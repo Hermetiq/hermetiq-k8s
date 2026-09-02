@@ -4,7 +4,49 @@ This chart deploys the Buildbarn services used by Hermetiq for remote cache,
 remote execution, Buildbarn Browser, and optionally the Remote Asset API. It is
 the detailed reference for the chart internals.
 
+![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
+
+Use the repository's
+[installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
+supported full-stack deployment order and external dependencies.
+
 For Buildbarn upstream background, see https://github.com/buildbarn.
+
+## Contents
+
+- [What The Chart Deploys](#what-the-chart-deploys)
+- [Install](#install)
+- [Service Topology](#service-topology)
+- [Routing And TLS](#routing-and-tls)
+  - [Envoy Gateway policies](#envoy-gateway-policies)
+  - [Tuning the downstream leg for high-RTT Bazel clients](#tuning-the-downstream-leg-for-high-rtt-bazel-clients)
+  - [TLS certificates](#tls-certificates)
+- [Browser SSO](#browser-sso)
+  - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
+- [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+  - [Hermetiq grpc-cache-proxy sidecar](#hermetiq-grpc-cache-proxy-sidecar)
+- [JWKS ConfigMap Management](#jwks-configmap-management)
+- [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
+- [Remote Asset API](#remote-asset-api)
+- [bb-portal](#bb-portal)
+- [Storage](#storage)
+  - [Raw block-device storage](#raw-block-device-storage)
+  - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
+  - [DIY mirrored storage (advanced)](#diy-mirrored-storage-advanced)
+- [Worker And Runner](#worker-and-runner)
+- [Worker Autoscaling](#worker-autoscaling)
+- [Testcontainers Worker Fleets](#testcontainers-worker-fleets)
+  - [DinD Fleet](#dind-fleet)
+  - [Sysbox Fleet](#sysbox-fleet)
+  - [Routing](#routing)
+  - [Node Pool Prerequisites](#node-pool-prerequisites)
+  - [Operational notes](#operational-notes)
+- [Security And Availability Hardening](#security-and-availability-hardening)
+  - [Restricting direct storage access](#restricting-direct-storage-access)
+- [Scheduling](#scheduling)
+- [Jsonnet Config Model](#jsonnet-config-model)
+- [Per-File Jsonnet Overrides](#per-file-jsonnet-overrides)
+- [Verification](#verification)
 
 ## What The Chart Deploys
 
@@ -16,6 +58,9 @@ Core resources:
 - `frontend` Deployment plus `frontend-grpc` Service.
 - `scheduler-ubuntu22-04` Deployment and `scheduler` Service.
 - `storage` StatefulSet and headless `storage` Service.
+- Optional `bb-portal` Deployment and Service when `portal.enabled=true` (see [bb-portal](#bb-portal)).
+- Optional `frontend-internal` ClusterIP Service for trusted in-cluster clients when `frontend.internalService.enabled=true`.
+- Optional `NetworkPolicy` restricting the storage gRPC port to Buildbarn components and named peers when `storage.networkPolicy.enabled=true`.
 - Optional legacy `worker-ubuntu22-04` Deployment and matching KEDA `ScaledObject` when `workerUbuntu2204.enabled=true`.
 - Optional `worker-testcontainers` Deployment (with a Docker-in-Docker sidecar) and matching KEDA `ScaledObject` for Bazel actions that need a Docker daemon.
 - Optional `worker-testcontainers-sysbox` Deployment and matching KEDA `ScaledObject` for Bazel actions that need Docker inside a Sysbox runtime.
@@ -36,9 +81,10 @@ chart-managed fleets for tests/actions that need Docker (see
 ## Install
 
 ```bash
-helm upgrade --install buildbarn ./charts/buildbarn \
-  --namespace hermetiq \
-  --values custom-values/buildbarn-values.yaml
+helm upgrade --install --namespace hermetiq buildbarn \
+  oci://ghcr.io/hermetiq/buildbarn \
+  --version 0.9.0 \
+  --values buildbarn-values.yaml
 ```
 
 By default, namespaced resources render into `hermetiq`:
@@ -51,7 +97,14 @@ createNamespace: false
 Set `createNamespace: true` if Helm should create that namespace, or override
 `namespaceOverride` to render into a different namespace.
 
-Before applying changes, render locally:
+Inspect the packaged documentation and defaults before creating overrides:
+
+```bash
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.0
+```
+
+Contributors can render the checked-out chart locally:
 
 ```bash
 helm template buildbarn ./charts/buildbarn \
@@ -163,6 +216,37 @@ GRPCRoute. Use `gateway` for Envoy Gateway and other controllers that support
 GRPCRoute. If your cluster uses older Gateway API CRDs, override
 `gateway.httpRouteApiVersion` or `gateway.grpcRouteApiVersion`.
 
+### Envoy Gateway policies
+
+`routing.provider=gateway` renders Envoy Gateway `gateway.envoyproxy.io`
+resources alongside the standard routes: `BackendTrafficPolicy` for the
+long-lived gRPC stream timeouts, `SecurityPolicy` for Browser CORS, and the
+optional `ClientTrafficPolicy`. On a `GRPCRoute`-capable controller that is not
+Envoy Gateway those kinds do not exist and the install fails on unknown kinds.
+Disable them:
+
+```yaml
+gateway:
+  cors:
+    enabled: false
+  grpcRoutes:
+    frontend:
+      backendTrafficPolicy:
+        enabled: false
+    bes:
+      backendTrafficPolicy:
+        enabled: false
+    remoteAsset:
+      backendTrafficPolicy:
+        enabled: false
+  clientTrafficPolicy:
+    enabled: false
+```
+
+Without the timeout policies, whatever default route timeout your controller
+applies governs `ByteStream` transfers and BES uploads; check that it does not
+truncate them.
+
 ### Tuning the downstream leg for high-RTT Bazel clients
 
 `gateway.clientTrafficPolicy` renders an Envoy Gateway `ClientTrafficPolicy`
@@ -210,11 +294,21 @@ keepalive PINGs are not part of `ClientTrafficPolicy` at all and need an
 connection churn: Envoy's HTTP idle timeout is request-based, so neither PINGs
 nor TCP keepalives reset it.
 
+### TLS certificates
+
 Contour and Ingress modes use a shared TLS secret. If `tls.secretName` is set,
 the chart uses that existing Secret. Otherwise, when `certificate.enabled` is
 true, it renders a cert-manager `Certificate` named by `certificate.name` with
 `*.hosts.domainBase` plus the concrete Browser, frontend gRPC, RBE web, and
 optional Remote Asset hostnames.
+
+`certificate.enabled` defaults to `true` and `certificate.issuerRef.name`
+defaults to `lets-encrypt-issuer`, so a Contour or Ingress install renders a
+`bb-wildcard-cert` Certificate unless you act. Point `certificate.issuerRef` at
+a `ClusterIssuer` that exists in your cluster, set `tls.secretName` to reuse a
+wildcard Secret you already manage, or set `certificate.enabled: false`. If the
+referenced issuer does not exist, the Certificate stays pending and the routes
+serve no usable TLS.
 
 ## Browser SSO
 
@@ -432,6 +526,86 @@ supported: there are no values for NATS credentials, nkeys, or TLS.
 Tuning beyond the modelled values goes through `frontend.grpcCacheProxy.env`, e.g.
 `CACHE_EVENT_BATCH_SIZE`, `CACHE_EVENT_FLUSH_INTERVAL`, `SHUTDOWN_DRAIN_DELAY`,
 `SHUTDOWN_TIMEOUT`.
+
+#### How lookups are classified
+
+The proxy never inspects stored data. It classifies each `GetActionResult`
+purely by the gRPC status the frontend returns:
+
+| Status from the frontend | Recorded as |
+| --- | --- |
+| `OK` | cache hit |
+| `NotFound` | cache miss |
+| anything else | no event; the lookup is skipped silently |
+
+Any frontend configuration that turns a cache lookup into some other error
+makes those lookups vanish from analytics rather than count as misses. The
+chart's generated Jsonnet already satisfies the requirements below; they matter
+when you replace `frontend.jsonnet` through `configOverrides`:
+
+- **Keep the frontend listening on `:8980`.** The sidecar forwards to
+  `127.0.0.1:8980`. Because the Service `targetPort` points at the sidecar,
+  changing `grpcServers[].listenAddresses` takes the whole frontend endpoint
+  down.
+- **Keep Action Cache reads open.** `actionCache.getAuthorizer` must allow the
+  traffic, which is why
+  [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+  only tightens the put and execute authorizers. A denied read returns
+  `PermissionDenied` and produces no event, and the same applies to a request
+  rejected as `Unauthenticated` by `grpcServers[].authenticationPolicy`.
+- **Keep `completenessChecking` on the Action Cache.** It returns `NotFound`
+  when an `ActionResult` exists but its output blobs are gone from the CAS,
+  which is what Bazel experiences. Without it those lookups are recorded as
+  hits while Bazel treats them as misses, inflating the hit rate exactly when
+  CAS eviction pressure is worst.
+- **Short Action Cache deadlines hide lookups.** A `deadlineEnforcing` wrapper
+  returns `DeadlineExceeded` when storage is slow, and those lookups produce no
+  event. A dip in recorded lookups during a storage slowdown reflects the
+  timeout, not lost traffic.
+- **`actionResultExpiring` is safe.** Expired entries return `NotFound` and are
+  recorded as misses, matching what Bazel sees.
+
+#### Project attribution
+
+Attribution to a Hermetiq project comes from the request, not from Buildbarn.
+With `enforceAuth: false` the proxy reads the `x-hermetiq-project-id` header if
+present and otherwise falls back to Bazel's `--remote_instance_name`. Set
+`--remote_instance_name` to the Hermetiq project ID unless you send the header.
+Buildbarn accepts any instance name here because the chart's blobstore does not
+demultiplex on it, but with remote execution the name must still satisfy the
+scheduler's `instanceNamePrefix`, which is empty by default and matches
+everything. Lookups whose project cannot be resolved are counted as
+`unresolved` in the sidecar's log summary.
+
+The scheduler stanza that forwards
+`build.bazel.remote.execution.v2.requestmetadata-bin` to the scheduler belongs
+to remote execution attribution through the Completed Action Logger, not to the
+cache proxy. `GetActionResult` never reaches the scheduler, and the sidecar
+reads Bazel's request metadata directly off the incoming request.
+
+#### Hermetiq side
+
+Enabling the sidecar collects the events; the Hermetiq chart consumes them. Set
+`app.cacheEventsEnabled: true` there, keep the sidecar's `cacheEvents.numShards`
+equal to the Hermetiq chart's `app.streamPartitionCount`, and enable
+**Action Cache Hit Tracker** in the project's settings.
+
+#### Verify the sidecar
+
+```bash
+kubectl -n hermetiq get pods -l app=frontend
+kubectl -n hermetiq logs -l app=frontend -c grpc-cache-proxy --tail=20
+```
+
+Each frontend pod should report `2/2` ready. The proxy logs a one-line
+publisher summary each minute rather than per request. `published` climbing
+after a build means events are reaching NATS. A high `unresolved` count means
+no Hermetiq project could be attributed, which normally means
+`--remote_instance_name` does not match a project ID. `dropped` counts events
+discarded because NATS was unreachable or slow; cache traffic itself is never
+blocked by the event path, so a nonzero `dropped` costs analytics, never
+builds. Then run a build and confirm the events appear in the Hermetiq
+dashboard's cache analytics or through the Hermetiq MCP server.
 
 ## JWKS ConfigMap Management
 
@@ -730,6 +904,13 @@ you need settings the values do not expose.
 Storage is a sharded StatefulSet. The number of shards is `storage.replicas`;
 `common.libsonnet` generates one CAS and Action Cache shard entry per replica.
 
+Use the focused repository runbooks for planning and live operations:
+
+- [storage model and sizing](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md)
+- [storage operations](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md)
+- [raw block-device storage](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-block-storage.md)
+- [ISCC size classes](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/iscc-size-classes.md)
+
 The chart stores CAS and Action Cache data on PVC-backed persistent disks by
 default:
 
@@ -864,10 +1045,8 @@ StatefulSet PVCs are retained. Block mode uses distinct claim names
 (`<store>-blocks` / `<store>-meta`), so switching an existing release from
 `filesystem` leaves the old `cas`/`ac` PVCs **orphaned** (still billing) — delete them
 manually once the switch is confirmed. There is **no data migration**; the raw device
-initializes empty. Upgrading to this chart version with default values changes the
-default CAS block geometry, so persistent stores that use those defaults discard their
-existing data on next start. Treat that upgrade as a planned cache flush; volatile or
-in-memory-KLM stores only see the usual restart cold cache.
+initializes empty. Changing block counts or the device size on a persistent store also
+discards its data on the next start; plan such changes as cache flushes.
 Enabling `storage.persistence.iscc.enabled` or `storage.persistence.fsac.enabled` on an
 existing PVC-backed release also changes the StatefulSet's `volumeClaimTemplates`.
 Plan a reviewed StatefulSet recreate/migration for that change; Helm cannot patch the
@@ -1102,7 +1281,7 @@ Hazards you own:
 ## Worker And Runner
 
 By default this chart does not render the Ubuntu 22.04 worker Deployment. Install
-the `bb-worker-operator` chart and create `Worker` custom resources for normal
+the `bb-worker-operator` chart and create `RbeWorker` custom resources for normal
 worker pools.
 
 The legacy `worker-ubuntu22-04` Deployment can still be enabled with
@@ -1174,7 +1353,7 @@ KEDA `ScaledObject` for `worker-ubuntu22-04`. The scaler queries VictoriaMetrics
 for scheduled tasks minus tasks that have finished execution, which tracks
 currently queued or executing work for the worker platform properties.
 
-Operator-managed worker autoscaling should be configured on the `Worker` custom
+Operator-managed worker autoscaling should be configured on the `RbeWorker` custom
 resource instead. Leaving `workerUbuntu2204.enabled=false` also disables the old
 chart-managed `ScaledObject`.
 
@@ -1216,8 +1395,9 @@ with the runner. Sysbox starts `dockerd` inside the runner container itself,
 under Kubernetes `runtimeClassName: sysbox-runc` and `hostUsers: false`, so it
 does not need a privileged Docker sidecar or a host Docker socket.
 
-The sample Bazel workspace in `examples/testcontainers/` demonstrates
-the target-side pattern: declare the Testcontainers environment variables on the
+The sample Bazel workspace in the repository's
+[`examples/testcontainers/`](https://github.com/Hermetiq/hermetiq-k8s/tree/main/examples/testcontainers)
+directory demonstrates the target-side pattern: declare the Testcontainers environment variables on the
 test rule and select a worker fleet with `exec_properties`.
 
 Enable the DinD fleet with:
@@ -1263,9 +1443,9 @@ before launching `bb_runner`; unlike the regular worker fleets, the Sysbox fleet
 does not use a `bb-runner-installer` init container because the runtime class is
 applied to the whole pod.
 
-The chart does not build or publish that image. See
-`examples/sysbox-runner-image/` for a Dockerfile and entrypoint adapted from
-EngFlow's Sysbox recommendation.
+The chart does not build or publish that image. See the repository's
+[`examples/sysbox-runner-image/`](https://github.com/Hermetiq/hermetiq-k8s/tree/main/examples/sysbox-runner-image)
+for a Dockerfile and entrypoint adapted from EngFlow's Sysbox recommendation.
 
 The example image does three chart-specific things:
 
@@ -1440,6 +1620,44 @@ Use frontend JWKS plus `requireCanWriteToCache` authorizers for exposed
 frontend gRPC endpoints. Leaving write and execute authorizers as `allow` is
 appropriate only when another trusted layer is enforcing access.
 
+### Restricting direct storage access
+
+The storage shards serve unauthenticated gRPC on `:8981`. That port is the CAS
+and Action Cache themselves, so anything able to reach it can read and write
+cache entries directly; the frontend authorizers are not a boundary for traffic
+that bypasses the frontend. The port is never routed externally, so the
+exposure is in-cluster: by default any pod in the cluster can reach it.
+
+`storage.networkPolicy` restricts it to the Buildbarn components plus peers you
+name. It is disabled by default because it has to know where your workers run:
+
+```yaml
+storage:
+  networkPolicy:
+    enabled: true
+    # Operator-managed RbeWorker pods outside the Buildbarn namespace.
+    additionalClientPeers:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: bb-worker
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: rbe-workers
+    # Peers allowed to scrape metrics on :9980. An empty list allows any
+    # source, which suits a scraper that runs in another namespace.
+    metricsPeers:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: victoriametrics
+```
+
+Enable this only after enumerating every client. Workers, the frontend, the
+scheduler, Browser, the portal, and the remote asset service all talk to
+storage directly, and a missing peer surfaces as cache misses and RBE failures
+rather than a clear connection error. The cluster also needs a
+NetworkPolicy-enforcing CNI; without one the policy is accepted and silently
+does nothing.
+
 ## Scheduling
 
 Non-worker pods inherit top-level scheduling by default:
@@ -1467,7 +1685,7 @@ frontend:
       operator: Exists
 ```
 
-Operator-managed workers use scheduling fields on their `Worker` custom
+Operator-managed workers use scheduling fields on their `RbeWorker` custom
 resources. Legacy chart-managed workers use `workerUbuntu2204.nodeSelector` and
 `workerUbuntu2204.tolerations`, because worker scheduling usually targets larger
 or local-SSD nodes. Override these for your cloud provider and node pool.
@@ -1476,8 +1694,8 @@ or local-SSD nodes. Override these for your cloud provider and node pool.
 
 Buildbarn itself is configured through Jsonnet. The chart renders two ConfigMaps:
 
-- `buildbarn-config` from `charts/buildbarn/files/config/`.
-- `buildbarn-worker-config` from `charts/buildbarn/files/worker-config/`.
+- `buildbarn-config` from the chart's `files/config/` directory.
+- `buildbarn-worker-config` from the chart's `files/worker-config/` directory.
 
 `buildbarn-worker-config` also includes the top-level `common.libsonnet`, so
 worker and runner configs use the same sharded storage, message size, tracing,
@@ -1498,9 +1716,10 @@ Use `configOverrides` or `workerConfigOverrides` when a value is too specific or
 too deep for the chart values model:
 
 ```bash
-helm upgrade --install buildbarn ./charts/buildbarn \
-  --namespace hermetiq \
-  --values custom-values/buildbarn-values.yaml \
+helm upgrade --install --namespace hermetiq buildbarn \
+  oci://ghcr.io/hermetiq/buildbarn \
+  --version 0.9.0 \
+  --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
   --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
 ```
@@ -1521,9 +1740,14 @@ Override-able files:
 | `configOverrides` | `common.libsonnet` |
 | `configOverrides` | `frontend.jsonnet` |
 | `configOverrides` | `scheduler.jsonnet` |
+| `configOverrides` | `portal.jsonnet` |
 | `configOverrides` | `storage.jsonnet` |
+| `workerConfigOverrides` | `runner-testcontainers-sysbox.jsonnet` |
+| `workerConfigOverrides` | `runner-testcontainers.jsonnet` |
 | `workerConfigOverrides` | `runner-ubuntu22-04.jsonnet` |
 | `workerConfigOverrides` | `worker-common.libsonnet` |
+| `workerConfigOverrides` | `worker-testcontainers-sysbox.jsonnet` |
+| `workerConfigOverrides` | `worker-testcontainers.jsonnet` |
 | `workerConfigOverrides` | `worker-ubuntu22-04.jsonnet` |
 
 `configOverrides.common.libsonnet` propagates to both ConfigMaps.
@@ -1533,9 +1757,10 @@ Override-able files:
 Render and inspect the chart:
 
 ```bash
-helm template buildbarn ./charts/buildbarn \
+helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
+  --version 0.9.0 \
   --namespace hermetiq \
-  --values custom-values/buildbarn-values.yaml > /tmp/buildbarn.yaml
+  --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
 
 Check workloads:
@@ -1543,11 +1768,11 @@ Check workloads:
 ```bash
 kubectl get deploy browser frontend scheduler-ubuntu22-04 -n hermetiq
 kubectl get sts storage -n hermetiq
-kubectl get workers.bb.hermetiq.com -n hermetiq
+kubectl get rbeworkers.bb.hermetiq.com -n hermetiq
 ```
 
 Legacy chart-managed workers may be `0/0` until KEDA scales them for queued
-work. Operator-managed worker status is reported on the `Worker` custom
+work. Operator-managed worker status is reported on the `RbeWorker` custom
 resource.
 
 Check endpoints:
@@ -1583,11 +1808,48 @@ If VictoriaMetrics resources are enabled, check scrapes and recording rules:
 kubectl get vmpodscrape,vmrule -n hermetiq
 ```
 
-Inspect worker startup issues:
+Inspect an operator-managed worker pool through its `RbeWorker` status, which
+records the managed Deployment name and the pod selector:
+
+```bash
+kubectl -n hermetiq describe rbeworker worker-ubuntu22-04
+
+SELECTOR=$(kubectl -n hermetiq get rbeworker worker-ubuntu22-04 \
+  -o jsonpath='{.status.selector}')
+DEPLOY=$(kubectl -n hermetiq get rbeworker worker-ubuntu22-04 \
+  -o jsonpath='{.status.deploymentName}')
+
+kubectl -n hermetiq get pods -l "$SELECTOR"
+kubectl -n hermetiq logs deploy/"$DEPLOY" -c worker
+kubectl -n hermetiq logs deploy/"$DEPLOY" -c runner
+```
+
+Inspect legacy chart-managed worker startup issues:
 
 ```bash
 kubectl describe pod -l app=worker,instance=ubuntu22-04 -n hermetiq
 kubectl get deploy -l app=worker -n hermetiq
-kubectl logs deploy/worker-ubuntu22-04 -c worker -n hermetiq # legacy chart-managed worker
-kubectl logs deploy/worker-ubuntu22-04 -c runner -n hermetiq # legacy chart-managed worker
+kubectl logs deploy/worker-ubuntu22-04 -c worker -n hermetiq
+kubectl logs deploy/worker-ubuntu22-04 -c runner -n hermetiq
 ```
+
+Confirm the frontend accepts your JWT and advertises remote execution and
+Action Cache writes:
+
+```bash
+export JWT="..."
+
+grpcurl -H "authorization: Bearer $JWT" -d @ \
+  bb.<your-domain>:443 \
+  build.bazel.remote.execution.v2.Capabilities/GetCapabilities \
+  <<<'{"instance_name":"0"}' | jq '.executionCapabilities.execEnabled'
+
+grpcurl -H "authorization: Bearer $JWT" -d @ \
+  bb.<your-domain>:443 \
+  build.bazel.remote.execution.v2.Capabilities/GetCapabilities \
+  <<<'{"instance_name":"0"}' | jq '.cacheCapabilities.actionCacheUpdateCapabilities'
+```
+
+Expect `true` for `execEnabled` and `{"updateEnabled": true}` for the Action
+Cache. Use the Hermetiq project ID as the instance name so the grpc-cache-proxy
+sidecar, when enabled, attributes the lookups to that project.

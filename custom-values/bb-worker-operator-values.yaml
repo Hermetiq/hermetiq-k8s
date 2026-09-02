@@ -6,7 +6,10 @@ minReadySeconds: 5
 
 image:
   repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-worker-operator
-  tag: "v0.2.0"
+  # Empty uses the chart appVersion, which keeps the controller image on the
+  # same release as the packaged RbeWorker CRD. Pin tag or digest only when
+  # directed by Hermetiq support.
+  tag: ""
   pullPolicy: IfNotPresent
 
 rbac:

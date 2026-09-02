@@ -30,10 +30,6 @@ image:
   # on it. A chart whose CRD is newer than its image installs fields the operator
   # silently ignores — no error, the feature just never appears in the generated
   # worker Jsonnet.
-  #
-  # Chart 0.3.0 added spec.config.generated.prefetching (FSAC-driven input
-  # prefetching). It needs an operator built at or after that change; pin `tag`
-  # (or `digest`) to such a build until appVersion catches up.
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent

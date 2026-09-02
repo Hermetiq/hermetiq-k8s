@@ -1,6 +1,6 @@
 # MCP Server Authentication — Auth0 Tenant Runbook
 
-This runbook walks through configuring an Auth0 tenant so that MCP clients such as Claude can authenticate to the Hermetiq MCP server (`https://mcp.<your-domain>`) via OAuth **Dynamic Client Registration (DCR)**. The Hermetiq chart side is covered in the main guide under [MCP Server Authentication](../README.md#mcp-server-authentication); this document is only the IdP side.
+This runbook walks through configuring an Auth0 tenant so that MCP clients such as Claude can authenticate to the Hermetiq MCP server (`https://mcp.<your-domain>`) via OAuth **Dynamic Client Registration (DCR)**. The Hermetiq chart side is covered in the Hermetiq chart README under [MCP Authentication](../charts/hermetiq/README.md#mcp-authentication); this document is only the IdP side.
 
 Configure the tenant once so that *any* dynamically-registered client is authorized. The commands below use the Auth0 CLI's Management API passthrough (run `auth0 login` first).
 

@@ -8,6 +8,41 @@ ID are correct:
 kubectl apply --namespace hermetiq --kustomize custom-values/rbeworkers
 ```
 
+## Pools
+
+Standard bundle:
+
+- `worker-ubuntu22-04.yaml`: general-purpose Ubuntu 22.04 pool advertising the
+  `container-image` platform property most Bazel clients already request.
+- `worker-ubuntu24-04.yaml`: the same pool built on Ubuntu 24.04.
+- `worker-codex.yaml`: Codex pool using a codex-bazel runner image and a FUSE
+  virtual build directory.
+- `worker-envoy.yaml`: Envoy CI pool whose runner provides the Envoy build
+  toolchain.
+
+Optional components under `optional/`:
+
+- `sizeclass/`: `worker-sizeclass-small.yaml` and `worker-sizeclass-large.yaml`
+  advertise the same `pool=sizeclass` platform with different `sizeClass`
+  values for ISCC-driven routing.
+- `testcontainers/`: Docker-in-Docker pool selected with `pool=testcontainers`.
+- `testcontainers-sysbox/`: Sysbox-backed Docker pool selected with
+  `pool=testcontainers-sysbox`.
+- `drake/`: runner pool for building Drake remotely; publish
+  [`examples/drake-runner-image`](../../examples/drake-runner-image/README.md)
+  first.
+
+Every manifest references the `buildbarn-worker-config` ConfigMap rendered by
+the Buildbarn chart, so apply them after the Buildbarn release is ready. Pools
+that should emit completed-action events must point
+`spec.config.generated.completedActionLoggerAddress` at the Hermetiq publisher;
+the starter value `bep-nats-pub.hermetiq.svc.cluster.local:50091` matches
+`bbcal.address` in `custom-values/buildbarn-values.yaml`. Adjust node labels,
+tolerations, platform properties, runner images, and resource sizes to match
+your environment.
+
+## Environment overlays
+
 For another environment, reference this directory from a Kustomize overlay and
 patch the environment-specific values without copying the worker manifests:
 
@@ -50,10 +85,12 @@ The JSON Patch `replace` operations intentionally fail if a future manifest no
 longer contains one of these fields, preventing an overlay from silently
 leaving a worker pointed at the starter environment.
 
-The size-class and Testcontainers manifests are intentionally excluded from
-the standard bundle. Apply them only after satisfying the scheduler, node-pool,
-and container-runtime prerequisites documented in the repository README. Add
-any combination to the environment overlay with `components`:
+The size-class, Testcontainers, and Drake manifests are intentionally excluded
+from the standard bundle. Apply them only after satisfying the scheduler,
+node-pool, and container-runtime prerequisites in the
+[Buildbarn chart README](../../charts/buildbarn/README.md#node-pool-prerequisites)
+and the [ISCC size-class runbook](../../docs/iscc-size-classes.md). Add any
+combination to the environment overlay with `components`:
 
 ```yaml
 resources:

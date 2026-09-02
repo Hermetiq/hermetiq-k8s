@@ -3,7 +3,7 @@ namespaceOverride: hermetiq
 # REQUIRED: contact email for this installation. The install
 # fails without a valid address. With no license key configured, a 30-day
 # trial is issued automatically on first boot using this email — see the
-# "Licensing and Trials" section of the README. Purchased keys go in a Secret
+# "Licensing and trials" section of the Hermetiq chart README. Purchased keys go in a Secret
 # via license.key.existingSecret.
 license:
   contactEmail: build-team@example.com
@@ -112,7 +112,7 @@ victoriaMetrics:
 gcpWorkloadIdentity:
   enabled: true
   # The GCP service account bound to the bep-nats Kubernetes ServiceAccount
-  # (see the Cloud Workload Identity section of the install guide).
+  # (see the "Workload identity" section of the Hermetiq chart README).
   serviceAccount: "hermetiq-bep@<gcp-project>.iam.gserviceaccount.com"
 
 # Optional hardened mode starting point. Leave commented until you have
@@ -170,7 +170,7 @@ api:
   # automountServiceAccountToken: true
   # Uncomment only to expose the MCP server WITHOUT authentication (e.g. a
   # fully private cluster). The default (false) enforces the bearer-token auth
-  # described in the install guide's MCP Server Authentication section.
+  # described in the Hermetiq chart README's "MCP Authentication" section.
   # mcpAuthDisabled: true
   # MCP OAuth clients and Auth0 API identifiers match the resource URL
   # byte-for-byte, including any trailing slash. The chart derives

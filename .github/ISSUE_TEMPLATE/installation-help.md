@@ -6,7 +6,7 @@ labels: install-help
 ---
 
 **Where you got stuck**
-<!-- Which section of the README? e.g. "Hermetiq Core Services > Install Hermetiq" -->
+<!-- Which guide and section? e.g. "Root README > Install Hermetiq" or "Hermetiq chart README > Authentication and SSO" -->
 
 **Command and output**
 <!-- The command you ran and the full output. Redact any secrets / hostnames you'd rather not share. -->
@@ -19,7 +19,7 @@ $ helm upgrade --install ...
 **Cluster context**
 - Kubernetes version: <!-- e.g. GKE 1.33.2 -->
 - Helm version: <!-- helm version --short -->
-- Chart + version: <!-- e.g. hermetiq 0.1.0 / buildbarn 0.1.0 -->
+- Chart + version: <!-- e.g. hermetiq 0.9.0 / buildbarn 0.9.0 -->
 
 **Your custom-values (redacted)**
 <!-- Paste the relevant section of your hermetiq-values.yaml or buildbarn-values.yaml.

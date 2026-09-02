@@ -7,7 +7,7 @@ Read this before choosing disk sizes, enabling raw block devices, or changing st
 
 Most surprising behavior comes from those two structures being fixed-size and tightly coupled. If the map is too small, writes can become invisible even though bytes are still on disk. If the block geometry changes, a persistent store starts empty. If the map lives in memory, durable disks do not make the store durable.
 
-Volume provisioning is covered in the main guide's [Planning](../README.md#planning) section. Raw block devices are covered in [buildbarn-block-storage.md](buildbarn-block-storage.md). Restart behavior, monitoring, and runbooks are covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md).
+Volume provisioning is covered in the Buildbarn chart README's [Storage](../charts/buildbarn/README.md#storage) section. Raw block devices are covered in [buildbarn-block-storage.md](buildbarn-block-storage.md). Restart behavior, monitoring, and runbooks are covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md).
 
 ## Blocks: Allocation, Eviction, and Maximum Blob Size
 

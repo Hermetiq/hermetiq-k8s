@@ -31,7 +31,7 @@ content-addressable store.
 
 ## Build and publish
 
-From the `hermetiq-helm-gke` checkout, build the required Linux x86-64 image
+From the `hermetiq-k8s` checkout, build the required Linux x86-64 image
 and publish it to a registry reachable by the cluster. Authenticate Docker to
 that registry first, then use a unique version tag for each change:
 

@@ -3897,7 +3897,7 @@
           ],
           "title": "Log Compression Outcomes",
           "type": "timeseries",
-          "description": "Log compression operation outcomes by trigger source and status. Sources include finish-triggered, ticker, consumer, or Temporal paths where present."
+          "description": "Log compression operation outcomes by trigger source and status. Sources include finish-triggered, ticker, or consumer paths where present."
         },
         {
           "datasource": {

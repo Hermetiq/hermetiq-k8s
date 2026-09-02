@@ -139,7 +139,7 @@ frontend:
   #   maxUnavailable: 1
   # Optional Hermetiq cache hit/miss analytics. Rides in this pod and takes over
   # the frontend-grpc Service targetPort, so no route changes are needed. See
-  # "Hermetiq grpc-cache-proxy Sidecar" in the README — numShards must match the
+  # "Hermetiq grpc-cache-proxy sidecar" in the Buildbarn chart README — numShards must match the
   # hermetiq chart's app.streamPartitionCount, and the analytics only surface
   # once app.cacheEventsEnabled=true there too.
   # grpcCacheProxy:

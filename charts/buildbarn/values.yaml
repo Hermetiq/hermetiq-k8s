@@ -1132,7 +1132,7 @@ portal:
 
 workerUbuntu2204:
   # Legacy chart-managed worker Deployment. Disabled by default so worker pools
-  # are managed through the bb-worker-operator Worker custom resource instead.
+  # are managed through the bb-worker-operator RbeWorker custom resource instead.
   enabled: false
   replicas: 0
   # Set to true/false to override serviceAccount.automountServiceAccountToken.

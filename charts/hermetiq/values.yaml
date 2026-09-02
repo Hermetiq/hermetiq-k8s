@@ -117,9 +117,9 @@ app:
   rawBepExportBucket: ""
   ghEnvDir: ""
   mcpProtoIntelToolsEnabled: true
-  # Detailed cache-event analytics require the Hermetiq gRPC cache proxy and
-  # Temporal integration. On-prem deployments default this off until those
-  # pieces are installed.
+  # Detailed cache-event analytics require the Hermetiq grpc-cache-proxy
+  # sidecar on the Buildbarn frontend. Off by default; enable it once the
+  # sidecar publishes cache events to this chart's NATS.
   cacheEventsEnabled: false
   # VictoriaLogs-backed MCP tools are hidden by default for on-prem installs
   # that do not deploy VictoriaLogs. Set true when VL is available.
@@ -217,11 +217,9 @@ nats:
   # NATS_BEP_STORE_COALESCER_ENABLED=false, which restores one database call
   # per worker micro-batch.
   #
-  # The packaged file describes a FRESH install: BEP_BUILD_TOOL plus the DLQ,
+  # The packaged file describes a fresh install: BEP_BUILD_TOOL plus the DLQ,
   # and no lifecycle stream, because app.invocationStartEvent defaults to
-  # build_tool. Upgrading from 0.4.x still drains the legacy BEP_STREAM — its
-  # name comes from the application's built-in defaults, so it does not need
-  # to appear here.
+  # build_tool.
   #
   # The packaged file sets replicas: 3 on the build-tool stream — the one
   # stream the whole ingest path depends on. JetStream needs a clustered NATS
