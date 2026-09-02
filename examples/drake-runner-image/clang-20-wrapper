@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly real_clang=/usr/lib/llvm-20/bin/clang.real
+rewritten_args=()
+temporary_files=()
+
+cleanup() {
+  if ((${#temporary_files[@]})); then
+    rm -f -- "${temporary_files[@]}"
+  fi
+}
+trap cleanup EXIT
+
+for arg in "$@"; do
+  if [[ "$arg" == "-fuse-ld=/usr/bin/ld.lld" ]]; then
+    rewritten_args+=("-fuse-ld=lld")
+  elif [[ "$arg" == @* ]] \
+      && grep -Fq -- "-fuse-ld=/usr/bin/ld.lld" "${arg#@}"; then
+    rewritten_response=$(mktemp)
+    sed 's#-fuse-ld=/usr/bin/ld\.lld#-fuse-ld=lld#g' \
+      "${arg#@}" > "$rewritten_response"
+    temporary_files+=("$rewritten_response")
+    rewritten_args+=("@$rewritten_response")
+  else
+    rewritten_args+=("$arg")
+  fi
+done
+
+"$real_clang" "${rewritten_args[@]}"

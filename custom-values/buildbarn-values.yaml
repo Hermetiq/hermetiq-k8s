@@ -1,0 +1,470 @@
+# By default this chart renders all namespaced resources into hermetiq.
+namespaceOverride: hermetiq
+
+project:
+  # Keep this aligned with hermetiq-values.yaml bootstrap.projectId.
+  id: "0"
+
+# Advanced Jsonnet overrides for deep Buildbarn config changes. Keys must match
+# filenames under the chart's files/config or files/worker-config directories.
+# Prefer --set-file so large Jsonnet remains outside this values file.
+configOverrides: {}
+workerConfigOverrides: {}
+
+# Hardened mode: uncomment to stop Buildbarn app and worker pods from receiving
+# default ServiceAccount tokens. JWKS sync opts back in below because it patches
+# the mounted JWKS ConfigMap through Kubernetes RBAC.
+# serviceAccount:
+#   automountServiceAccountToken: false
+
+hosts:
+  # All buildbarn host DNS names derive from this base (browser.<domainBase>,
+  # bb.<domainBase>, rbe-web.<domainBase>, asset.<domainBase>). Override individual hosts below if needed.
+  domainBase: helm.hermetiq.dev # change to a base domain name for your environment
+  otel: otel-collector.hermetiq.svc.cluster.local
+
+config:
+  # 800 MiB, matching the current tested GKE deployment. Lower this if your
+  # clients and workers should reject unusually large blobs earlier.
+  maximumMessageSizeBytes: 838860800
+
+bbcal:
+  address: bep-nats-pub.hermetiq.svc.cluster.local:50091
+
+tracing:
+  enabled: false
+
+routing:
+  enabled: true
+  # Supported providers: contour, gateway, gateway-httproute-only, ingress, none.
+  # Use gateway for GRPCRoute-capable Gateway controllers,
+  # gateway-httproute-only for GKE Gateway, or none when routes are managed
+  # outside the chart.
+  provider: gateway
+
+k8sNodeScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+#    node-type: core8
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/core8
+#      operator: Exists
+
+storage:
+  replicas: 3 # go with 5 or more if cache is large
+  resources:
+    requests:
+      cpu: 7100m
+      memory: 16Gi
+    limits:
+      cpu: 7100m
+      memory: 16Gi
+  env:
+    BB_PPROF_ENABLED: "false"
+  persistence:
+    # pvc is durable. emptyDir or hostPath are for local-SSD style deployments
+    # where cache loss on pod/node replacement is acceptable.
+    mode: pvc
+    cas:
+      storageClassName: premium-rwo
+      # total disk per shard
+      size: 1000Gi
+      # Size of the CAS blocks file in GiB. Must be smaller than `size` to leave headroom
+      # for cas-keys.db (~800MB) and persistent state — typically ~10% smaller.
+      blocksSizeGi: 950
+    ac:
+      storageClassName: premium-rwo
+      size: 12Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  podAntiAffinity:
+    enabled: true
+  # Optional PDB. Enable only when storage.replicas leaves enough capacity for
+  # one shard to be voluntarily disrupted during node drains or upgrades.
+  # podDisruptionBudget:
+  #   enabled: true
+  #   maxUnavailable: 1
+
+frontend:
+  replicas: 2 # may need more depending on # of concurrent builds
+  # JWT auth on the frontend gRPC server is permissive for reads: CAS and
+  # Action Cache reads remain open, while AC writes, CAS uploads, and Execute
+  # are gated below with requireCanWriteToCache.
+  jwks:
+    enabled: true
+    issuer: https://<tenant>.auth0.com/ # TODO: your OIDC issuer URL
+    audience: https://bep.helm.hermetiq.dev
+    # Buildbarn reads JWKS from this mounted ConfigMap key. The optional sync
+    # CronJob patches the ConfigMap; kubelet updates the file mount and
+    # Buildbarn reloads it periodically for key rotation.
+    configMapName: frontend-jwks
+    configMapKey: jwks.json
+    sync:
+      enabled: true
+      url: https://<tenant>.auth0.com/.well-known/jwks.json # TODO: your OIDC provider's JWKS URL
+      schedule: "0 */6 * * *"
+      initialSyncEnabled: true
+      automountServiceAccountToken: true
+      startingDeadlineSeconds: 600
+      job:
+        activeDeadlineSeconds: 300
+        ttlSecondsAfterFinished: 3600
+      initialJob:
+        activeDeadlineSeconds: 300
+        ttlSecondsAfterFinished: 3600
+  actionCache:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  contentAddressableStorage:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  executeAuthorizer:
+    mode: requireCanWriteToCache
+  resources:
+    requests:
+      cpu: "2"
+      memory: 3Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  # Optional PDB. Enable only when frontend.replicas is at least 2.
+  # podDisruptionBudget:
+  #   enabled: true
+  #   maxUnavailable: 1
+  # Optional Hermetiq cache hit/miss analytics. Rides in this pod and takes over
+  # the frontend-grpc Service targetPort, so no route changes are needed. See
+  # "Hermetiq grpc-cache-proxy Sidecar" in the README — numShards must match the
+  # hermetiq chart's app.streamPartitionCount, and the analytics only surface
+  # once app.cacheEventsEnabled=true there too.
+  # grpcCacheProxy:
+  #   enabled: true
+  #   natsUrl: nats://nats.hermetiq.svc:4222
+  #   cacheEvents:
+  #     subjectPrefix: prod_cache
+  #     # Must equal app.streamPartitionCount in hermetiq-values.yaml, which
+  #     # this example set sizes at 4 (the chart default is 9).
+  #     numShards: 4
+  #   # Buildbarn keeps enforcing its own authorizers; the proxy just forwards.
+  #   enforceAuth: false
+  #   maxMessageSizeBytes: 67108864
+
+scheduler:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+
+browser:
+  replicas: 1
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  oauth2Proxy:
+    enabled: true
+    # Reuse the oauth2-proxy ConfigMap created by the hermetiq chart, including
+    # issuer, shared logout URL, cookie, and whitelist-domain behavior.
+    existingConfigMap: oauth2-proxy-config-web-ui
+    # Required only when existingConfigMap is empty.
+    oidcIssuerUrl: ""
+    cookieDomains: []
+    # If existingConfigMap is empty and this chart renders a Buildbarn-specific
+    # oauth2-proxy ConfigMap, set provider/TLS verification flags explicitly:
+    # insecureOidcAllowUnverifiedEmail: false
+    # insecureOidcSkipIssuerVerification: false
+    # sslInsecureSkipVerify: false
+    # showDebugOnError: false
+    # Reuse the oauth2-proxy Secret created by the hermetiq chart.
+    client:
+      existingSecret: oauth2-proxy-client
+      clientId: ""
+      clientSecret: ""
+      cookieSecret: ""
+
+remoteAsset:
+  # Optional Bazel Remote Asset API. When enabled, also enable the matching
+  # route for your provider, for example gateway.grpcRoutes.remoteAsset or
+  # ingress.remoteAssetGrpc.
+  enabled: false
+  # Health probes are enabled by default when remoteAsset.enabled=true.
+  # probes:
+  #   enabled: true
+
+workerUbuntu2204:
+  # Recommended path: keep the legacy chart-managed worker disabled and apply
+  # the RbeWorker examples under custom-values/rbeworkers/ after Buildbarn is
+  # installed. Keep the rest of this block as a compatibility reference if you
+  # intentionally re-enable chart-managed workers.
+  enabled: false
+  replicas: 0
+  config:
+    # Keep the default worker unqualified so actions without a pool property
+    # continue to land here. The Testcontainers examples route with
+    # exec_properties = {"pool": "..."}.
+    platformProperties: []
+  worker:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+  runner:
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+  initResources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+  nodeSelector:
+    # GKE local SSD node-pool convention used by the chart's default hostPaths.
+    cloud.google.com/gke-ephemeral-storage-local-ssd: "true"
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+#    node-type: spot-ssd
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/allows-spot
+#      operator: Exists
+  storageWorkerCas:
+    hostPath:
+      path: /mnt/stateful_partition/kube-ephemeral-ssd/cas
+      type: DirectoryOrCreate
+  fuse:
+    enabled: true
+    hostPath:
+      path: /dev/fuse
+      type: CharDevice
+
+workerTestcontainers:
+  # Legacy chart-managed compatibility only. Recommended path: keep disabled
+  # and apply custom-values/rbeworkers/optional/testcontainers/worker-testcontainers.yaml instead.
+  enabled: false
+  replicas: 0
+  config:
+    # DinD-backed Testcontainers pool. Bazel targets select it with
+    # exec_properties = {"pool": "testcontainers"}. The chart defaults schedule
+    # this fleet onto nodes labeled and tainted workload=testcontainers, using
+    # an Ubuntu containerd image with local SSD mounted at the hostPath below.
+    platformProperties:
+      - name: pool
+        value: testcontainers
+    # For Bazel test rules, also set DOCKER_HOST,
+    # TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE, and TESTCONTAINERS_HOST_OVERRIDE
+    # on the rule env; Bazel's test wrapper may strip worker-injected env vars.
+  dind:
+    # Add an internal Artifact Registry remote repo here to avoid Docker Hub
+    # rate limits; mirror.gcr.io is the default public fallback.
+    registryMirrors:
+      - https://mirror.gcr.io
+  # Pre-pull common DB/broker images into the DinD daemon to trade startup time
+  # for fewer cold-cache test stalls on fresh workers.
+  preloadImages: []
+
+images:
+  runnerTestcontainersSysbox:
+    # Must include Docker Engine/CLI and an entrypoint that starts dockerd
+    # before execing the bb_runner command from the Deployment.
+    image: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/buildbarn-sysbox-runner:0.1.0
+    pullPolicy: Always
+
+workerTestcontainersSysbox:
+  # Legacy chart-managed compatibility only. Recommended path: keep disabled
+  # and apply custom-values/rbeworkers/optional/testcontainers-sysbox/worker-testcontainers-sysbox.yaml instead.
+  enabled: false
+  replicas: 0
+  # Requires a dedicated Sysbox-enabled node pool and this RuntimeClass.
+  runtimeClassName: sysbox-runc
+  # Sysbox v0.7 requires Kubernetes user namespaces.
+  hostUsers: false
+  nodeSelector:
+    workload: testcontainers-sysbox
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: testcontainers-sysbox
+      effect: NoSchedule
+  config:
+    # Sysbox-backed Testcontainers pool. Bazel targets select it with
+    # exec_properties = {"pool": "testcontainers-sysbox"}. This pool is
+    # intentionally separate from the DinD fleet so workloads can opt into one.
+    platformProperties:
+      - name: pool
+        value: testcontainers-sysbox
+  preloadImages: []
+
+keda:
+  enabled: true
+  # keda needs access to scheduler metrics in VM
+  prometheusServerAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  # The nested worker* settings below apply only to legacy chart-managed worker
+  # Deployments. Operator-managed RbeWorker autoscaling is declared on each CR.
+  workerUbuntu2204:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 3
+    maxReplicaCount: 20
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    metricName: worker_ubuntu22_04_active_or_queued_tasks
+    threshold: "11"
+  workerTestcontainers:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    metricName: worker_testcontainers_active_or_queued_tasks
+    # Matches workerTestcontainers.config.concurrency.
+    threshold: "2"
+  workerTestcontainersSysbox:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    metricName: worker_testcontainers_sysbox_active_or_queued_tasks
+    # Matches workerTestcontainersSysbox.config.concurrency.
+    threshold: "2"
+
+certificate:
+  enabled: true
+  name: bb-wildcard-cert
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: dev-issuer
+
+ingress:
+  enabled: true
+  className: nginx
+  browser:
+    enabled: true
+    name: browser-bb
+    corsAllowOrigin: https://dashboard.helm.hermetiq.dev
+  rbeWeb:
+    enabled: true
+    name: rbe-web-bb
+
+# Contour resource: only applies if using contour
+httpProxy:
+  enabled: true
+  name: frontend-bb-cloud-grpc
+  responseTimeout: 300s
+  clientValidation:
+    enabled: false
+    caSecret: grpc-client-tls-ca-crt
+    optionalClientCertificate: true
+    forwardClientCertificate:
+      cert: true
+      subject: true
+
+gateway:
+  enabled: true
+  name: hermetiq-gateway
+  namespace: ""
+  httpRouteApiVersion: gateway.networking.k8s.io/v1
+  grpcRouteApiVersion: gateway.networking.k8s.io/v1
+  httpRoutes:
+    browser:
+      enabled: true
+      name: browser-bb
+      pathPrefix: /
+    rbeWeb:
+      enabled: false
+      name: rbe-web-bb
+      pathPrefix: /
+  grpcRoutes:
+    frontend:
+      enabled: true
+      name: frontend-bb-cloud-grpc
+      backendTrafficPolicy:
+        enabled: true
+        name: frontend-bb-cloud-grpc-timeouts
+        # Preserve long-lived Execute streams and large ByteStream/Write uploads
+        # through Envoy Gateway.
+        requestTimeout: "0s"
+        maxStreamDuration: "0s"
+        connectionIdleTimeout: "1h"
+  gke:
+    # Rendered only with routing.provider=gateway-httproute-only.
+    healthCheckPolicy:
+      enabled: true
+    backendPolicy:
+      enabled: true
+      # Preserve long-lived Bazel gRPC streams behind GKE Gateway.
+      timeoutSec: 300
+  cors:
+    enabled: true
+    browserPolicyName: browser-bb-cors
+    # Defaults to ingress.browser.corsAllowOrigin when empty.
+    allowOrigins: []
+    allowMethods:
+      - GET
+      - POST
+      - OPTIONS
+      - HEAD
+    allowHeaders:
+      - authorization
+      - cache-control
+      - x-hermetiq-jwt
+      - x-grpc-web
+      - User-Agent
+      - x-accept-content-transfer-encoding
+      - x-accept-response-streaming
+      - x-user-agent
+      - grpc-timeout
+      - Grpc-Message
+      - Grpc-Status
+      - content-type
+      - format
+      - headers
+      - method
+      - x-hermetiq-bytestream-file
+      - x-hermetiq-bytestream-type
+    exposeHeaders:
+      - Content-Length
+      - Content-Range
+      - Content-Type
+      - Access-Control-Allow-Headers
+      - grpc-status
+      - grpc-message
+    allowCredentials: true
+    maxAge: 10m
+
+vmPodScrapes:
+  enabled: true
+  interval: 30s
+
+vmRules:
+  # Disable vmRules and vmPodScrapes on clusters without VictoriaMetrics CRDs.
+  enabled: true
+  # Leave empty for the chart namespace; set when the VM operator watches only
+  # a dedicated observability namespace.
+  namespaceOverride: ""

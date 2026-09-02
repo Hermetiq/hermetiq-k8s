@@ -1,0 +1,127 @@
+# Envoy CI pool. The advertised container-image platform property is
+# intentionally different from the runner image; clients match on the platform
+# property while the runner provides an equivalent Envoy toolchain.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-envoy
+spec:
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      concurrency: 11
+      inputDownloadConcurrency: 9
+      outputUploadConcurrency: 11
+      environmentVariables:
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      platformProperties:
+        - name: container-image
+          value: docker://gcr.io/envoy-ci/envoy-build@sha256:1714d9c81bd61b493f24ae796b74db685f34cebdff6c3bb27c0cac6c683df66a
+        - name: dockerAddCapabilities
+          value: SYS_PTRACE,NET_RAW,NET_ADMIN
+        - name: dockerNetwork
+          value: standard
+        - name: dockerPrivileged
+          value: "True"
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368 # 32 GiB
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776 # 24 GiB
+    rolloutOnChange: true
+  images:
+    runner: gcr.io/envoy-ci/envoy-build@sha256:1714d9c81bd61b493f24ae796b74db685f34cebdff6c3bb27c0cac6c683df66a
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      node-type: spot-std-large
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: hermetiq/allows-spot
+        operator: Exists
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 20
+    cooldownPeriodSeconds: 450
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_envoy_active_or_queued_tasks
+      threshold: "11" # matches concurrency
+      queryWindow: 1m # set to 5m for PROD / longer-lived environments
+    pollingIntervalSeconds: 10
+    advanced:
+      horizontalPodAutoscalerConfig:
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: 0
+            selectPolicy: Max
+            policies:
+              - {type: Pods, value: 8, periodSeconds: 15}
+              - {type: Percent, value: 100, periodSeconds: 15}
+          scaleDown:
+            stabilizationWindowSeconds: 900
+            selectPolicy: Min
+            policies:
+              - {type: Pods, value: 2, periodSeconds: 60}
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsUser: 0
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir: {} # std-large nodes have no local SSD; boot-disk emptyDir
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir: {}
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

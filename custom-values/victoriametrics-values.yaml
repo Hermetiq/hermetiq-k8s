@@ -1,0 +1,244 @@
+alertmanager:
+  enabled: false
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+  useManagedConfig: true
+coreDns:
+  enabled: false
+defaultRules:
+  groups:
+    kubernetesSystemControllerManager:
+      create: false
+    kubernetesSystemScheduler:
+      create: false
+  rules:
+    CPUThrottlingHigh:
+      create: false
+nameOverride: vmks
+fullnameOverride: vmks
+grafana:
+#  nodeSelector:
+#    node-type: core8
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/core8
+#      operator: Exists
+  admin:
+    existingSecret: grafana-admin
+  enabled: true
+  fullnameOverride: vm-grafana
+  # Grafana 13.x stores and exports dashboards in v2 schema, which the
+  # file provisioner used by this chart can't load. Pin to 11.x LTS where
+  # v1 is still the storage format, so editing in the UI and saving the
+  # exported JSON back into files/dashboards/ works as expected.
+  image:
+    tag: "11.6.7"
+  grafana.ini:
+    alerting:
+      enabled: false
+    analytics:
+      check_for_updates: false
+      reporting_enabled: false
+    auth:
+      # Login form stays enabled as a fallback / debug path. With auth.proxy
+      # enabled, authenticated requests bypass it.
+      disable_login_form: true
+      disable_signout_menu: true
+      signout_redirect_url: https://grafana.helm.hermetiq.dev/login
+    auth.anonymous:
+      enabled: false
+    auth.proxy:
+      enabled: true
+      # oauth2-proxy with PASS_USER_HEADERS=true sets X-Forwarded-User
+      # (sub/preferred_username) and X-Forwarded-Email on the upstream
+      # request. Grafana keys the account on the User header.
+      header_name: X-Forwarded-User
+      header_property: username
+      # Pass email and groups through as additional Grafana fields.
+      headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
+      auto_sign_up: true
+      auto_assign_org_role: Admin
+      # Mint a Grafana session cookie on first authenticated request so the
+      # frontend's /api/user/auth-tokens/rotate calls succeed instead of
+      # 401-looping. With this false, Grafana re-authenticates every request
+      # via the proxy header but the rotate endpoint has nothing to rotate
+      # and returns 401, sending the frontend into a redirect loop.
+      enable_login_token: true
+      # Empty whitelist disables IP allowlisting. Safe because the only
+      # ingress path is through the grafana-oauth2-proxy Service.
+      whitelist: ""
+    log:
+      level: info
+      mode: console
+    security:
+      disable_gravatar: true
+    server:
+      domain: grafana.helm.hermetiq.dev
+      root_url: https://grafana.helm.hermetiq.dev/
+      skip_verify: true
+    unified_alerting:
+      enabled: false
+    users:
+      allow_sign_up: true
+      auto_assign_org: true
+      auto_assign_org_role: Admin
+  ingress:
+    enabled: false
+  resources:
+    limits:
+      cpu: 700m
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+  service:
+    type: ClusterIP
+kube-state-metrics:
+  enabled: true
+#  nodeSelector:
+#    node-type: core8
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/core8
+#      operator: Exists
+  metricLabelsAllowlist:
+  - nodes=[*]
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+kubeApiServer:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeDns:
+  enabled: false
+kubelet:
+  vmScrape:
+    spec:
+      metricRelabelConfigs:
+      - action: labeldrop
+        regex: pod_uid
+prometheus-node-exporter:
+  enabled: false
+  extraArgs:
+  - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/pods/.+|run/containerd/.+)($|/)
+  - --collector.filesystem.fs-types-exclude=^(tmpfs|autofs|binfmt_misc|cgroup|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|sysfs|tracefs)$
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+serviceMonitor:
+  enabled: true
+victoria-metrics-operator:
+  operator:
+    disable_prometheus_converter: true
+#  nodeSelector:
+#    node-type: core8
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/core8
+#      operator: Exists
+vmagent:
+  enabled: true
+  spec:
+#    nodeSelector:
+#      node-type: core8
+#    tolerations:
+#      - effect: NoSchedule
+#        key: hermetiq/core8
+#        operator: Exists
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+vmalert:
+  enabled: true
+  spec:
+#    datasource:
+#      url: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+    extraArgs:
+      notifier.blackhole: "true"
+#    nodeSelector:
+#      node-type: core8
+#    tolerations:
+#      - effect: NoSchedule
+#        key: hermetiq/core8
+#        operator: Exists
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        memory: 128Mi
+vmcluster:
+  enabled: true
+  spec:
+    retentionPeriod: 14d
+    vminsert:
+      extraArgs:
+        maxLabelsPerTimeseries: "100"
+#      nodeSelector:
+#        node-type: core8
+#      tolerations:
+#        - effect: NoSchedule
+#          key: hermetiq/core8
+#          operator: Exists
+      resources:
+        limits:
+          cpu: "1"
+          memory: 1Gi
+        requests:
+          cpu: 500m
+          memory: 1Gi
+    vmselect:
+      replicaCount: 2
+#      nodeSelector:
+#        node-type: core8
+#      tolerations:
+#        - effect: NoSchedule
+#          key: hermetiq/core8
+#          operator: Exists
+      resources:
+        limits:
+          cpu: "2"
+          memory: 2Gi
+        requests:
+          cpu: 500m
+          memory: 2Gi
+    vmstorage:
+      extraArgs:
+        search.maxConcurrentRequests: "16"
+#      nodeSelector:
+#        node-type: core8
+#      tolerations:
+#        - effect: NoSchedule
+#          key: hermetiq/core8
+#          operator: Exists
+      resources:
+        limits:
+          cpu: 5000m
+          memory: 16Gi
+        requests:
+          cpu: 1000m
+          memory: 1Gi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 30Gi
+vmsingle:
+  enabled: false

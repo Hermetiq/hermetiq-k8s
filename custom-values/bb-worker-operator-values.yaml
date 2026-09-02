@@ -1,0 +1,92 @@
+namespaceOverride: hermetiq
+
+replicaCount: 1
+revisionHistoryLimit: 5
+minReadySeconds: 5
+
+image:
+  repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-worker-operator
+  tag: "v0.2.0"
+  pullPolicy: IfNotPresent
+
+rbac:
+  managerBindingMode: cluster
+
+metrics:
+  enabled: true
+  bindAddress: ":8443"
+  containerPort: 8443
+  secure: true
+  authProxy:
+    # Required when metrics.secure=true and controller-runtime metrics authn/authz is used.
+    create: true
+  cert:
+    existingSecret: ""
+    mountPath: /certs/metrics
+    certName: tls.crt
+    keyName: tls.key
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8443
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    tlsConfig:
+      insecureSkipVerify: true
+  vmServiceScrape:
+    enabled: false
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    tlsConfig:
+      insecureSkipVerify: true
+
+healthProbe:
+  bindAddress: ":8081"
+  port: 8081
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+otel:
+  metrics:
+    enabled: false
+  logs:
+    enabled: false
+  endpoint: ""
+  insecure: false
+  # Defaults to the Helm fullname when empty.
+  serviceName: ""
+  # Comma-separated OTEL resource attributes, for example:
+  # service.namespace=buildbarn,deployment.environment=prod
+  resourceAttributes: ""
+
+enableHTTP2: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: null
+  maxUnavailable: 1

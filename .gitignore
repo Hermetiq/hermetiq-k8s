@@ -1,0 +1,18 @@
+# Customer-created copies of custom-values for their environment
+my-custom-values/
+*-custom-values/
+
+# Local secrets / scratch
+*.env
+.env
+*-pass.txt
+*-render.yaml
+
+# Bazel output symlinks generated when running examples locally
+/examples/testcontainers/bazel-*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,169 @@
+# GKE Standard raw-block Local SSD LVM provisioner for Buildbarn storage.
+#
+# This DaemonSet targets nodes created with --local-nvme-ssd-block, creates an
+# LVM volume group named "ephemeral", carves logical volumes for Buildbarn, and
+# labels the node hermetiq/ephemeral-lvm=ready after all devices exist.
+#
+# Use with buildbarn-values-local-ssd-block.yaml. Do not use on GKE Autopilot or
+# on nodes created with --ephemeral-storage-local-ssd; those disks are already
+# formatted and mounted as filesystem-backed ephemeral storage.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: partition-ephemeral-disks
+  namespace: hermetiq
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: partition-ephemeral-disks-node-labeler
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: partition-ephemeral-disks-node-labeler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: partition-ephemeral-disks-node-labeler
+subjects:
+  - kind: ServiceAccount
+    name: partition-ephemeral-disks
+    namespace: hermetiq
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: partition-ephemeral-disks
+  namespace: hermetiq
+  labels:
+    app: partition-ephemeral-disks
+    app.kubernetes.io/name: partition-ephemeral-disks
+    app.kubernetes.io/component: buildbarn-storage-provisioner
+spec:
+  selector:
+    matchLabels:
+      app: partition-ephemeral-disks
+  template:
+    metadata:
+      labels:
+        app: partition-ephemeral-disks
+        app.kubernetes.io/name: partition-ephemeral-disks
+        app.kubernetes.io/component: buildbarn-storage-provisioner
+    spec:
+      serviceAccountName: partition-ephemeral-disks
+      nodeSelector:
+        node-type: ssd-block
+        kubernetes.io/os: linux
+      tolerations:
+        - effect: NoSchedule
+          key: hermetiq/ssd-block
+          operator: Exists
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: partition
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          terminationMessagePath: /tmp/termination-log
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export DM_DISABLE_UDEV=y
+              VG=ephemeral
+              LABEL=hermetiq/ephemeral-lvm
+              apk add --no-cache lvm2 curl >/dev/null
+
+              SA=/var/run/secrets/kubernetes.io/serviceaccount
+              label_node() {
+                curl -sS --fail --cacert "$SA/ca.crt" \
+                  -H "Authorization: Bearer $(cat "$SA/token")" \
+                  -H "Content-Type: application/strategic-merge-patch+json" \
+                  -X PATCH "https://kubernetes.default.svc/api/v1/nodes/$NODE_NAME" \
+                  -d "{\"metadata\":{\"labels\":{\"$LABEL\":$1}}}" >/dev/null
+              }
+
+              # Clear stale readiness before provisioning. A reboot can wipe
+              # local SSD state while leaving Kubernetes node labels behind.
+              label_node null || true
+
+              set -- $(ls /dev/disk/by-id/google-local-nvme-ssd-* 2>/dev/null || true)
+              if [ "$#" -eq 0 ]; then
+                echo "ERROR: no /dev/disk/by-id/google-local-nvme-ssd-* devices."
+                echo "This node is not a --local-nvme-ssd-block pool."
+                exit 1
+              fi
+
+              devs=""
+              for l in "$@"; do devs="$devs $(readlink -f "$l")"; done
+              devs=$(echo $devs | tr ' ' '\n' | sort -u | tr '\n' ' ')
+              n=$(echo $devs | wc -w)
+              echo "Local NVMe SSDs ($n):$devs"
+
+              if ! vgs "$VG" >/dev/null 2>&1; then
+                vgcreate --force "$VG" $devs
+              fi
+
+              stripe=""
+              if [ "$n" -gt 1 ]; then
+                stripe="--stripes $n --stripesize 2048"
+              fi
+
+              # Small stores first (ABSOLUTE sizes); CAS gets all remaining extents.
+              #
+              # Fixed sizes rather than 1%VG: the AC/ISCC/FSAC hold tiny objects
+              # (~1.1 KiB ActionResults, ~0.5 KiB ISCC protos, ~2 KiB FSAC bloom
+              # filters), so their capacity in OBJECTS — and hence the
+              # key-location map they need to stay indexable — grows with the
+              # device. A percentage hands a multi-SSD node tens of GiB and
+              # millions of extra slots the values file would then have to cover.
+              # See storage.keyLocationMapSizing in the buildbarn chart values.
+              #
+              # lvcreate is guarded by `lvs ... ||`, so editing a size here never
+              # resizes an existing LV; only fresh or wiped nodes pick it up.
+              lvs "$VG/ac" >/dev/null 2>&1 || lvcreate $stripe --size 8G --name ac --wipesignatures n --yes "$VG"
+              lvs "$VG/iscc" >/dev/null 2>&1 || lvcreate $stripe --size 2G --name iscc --wipesignatures n --yes "$VG"
+              lvs "$VG/fsac" >/dev/null 2>&1 || lvcreate $stripe --size 6G --name fsac --wipesignatures n --yes "$VG"
+              lvs "$VG/cas" >/dev/null 2>&1 || lvcreate $stripe --extents 100%FREE --name cas --wipesignatures n --yes "$VG"
+
+              for d in cas ac iscc fsac; do
+                [ -b "/dev/$VG/$d" ] || { echo "ERROR: /dev/$VG/$d missing"; exit 1; }
+              done
+
+              label_node '"ready"'
+              echo "Provisioned node $NODE_NAME with $LABEL=ready"
+              exec sleep infinity
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+              mountPropagation: Bidirectional
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+            type: Directory

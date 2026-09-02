@@ -1,0 +1,33 @@
+command:
+  - /bin/sh
+  - -ec
+  - for name in $(env | cut -d= -f1 | grep '^DFLY_' | grep -v '^DFLY_requirepass$');
+    do unset "$name"; done; exec dragonfly "$@"
+  - dragonfly
+extraArgs:
+  - --cache_mode=true
+  - --dbnum=4
+  - --logtostdout=true
+  - --proactor_threads=4 # more threads requires more memory
+fullnameOverride: dragonfly
+passwordFromSecret:
+  enable: true
+  existingSecret:
+    key: password
+    name: dragonfly-auth
+resources:
+  limits:
+    memory: 2000Mi
+  requests:
+    memory: 2000Mi
+storage:
+  enabled: false
+podSecurityContext:
+  fsGroup: 2000
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000

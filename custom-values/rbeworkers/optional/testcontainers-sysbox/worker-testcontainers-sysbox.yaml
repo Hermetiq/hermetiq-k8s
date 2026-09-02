@@ -1,0 +1,103 @@
+# Sysbox Testcontainers worker pool.
+#
+# Bazel tests select this pool with
+# exec_properties = {"pool": "testcontainers-sysbox"}. Nodes must have Sysbox
+# installed and a sysbox-runc RuntimeClass available.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-testcontainers-sysbox
+spec:
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    pollingIntervalSeconds: 30
+    cooldownPeriodSeconds: 450
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_testcontainers_sysbox_active_or_queued_tasks
+      threshold: "2"
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      platformProperties:
+        - name: pool
+          value: testcontainers-sysbox
+      concurrency: 2
+      inputDownloadConcurrency: 4
+      outputUploadConcurrency: 4
+      environmentVariables: {}
+      runner:
+        setTmpdirEnvironmentVariable: false
+    rolloutOnChange: true
+  docker:
+    mode: sysbox
+    socketPath: /var/run/docker.sock
+    # Passed to the Sysbox runner image through BUILDBARN_PRELOAD_IMAGES.
+    preloadImages: []
+    sysbox:
+      runtimeClassName: sysbox-runc
+      hostUsers: false
+  images:
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+    # Must include Docker Engine/CLI and start dockerd before execing bb_runner.
+    runner: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/buildbarn-sysbox-runner:0.1.0
+    volumeInit: busybox:1.31.1-uclibc
+  pod:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      sysbox-install: "yes"
+      workload: testcontainers-sysbox
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: workload
+        operator: Equal
+        value: testcontainers-sysbox
+  runner:
+    installerEnabled: false
+    # Preserve the runner image ENTRYPOINT so it can start dockerd, then exec
+    # bb_runner with the generated config.
+    args:
+      - /bb/bb_runner
+      - /config/runner-worker-testcontainers-sysbox.jsonnet
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 4000m
+        memory: 16Gi
+      limits:
+        cpu: 8000m
+        memory: 32Gi
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir:
+        sizeLimit: 64Gi
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir:
+        sizeLimit: 64Gi
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsGroup: 0
+      runAsUser: 0
