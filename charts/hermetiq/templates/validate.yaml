@@ -121,6 +121,10 @@
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- $agreement := default (dict) .Values.license.agreement -}}
+{{- if ne (toString $agreement.accepted) "true" -}}
+{{- fail (printf "license.agreement.accepted must be true to install Hermetiq. The Hermetiq container images are proprietary software licensed under the Hermetiq Software License Agreement, packaged with this chart as SOFTWARE-LICENSE-AGREEMENT.md and published at %s; set license.agreement.accepted=true to confirm you accept it" (default "see the chart README" $agreement.url)) -}}
+{{- end -}}
 {{- $contactEmail := trim (default "" .Values.license.contactEmail) -}}
 {{- if not $contactEmail -}}
 {{- fail "license.contactEmail is required (every installation needs a human contact; pods refuse to start without it)" -}}

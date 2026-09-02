@@ -377,6 +377,14 @@ tests:
       - failedTemplate:
           errorPattern: "must be a syntactically valid email address"
 
+  - it: fails to template until the EULA is accepted
+    template: templates/validate.yaml
+    set:
+      license.agreement.accepted: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.agreement.accepted must be true"
+
   - it: rejects air-gapped mode without a key Secret
     template: templates/validate.yaml
     set:

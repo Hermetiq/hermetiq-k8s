@@ -7,6 +7,11 @@ namespaceOverride: hermetiq
 # via license.key.existingSecret.
 license:
   contactEmail: build-team@example.com
+  # REQUIRED. Installing Hermetiq confirms acceptance of the Hermetiq Software
+  # License Agreement (SOFTWARE-LICENSE-AGREEMENT.md in the chart package; URL
+  # in license.agreement.url). The install fails while accepted is false.
+  agreement:
+    accepted: true
 
 # Search and replace `helm.hermetiq.dev` with the base DNS name for your installation
 hosts:

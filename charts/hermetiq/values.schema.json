@@ -209,9 +209,27 @@
     "license": {
       "type": "object",
       "required": [
-        "contactEmail"
+        "contactEmail",
+        "agreement"
       ],
       "properties": {
+        "agreement": {
+          "type": "object",
+          "description": "The Hermetiq Software License Agreement, packaged with the chart as SOFTWARE-LICENSE-AGREEMENT.md.",
+          "required": [
+            "accepted"
+          ],
+          "properties": {
+            "accepted": {
+              "type": "boolean",
+              "description": "Must be true to confirm acceptance of the Hermetiq Software License Agreement. Rendering fails while false."
+            },
+            "url": {
+              "type": "string",
+              "description": "Published copy of the agreement, referenced by the acceptance check and the install notes."
+            }
+          }
+        },
         "contactEmail": {
           "type": "string"
         },

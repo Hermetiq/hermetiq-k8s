@@ -2,9 +2,16 @@ apiVersion: v2
 name: hermetiq
 description: Hermetiq gRPC API, MCP server, publisher, subscriber, dashboard, and DB maintenance jobs
 type: application
+home: https://www.hermetiq.com
+sources:
+  - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.0
 appVersion: "0.9.0"
 annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Hermetiq Software License Agreement
+      url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
     - kind: added
       description: Initial release of Hermetiq chart

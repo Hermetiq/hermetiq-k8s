@@ -34,6 +34,8 @@ publisher:
     audience: https://bep.ci.hermetiq.test
 license:
   contactEmail: ci@hermetiq.test
+  agreement:
+    accepted: true
 # Disable the dashboard oauth2-proxy for the render fixture (it requires client
 # id/secret/cookie creds). A fixture exercising the oauth2-proxy path is a follow-on.
 dashboard:

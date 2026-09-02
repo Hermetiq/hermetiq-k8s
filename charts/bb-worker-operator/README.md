@@ -16,6 +16,7 @@ supported full-stack deployment order.
 - [RBAC Scope](#rbac-scope)
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
+- [License](#license)
 
 ## Install
 
@@ -317,3 +318,10 @@ helm template bb-worker-operator ./charts/bb-worker-operator \
   --namespace hermetiq \
   --include-crds
 ```
+
+## License
+
+The chart source in this package is licensed under the Apache License 2.0;
+see the packaged `LICENSE` file. The operator image it deploys is proprietary
+software distributed under the
+[Hermetiq Software License Agreement](https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md).

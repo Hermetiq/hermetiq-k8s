@@ -150,6 +150,15 @@ license:
   # without a syntactically valid value; it is also the contact a trial
   # license is issued against.
   contactEmail: ""
+  # The Hermetiq Software License Agreement, packaged with this chart as
+  # SOFTWARE-LICENSE-AGREEMENT.md. The Hermetiq container images this chart
+  # deploys are proprietary software licensed under that agreement.
+  agreement:
+    # REQUIRED. Set true to confirm acceptance; rendering fails until it is.
+    accepted: false
+    # Published copy of the agreement, referenced by the acceptance check and
+    # printed in the install notes.
+    url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   key:
     # Inline license key (the chart creates the hermetiq-license Secret), or:
     value: ""

@@ -52,6 +52,10 @@ tolerance lapses. Install a key via license.key.value or
 license.key.existingSecret.
 {{- end }}
 
+LICENSE AGREEMENT — license.agreement.accepted=true confirms acceptance of the
+Hermetiq Software License Agreement (SOFTWARE-LICENSE-AGREEMENT.md in the chart
+package): {{ .Values.license.agreement.url }}
+
 Check license status at any time (works even while pods are unready):
 
   kubectl -n {{ $ns }} port-forward deploy/{{ include "hermetiq-core.apiName" . }} 8008

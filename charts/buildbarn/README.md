@@ -17,22 +17,23 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [What The Chart Deploys](#what-the-chart-deploys)
 - [Install](#install)
 - [Service Topology](#service-topology)
+- [Jsonnet Config Model](#jsonnet-config-model)
+- [Per-File Jsonnet Overrides](#per-file-jsonnet-overrides)
 - [Routing And TLS](#routing-and-tls)
   - [Envoy Gateway policies](#envoy-gateway-policies)
   - [Tuning the downstream leg for high-RTT Bazel clients](#tuning-the-downstream-leg-for-high-rtt-bazel-clients)
   - [TLS certificates](#tls-certificates)
-- [Browser SSO](#browser-sso)
-  - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
-- [Frontend Authentication And Writes](#frontend-authentication-and-writes)
-  - [Hermetiq grpc-cache-proxy sidecar](#hermetiq-grpc-cache-proxy-sidecar)
-- [JWKS ConfigMap Management](#jwks-configmap-management)
-- [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
-- [Remote Asset API](#remote-asset-api)
-- [bb-portal](#bb-portal)
 - [Storage](#storage)
   - [Raw block-device storage](#raw-block-device-storage)
   - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
   - [DIY mirrored storage (advanced)](#diy-mirrored-storage-advanced)
+- [Browser SSO](#browser-sso)
+  - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
+- [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+- [JWKS ConfigMap Management](#jwks-configmap-management)
+- [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
+- [Remote Asset API](#remote-asset-api)
+- [bb-portal](#bb-portal)
 - [Worker And Runner](#worker-and-runner)
 - [Worker Autoscaling](#worker-autoscaling)
 - [Testcontainers Worker Fleets](#testcontainers-worker-fleets)
@@ -44,9 +45,13 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Security And Availability Hardening](#security-and-availability-hardening)
   - [Restricting direct storage access](#restricting-direct-storage-access)
 - [Scheduling](#scheduling)
-- [Jsonnet Config Model](#jsonnet-config-model)
-- [Per-File Jsonnet Overrides](#per-file-jsonnet-overrides)
 - [Verification](#verification)
+- [Hermetiq grpc-cache-proxy sidecar](#hermetiq-grpc-cache-proxy-sidecar)
+  - [How lookups are classified](#how-lookups-are-classified)
+  - [Project attribution](#project-attribution)
+  - [Hermetiq side](#hermetiq-side)
+  - [Verify the sidecar](#verify-the-sidecar)
+- [License](#license)
 
 ## What The Chart Deploys
 
@@ -142,6 +147,68 @@ This produces:
 
 Set `hosts.browser`, `hosts.frontendGrpc`, `hosts.rbeWeb`, `hosts.remoteAsset`,
 `hosts.portal`, or `hosts.bes` to override any individual host.
+
+## Jsonnet Config Model
+
+Buildbarn itself is configured through Jsonnet. The chart renders two ConfigMaps:
+
+- `buildbarn-config` from the chart's `files/config/` directory.
+- `buildbarn-worker-config` from the chart's `files/worker-config/` directory.
+
+`buildbarn-worker-config` also includes the top-level `common.libsonnet`, so
+worker and runner configs use the same sharded storage, message size, tracing,
+and diagnostics defaults as the rest of the chart.
+
+Some Jsonnet files are Helm-templated before landing in the ConfigMap. For
+example:
+
+- `common.libsonnet` renders storage shard addresses and tracing settings.
+- `frontend.jsonnet` renders JWKS auth, CAS/Action Cache/Execute authorizers, read cache settings, and trace attributes.
+- `storage.jsonnet` renders persistence sizing.
+- `worker-common.libsonnet` renders worker concurrency, caches, platform properties, completed action logging, and runner options.
+- `asset.jsonnet` renders Remote Asset API port and fetch/push behavior.
+
+## Per-File Jsonnet Overrides
+
+Use `configOverrides` or `workerConfigOverrides` when a value is too specific or
+too deep for the chart values model:
+
+```bash
+helm upgrade --install --namespace hermetiq buildbarn \
+  oci://ghcr.io/hermetiq/buildbarn \
+  --version 0.9.0 \
+  --values buildbarn-values.yaml \
+  --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
+  --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
+```
+
+Keys must match a filename in `files/config/` or `files/worker-config/`.
+Unknown keys fail `helm template` with the valid filenames.
+
+Overrides are verbatim. Helm templating is not applied to override contents, so
+if you override a templated file you own all values that the chart would normally
+inject into that file.
+
+Override-able files:
+
+| Map | Filename |
+| --- | --- |
+| `configOverrides` | `asset.jsonnet` |
+| `configOverrides` | `browser.jsonnet` |
+| `configOverrides` | `common.libsonnet` |
+| `configOverrides` | `frontend.jsonnet` |
+| `configOverrides` | `scheduler.jsonnet` |
+| `configOverrides` | `portal.jsonnet` |
+| `configOverrides` | `storage.jsonnet` |
+| `workerConfigOverrides` | `runner-testcontainers-sysbox.jsonnet` |
+| `workerConfigOverrides` | `runner-testcontainers.jsonnet` |
+| `workerConfigOverrides` | `runner-ubuntu22-04.jsonnet` |
+| `workerConfigOverrides` | `worker-common.libsonnet` |
+| `workerConfigOverrides` | `worker-testcontainers-sysbox.jsonnet` |
+| `workerConfigOverrides` | `worker-testcontainers.jsonnet` |
+| `workerConfigOverrides` | `worker-ubuntu22-04.jsonnet` |
+
+`configOverrides.common.libsonnet` propagates to both ConfigMaps.
 
 ## Routing And TLS
 
@@ -288,7 +355,7 @@ policy fully overrides a Gateway-scoped one rather than combining with it.
 Some adjacent knobs are deliberately not exposed. `spec.timeout.tcp` only
 applies to TCP and TLS-passthrough listeners, so it is a silent no-op where
 Envoy terminates TLS and speaks HTTP/2. `spec.connection.connectionLimit` risks
-capping concurrency for little benefit at build-farm client counts. HTTP/2
+capping concurrency for little benefit at build-cluster client counts. HTTP/2
 keepalive PINGs are not part of `ClientTrafficPolicy` at all and need an
 `EnvoyPatchPolicy`. Raising the idle timeout is what actually prevents
 connection churn: Envoy's HTTP idle timeout is request-based, so neither PINGs
@@ -309,595 +376,6 @@ a `ClusterIssuer` that exists in your cluster, set `tls.secretName` to reuse a
 wildcard Secret you already manage, or set `certificate.enabled: false`. If the
 referenced issuer does not exist, the Certificate stays pending and the routes
 serve no usable TLS.
-
-## Browser SSO
-
-Browser SSO is separate from frontend gRPC authentication. The Browser can be
-protected with an `oauth2-proxy` sidecar:
-
-```yaml
-browser:
-  oauth2Proxy:
-    enabled: true
-    existingConfigMap: oauth2-proxy-config-web-ui
-    client:
-      existingSecret: oauth2-proxy-client
-```
-
-When the Hermetiq chart is installed first with dashboard OAuth enabled, this
-chart can reuse the dashboard `oauth2-proxy-config-web-ui` ConfigMap and
-`oauth2-proxy-client` Secret. The shared ConfigMap provides provider/session
-settings. The Buildbarn Browser Deployment supplies its own redirect URL and
-upstream through container environment variables.
-
-When enabled, the Browser Service exposes oauth2-proxy on port `80`; oauth2-proxy
-redirects to `https://<browser-host>/oauth2/callback` and proxies upstream to the
-local Browser container on `127.0.0.1:7984`.
-
-If `browser.oauth2Proxy.existingConfigMap` is empty, the chart renders a
-Buildbarn-specific oauth2-proxy ConfigMap. In that mode,
-`browser.oauth2Proxy.oidcIssuerUrl` is required.
-
-For production installs that render the Buildbarn-specific ConfigMap, review
-the insecure provider and TLS flags before exposing Browser:
-
-```yaml
-browser:
-  oauth2Proxy:
-    existingConfigMap: ""
-    insecureOidcAllowUnverifiedEmail: false
-    insecureOidcSkipIssuerVerification: false
-    sslInsecureSkipVerify: false
-    showDebugOnError: false
-```
-
-If `browser.oauth2Proxy.client.existingSecret` is empty, the chart renders an
-`oauth2-proxy-client` Secret from `clientId`, `clientSecret`, and `cookieSecret`.
-
-### Custom auth sidecar hook
-
-For auth proxies the chart does not model, append your own sidecar and point
-the Browser Service at it. The container spec lives entirely in your values
-file (it is rendered through `tpl`), and any referenced Secrets must be
-pre-created:
-
-```yaml
-browser:
-  service:
-    targetPortOverride: 9191
-  extraContainers:
-    - name: my-auth-proxy
-      image: registry.example.com/my-auth-proxy:latest
-      ports:
-        - name: proxy
-          containerPort: 9191
-      env:
-        - name: HTTP_PORT
-          value: "9191"
-        - name: PROXY_PORT
-          value: "7984" # forward to the Browser container
-      envFrom:
-        - secretRef:
-            name: my-auth-proxy-secret
-```
-
-With `targetPortOverride` set, the Browser Service serves that port (named
-`proxy`) and every routing provider follows it automatically. This hook is
-mutually exclusive with `browser.oauth2Proxy.enabled`.
-
-## Frontend Authentication And Writes
-
-The frontend gRPC server can run fully open, or it can verify JWTs from a JWKS
-file while still allowing unauthenticated CAS reads:
-
-```yaml
-frontend:
-  jwks:
-    enabled: true
-    issuer: https://your-tenant.auth0.com/
-    audience: https://your-api-identifier
-    configMapName: frontend-jwks
-    configMapKey: jwks.json
-```
-
-When JWKS is enabled, the frontend renders an `any` authentication policy:
-
-- First arm: validate JWT signature and claims from the mounted JWKS file.
-- Second arm: `allow: {}` fallback so unauthenticated requests still pass.
-
-JWT-authenticated requests receive private metadata:
-
-```json
-{ "private": { "canWriteToCache": true } }
-```
-
-CAS reads remain open by default and are intentionally independent of JWT
-validation:
-
-- `contentAddressableStorage.getAuthorizer` is always `allow`.
-- `contentAddressableStorage.findMissingAuthorizer` is always `allow`.
-- Action Cache reads are always `allow`.
-
-Writes and execution are controlled separately:
-
-```yaml
-frontend:
-  actionCache:
-    putAuthorizer:
-      mode: requireCanWriteToCache
-  contentAddressableStorage:
-    putAuthorizer:
-      mode: requireCanWriteToCache
-  executeAuthorizer:
-    mode: requireCanWriteToCache
-```
-
-Use `requireCanWriteToCache` when Action Cache writes, CAS uploads, or Execute
-calls should require a valid JWT. Keep `allow` only for clusters where another
-proxy layer is intentionally handling trust, or where open writes/execution are
-acceptable.
-
-The frontend also keeps CAS reads efficient by default:
-
-- CAS `existenceCaching` is enabled when `frontend.readCache.enabled` is false.
-- `supportedCompressors: ['ZSTD']` is advertised.
-- Action Cache `GetActionResult` and `UpdateActionResult` can add digest trace attributes through `frontend.tracingAttributes.actionCacheDigests.enabled`.
-
-### Hermetiq grpc-cache-proxy sidecar
-
-`frontend.grpcCacheProxy` adds a Hermetiq sidecar that observes frontend gRPC
-traffic and publishes cache hit/miss events to NATS for Hermetiq analytics:
-
-```yaml
-frontend:
-  grpcCacheProxy:
-    enabled: true
-    natsUrl: nats://nats.nats-system.svc:4222
-    cacheEvents:
-      subjectPrefix: prod_cache
-      numShards: 1
-```
-
-When enabled, the `frontend-grpc` Service keeps port `8980` but its
-`targetPort` switches to the sidecar (`frontend.grpcCacheProxy.port`, default
-`50081`), so all routing providers pass external traffic through the proxy
-with no route changes; the sidecar forwards to the frontend container on
-`127.0.0.1:8980`. `stytch.existingSecret` (default `stytch-secret`) is exposed
-via `envFrom` for token validation — only when `enforceAuth` is true, since the
-proxy reads the `STYTCH_*` vars only then.
-
-The sidecar's exporter is always configured, so the chart always sets
-`OTEL_EXPORTER_OTLP_ENDPOINT` (otherwise the OTEL SDK would dial its default of
-`localhost:4317`). It resolves in this order:
-
-1. `frontend.grpcCacheProxy.otel.endpoint`, used verbatim if set.
-2. `tracing.enabled` and `tracing.nodeLocal.enabled` — the node-local agent at
-   `$(K8S_LOCAL_NODE_IP):<tracing.nodeLocal.port>`.
-3. `tracing.enabled` and `tracing.endpoint` — that endpoint.
-4. Otherwise `http://<hosts.otel>:4317`. `hosts.otel` is required here.
-
-Cases 2 and 3 use `https` when `tracing.tls.enabled` is set, `http` otherwise.
-Case 4 is always plaintext, and `hosts.otel` defaults to a Hermetiq-operated
-host — point it at your own in-cluster collector for on-prem installs, or set
-`frontend.grpcCacheProxy.otel.endpoint` explicitly. Note the sidecar mounts no
-client certificates, so `tracing.tls.clientCertificate` (mTLS) does not reach
-it; use `otel.endpoint` with a collector that does not require mTLS.
-
-`cacheEvents.numShards` **must** equal the bep-nats stream partition count on the
-Hermetiq side. Events published to a shard subject nothing consumes are silently
-discarded.
-
-`maxMessageSizeBytes` (default 64Mi) applies to both the sidecar's server and its
-connection to the frontend, and is floored at `config.maximumMessageSizeBytes` so
-the sidecar can never be a smaller bottleneck than the frontend behind it.
-
-Because the Service `targetPort` moves to the sidecar, gRPC health checks on that
-port (`frontend.grpcCacheProxy.probes`, native Kubernetes gRPC probes) report the
-*proxy's* health, not the frontend's. The frontend container keeps its own HTTP
-probes on `:9980`.
-
-`enforceAuth: false` makes the sidecar a pure forwarder — it is **not** an
-authorization boundary in that mode, and Buildbarn's own authorizers remain the
-only thing gating access.
-
-For trusted in-cluster clients that cannot authenticate to the proxy, keep
-`enforceAuth: true` on the externally routed `frontend-grpc` Service and enable
-the separate direct Service instead:
-
-```yaml
-frontend:
-  internalService:
-    enabled: true
-    name: frontend-internal
-```
-
-This creates the ClusterIP endpoint
-`frontend-internal.<namespace>.svc.cluster.local:8980`. It always targets the
-Buildbarn frontend container on port `8980`, while `frontend-grpc` continues to
-target the proxy sidecar. The internal Service bypasses proxy authentication and
-cache-event capture, so never attach an Ingress, Gateway route, or other external
-load balancer to it. Use a NetworkPolicy if only selected namespaces should be
-able to reach the direct frontend port.
-
-Leave `natsUrl` empty to switch cache-event capture off entirely and run the
-sidecar as a plain pass-through proxy. Only unauthenticated NATS endpoints are
-supported: there are no values for NATS credentials, nkeys, or TLS.
-
-Tuning beyond the modelled values goes through `frontend.grpcCacheProxy.env`, e.g.
-`CACHE_EVENT_BATCH_SIZE`, `CACHE_EVENT_FLUSH_INTERVAL`, `SHUTDOWN_DRAIN_DELAY`,
-`SHUTDOWN_TIMEOUT`.
-
-#### How lookups are classified
-
-The proxy never inspects stored data. It classifies each `GetActionResult`
-purely by the gRPC status the frontend returns:
-
-| Status from the frontend | Recorded as |
-| --- | --- |
-| `OK` | cache hit |
-| `NotFound` | cache miss |
-| anything else | no event; the lookup is skipped silently |
-
-Any frontend configuration that turns a cache lookup into some other error
-makes those lookups vanish from analytics rather than count as misses. The
-chart's generated Jsonnet already satisfies the requirements below; they matter
-when you replace `frontend.jsonnet` through `configOverrides`:
-
-- **Keep the frontend listening on `:8980`.** The sidecar forwards to
-  `127.0.0.1:8980`. Because the Service `targetPort` points at the sidecar,
-  changing `grpcServers[].listenAddresses` takes the whole frontend endpoint
-  down.
-- **Keep Action Cache reads open.** `actionCache.getAuthorizer` must allow the
-  traffic, which is why
-  [Frontend Authentication And Writes](#frontend-authentication-and-writes)
-  only tightens the put and execute authorizers. A denied read returns
-  `PermissionDenied` and produces no event, and the same applies to a request
-  rejected as `Unauthenticated` by `grpcServers[].authenticationPolicy`.
-- **Keep `completenessChecking` on the Action Cache.** It returns `NotFound`
-  when an `ActionResult` exists but its output blobs are gone from the CAS,
-  which is what Bazel experiences. Without it those lookups are recorded as
-  hits while Bazel treats them as misses, inflating the hit rate exactly when
-  CAS eviction pressure is worst.
-- **Short Action Cache deadlines hide lookups.** A `deadlineEnforcing` wrapper
-  returns `DeadlineExceeded` when storage is slow, and those lookups produce no
-  event. A dip in recorded lookups during a storage slowdown reflects the
-  timeout, not lost traffic.
-- **`actionResultExpiring` is safe.** Expired entries return `NotFound` and are
-  recorded as misses, matching what Bazel sees.
-
-#### Project attribution
-
-Attribution to a Hermetiq project comes from the request, not from Buildbarn.
-With `enforceAuth: false` the proxy reads the `x-hermetiq-project-id` header if
-present and otherwise falls back to Bazel's `--remote_instance_name`. Set
-`--remote_instance_name` to the Hermetiq project ID unless you send the header.
-Buildbarn accepts any instance name here because the chart's blobstore does not
-demultiplex on it, but with remote execution the name must still satisfy the
-scheduler's `instanceNamePrefix`, which is empty by default and matches
-everything. Lookups whose project cannot be resolved are counted as
-`unresolved` in the sidecar's log summary.
-
-The scheduler stanza that forwards
-`build.bazel.remote.execution.v2.requestmetadata-bin` to the scheduler belongs
-to remote execution attribution through the Completed Action Logger, not to the
-cache proxy. `GetActionResult` never reaches the scheduler, and the sidecar
-reads Bazel's request metadata directly off the incoming request.
-
-#### Hermetiq side
-
-Enabling the sidecar collects the events; the Hermetiq chart consumes them. Set
-`app.cacheEventsEnabled: true` there, keep the sidecar's `cacheEvents.numShards`
-equal to the Hermetiq chart's `app.streamPartitionCount`, and enable
-**Action Cache Hit Tracker** in the project's settings.
-
-#### Verify the sidecar
-
-```bash
-kubectl -n hermetiq get pods -l app=frontend
-kubectl -n hermetiq logs -l app=frontend -c grpc-cache-proxy --tail=20
-```
-
-Each frontend pod should report `2/2` ready. The proxy logs a one-line
-publisher summary each minute rather than per request. `published` climbing
-after a build means events are reaching NATS. A high `unresolved` count means
-no Hermetiq project could be attributed, which normally means
-`--remote_instance_name` does not match a project ID. `dropped` counts events
-discarded because NATS was unreachable or slow; cache traffic itself is never
-blocked by the event path, so a nonzero `dropped` costs analytics, never
-builds. Then run a build and confirm the events appear in the Hermetiq
-dashboard's cache analytics or through the Hermetiq MCP server.
-
-## JWKS ConfigMap Management
-
-Buildbarn reads JWKS from a mounted file. It deliberately does not fetch JWKS
-over HTTP at runtime, which avoids a startup dependency on the identity provider
-and avoids every frontend/storage pod polling the IdP.
-
-You have two options.
-
-Manage the ConfigMap yourself:
-
-```bash
-curl -fsS https://your-tenant.auth0.com/.well-known/jwks.json \
-  | kubectl create configmap frontend-jwks \
-      --from-file=jwks.json=/dev/stdin \
-      --dry-run=client -o yaml \
-  | kubectl apply -n hermetiq -f -
-```
-
-Or enable the bundled sync:
-
-```yaml
-frontend:
-  jwks:
-    enabled: true
-    sync:
-      enabled: true
-      url: https://your-tenant.auth0.com/.well-known/jwks.json
-      schedule: "0 */6 * * *"
-      initialSyncEnabled: true
-```
-
-The sync path renders a small namespace-scoped ServiceAccount, Role/RoleBinding,
-CronJob, and optional post-install/post-upgrade Job using Buildbarn's
-`sync_jwks_to_configmap` image. The chart also seeds the ConfigMap with
-`{"keys":[]}` so the frontend can mount the volume before the first sync.
-
-The sync workload patches the JWKS ConfigMap through the Kubernetes API, so its
-ServiceAccount token remains enabled by default. You can add job guardrails
-without changing the auth model:
-
-```yaml
-frontend:
-  jwks:
-    sync:
-      startingDeadlineSeconds: 600
-      job:
-        activeDeadlineSeconds: 300
-        ttlSecondsAfterFinished: 3600
-      initialJob:
-        activeDeadlineSeconds: 300
-        ttlSecondsAfterFinished: 3600
-```
-
-Rotation flow:
-
-```text
-IdP publishes keys -> CronJob patches ConfigMap -> kubelet updates volume -> Buildbarn reloads jwks.json
-```
-
-## Tracing, Metrics, And Diagnostics
-
-`common.libsonnet` defines shared Buildbarn globals. When tracing is enabled,
-that shared global is used by storage, frontend, scheduler, browser, workers,
-runners, and remote asset:
-
-```yaml
-tracing:
-  enabled: true
-  nodeLocal:
-    enabled: true
-    port: 4317
-```
-
-With node-local tracing enabled, each pod exports spans to
-`$(K8S_LOCAL_NODE_IP):<port>`. With node-local tracing disabled, set
-`tracing.endpoint`.
-
-Optional TLS and mTLS are configured under:
-
-```yaml
-tracing:
-  tls:
-    enabled: true
-    clientCertificate:
-      enabled: true
-```
-
-Containers that use the shared tracing config receive a `SERVICE_NAME`
-environment variable. Node-local tracing also injects `K8S_LOCAL_NODE_IP` from
-the pod's host IP. These environment variables are required because Jsonnet uses
-`std.extVar()`.
-
-The shared global also includes the diagnostics HTTP server on `:9980` with
-Prometheus, pprof, and active spans enabled. Worker pods are special: the worker
-and runner containers share one pod network namespace, so only the worker should
-bind `:9980`. The runner still inherits tracing and other shared global settings,
-but its config uses Jsonnet hidden-field override syntax to strip diagnostics:
-
-```jsonnet
-global: common.global {
-  diagnosticsHttpServer:: null,
-}
-```
-
-When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics
-`VMPodScrape` resources for Buildbarn pods and stamps samples with
-`hermetiq_project_id`.
-
-When `vmRules.enabled` is true, the chart renders Buildbarn recording rules as
-VictoriaMetrics `VMRule` resources. The VMRule namespace defaults to the chart
-namespace; set `vmRules.namespaceOverride` if your VictoriaMetrics operator only
-watches a dedicated observability namespace. Use `vmRules.labels` when your
-`VMAgent` selects rules by label.
-
-Disable the VictoriaMetrics resources on clusters without the VictoriaMetrics
-operator CRDs installed:
-
-```yaml
-vmPodScrapes:
-  enabled: false
-vmRules:
-  enabled: false
-```
-
-## Remote Asset API
-
-The Remote Asset API lets Bazel ask Buildbarn to fetch external assets, such as
-HTTP URLs, and store the resulting blob in CAS. This avoids every client or
-worker fetching the same external asset independently.
-
-Enable it with:
-
-```yaml
-remoteAsset:
-  enabled: true
-  fetcher:
-    http:
-      enabled: true
-```
-
-The chart renders:
-
-- `asset.jsonnet` in `buildbarn-config`.
-- `remote-asset` Deployment.
-- `remote-asset` Service.
-- `remote-asset-grpc` Service.
-- A Contour `HTTPProxy`, Gateway `GRPCRoute`, or nginx-style `Ingress` when the matching route value is enabled.
-- `remote-asset-vmpodscrape` when `vmPodScrapes.enabled` is true.
-
-Remote asset health probes are enabled by default when the workload is enabled,
-using the shared Buildbarn diagnostics server on `:9980`:
-
-```yaml
-remoteAsset:
-  probes:
-    enabled: true
-```
-
-The default `asset.jsonnet` uses the same sharded CAS and Action Cache helpers
-as the frontend. It allows Fetch requests and disables Push by default through:
-
-```yaml
-remoteAsset:
-  allowUpdatesForInstances: []
-```
-
-FetchBlob URI tracing is enabled by default:
-
-```yaml
-remoteAsset:
-  tracingAttributes:
-    fetchBlobUris:
-      enabled: true
-```
-
-For Contour or Ingress, expose it with:
-
-```yaml
-remoteAsset:
-  enabled: true
-ingress:
-  remoteAssetGrpc:
-    enabled: true
-```
-
-For Gateway API, expose it with:
-
-```yaml
-remoteAsset:
-  enabled: true
-gateway:
-  grpcRoutes:
-    remoteAsset:
-      enabled: true
-```
-
-## bb-portal
-
-`portal.enabled` deploys the [bb-portal](https://github.com/buildbarn/bb-portal)
-build-event dashboard as a single `bb-portal` Deployment. One container serves
-everything:
-
-- the web UI and its HTTP/gRPC-Web APIs on `portal.<domainBase>` (`:8081`),
-- the Build Event Stream gRPC ingest endpoint on `bes.<domainBase>` (`:8082`,
-  h2c), persisting invocations to PostgreSQL,
-- diagnostics and Prometheus metrics on `:9980`.
-
-The UI is embedded in the Go binary
-(`frontendServiceConfiguration.frontendSource.embedded`), so there is no
-separate Next.js workload and nothing to proxy to.
-
-> **bb-portal is unauthenticated.** Both routes are served with
-> `authenticationPolicy: { allow: {} }` and an `allow` instance-name authorizer,
-> so anyone who can reach `portal.<domainBase>` can read every build's events,
-> and anyone who can reach `bes.<domainBase>` can publish their own. The chart
-> does not front the portal with oauth2-proxy the way `browser.oauth2Proxy`
-> fronts Buildbarn Browser. Before enabling it, put it behind an external auth
-> layer, restrict the routes to an internal-only Gateway or Ingress, or limit
-> reachability with a NetworkPolicy. Also consider
-> `portal.bes.enableGraphqlPlayground: false`.
-
-```yaml
-portal:
-  enabled: true
-  db:
-    existingSecret: bbportal-db-env
-  frontend:
-    companyName: Hermetiq
-```
-
-The database Secret must be pre-created with keys `DB_USER`, `DB_PASSWORD`,
-`DB_HOSTNAME`, `DB_PORT`, and `DB_NAME`; the pod composes
-`DB_CONNECTION_STRING` from them at start. The chart never renders database
-credentials. `portal.db.connectionPool` bounds the pool — keep
-`maxOpenConnections` within what your server allows across all replicas.
-
-`portal.bes.buildKey` names the build tag that groups invocations into builds,
-but build tags only exist if `portal.bes.invocationMetadataExtractor` produces
-them. That value is a raw
-`buildbarn.configuration.jmespath.Expression` evaluated against
-`{"env": <Bazel's environment>, "files": {...}}`, and what it returns is what
-populates the Builds page, the per-user views, and the source-control tab:
-
-```yaml
-portal:
-  bes:
-    invocationMetadataExtractor:
-      expression: |
-        {
-          "username": env.BUILDKITE_BUILD_CREATOR,
-          "buildTags": {"build_id": env.BUILDKITE_BUILD_ID},
-          "sourceControls": [{
-            "repo": env.BUILDKITE_REPO,
-            "ref": env.BUILDKITE_BRANCH,
-            "commit": env.BUILDKITE_COMMIT
-          }]
-        }
-```
-
-With no extractor configured (the default), invocations are still recorded but
-never group into builds. `expression` also accepts `files` and `testVectors` —
-failing test vectors abort startup, so they are worth adding.
-
-`portal.frontend` holds UI settings only. `featureFlags` toggles pages
-(`home.fileUpload`, `home.instructions`, the five `bes.page*` pages, `browser`,
-`scheduler`); each one only hides UI, so do not treat them as access control.
-Turn `browser` off if you send people to Buildbarn Browser instead.
-`footerContent`, `additionalBuildColumns`, and
-`additionalBuildInvocationColumns` pass through to the frontend config as-is.
-
-Routes render per provider (Contour `HTTPProxy`, Gateway `HTTPRoute` +
-`GRPCRoute`, or nginx `Ingress` pairs), all backed by the single `bb-portal`
-Service, and are individually gated by `ingress.portal` / `ingress.besGrpc` /
-`gateway.httpRoutes.portal` / `gateway.grpcRoutes.bes`. The Certificate gains
-the `portal.` and `bes.` SANs in contour/ingress modes, and a `VMPodScrape`
-covers the `:9980` diagnostics port.
-
-Point Bazel at it with:
-
-```
-build --bes_backend=grpcs://bes.<domainBase>
-build --bes_results_url=https://portal.<domainBase>/bazel-invocations/
-```
-
-The portal's blob browsing reads the storage shards directly (top-level
-`contentAddressableStorage` / `actionCache`, plus `initialSizeClassCache` and
-`fileSystemAccessCache` when those stores are enabled) rather than going through
-`frontend-grpc`, so portal traffic never passes the optional grpc-cache-proxy
-sidecar and cannot pollute cache-event analytics.
-`configOverrides."portal.jsonnet"` replaces the generated config wholesale if
-you need settings the values do not expose.
 
 ## Storage
 
@@ -1277,6 +755,431 @@ Hazards you own:
 - Enabling mirroring over an existing loaded cache is safe for ring A (its
   addresses do not change), and ring B refills on the request path — expect
   slow first builds, or pre-seed with `bb_copy`.
+
+## Browser SSO
+
+Browser SSO is separate from frontend gRPC authentication. The Browser can be
+protected with an `oauth2-proxy` sidecar:
+
+```yaml
+browser:
+  oauth2Proxy:
+    enabled: true
+    existingConfigMap: oauth2-proxy-config-web-ui
+    client:
+      existingSecret: oauth2-proxy-client
+```
+
+When the Hermetiq chart is installed first with dashboard OAuth enabled, this
+chart can reuse the dashboard `oauth2-proxy-config-web-ui` ConfigMap and
+`oauth2-proxy-client` Secret. The shared ConfigMap provides provider/session
+settings. The Buildbarn Browser Deployment supplies its own redirect URL and
+upstream through container environment variables.
+
+When enabled, the Browser Service exposes oauth2-proxy on port `80`; oauth2-proxy
+redirects to `https://<browser-host>/oauth2/callback` and proxies upstream to the
+local Browser container on `127.0.0.1:7984`.
+
+If `browser.oauth2Proxy.existingConfigMap` is empty, the chart renders a
+Buildbarn-specific oauth2-proxy ConfigMap. In that mode,
+`browser.oauth2Proxy.oidcIssuerUrl` is required.
+
+For production installs that render the Buildbarn-specific ConfigMap, review
+the insecure provider and TLS flags before exposing Browser:
+
+```yaml
+browser:
+  oauth2Proxy:
+    existingConfigMap: ""
+    insecureOidcAllowUnverifiedEmail: false
+    insecureOidcSkipIssuerVerification: false
+    sslInsecureSkipVerify: false
+    showDebugOnError: false
+```
+
+If `browser.oauth2Proxy.client.existingSecret` is empty, the chart renders an
+`oauth2-proxy-client` Secret from `clientId`, `clientSecret`, and `cookieSecret`.
+
+### Custom auth sidecar hook
+
+For auth proxies the chart does not model, append your own sidecar and point
+the Browser Service at it. The container spec lives entirely in your values
+file (it is rendered through `tpl`), and any referenced Secrets must be
+pre-created:
+
+```yaml
+browser:
+  service:
+    targetPortOverride: 9191
+  extraContainers:
+    - name: my-auth-proxy
+      image: registry.example.com/my-auth-proxy:latest
+      ports:
+        - name: proxy
+          containerPort: 9191
+      env:
+        - name: HTTP_PORT
+          value: "9191"
+        - name: PROXY_PORT
+          value: "7984" # forward to the Browser container
+      envFrom:
+        - secretRef:
+            name: my-auth-proxy-secret
+```
+
+With `targetPortOverride` set, the Browser Service serves that port (named
+`proxy`) and every routing provider follows it automatically. This hook is
+mutually exclusive with `browser.oauth2Proxy.enabled`.
+
+## Frontend Authentication And Writes
+
+The frontend gRPC server can run fully open, or it can verify JWTs from a JWKS
+file while still allowing unauthenticated CAS reads:
+
+```yaml
+frontend:
+  jwks:
+    enabled: true
+    issuer: https://your-tenant.auth0.com/
+    audience: https://your-api-identifier
+    configMapName: frontend-jwks
+    configMapKey: jwks.json
+```
+
+When JWKS is enabled, the frontend renders an `any` authentication policy:
+
+- First arm: validate JWT signature and claims from the mounted JWKS file.
+- Second arm: `allow: {}` fallback so unauthenticated requests still pass.
+
+JWT-authenticated requests receive private metadata:
+
+```json
+{ "private": { "canWriteToCache": true } }
+```
+
+CAS reads remain open by default and are intentionally independent of JWT
+validation:
+
+- `contentAddressableStorage.getAuthorizer` is always `allow`.
+- `contentAddressableStorage.findMissingAuthorizer` is always `allow`.
+- Action Cache reads are always `allow`.
+
+Writes and execution are controlled separately:
+
+```yaml
+frontend:
+  actionCache:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  contentAddressableStorage:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  executeAuthorizer:
+    mode: requireCanWriteToCache
+```
+
+Use `requireCanWriteToCache` when Action Cache writes, CAS uploads, or Execute
+calls should require a valid JWT. Keep `allow` only for clusters where another
+proxy layer is intentionally handling trust, or where open writes/execution are
+acceptable.
+
+The frontend also keeps CAS reads efficient by default:
+
+- CAS `existenceCaching` is enabled when `frontend.readCache.enabled` is false.
+- `supportedCompressors: ['ZSTD']` is advertised.
+- Action Cache `GetActionResult` and `UpdateActionResult` can add digest trace attributes through `frontend.tracingAttributes.actionCacheDigests.enabled`.
+
+## JWKS ConfigMap Management
+
+Buildbarn reads JWKS from a mounted file. It deliberately does not fetch JWKS
+over HTTP at runtime, which avoids a startup dependency on the identity provider
+and avoids every frontend/storage pod polling the IdP.
+
+You have two options.
+
+Manage the ConfigMap yourself:
+
+```bash
+curl -fsS https://your-tenant.auth0.com/.well-known/jwks.json \
+  | kubectl create configmap frontend-jwks \
+      --from-file=jwks.json=/dev/stdin \
+      --dry-run=client -o yaml \
+  | kubectl apply -n hermetiq -f -
+```
+
+Or enable the bundled sync:
+
+```yaml
+frontend:
+  jwks:
+    enabled: true
+    sync:
+      enabled: true
+      url: https://your-tenant.auth0.com/.well-known/jwks.json
+      schedule: "0 */6 * * *"
+      initialSyncEnabled: true
+```
+
+The sync path renders a small namespace-scoped ServiceAccount, Role/RoleBinding,
+CronJob, and optional post-install/post-upgrade Job using Buildbarn's
+`sync_jwks_to_configmap` image. The chart also seeds the ConfigMap with
+`{"keys":[]}` so the frontend can mount the volume before the first sync.
+
+The sync workload patches the JWKS ConfigMap through the Kubernetes API, so its
+ServiceAccount token remains enabled by default. You can add job guardrails
+without changing the auth model:
+
+```yaml
+frontend:
+  jwks:
+    sync:
+      startingDeadlineSeconds: 600
+      job:
+        activeDeadlineSeconds: 300
+        ttlSecondsAfterFinished: 3600
+      initialJob:
+        activeDeadlineSeconds: 300
+        ttlSecondsAfterFinished: 3600
+```
+
+Rotation flow:
+
+```text
+IdP publishes keys -> CronJob patches ConfigMap -> kubelet updates volume -> Buildbarn reloads jwks.json
+```
+
+## Tracing, Metrics, And Diagnostics
+
+`common.libsonnet` defines shared Buildbarn globals. When tracing is enabled,
+that shared global is used by storage, frontend, scheduler, browser, workers,
+runners, and remote asset:
+
+```yaml
+tracing:
+  enabled: true
+  nodeLocal:
+    enabled: true
+    port: 4317
+```
+
+With node-local tracing enabled, each pod exports spans to
+`$(K8S_LOCAL_NODE_IP):<port>`. With node-local tracing disabled, set
+`tracing.endpoint`.
+
+Optional TLS and mTLS are configured under:
+
+```yaml
+tracing:
+  tls:
+    enabled: true
+    clientCertificate:
+      enabled: true
+```
+
+Containers that use the shared tracing config receive a `SERVICE_NAME`
+environment variable. Node-local tracing also injects `K8S_LOCAL_NODE_IP` from
+the pod's host IP. These environment variables are required because Jsonnet uses
+`std.extVar()`.
+
+The shared global also includes the diagnostics HTTP server on `:9980` with
+Prometheus, pprof, and active spans enabled. Worker pods are special: the worker
+and runner containers share one pod network namespace, so only the worker should
+bind `:9980`. The runner still inherits tracing and other shared global settings,
+but its config uses Jsonnet hidden-field override syntax to strip diagnostics:
+
+```jsonnet
+global: common.global {
+  diagnosticsHttpServer:: null,
+}
+```
+
+When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics
+`VMPodScrape` resources for Buildbarn pods and stamps samples with
+`hermetiq_project_id`.
+
+When `vmRules.enabled` is true, the chart renders Buildbarn recording rules as
+VictoriaMetrics `VMRule` resources. The VMRule namespace defaults to the chart
+namespace; set `vmRules.namespaceOverride` if your VictoriaMetrics operator only
+watches a dedicated observability namespace. Use `vmRules.labels` when your
+`VMAgent` selects rules by label.
+
+Disable the VictoriaMetrics resources on clusters without the VictoriaMetrics
+operator CRDs installed:
+
+```yaml
+vmPodScrapes:
+  enabled: false
+vmRules:
+  enabled: false
+```
+
+## Remote Asset API
+
+The Remote Asset API lets Bazel ask Buildbarn to fetch external assets, such as
+HTTP URLs, and store the resulting blob in CAS. This avoids every client or
+worker fetching the same external asset independently.
+
+Enable it with:
+
+```yaml
+remoteAsset:
+  enabled: true
+  fetcher:
+    http:
+      enabled: true
+```
+
+The chart renders:
+
+- `asset.jsonnet` in `buildbarn-config`.
+- `remote-asset` Deployment.
+- `remote-asset` Service.
+- `remote-asset-grpc` Service.
+- A Contour `HTTPProxy`, Gateway `GRPCRoute`, or nginx-style `Ingress` when the matching route value is enabled.
+- `remote-asset-vmpodscrape` when `vmPodScrapes.enabled` is true.
+
+Remote asset health probes are enabled by default when the workload is enabled,
+using the shared Buildbarn diagnostics server on `:9980`:
+
+```yaml
+remoteAsset:
+  probes:
+    enabled: true
+```
+
+The default `asset.jsonnet` uses the same sharded CAS and Action Cache helpers
+as the frontend. It allows Fetch requests and disables Push by default through:
+
+```yaml
+remoteAsset:
+  allowUpdatesForInstances: []
+```
+
+FetchBlob URI tracing is enabled by default:
+
+```yaml
+remoteAsset:
+  tracingAttributes:
+    fetchBlobUris:
+      enabled: true
+```
+
+For Contour or Ingress, expose it with:
+
+```yaml
+remoteAsset:
+  enabled: true
+ingress:
+  remoteAssetGrpc:
+    enabled: true
+```
+
+For Gateway API, expose it with:
+
+```yaml
+remoteAsset:
+  enabled: true
+gateway:
+  grpcRoutes:
+    remoteAsset:
+      enabled: true
+```
+
+## bb-portal
+
+`portal.enabled` deploys the [bb-portal](https://github.com/buildbarn/bb-portal)
+build-event dashboard as a single `bb-portal` Deployment. One container serves
+everything:
+
+- the web UI and its HTTP/gRPC-Web APIs on `portal.<domainBase>` (`:8081`),
+- the Build Event Stream gRPC ingest endpoint on `bes.<domainBase>` (`:8082`,
+  h2c), persisting invocations to PostgreSQL,
+- diagnostics and Prometheus metrics on `:9980`.
+
+The UI is embedded in the Go binary
+(`frontendServiceConfiguration.frontendSource.embedded`), so there is no
+separate Next.js workload and nothing to proxy to.
+
+> **bb-portal is unauthenticated.** Both routes are served with
+> `authenticationPolicy: { allow: {} }` and an `allow` instance-name authorizer,
+> so anyone who can reach `portal.<domainBase>` can read every build's events,
+> and anyone who can reach `bes.<domainBase>` can publish their own. The chart
+> does not front the portal with oauth2-proxy the way `browser.oauth2Proxy`
+> fronts Buildbarn Browser. Before enabling it, put it behind an external auth
+> layer, restrict the routes to an internal-only Gateway or Ingress, or limit
+> reachability with a NetworkPolicy. Also consider
+> `portal.bes.enableGraphqlPlayground: false`.
+
+```yaml
+portal:
+  enabled: true
+  db:
+    existingSecret: bbportal-db-env
+  frontend:
+    companyName: Hermetiq
+```
+
+The database Secret must be pre-created with keys `DB_USER`, `DB_PASSWORD`,
+`DB_HOSTNAME`, `DB_PORT`, and `DB_NAME`; the pod composes
+`DB_CONNECTION_STRING` from them at start. The chart never renders database
+credentials. `portal.db.connectionPool` bounds the pool — keep
+`maxOpenConnections` within what your server allows across all replicas.
+
+`portal.bes.buildKey` names the build tag that groups invocations into builds,
+but build tags only exist if `portal.bes.invocationMetadataExtractor` produces
+them. That value is a raw
+`buildbarn.configuration.jmespath.Expression` evaluated against
+`{"env": <Bazel's environment>, "files": {...}}`, and what it returns is what
+populates the Builds page, the per-user views, and the source-control tab:
+
+```yaml
+portal:
+  bes:
+    invocationMetadataExtractor:
+      expression: |
+        {
+          "username": env.BUILDKITE_BUILD_CREATOR,
+          "buildTags": {"build_id": env.BUILDKITE_BUILD_ID},
+          "sourceControls": [{
+            "repo": env.BUILDKITE_REPO,
+            "ref": env.BUILDKITE_BRANCH,
+            "commit": env.BUILDKITE_COMMIT
+          }]
+        }
+```
+
+With no extractor configured (the default), invocations are still recorded but
+never group into builds. `expression` also accepts `files` and `testVectors` —
+failing test vectors abort startup, so they are worth adding.
+
+`portal.frontend` holds UI settings only. `featureFlags` toggles pages
+(`home.fileUpload`, `home.instructions`, the five `bes.page*` pages, `browser`,
+`scheduler`); each one only hides UI, so do not treat them as access control.
+Turn `browser` off if you send people to Buildbarn Browser instead.
+`footerContent`, `additionalBuildColumns`, and
+`additionalBuildInvocationColumns` pass through to the frontend config as-is.
+
+Routes render per provider (Contour `HTTPProxy`, Gateway `HTTPRoute` +
+`GRPCRoute`, or nginx `Ingress` pairs), all backed by the single `bb-portal`
+Service, and are individually gated by `ingress.portal` / `ingress.besGrpc` /
+`gateway.httpRoutes.portal` / `gateway.grpcRoutes.bes`. The Certificate gains
+the `portal.` and `bes.` SANs in contour/ingress modes, and a `VMPodScrape`
+covers the `:9980` diagnostics port.
+
+Point Bazel at it with:
+
+```
+build --bes_backend=grpcs://bes.<domainBase>
+build --bes_results_url=https://portal.<domainBase>/bazel-invocations/
+```
+
+The portal's blob browsing reads the storage shards directly (top-level
+`contentAddressableStorage` / `actionCache`, plus `initialSizeClassCache` and
+`fileSystemAccessCache` when those stores are enabled) rather than going through
+`frontend-grpc`, so portal traffic never passes the optional grpc-cache-proxy
+sidecar and cannot pollute cache-event analytics.
+`configOverrides."portal.jsonnet"` replaces the generated config wholesale if
+you need settings the values do not expose.
 
 ## Worker And Runner
 
@@ -1690,68 +1593,6 @@ resources. Legacy chart-managed workers use `workerUbuntu2204.nodeSelector` and
 `workerUbuntu2204.tolerations`, because worker scheduling usually targets larger
 or local-SSD nodes. Override these for your cloud provider and node pool.
 
-## Jsonnet Config Model
-
-Buildbarn itself is configured through Jsonnet. The chart renders two ConfigMaps:
-
-- `buildbarn-config` from the chart's `files/config/` directory.
-- `buildbarn-worker-config` from the chart's `files/worker-config/` directory.
-
-`buildbarn-worker-config` also includes the top-level `common.libsonnet`, so
-worker and runner configs use the same sharded storage, message size, tracing,
-and diagnostics defaults as the rest of the chart.
-
-Some Jsonnet files are Helm-templated before landing in the ConfigMap. For
-example:
-
-- `common.libsonnet` renders storage shard addresses and tracing settings.
-- `frontend.jsonnet` renders JWKS auth, CAS/Action Cache/Execute authorizers, read cache settings, and trace attributes.
-- `storage.jsonnet` renders persistence sizing.
-- `worker-common.libsonnet` renders worker concurrency, caches, platform properties, completed action logging, and runner options.
-- `asset.jsonnet` renders Remote Asset API port and fetch/push behavior.
-
-## Per-File Jsonnet Overrides
-
-Use `configOverrides` or `workerConfigOverrides` when a value is too specific or
-too deep for the chart values model:
-
-```bash
-helm upgrade --install --namespace hermetiq buildbarn \
-  oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.0 \
-  --values buildbarn-values.yaml \
-  --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
-  --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
-```
-
-Keys must match a filename in `files/config/` or `files/worker-config/`.
-Unknown keys fail `helm template` with the valid filenames.
-
-Overrides are verbatim. Helm templating is not applied to override contents, so
-if you override a templated file you own all values that the chart would normally
-inject into that file.
-
-Override-able files:
-
-| Map | Filename |
-| --- | --- |
-| `configOverrides` | `asset.jsonnet` |
-| `configOverrides` | `browser.jsonnet` |
-| `configOverrides` | `common.libsonnet` |
-| `configOverrides` | `frontend.jsonnet` |
-| `configOverrides` | `scheduler.jsonnet` |
-| `configOverrides` | `portal.jsonnet` |
-| `configOverrides` | `storage.jsonnet` |
-| `workerConfigOverrides` | `runner-testcontainers-sysbox.jsonnet` |
-| `workerConfigOverrides` | `runner-testcontainers.jsonnet` |
-| `workerConfigOverrides` | `runner-ubuntu22-04.jsonnet` |
-| `workerConfigOverrides` | `worker-common.libsonnet` |
-| `workerConfigOverrides` | `worker-testcontainers-sysbox.jsonnet` |
-| `workerConfigOverrides` | `worker-testcontainers.jsonnet` |
-| `workerConfigOverrides` | `worker-ubuntu22-04.jsonnet` |
-
-`configOverrides.common.libsonnet` propagates to both ConfigMaps.
-
 ## Verification
 
 Render and inspect the chart:
@@ -1853,3 +1694,182 @@ grpcurl -H "authorization: Bearer $JWT" -d @ \
 Expect `true` for `execEnabled` and `{"updateEnabled": true}` for the Action
 Cache. Use the Hermetiq project ID as the instance name so the grpc-cache-proxy
 sidecar, when enabled, attributes the lookups to that project.
+
+## Hermetiq grpc-cache-proxy sidecar
+
+> **Experimental.** Treat the sidecar as an advanced option. Install Hermetiq
+> and Buildbarn first, complete both charts' verification steps, and confirm
+> that builds run successfully against the remote cache before enabling it.
+> Enabling it moves the `frontend-grpc` Service's target port to the sidecar,
+> so treat it as a separate, deliberately verified change.
+
+`frontend.grpcCacheProxy` adds a Hermetiq sidecar that observes frontend gRPC
+traffic and publishes cache hit/miss events to NATS for Hermetiq analytics:
+
+```yaml
+frontend:
+  grpcCacheProxy:
+    enabled: true
+    natsUrl: nats://nats.nats-system.svc:4222
+    cacheEvents:
+      subjectPrefix: prod_cache
+      numShards: 1
+```
+
+When enabled, the `frontend-grpc` Service keeps port `8980` but its
+`targetPort` switches to the sidecar (`frontend.grpcCacheProxy.port`, default
+`50081`), so all routing providers pass external traffic through the proxy
+with no route changes; the sidecar forwards to the frontend container on
+`127.0.0.1:8980`. `stytch.existingSecret` (default `stytch-secret`) is exposed
+via `envFrom` for token validation — only when `enforceAuth` is true, since the
+proxy reads the `STYTCH_*` vars only then.
+
+The sidecar's exporter is always configured, so the chart always sets
+`OTEL_EXPORTER_OTLP_ENDPOINT` (otherwise the OTEL SDK would dial its default of
+`localhost:4317`). It resolves in this order:
+
+1. `frontend.grpcCacheProxy.otel.endpoint`, used verbatim if set.
+2. `tracing.enabled` and `tracing.nodeLocal.enabled` — the node-local agent at
+   `$(K8S_LOCAL_NODE_IP):<tracing.nodeLocal.port>`.
+3. `tracing.enabled` and `tracing.endpoint` — that endpoint.
+4. Otherwise `http://<hosts.otel>:4317`. `hosts.otel` is required here.
+
+Cases 2 and 3 use `https` when `tracing.tls.enabled` is set, `http` otherwise.
+Case 4 is always plaintext, and `hosts.otel` defaults to a Hermetiq-operated
+host — point it at your own in-cluster collector for on-prem installs, or set
+`frontend.grpcCacheProxy.otel.endpoint` explicitly. Note the sidecar mounts no
+client certificates, so `tracing.tls.clientCertificate` (mTLS) does not reach
+it; use `otel.endpoint` with a collector that does not require mTLS.
+
+`cacheEvents.numShards` **must** equal the bep-nats stream partition count on the
+Hermetiq side. Events published to a shard subject nothing consumes are silently
+discarded.
+
+`maxMessageSizeBytes` (default 64Mi) applies to both the sidecar's server and its
+connection to the frontend, and is floored at `config.maximumMessageSizeBytes` so
+the sidecar can never be a smaller bottleneck than the frontend behind it.
+
+Because the Service `targetPort` moves to the sidecar, gRPC health checks on that
+port (`frontend.grpcCacheProxy.probes`, native Kubernetes gRPC probes) report the
+*proxy's* health, not the frontend's. The frontend container keeps its own HTTP
+probes on `:9980`.
+
+`enforceAuth: false` makes the sidecar a pure forwarder — it is **not** an
+authorization boundary in that mode, and Buildbarn's own authorizers remain the
+only thing gating access.
+
+For trusted in-cluster clients that cannot authenticate to the proxy, keep
+`enforceAuth: true` on the externally routed `frontend-grpc` Service and enable
+the separate direct Service instead:
+
+```yaml
+frontend:
+  internalService:
+    enabled: true
+    name: frontend-internal
+```
+
+This creates the ClusterIP endpoint
+`frontend-internal.<namespace>.svc.cluster.local:8980`. It always targets the
+Buildbarn frontend container on port `8980`, while `frontend-grpc` continues to
+target the proxy sidecar. The internal Service bypasses proxy authentication and
+cache-event capture, so never attach an Ingress, Gateway route, or other external
+load balancer to it. Use a NetworkPolicy if only selected namespaces should be
+able to reach the direct frontend port.
+
+Leave `natsUrl` empty to switch cache-event capture off entirely and run the
+sidecar as a plain pass-through proxy. Only unauthenticated NATS endpoints are
+supported: there are no values for NATS credentials, nkeys, or TLS.
+
+Tuning beyond the modelled values goes through `frontend.grpcCacheProxy.env`, e.g.
+`CACHE_EVENT_BATCH_SIZE`, `CACHE_EVENT_FLUSH_INTERVAL`, `SHUTDOWN_DRAIN_DELAY`,
+`SHUTDOWN_TIMEOUT`.
+
+### How lookups are classified
+
+The proxy never inspects stored data. It classifies each `GetActionResult`
+purely by the gRPC status the frontend returns:
+
+| Status from the frontend | Recorded as |
+| --- | --- |
+| `OK` | cache hit |
+| `NotFound` | cache miss |
+| anything else | no event; the lookup is skipped silently |
+
+Any frontend configuration that turns a cache lookup into some other error
+makes those lookups vanish from analytics rather than count as misses. The
+chart's generated Jsonnet already satisfies the requirements below; they matter
+when you replace `frontend.jsonnet` through `configOverrides`:
+
+- **Keep the frontend listening on `:8980`.** The sidecar forwards to
+  `127.0.0.1:8980`. Because the Service `targetPort` points at the sidecar,
+  changing `grpcServers[].listenAddresses` takes the whole frontend endpoint
+  down.
+- **Keep Action Cache reads open.** `actionCache.getAuthorizer` must allow the
+  traffic, which is why
+  [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+  only tightens the put and execute authorizers. A denied read returns
+  `PermissionDenied` and produces no event, and the same applies to a request
+  rejected as `Unauthenticated` by `grpcServers[].authenticationPolicy`.
+- **Keep `completenessChecking` on the Action Cache.** It returns `NotFound`
+  when an `ActionResult` exists but its output blobs are gone from the CAS,
+  which is what Bazel experiences. Without it those lookups are recorded as
+  hits while Bazel treats them as misses, inflating the hit rate exactly when
+  CAS eviction pressure is worst.
+- **Short Action Cache deadlines hide lookups.** A `deadlineEnforcing` wrapper
+  returns `DeadlineExceeded` when storage is slow, and those lookups produce no
+  event. A dip in recorded lookups during a storage slowdown reflects the
+  timeout, not lost traffic.
+- **`actionResultExpiring` is safe.** Expired entries return `NotFound` and are
+  recorded as misses, matching what Bazel sees.
+
+### Project attribution
+
+Attribution to a Hermetiq project comes from the request, not from Buildbarn.
+With `enforceAuth: false` the proxy reads the `x-hermetiq-project-id` header if
+present and otherwise falls back to Bazel's `--remote_instance_name`. Set
+`--remote_instance_name` to the Hermetiq project ID unless you send the header.
+Buildbarn accepts any instance name here because the chart's blobstore does not
+demultiplex on it, but with remote execution the name must still satisfy the
+scheduler's `instanceNamePrefix`, which is empty by default and matches
+everything. Lookups whose project cannot be resolved are counted as
+`unresolved` in the sidecar's log summary.
+
+The scheduler stanza that forwards
+`build.bazel.remote.execution.v2.requestmetadata-bin` to the scheduler belongs
+to remote execution attribution through the Completed Action Logger, not to the
+cache proxy. `GetActionResult` never reaches the scheduler, and the sidecar
+reads Bazel's request metadata directly off the incoming request.
+
+### Hermetiq side
+
+Enabling the sidecar collects the events; the Hermetiq chart consumes them. Set
+`app.cacheEventsEnabled: true` there, keep the sidecar's `cacheEvents.numShards`
+equal to the Hermetiq chart's `app.streamPartitionCount`, and enable
+**Action Cache Hit Tracker** in the project's settings.
+
+### Verify the sidecar
+
+```bash
+kubectl -n hermetiq get pods -l app=frontend
+kubectl -n hermetiq logs -l app=frontend -c grpc-cache-proxy --tail=20
+```
+
+Each frontend pod should report `2/2` ready. The proxy logs a one-line
+publisher summary each minute rather than per request. `published` climbing
+after a build means events are reaching NATS. A high `unresolved` count means
+no Hermetiq project could be attributed, which normally means
+`--remote_instance_name` does not match a project ID. `dropped` counts events
+discarded because NATS was unreachable or slow; cache traffic itself is never
+blocked by the event path, so a nonzero `dropped` costs analytics, never
+builds. Then run a build and confirm the events appear in the Hermetiq
+dashboard's cache analytics or through the Hermetiq MCP server.
+
+## License
+
+The chart source in this package is licensed under the Apache License 2.0;
+see the packaged `LICENSE` file. The Buildbarn images it deploys from
+`ghcr.io/buildbarn` are Apache-2.0 open source maintained by the Buildbarn
+project. The optional Hermetiq grpc-cache-proxy sidecar image is proprietary
+software distributed under the
+[Hermetiq Software License Agreement](https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md).
