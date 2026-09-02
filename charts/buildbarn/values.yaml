@@ -168,7 +168,7 @@ images:
   # Released public image; no imagePullSecret is required.
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
-    tag: v0.6.0
+    tag: v0.9.0
     digest: ""
     pullPolicy: IfNotPresent
   # bb-portal build-event dashboard (portal.enabled). One image: the Go binary

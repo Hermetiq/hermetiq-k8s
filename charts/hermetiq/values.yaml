@@ -19,31 +19,25 @@ standardLabels:
   appVersion: false
 
 images:
-  # RELEASE GATE for chart >= 0.6.0 (licensing): every bepNats tag below MUST
-  # point at a license-ANCHORED build (a cloud-native release cut after the
-  # keygen anchors landed — verify with `docker run --rm <image> /app/bep-nats
-  # license-anchors`), and the dashboard tag at a web-ui build containing the
-  # license banner. v0.5.5 predates both: shipping chart 0.6.0 with these pins
-  # renders all the license env/RBAC/NOTES against binaries that ignore them.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.6.0"
+    apiTag: "v0.9.0"
     apiDigest: ""
-    pubTag: "v0.6.0"
+    pubTag: "v0.9.0"
     pubDigest: ""
-    subTag: "v0.6.0"
+    subTag: "v0.9.0"
     subDigest: ""
-    bootstrapTag: "v0.6.0"
+    bootstrapTag: "v0.9.0"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.6.0"
+    tag: "v0.9.0"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.6.0"
+    tag: "v0.9.0"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
