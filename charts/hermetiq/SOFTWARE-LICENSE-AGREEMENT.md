@@ -2,7 +2,7 @@
 
 This Agreement is made by and between Hermetiq and the person or entity that has downloaded the Hermetiq Solution and/or executed an Order Form referencing this Agreement or Hermetiq’s standard license agreement terms.
 
-**PLEASE READ THIS LICENSE AGREEMENT CAREFULLY.** This Hermetiq Software License Agreement (this “License Agreement”) governs the license and use of the Solution (defined below) and is incorporated by reference into, and forms part of, each Order Form entered into between the customer identified in that Order Form (“Customer,” “You,” or “Your”) and Hermetiq, Inc. (“Hermetiq,” “We,” or “Us”). BY (A) CLICKING “I AGREE” (OR A SIMILARLY LABELED BUTTON) PRESENTED ALONGSIDE THIS LICENSE AGREEMENT, (B) DOWNLOADING, INSTALLING, OR USING THE SOLUTION (including for trial license purposes as referenced in section o.1), OR (C) EXECUTING OR ACCEPTING AN ORDER FORM THAT REFERENCES THIS LICENSE AGREEMENT, WHICHEVER OCCURS FIRST, YOU AGREE TO BE BOUND BY THIS LICENSE AGREEMENT. IF YOU DO NOT AGREE TO THIS LICENSE AGREEMENT, DO NOT DOWNLOAD, INSTALL, OR USE THE SOLUTION.
+**PLEASE READ THIS LICENSE AGREEMENT CAREFULLY.** This Hermetiq Software License Agreement (this “License Agreement”) governs the license and use of the Solution (defined below) and is incorporated by reference into, and forms part of, each Order Form entered into between the customer identified in that Order Form (“Customer,” “You,” or “Your”) and Hermetiq, Inc. (“Hermetiq,” “We,” or “Us”). BY (A) CLICKING “I AGREE” (OR A SIMILARLY LABELED BUTTON) PRESENTED ALONGSIDE THIS LICENSE AGREEMENT, (B) DOWNLOADING, INSTALLING, OR USING THE SOLUTION (including for trial license purposes as referenced in section O.1), OR (C) EXECUTING OR ACCEPTING AN ORDER FORM THAT REFERENCES THIS LICENSE AGREEMENT, WHICHEVER OCCURS FIRST, YOU AGREE TO BE BOUND BY THIS LICENSE AGREEMENT. IF YOU DO NOT AGREE TO THIS LICENSE AGREEMENT, DO NOT DOWNLOAD, INSTALL, OR USE THE SOLUTION.
 
 If You are entering into this License Agreement on behalf of a company or other legal entity, You represent that You have the authority to bind that entity, in which case “Customer,” “You,” and “Your” refer to that entity. A User must be at least 18 years of age.
 
@@ -205,15 +205,13 @@ Customer consents to receive communications from Hermetiq electronically via the
 
 Communications through Hermetiq’s support or messaging channels (including email) do not constitute legal notice to Hermetiq. Legal notice to either party must be in writing and may be delivered by email (to Hermetiq at legalnotices@hermetiq.com), with a concurrent copy by certified mail or recognized overnight courier to:
 
+```
 Hermetiq, Inc.
-
 Attn: Legal Notices
-
 915 W. Foothill Blvd
-
 Suite C - Unit #751
-
 Claremont, CA 91711 USA
+```
 
 Notice to Customer may be given to the email and mailing addresses provided in the applicable Order Form. Notice is deemed given upon (a) receipt of the email at the address provided, or (b) the date of delivery to the mailing address shown on the courier or postal receipt, whichever occurs first.
 
