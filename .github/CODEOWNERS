@@ -1,0 +1,4 @@
+# Code owners are requested for review automatically and, because main requires
+# a code-owner review, one of them must approve before a pull request can merge.
+# Owners must have write access to the repository to count.
+*   @thelabdude @acesar
