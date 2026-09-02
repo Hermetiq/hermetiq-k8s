@@ -1,0 +1,72 @@
+name: Chart feature request
+description: Propose an improvement to Hermetiq's Kubernetes deployment artifacts
+title: "[feature] "
+labels:
+  - enhancement
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the operational problem first. This helps us evaluate the smallest safe change and its upgrade impact.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - hermetiq chart
+        - buildbarn chart
+        - bb-worker-operator chart
+        - custom values or examples
+        - documentation or release tooling
+        - multiple components
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the use case, constraint, or operational pain. Include who is affected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the values, rendered resources, workflow, or documentation you would like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include current workarounds and why they are insufficient.
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and operational impact
+      description: Note any effect on upgrades, defaults, CRDs, RBAC, persistence, networking, security, or supported Kubernetes providers.
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List observable outcomes that would make this request complete.
+      placeholder: |
+        - [ ] `helm template` renders ...
+        - [ ] Existing installations continue to ...
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and did not find an equivalent request.
+          required: true
+        - label: This request does not contain secrets or customer-identifying data.
+          required: true
