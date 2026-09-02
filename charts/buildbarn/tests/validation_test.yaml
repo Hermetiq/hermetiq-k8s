@@ -1,0 +1,246 @@
+suite: buildbarn validation
+templates:
+  - templates/validate.yaml
+tests:
+  - it: rejects enabled ISCC filesystem blocks that fill the PVC
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.blocksSizeGi: 8
+    asserts:
+      - failedTemplate:
+          errorPattern: "storage.persistence.iscc.blocksSizeGi .* must be smaller than storage.persistence.iscc.size"
+
+  - it: rejects enabled FSAC filesystem blocks that fill the PVC
+    set:
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.blocksSizeGi: 8
+    asserts:
+      - failedTemplate:
+          errorPattern: "storage.persistence.fsac.blocksSizeGi .* must be smaller than storage.persistence.fsac.size"
+
+  - it: rejects block metadata PVCs that cannot hold the key-location map
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+      storage.persistence.cas.blockDevice.metadata.size: 500Mi
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 800
+    asserts:
+      - failedTemplate:
+          errorPattern: "storage.persistence.cas.blockDevice.metadata.size .* must be larger than storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi"
+
+  - it: allows grpc-cache-proxy with no NATS URL (pass-through, events disabled)
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: ""
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects grpc-cache-proxy without a cache-event subject prefix
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.grpcCacheProxy.cacheEvents.subjectPrefix is required when frontend.grpcCacheProxy.natsUrl is set"
+
+  - it: rejects grpc-cache-proxy enforceAuth without Stytch settings
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "stytch.apiHost and frontend.grpcCacheProxy.stytch.existingSecret are required"
+
+  - it: rejects combining oauth2Proxy with the browser target-port override
+    set:
+      browser.oauth2Proxy.enabled: true
+      browser.service.targetPortOverride: 9191
+    asserts:
+      - failedTemplate:
+          errorPattern: "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled"
+
+  - it: rejects block geometry above bb-storage's 100-block limit
+    set:
+      storage.persistence.cas.currentBlocks: 200
+    asserts:
+      - failedTemplate:
+          errorPattern: "at most 100 blocks per store"
+
+  - it: rejects emptyDir mode without a sizeLimit
+    set:
+      storage.persistence.mode: emptyDir
+    asserts:
+      - failedTemplate:
+          errorPattern: "emptyDir.sizeLimit is required when storage.persistence.mode=emptyDir"
+
+  # sizeLimit has to leave room for the blocks file (cas blocksSizeGi defaults
+  # to 950, ac to 10), otherwise the store overruns the volume and the pod is
+  # evicted — which the blocksSizeGi < sizeLimit check below now rejects.
+  - it: accepts emptyDir mode when every active store sets a sizeLimit
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: rejects a pvc-mode block device without a size
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.size: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "blockDevice.size is required when backend=blockDevice and mode=pvc"
+
+  - it: accepts a hostPath-mode block device without a size
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: ""
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: accepts AC raw block storage with file-backed key-location map defaults
+    set:
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.storageClassName: bb-block
+      storage.persistence.ac.blockDevice.keyLocationMap: file
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # blocksSizeGi must be compared against whatever actually bounds the volume.
+  # `size` only sizes the PVC in mode=pvc, so comparing against it in
+  # emptyDir/hostPath mode rejected valid configs and missed real overruns.
+  - it: compares blocksSizeGi against emptyDir.sizeLimit in emptyDir mode
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 400Gi
+      storage.persistence.cas.blocksSizeGi: 500
+      storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.ac.blocksSizeGi: 10
+    asserts:
+      - failedTemplate:
+          errorMessage: storage.persistence.cas.blocksSizeGi (500) must be smaller than storage.persistence.cas.emptyDir.sizeLimit (400Gi) to leave headroom for metadata
+
+  - it: accepts blocksSizeGi under emptyDir.sizeLimit even when size is smaller
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 400Gi
+      storage.persistence.cas.blocksSizeGi: 300
+      storage.persistence.cas.size: 10Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.ac.blocksSizeGi: 10
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not compare blocksSizeGi against the inert size in hostPath mode
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.blocksSizeGi: 5000
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still rejects blocksSizeGi at or above size in pvc mode
+    set:
+      storage.persistence.mode: pvc
+      storage.persistence.cas.blocksSizeGi: 1000
+      storage.persistence.cas.size: 1000Gi
+    asserts:
+      - failedTemplate:
+          errorMessage: storage.persistence.cas.blocksSizeGi (1000) must be smaller than storage.persistence.cas.size (1000Gi) to leave headroom for metadata
+
+  - it: rejects a zero actionResultExpiring jitter (bb-storage divides by it)
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+      config.actionCache.actionResultExpiring.maximumValidityJitter: 0s
+    asserts:
+      - failedTemplate:
+          errorPattern: "maximumValidityJitter must be a NONZERO duration"
+
+  - it: rejects an absent actionResultExpiring jitter
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+      config.actionCache.actionResultExpiring.maximumValidityJitter: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "maximumValidityJitter must be a NONZERO duration"
+
+  - it: accepts actionResultExpiring with a nonzero jitter
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: key-location map sizing is not checked unless opted in
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 1000
+      storage.persistence.cas.blockDevice.size: 340Gi
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a CAS key-location map that cannot index its blocks device
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 20000000
+      storage.persistence.cas.blockDevice.size: 340Gi
+    asserts:
+      - failedTemplate:
+          # Reported as a plain integer, not float64 "2e+07".
+          errorPattern: "storage.persistence.cas: key-location map is too small .*keyLocationMapInMemoryEntries=20000000 indexes 20000000 objects.*that is 1.02x, below the required 2x"
+
+  - it: accepts a CAS key-location map sized at the required ratio
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 40000000
+      storage.persistence.cas.blockDevice.size: 340Gi
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips a disabled store when checking key-location map sizing
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.entries: 1000
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks an enabled store's key-location map sizing
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.keyLocationMap.entries: 1000
+    asserts:
+      - failedTemplate:
+          errorPattern: "storage.persistence.fsac: key-location map is too small"
+
+  - it: honors a custom averageObjectSizeBytes when sizing the map
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 20000000
+      storage.persistence.cas.blockDevice.size: 340Gi
+      # Larger average blobs => fewer indexable objects => 20M is now enough.
+      storage.keyLocationMapSizing.averageObjectSizeBytes.cas: 65536
+    asserts:
+      - notFailedTemplate: {}

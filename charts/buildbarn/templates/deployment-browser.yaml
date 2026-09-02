@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "browser") | nindent 4 }}
+spec:
+  replicas: {{ .Values.browser.replicas }}
+  selector:
+    matchLabels:
+      app: browser
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "browser") | nindent 8 }}
+        app: browser
+        kubernetes_service: browser
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "browser.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.browser) | nindent 6 }}
+      containers:
+        {{- if .Values.browser.oauth2Proxy.enabled }}
+        - name: oauth2-proxy
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.oauth2Proxy" "repository" .Values.images.oauth2Proxy.repository "tag" .Values.images.oauth2Proxy.tag "digest" .Values.images.oauth2Proxy.digest) }}
+          imagePullPolicy: {{ .Values.images.oauth2Proxy.pullPolicy }}
+          {{- if .Values.browser.oauth2Proxy.whitelistDomain }}
+          args:
+            - {{ printf "--whitelist-domain=%s" .Values.browser.oauth2Proxy.whitelistDomain | quote }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.browser.oauth2Proxy.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "buildbarn.oauth2ProxyConfigName" . }}
+            - secretRef:
+                name: {{ include "buildbarn.oauth2ProxySecretName" . }}
+          env:
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: {{ printf "%s/oauth2/callback" (include "buildbarn.browserUrl" .) | quote }}
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: "http://127.0.0.1:7984"
+            {{- if .Values.browser.oauth2Proxy.cookieDomains }}
+            - name: OAUTH2_PROXY_COOKIE_DOMAINS
+              value: {{ join "," .Values.browser.oauth2Proxy.cookieDomains | quote }}
+            {{- end }}
+          ports:
+            - name: proxy
+              containerPort: 8888
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 2000
+            capabilities:
+              drop:
+                - "ALL"
+        {{- end }}
+        - name: browser
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.browser" "repository" .Values.images.browser.repository "tag" .Values.images.browser.tag "digest" .Values.images.browser.digest) }}
+          imagePullPolicy: {{ .Values.images.browser.pullPolicy }}
+          args:
+            - /config/browser.jsonnet
+          {{- if .Values.tracing.enabled }}
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-browser") | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 7984
+              protocol: TCP
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+          {{- with .Values.browser.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7984
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 7984
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+        {{- with .Values.browser.extraContainers }}
+        {{- include "buildbarn.tplvalues.render" (dict "value" . "context" $) | nindent 8 }}
+        {{- end }}
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.browser) | nindent 6 }}
+      volumes:
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.configName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: browser.jsonnet
+                path: browser.jsonnet

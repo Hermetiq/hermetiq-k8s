@@ -1,0 +1,68 @@
+fullnameOverride: otel-collector
+mode: deployment
+replicaCount: 2
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  targetCPUUtilizationPercentage: 80
+image:
+  repository: otel/opentelemetry-collector-contrib
+resources:
+  limits:
+    cpu: "1"
+    memory: 1024Mi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+#nodeSelector:
+#  node-type: core8
+#tolerations:
+#  - effect: NoSchedule
+#    key: hermetiq/core8
+#    operator: Exists
+service:
+  enabled: true
+ingress:
+  enabled: false
+presets:
+  logsCollection:
+    enabled: false
+  kubernetesAttributes:
+    enabled: true
+  hostMetrics:
+    enabled: true
+  kubeletMetrics:
+    enabled: true
+  kubernetesEvents:
+    enabled: false
+config:
+  extensions:
+    zpages:
+      endpoint: 0.0.0.0:55679
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+          include_metadata: true
+  processors:
+    attributes/grpc_metadata:
+      actions:
+        - key: hermetiq_project_id
+          from_context: metadata.x-hermetiq-project-id
+          action: upsert
+  exporters:
+    otlphttp/victoriametrics:
+      metrics_endpoint: http://vminsert-vmks.hermetiq.svc:8480/insert/0/opentelemetry/v1/metrics
+      compression: gzip
+      encoding: proto
+      tls:
+        insecure: true
+  service:
+    pipelines:
+      logs: null
+      traces: null
+      metrics:
+        receivers: [otlp]
+        processors: [attributes/grpc_metadata, memory_limiter, batch]
+        exporters: [otlphttp/victoriametrics]

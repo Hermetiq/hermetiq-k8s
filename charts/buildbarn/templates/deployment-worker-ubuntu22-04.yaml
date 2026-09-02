@@ -1,0 +1,190 @@
+{{- if .Values.workerUbuntu2204.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-ubuntu22-04
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "worker") | nindent 4 }}
+    app: worker
+    hermetiq.com/worker-pool: ubuntu22-04
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.workerUbuntu2204.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: worker
+      instance: ubuntu22-04
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "worker") | nindent 8 }}
+        app: worker
+        instance: ubuntu22-04
+        kubernetes_service: worker-ubuntu22-04
+        hermetiq.com/worker-pool: ubuntu22-04
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/worker-config: {{ include "buildbarn.workerConfigChecksum" (dict "root" . "files" (list "common.libsonnet" "worker-common.libsonnet" "runner-ubuntu22-04.jsonnet" "worker-ubuntu22-04.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.workerUbuntu2204) | nindent 6 }}
+      containers:
+        - name: worker
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.worker" "repository" .Values.images.worker.repository "tag" .Values.images.worker.tag "digest" .Values.images.worker.digest) }}
+          imagePullPolicy: {{ .Values.images.worker.pullPolicy }}
+          args:
+            - /config/worker-ubuntu22-04.jsonnet
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-worker") | nindent 12 }}
+            {{- range $name, $value := .Values.workerUbuntu2204.worker.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+          resources:
+            {{- toYaml .Values.workerUbuntu2204.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.workerUbuntu2204.worker.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+              mountPropagation: Bidirectional
+            {{- if .Values.workerUbuntu2204.fuse.enabled }}
+            - mountPath: /dev/fuse
+              name: dev-fuse
+            {{- end }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+        - name: runner
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.runnerUbuntu2204" "image" .Values.images.runnerUbuntu2204.image) | quote }}
+          imagePullPolicy: {{ .Values.images.runnerUbuntu2204.pullPolicy }}
+          command:
+            - /bb/bb_runner
+            - /config/runner-ubuntu22-04.jsonnet
+          {{- if or .Values.tracing.enabled .Values.workerUbuntu2204.runner.env }}
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-runner") | nindent 12 }}
+            {{- range $name, $value := .Values.workerUbuntu2204.runner.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.workerUbuntu2204.runner.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.workerUbuntu2204.runner.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+              mountPropagation: HostToContainer
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            - mountPath: /bb
+              name: empty
+              readOnly: true
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+      dnsPolicy: ClusterFirst
+      initContainers:
+        - name: bb-runner-installer
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.runnerInstaller" "repository" .Values.images.runnerInstaller.repository "tag" .Values.images.runnerInstaller.tag "digest" .Values.images.runnerInstaller.digest) }}
+          imagePullPolicy: {{ .Values.images.runnerInstaller.pullPolicy }}
+          resources:
+            {{- toYaml .Values.workerUbuntu2204.initResources | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /bb/
+              name: empty
+        - name: volume-init
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.busybox" "image" .Values.images.busybox.image) | quote }}
+          imagePullPolicy: {{ .Values.images.busybox.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - mkdir -pm 0777 /worker/build && mkdir -pm 0700 /worker/cache && mkdir -pm 0777 /storage-worker-cas/persistent_state && chmod 0777 /worker
+          resources:
+            {{- toYaml .Values.workerUbuntu2204.initResources | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+      {{- with .Values.workerUbuntu2204.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.workerUbuntu2204.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: worker
+          emptyDir: {}
+        {{- if .Values.workerUbuntu2204.fuse.enabled }}
+        - name: dev-fuse
+          hostPath:
+            path: {{ .Values.workerUbuntu2204.fuse.hostPath.path | quote }}
+            type: {{ .Values.workerUbuntu2204.fuse.hostPath.type }}
+        {{- end }}
+        - name: empty
+          emptyDir: {}
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.workerConfigName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: worker-common.libsonnet
+                path: worker-common.libsonnet
+              - key: runner-ubuntu22-04.jsonnet
+                path: runner-ubuntu22-04.jsonnet
+              - key: worker-ubuntu22-04.jsonnet
+                path: worker-ubuntu22-04.jsonnet
+        - name: storage-worker-cas
+          hostPath:
+            path: {{ .Values.workerUbuntu2204.storageWorkerCas.hostPath.path | quote }}
+            type: {{ .Values.workerUbuntu2204.storageWorkerCas.hostPath.type }}
+{{- end }}

@@ -1,0 +1,1247 @@
+# Install this chart into the target namespace with `helm install -n <namespace>`.
+# External infrastructure is not installed by this chart.
+namespaceOverride: ""
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+imagePullSecrets: []
+
+commonLabels: {}
+# Additional labels applied to every chart-managed Pod. Built-in identity and
+# selector labels cannot be overridden. Changing these labels rolls workloads.
+podLabels: {}
+commonAnnotations: {}
+extraObjects: []
+
+standardLabels:
+  appVersion: false
+
+images:
+  bepNats:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
+    pullPolicy: IfNotPresent
+    apiTag: "v0.9.0"
+    apiDigest: ""
+    pubTag: "v0.9.0"
+    pubDigest: ""
+    subTag: "v0.9.0"
+    subDigest: ""
+    bootstrapTag: "v0.9.0"
+    bootstrapDigest: ""
+  authProxy:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
+    tag: "v0.9.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  dashboard:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
+    tag: "v0.9.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  oauth2Proxy:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: v7.15.1
+    digest: ""
+    pullPolicy: IfNotPresent
+
+bootstrap:
+  projectId: "0" # leave this as-is or update in buildbarn config too
+  projectName: build-analytics
+  # Defaults to the Helm release namespace. Override when Buildbarn is installed elsewhere.
+  projectNamespace: ""
+  # User-facing Buildbarn Browser URL for the managed namespace.
+  namespaceBrowserUrl: ""
+  # User-facing metrics/dashboard URL for the managed namespace.
+  namespaceDashboardUrl: ""
+  retentionDays: 30
+  premake: 30
+  partitionInterval: 6 hour
+  # Additional environment variables for the schema bootstrap Job.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for the schema bootstrap Job. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  activeDeadlineSeconds: 7200
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  # Only used when hook.enabled=false, where the Job is an ordinary release
+  # resource rather than a Helm hook. Each upgrade creates a revision-suffixed
+  # Job; this bounds how long finished ones linger.
+  ttlSecondsAfterFinished: 86400
+  hook:
+    enabled: true
+    # Keep successful migration Jobs visible for logs/audit. Helm deletes the
+    # previous hook Job before creating the next one on install/upgrade.
+    deletePolicy: before-hook-creation
+
+app:
+  # Identity provider for the api and publisher cores: "jwks" (on-prem, an
+  # external IdP) or "stytch" (Hermetiq SaaS only — needs Stytch credentials
+  # this chart does not render). Rendered as GRPC_AUTH_USER_PROVIDER on every
+  # core container that serves gRPC. The core refuses to start without it.
+  #
+  # There is no "off". Selecting "jwks" is what turns JWKS verification on.
+  # api.jwt.enabled / publisher.jwks.enabled select chart-managed JWKS settings;
+  # set one false only when its complete GRPC_AUTH_* set is supplied through
+  # api.env / publisher.env. Validation rejects either core unless it will
+  # receive exactly one JWKS source plus a non-empty issuer and audience. A
+  # core left with provider "jwks" and no JWKS source configured fails at
+  # startup with
+  #   provider "jwks" requires exactly one of GRPC_AUTH_JWKS_URL,
+  #   GRPC_AUTH_JWKS_FILE, or GRPC_AUTH_JWKS_INLINE
+  # and CrashLoopBackOffs.
+  grpcAuthUserProvider: jwks
+  environment: prod
+  # Emails that should receive the Hermetiq admin role. Rendered as the
+  # comma-delimited ADMIN_EMAIL_ALLOWLIST env var for the API and publisher workloads.
+  adminEmails: []
+  # How invocation rows are driven. "build_tool" (the chart default) creates
+  # invocations from BEP build-tool events and provisions NO BEP_LIFECYCLE
+  # streams. "lifecycle" is a legacy mode slated for removal — do not use it
+  # for chart deployments (see the chart README). Rendered into the shared
+  # env ConfigMap so publisher and subscriber always agree.
+  invocationStartEvent: "build_tool"
+  streamPartitionCount: 9
+  taskQueueName: ""
+  rawBepExportEnabled: false
+  rawBepExportBucket: ""
+  ghEnvDir: ""
+  mcpProtoIntelToolsEnabled: true
+  # Detailed cache-event analytics require the Hermetiq grpc-cache-proxy
+  # sidecar on the Buildbarn frontend. Off by default; enable it once the
+  # sidecar publishes cache events to this chart's NATS.
+  cacheEventsEnabled: false
+  # VictoriaLogs-backed MCP tools are hidden by default for on-prem installs
+  # that do not deploy VictoriaLogs. Set true when VL is available.
+  victoriaLogsEnabled: false
+  # OpenCost-backed cost report ticker is disabled by default for on-prem
+  # installs because OpenCost is optional external infrastructure. This also
+  # controls whether the dashboard exposes cost reporting and pricing fields.
+  costReportTickerEnabled: false
+  # OpenCost API base URL used when costReportTickerEnabled is true.
+  openCostUrl: ""
+  # Must exceed APP_SHUTDOWN_TIMEOUT (80s), which must exceed
+  # APP_ENDPOINT_DRAIN_DELAY (45s). The drain keeps a terminating pod serving
+  # until the ingress/load balancer stops routing to it; reprogramming takes
+  # tens of seconds on GCLB and Azure Application Gateway. Lowering this
+  # without also lowering those env vars SIGKILLs the pod mid-drain.
+  terminationGracePeriodSeconds: 90
+  otelInterval: 15s
+  buildIdMode: "BUILD_REQUEST_ID"
+  buildIdRegex: ""
+  # When true, collapse ssh/https/scp-like variants of the same git remote into a
+  # single canonical host/owner/repo key before persisting REPO build metadata or
+  # workspace_status. Improves per-repo analytics grouping when customers send
+  # mixed protocols (e.g. CI clones over SSH, developers over HTTPS).
+  normalizeRepoUrls: false
+
+license:
+  # REQUIRED. Contact email for this installation. Pods refuse to start
+  # without a syntactically valid value; it is also the contact a trial
+  # license is issued against.
+  contactEmail: ""
+  # The Hermetiq Software License Agreement, packaged with this chart as
+  # SOFTWARE-LICENSE-AGREEMENT.md. The Hermetiq container images this chart
+  # deploys are proprietary software licensed under that agreement.
+  agreement:
+    # REQUIRED. Set true to confirm acceptance; rendering fails until it is.
+    accepted: false
+    # Published copy of the agreement, referenced by the acceptance check and
+    # printed in the install notes.
+    url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
+  key:
+    # Inline license key (the chart creates the hermetiq-license Secret), or:
+    value: ""
+    # Name of a customer-managed Secret containing the key. Takes precedence
+    # over value.
+    existingSecret: ""
+    # Key inside the Secret holding the license key.
+    existingSecretKey: license.key
+  trial:
+    # Auto-provision a 30-day trial via the Hermetiq SaaS when no license key
+    # is configured. Must be false when airGapped is true.
+    enabled: true
+  # Offline license-file mode: the key Secret must also carry a checked-out
+  # license file (licenseFileSecretKey). Requires a key Secret and forbids
+  # trial.enabled. No network calls are made in this mode.
+  airGapped: false
+  # Key inside the Secret holding the air-gap license file.
+  licenseFileSecretKey: license.lic
+  # Support escape hatch overriding the derived cluster fingerprint;
+  # 64-character lowercase sha256 hex. Leave empty in normal operation.
+  fingerprintOverride: ""
+  # Hermetiq SaaS endpoint used for TRIAL ISSUANCE only (first boot with no
+  # key). Periodic license VALIDATION goes directly to https://api.keygen.sh
+  # — allow egress to both hosts.
+  saasUrl: https://api.cloud-usc1.hermetiq.io
+
+postgres:
+  host: ""
+  port: "5432"
+  database: ""
+  user: ""
+  sslMode: require
+  password:
+    existingSecret: "postgres-db"
+    existingSecretKey: password
+    value: ""
+  readReplica:
+    host: ""
+    port: ""
+
+redis:
+  host: ""
+  password:
+    existingSecret: ""
+    existingSecretKey: password
+    value: ""
+
+nats:
+  url: ""
+  # NATS stream/consumer config is loaded from files/config/nats_streams.json
+  # and rendered into the bep-nats-stream-config ConfigMap by default. Set
+  # streamConfig.existingConfigMap to mount an externally managed JSON file.
+  # The subscriber's worker-pipeline fetch-ahead is tunable per consumer in
+  # that file via workerQueueCapacity, pipelineMaxQueuedMessages, and
+  # pipelineMaxQueuedBytes (in-app defaults apply when omitted); keep
+  # maxAckPending at or above pipelineMaxQueuedMessages (default 2x batchSize)
+  # or the server caps fetch-ahead before the pipeline budget does. The
+  # pipeline can be disabled per deployment via subscriber.env with
+  # NATS_BEP_WORKER_PIPELINE_ENABLED=false.
+  #
+  # Subscribers also coalesce several workers' events into denser StoreEvents
+  # calls, tuned per consumer in that file via storeBatchMaxEvents,
+  # storeBatchMaxWait, and storeBatchParallelism. Coalescing can be disabled
+  # per deployment via subscriber.env with
+  # NATS_BEP_STORE_COALESCER_ENABLED=false, which restores one database call
+  # per worker micro-batch.
+  #
+  # The packaged file describes a fresh install: BEP_BUILD_TOOL plus the DLQ,
+  # and no lifecycle stream, because app.invocationStartEvent defaults to
+  # build_tool.
+  #
+  # The packaged file sets replicas: 3 on the build-tool stream — the one
+  # stream the whole ingest path depends on. JetStream needs a clustered NATS
+  # (3+ servers) to place a replicated stream; on a single-server NATS that
+  # value MUST be 1 or stream creation fails at subscriber startup and no
+  # events are ingested. To change it, copy files/config/nats_streams.json,
+  # edit the value, and point streamConfig.existingConfigMap at your own
+  # ConfigMap.
+  streamConfig:
+    existingConfigMap: ""
+    configMapKey: nats_streams.json
+    # Helm cannot hash external ConfigMap data. When using an existing
+    # ConfigMap, set this to a hash or version of the external data to trigger
+    # publisher/subscriber rollouts after the ConfigMap changes.
+    rolloutChecksum: ""
+
+victoriaMetrics:
+  dashboardUrl: ""
+  # Grafana datasource UIDs substituted into the packaged dashboard JSON.
+  # Override these when Grafana provisions the datasources under different UIDs.
+  metricsDatasourceUid: VictoriaMetrics
+  logsDatasourceUid: VictoriaLogs
+  # Enables the MCP server's metrics-backed tools (GetSchedulerQueueHealth,
+  # GetWorkerFleetHealth, GetInfraHealthSummary, GetStorageHealth, GetGrpcHealth).
+  # The metrics client is shared by VictoriaMetrics and VictoriaLogs, so when this
+  # is false the VictoriaLogs-backed GetBuildbarnEvents and GetBuildbarnPodLogs
+  # tools are disabled too — none of those 7 tools are registered on the MCP server.
+  # When true, baseUrl must point at a VictoriaMetrics vmselect Prometheus
+  # read endpoint.
+  metricsEnabled: false
+  # Whether Buildbarn metrics carry the hermetiq_project_id label. Defaults to
+  # false for self-managed Buildbarn, whose metrics typically don't have that
+  # label: the infra tools then omit it from every PromQL selector and may run
+  # without project context (single-tenant mode). Set true for Hermetiq-managed
+  # Buildbarn, which emits the label and uses it to scope queries per project.
+  # Surfaced as the METRICS_PROJECT_LABEL_ENABLED env var on the API container.
+  projectLabelEnabled: false
+  # VictoriaMetrics vmselect Prometheus read endpoint. The app default
+  # (http://vmselect-vm.obs.svc.cluster.local:8481/select/0/prometheus) only
+  # works for stacks installed as `vm` in the `obs` namespace; override to
+  # match your install, e.g.
+  #   http://vmselect-<vm-release>.<namespace>.svc.cluster.local:8481/select/<tenant>/prometheus
+  baseUrl: ""
+  natsPodScrape:
+    enabled: true
+    name: nats-vmpodscrape
+    port: prom-metrics
+    selectorLabels:
+      app.kubernetes.io/component: nats
+      app.kubernetes.io/instance: nats
+  dragonflyPodScrape:
+    enabled: true
+    name: dragonfly-vmpodscrape
+    port: admin
+    path: /metrics
+    selectorLabels:
+      app: dragonfly
+      app.kubernetes.io/name: dragonfly
+      role: master
+
+otel:
+  endpoint: ""
+  protocol: grpc
+  serviceName: hermetiq
+  mtls:
+    enabled: false
+    secretName: ""
+    mountPath: /config/mtls
+
+# Default OIDC provider used by api.jwt, publisher.jwks, and
+# dashboard.oauth2Proxy. Set `issuerUrl` once and the chart wires it through
+# everywhere. Per-component values still win when set, so users can override
+# any individual consumer.
+oidc:
+  # OIDC issuer URL, e.g. https://<tenant>.auth0.com/
+  issuerUrl: ""
+  # JWKS URL. Defaults to `<issuerUrl>.well-known/jwks.json` when empty.
+  jwksUrl: ""
+
+# gRPC authentication, performed by the bep-nats core process itself.
+#
+# Authentication moved out of the grpc-auth-proxy sidecar and into the core,
+# which reads the GRPC_AUTH_* environment family. The legacy JWKS_* variables
+# were removed from the application outright — there are no aliases — so these
+# settings, together with api.jwt.* / publisher.jwks.*, are the only thing
+# configuring gRPC and MCP authentication now. The api pods keep the sidecar,
+# but only for gRPC-web framing and CORS; its JWT_* settings no longer decide
+# who gets in.
+
+hosts:
+  domainBase: ""
+  bepGrpc: ""
+  apiGrpc: ""
+  bbcalGrpc: ""
+  api: ""
+  dashboard: ""
+  mcp: ""
+  # Optional Grafana host. Defaults to grafana.<domainBase>. The route is
+  # only rendered when gateway.routes.grafanaEnabled is true.
+  grafana: ""
+
+# Standalone oauth2-proxy in front of the Grafana service deployed by the
+# VictoriaMetrics chart. When enabled, the chart's Grafana route targets this
+# proxy instead of the upstream Grafana service. Reuses the shared
+# oauth2-proxy-config-web-ui ConfigMap and oauth2-proxy-client Secret, so it
+# shares an SSO session with the dashboard and buildbarn browser.
+#
+# Requires Grafana to trust the proxy headers — set auth.proxy.enabled=true
+# and the related auth.proxy.* values in the VictoriaMetrics chart's grafana
+# values. The proxy passes X-Forwarded-User/-Email/-Groups request headers
+# (OAUTH2_PROXY_PASS_USER_HEADERS), so Grafana must key on those, e.g.:
+#   grafana:
+#     grafana.ini:
+#       auth.proxy:
+#         enabled: true
+#         header_name: X-Forwarded-User
+#         header_property: username
+#         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
+#         auto_sign_up: true
+#         enable_login_token: true
+#
+# Also register https://grafana.<domainBase>/oauth2/callback as an allowed
+# callback URL with your IdP.
+grafana:
+  oauth2Proxy:
+    enabled: true
+    replicas: 1
+    # Additional environment variables for the Grafana oauth2-proxy deployment.
+    env: {}
+    # Set to true/false to override serviceAccount.automountServiceAccountToken
+    # for the Grafana oauth2-proxy pod. null preserves the ServiceAccount default.
+    automountServiceAccountToken: null
+    podDisruptionBudget:
+      enabled: false
+      maxUnavailable: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+routing:
+  # Set false to skip all chart-managed external routing resources, including
+  # Gateway/HTTPRoute/GRPCRoute, Contour HTTPProxy, Ingress, route TLS
+  # Certificates, and GKE Gateway policies. Internal Services are still
+  # rendered so you can supply your own routing implementation.
+  enabled: true
+  # Supported providers: gateway, gateway-httproute-only, contour, ingress, none.
+  # Use gateway-httproute-only for GKE Gateway, which supports HTTPRoute but
+  # not GRPCRoute. Use gateway for Envoy Gateway and other GRPCRoute-capable
+  # Gateway API controllers.
+  # Set provider to none as an alternative to routing.enabled=false.
+  # Leave empty to use the legacy gateway.enabled / contour.enabled flags.
+  provider: ""
+
+tls:
+  # Existing wildcard TLS secret to share across all Contour HTTPProxy or
+  # Ingress resources. When set, per-route cert-manager Certificates are not
+  # rendered.
+  secretName: ""
+  certificate:
+    # Render one wildcard cert-manager Certificate shared by all routes.
+    enabled: false
+    name: hermetiq-wildcard-tls
+    dnsNames: []
+    issuerRef:
+      group: cert-manager.io
+      kind: ClusterIssuer
+      name: ""
+
+gateway:
+  enabled: true
+  name: ""
+  namespace: ""
+  routes:
+    bepGrpcName: bep-cloud-grpc
+    apiGrpcName: api-cloud-grpc
+    bbcalGrpcEnabled: false
+    bbcalGrpcName: bbcal-grpc
+    apiWebName: api-web
+    apiWebPathPrefix: /api/v1
+    dashboardName: dashboard
+    mcpName: mcp
+    mcpPathPrefix: /
+    # Optional route to a Grafana service installed alongside the chart
+    # (e.g. via the VictoriaMetrics k8s stack chart). Service must live in
+    # the same namespace as this chart for ingress/contour. For gateway,
+    # cross-namespace requires a ReferenceGrant.
+    grafanaEnabled: true
+    grafanaName: grafana
+    grafanaService: vm-grafana
+    grafanaServicePort: 80
+  gke:
+    # Rendered only when routing.provider=gateway-httproute-only.
+    healthCheckPolicy:
+      enabled: true
+      namePrefix: hc
+    backendPolicy:
+      enabled: true
+      namePrefix: bp
+      # Backend service timeout in seconds for gRPC backends.
+      timeoutSec: 300
+  healthChecks:
+    # Render Envoy Gateway BackendTrafficPolicy resources in gateway mode so
+    # active health checks use unauthenticated readiness endpoints instead of
+    # default /healthz or grpc.health.v1 checks on auth-sensitive backends.
+    enabled: true
+  # Envoy Gateway stream timeouts for the chart's gRPC routes
+  # (routing.provider=gateway only). Without these, Envoy applies its default
+  # 15s route timeout — the only routing provider this chart supports that
+  # leaves the gRPC routes uncapped-by-omission. Contour already sets
+  # contour.httpProxy.responseTimeout (300s) on the same three routes and GKE
+  # sets gateway.gke.backendPolicy.timeoutSec (300s) on the same backends, so
+  # the values below bring Envoy Gateway in line rather than introducing a new
+  # policy.
+  #
+  # Envoy's route timeout measures from downstream end-of-stream (the client's
+  # half-close) to the completed upstream response. That means it does NOT cap
+  # a bidirectional stream's upload phase, but it does cap everything after the
+  # client half-closes, and it caps a server-streaming response in full because
+  # such clients half-close immediately.
+  #
+  # These render into the same per-route BackendTrafficPolicy as the health
+  # checks above, on purpose: Envoy Gateway does not merge two policies of the
+  # same kind that target the same route at the same level. It applies the
+  # oldest by creation timestamp and marks the rest Overridden, so a separate
+  # timeouts policy would be silently dropped alongside the health-check one.
+  timeouts:
+    enabled: true
+    # Bazel's BES/BEP PublishBuildToolEventStream is bidirectional-streaming
+    # and lives for the whole build. The exposure is the drain after Bazel
+    # half-closes: with the default --bes_upload_mode=wait_for_upload_complete
+    # Bazel blocks there waiting for the publisher to ack the remaining events,
+    # and a publisher under NATS backpressure or mid-rollout can take longer
+    # than 15s. That surfaces as a BES upload failure at the end of an
+    # otherwise-successful build. PublishLifecycleEvent on the same route is
+    # unary and capped outright. "0s" disables the cap and leaves bounding to
+    # Bazel's own --bes_timeout.
+    bepGrpc:
+      requestTimeout: "0s"
+      maxStreamDuration: "0s"
+      connectionIdleTimeout: "1h"
+    # Unary analytics queries from the dashboard and CLI over gRPC. (MCP's
+    # streamable-HTTP traffic uses the separate `mcp` route below.) 15s is a
+    # plausible p99 for a wide-time-range Build History or trends query, and an
+    # Envoy reset surfaces as a generic gRPC error rather than a query timeout,
+    # so it is easy to misattribute. Bounded rather than disabled — these are
+    # unary calls, so a stuck query should not pin the stream indefinitely.
+    # 300s matches the Contour and GKE providers.
+    apiGrpc:
+      requestTimeout: "300s"
+      maxStreamDuration: ""
+      connectionIdleTimeout: "1h"
+    # Only rendered when gateway.routes.bbcalGrpcEnabled. This route is handed
+    # to users as their Bazel --remote_cache endpoint (see
+    # dashboard.remoteCacheUrl), so it carries the same traffic as the
+    # Buildbarn frontend: server-streaming ByteStream/Read, client-streaming
+    # ByteStream/Write, and unary CAS/AC calls. ByteStream/Read is the worst
+    # case — the client half-closes immediately, so a 15s cap covers the entire
+    # blob download. Mirrors the buildbarn chart's frontend timeouts.
+    bbcalGrpc:
+      requestTimeout: "0s"
+      maxStreamDuration: "0s"
+      connectionIdleTimeout: "1h"
+    # The dashboard's REST/gRPC-web traffic. The same unary analytics queries
+    # that reach apiGrpc arrive over this route too, so it gets the same 300s
+    # bound rather than Envoy Gateway's 15s default.
+    apiWeb:
+      requestTimeout: "300s"
+      maxStreamDuration: ""
+      connectionIdleTimeout: "1h"
+    # Streamable-HTTP MCP traffic on port 5150. An MCP tool call can run a
+    # wide-time-range analytics query and the response stream stays open
+    # across it, so this needs the same headroom as apiGrpc.
+    mcp:
+      requestTimeout: "300s"
+      maxStreamDuration: "0s"
+      connectionIdleTimeout: "1h"
+  cors:
+    enabled: true
+    allowOrigins: []
+    allowMethods:
+      - GET
+      - POST
+      - OPTIONS
+      - HEAD
+    allowHeaders:
+      - authorization
+      - cache-control
+      - x-hermetiq-jwt
+      - x-grpc-web
+      - User-Agent
+      - x-accept-content-transfer-encoding
+      - x-accept-response-streaming
+      - x-user-agent
+      - grpc-timeout
+      - Grpc-Message
+      - Grpc-Status
+      - content-type
+      - format
+      - headers
+      - method
+      - x-hermetiq-bytestream-file
+      - x-hermetiq-bytestream-type
+    exposeHeaders:
+      - Content-Length
+      - Content-Range
+      - Content-Type
+      - Access-Control-Allow-Headers
+      - grpc-status
+      - grpc-message
+    allowCredentials: true
+    maxAge: 10m
+    mcpAllowOrigins:
+      - https://*
+  # Envoy Gateway ClientTrafficPolicy tuning the downstream leg (client -> Envoy)
+  # of the Gateway. Rendered only when routing.provider=gateway.
+  #
+  # This is the preferred place to enable the policy. It is Gateway-scoped, so it
+  # covers every route on the target listener — this chart's BEP/API/dashboard
+  # routes and the buildbarn chart's CAS/AC gRPC routes alike when both are
+  # installed on a shared Gateway. The buildbarn chart ships the same knobs for
+  # standalone installs; enable it in exactly ONE chart. ClientTrafficPolicy
+  # resources do not merge — with two targeting the same Gateway, the oldest wins
+  # and the other reports Overridden=True.
+  #
+  # Opt-in, deliberately: buffers are per-connection, and an Envoy Gateway proxy
+  # is often a single replica. Enable it while watching the Envoy pod's memory.
+  #
+  # These are the values Envoy Gateway v1.7.2 programs into Envoy by default —
+  # all far below what a high-RTT Bazel client wants, which is what the overrides
+  # below exist to correct:
+  #   per_connection_buffer_limit_bytes  32Ki
+  #   initial_stream_window_size         64Ki
+  #   initial_connection_window_size     1Mi
+  #   max_concurrent_streams             100
+  #   idle_timeout                       1h
+  clientTrafficPolicy:
+    enabled: false
+    name: hmq-gateway-client-traffic
+    # Optional Gateway listener (spec.listeners[].name) to scope the policy to.
+    # Empty targets every listener on the Gateway. A listener-scoped policy fully
+    # overrides a Gateway-scoped one rather than merging with it.
+    sectionName: ""
+    # The important one. Envoy Gateway's 32Ki default triggers watermark
+    # backpressure almost immediately on large BEP uploads and CAS blob
+    # transfer, and every drain/refill cycle costs a full client round trip —
+    # 17ms on a cross-region path. Envoy's own default is 1Mi. This is
+    # per-connection memory on the proxy, so check Envoy's RSS before raising it.
+    bufferLimit: 8Mi
+    http2:
+      # HTTP/2 flow control is a second cap, independent of bufferLimit: raising
+      # only bufferLimit can still yield 413 request_payload_too_large. Keep
+      # initialConnectionWindowSize >= initialStreamWindowSize, or the connection
+      # window throttles a single stream before its own window fills.
+      initialStreamWindowSize: 16Mi
+      initialConnectionWindowSize: 24Mi
+      # Bazel multiplexes concurrent RPCs onto one HTTP/2 connection, so the
+      # default of 100 caps effective parallelism well below a high --jobs.
+      maxConcurrentStreams: 1024
+    timeout:
+      http:
+        # Envoy's HTTP idle timeout is REQUEST-based: HTTP/2 PINGs and TCP
+        # keepalives do NOT reset it. A client channel that goes quiet through a
+        # long analysis or local-execution phase gets dropped, and the next RPC
+        # pays full TCP+TLS setup again (~39ms cross-region) or eats a mid-build
+        # retry. Do not set 0 — Envoy warns that disabling it risks connection
+        # leaks from lost FINs; prefer a large finite value.
+        idleTimeout: 7200s
+    # Socket-level dead-peer detection. This does not hold the HTTP idle timeout
+    # open; it detects half-open connections quickly instead of letting a client
+    # hang until its own deadline fires. Set to null to omit the block.
+    tcpKeepalive:
+      idleTime: 60s
+      interval: 15s
+      probes: 5
+
+contour:
+  enabled: false
+  ingressClassName: contour
+  httpProxy:
+    loadBalancerPolicy: Cookie
+    responseTimeout: "300s"
+  ingress:
+    proxyBodySize: "50m"
+  tls:
+    bepGrpc:
+      secretName: ""
+    apiGrpc:
+      secretName: ""
+    bbcalGrpc:
+      secretName: ""
+      clientValidation:
+        enabled: false
+        caSecret: ""
+        optionalClientCertificate: true
+        skipClientCertValidation: true
+    apiWeb:
+      secretName: ""
+    dashboard:
+      secretName: ""
+    mcp:
+      secretName: ""
+    grafana:
+      secretName: ""
+  certManager:
+    enabled: true
+    clusterIssuer: ""
+  cors:
+    enabled: true
+    allowPrivateNetwork: true
+    allowOrigins: []
+    allowMethods:
+      - GET
+      - POST
+      - OPTIONS
+      - HEAD
+    allowHeaders:
+      - authorization
+      - cache-control
+      - x-hermetiq-jwt
+      - x-grpc-web
+      - User-Agent
+      - x-accept-content-transfer-encoding
+      - x-accept-response-streaming
+      - x-user-agent
+      - grpc-timeout
+      - Grpc-Message
+      - Grpc-Status
+      - content-type
+      - format
+      - headers
+      - method
+      - x-hermetiq-bytestream-file
+      - x-hermetiq-bytestream-type
+    exposeHeaders:
+      - Content-Length
+      - Content-Range
+      - Content-Type
+      - Access-Control-Allow-Headers
+      - grpc-status
+      - grpc-message
+    allowCredentials: true
+    maxAge: "10m"
+    maxAgeSeconds: "600"
+    mcpAllowOrigins:
+      - "https://*"
+
+ingress:
+  enabled: true
+  className: nginx
+  proxyBodySize: "50m"
+  grpc:
+    proxyReadTimeoutSeconds: "300"
+    proxySendTimeoutSeconds: "300"
+  cors:
+    enabled: true
+    allowOrigins: []
+    allowMethods:
+      - GET
+      - POST
+      - OPTIONS
+      - HEAD
+    allowHeaders:
+      - authorization
+      - cache-control
+      - x-hermetiq-jwt
+      - x-grpc-web
+      - User-Agent
+      - x-accept-content-transfer-encoding
+      - x-accept-response-streaming
+      - x-user-agent
+      - grpc-timeout
+      - Grpc-Message
+      - Grpc-Status
+      - content-type
+      - format
+      - headers
+      - method
+      - x-hermetiq-bytestream-file
+      - x-hermetiq-bytestream-type
+    exposeHeaders:
+      - Content-Length
+      - Content-Range
+      - Content-Type
+      - Access-Control-Allow-Headers
+      - grpc-status
+      - grpc-message
+    allowCredentials: true
+    maxAgeSeconds: "600"
+    mcpAllowOrigins:
+      - "https://*"
+  certManager:
+    enabled: false
+    clusterIssuer: ""
+  apiWeb:
+    annotations: {}
+  dashboard:
+    annotations: {}
+  mcp:
+    annotations: {}
+  bepGrpc:
+    annotations: {}
+  apiGrpc:
+    annotations: {}
+  bbcalGrpc:
+    annotations: {}
+  grafana:
+    annotations: {}
+
+partitionMaintenance:
+  enabled: true
+  schedule: "0 1 * * *"
+  # Additional environment variables for the partition maintenance CronJob.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for this CronJob. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  startingDeadlineSeconds: 600
+  activeDeadlineSeconds: 21600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+
+progressesPartitionMaintenance:
+  enabled: true
+  schedule: "15 * * * *"
+  # Additional environment variables for the progresses partition maintenance CronJob.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for this CronJob. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  startingDeadlineSeconds: 600
+  activeDeadlineSeconds: 21600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+
+targetTrendsRefresh:
+  enabled: true
+  shortSchedule: "5 * * * *"
+  longSchedule: "20 0 * * *"
+  # Additional environment variables for target trends refresh CronJobs.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for these CronJobs. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  startingDeadlineSeconds: 600
+  activeDeadlineSeconds: 21600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+
+serviceAccount:
+  create: true
+  name: bep-nats
+  annotations: {}
+  automountServiceAccountToken: true
+
+azureWorkloadIdentity:
+  enabled: false
+  clientId: ""
+
+gcpWorkloadIdentity:
+  enabled: false
+  serviceAccount: ""
+
+rbac:
+  enabled: true
+  clusterRoleName: cert-crud
+  roleBindingName: cert-crud-binding
+  rules:
+    certManager: true
+    secrets: true
+    leases: true
+    # Read-only Deployments and StatefulSets, for the Buildbarn MCP tools'
+    # workload discovery (mounted ConfigMaps, worker pool container images, and
+    # the installed-component inventory get_buildbarn_status reports).
+    deployments: true
+    configMaps: true
+    # Read-only discovery of namespaced bb.hermetiq.com RbeWorker objects for
+    # grpc-api worker-pool cost and behavior reporting. The existing
+    # RoleBinding scopes this grant to the Hermetiq release namespace.
+    rbeWorkers: true
+    # ClusterRole+ClusterRoleBinding granting `get` on the kube-system
+    # Namespace OBJECT only (resourceNames: [kube-system]) — its UID is the
+    # stable cluster fingerprint for license identity. It cannot list
+    # namespaces and grants nothing INSIDE kube-system (Secrets, ConfigMaps,
+    # and Pods are separate resources with no grant here). Disabling this
+    # falls back to the weaker own-namespace UID fingerprint; licensing
+    # still works.
+    clusterFingerprint: true
+    # Namespaced Role letting the app write the single hermetiq-license-state
+    # Secret (auto-issued trial key, signed validation cache for offline
+    # grace). Write verbs are scoped to that one Secret by resourceNames;
+    # create cannot be name-scoped in Kubernetes RBAC.
+    licenseState: true
+
+security:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    dropCapabilities:
+      - ALL
+
+k8sNodeScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+  tolerations: []
+
+autoscaling:
+  publisher:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+
+api:
+  replicas: 4
+  # Additional environment variables for the API deployment.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for the API pod. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  # Optional app-layer CORS allowlist for the REST API and MCP HTTP server.
+  # Defaults to the selected routing provider's web CORS origins, which in
+  # turn default to the dashboard URL. Comma-separated Origin values.
+  corsAllowedOrigins: ""
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  resources:
+    authProxy:
+      requests:
+        memory: 300Mi
+      limits:
+        cpu: 500m
+        memory: 300Mi
+    api:
+      requests:
+        cpu: 1500m
+        memory: 2000Mi
+      limits:
+        cpu: 1900m
+        memory: 4000Mi
+  authProxy:
+    debug: false
+    # Additional environment variables for the grpc-auth-proxy sidecar.
+    env: {}
+    probes:
+      enabled: true
+      liveness:
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 1
+        failureThreshold: 3
+        successThreshold: 1
+      readiness:
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        timeoutSeconds: 1
+        failureThreshold: 3
+        successThreshold: 1
+    # Optional CORS allowlist applied at the auth-proxy layer (defense in depth
+    # for environments where the ingress/LB doesn't already answer CORS
+    # preflight). Comma-separated list of allowed Origin values, e.g.
+    # "https://dashboard.example.com,http://localhost:3000".
+    # Leave empty when CORS is handled upstream (Envoy Gateway SecurityPolicy
+    # via gateway.cors.* or Contour CorsPolicy via contour.cors.*).
+    corsAllowedOrigins: ""
+  # JWT/JWKS settings for the api pod. These now feed BOTH the api core
+  # (GRPC_AUTH_*, which authenticates the gRPC API and the MCP endpoint) and
+  # the grpc-auth-proxy sidecar (JWT_*, which only frames gRPC-web and answers
+  # CORS). `enabled` does not switch authentication off — see app.grpcAuthUserProvider.
+  # Keep it true for chart-managed JWKS settings. Set it false only when api.env
+  # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
+  # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
+  jwt:
+    enabled: true
+    jwksUrl: ""
+    issuer: ""
+    # gRPC API token audience. Leave empty to reuse the dashboard oauth2-proxy
+    # client ID (read from the oauth2-proxy Secret). The core's
+    # GRPC_AUTH_AUDIENCE is a *list*: the chart always adds the MCP resource
+    # URL alongside this value, because one process now authenticates both the
+    # gRPC API and the MCP endpoint and they carry different audiences.
+    audience: ""
+    groupsClaim: hermetiq/roles
+    nameClaim: name
+  mcpResourceUrl: ""
+  # Authorization server advertised in the MCP protected-resource metadata
+  # (authorization_servers). Leave empty to derive it from the OIDC issuer
+  # (api.jwt.issuer / oidc.issuerUrl) with any trailing slash stripped. Set
+  # explicitly only to point MCP clients at a different authorization server
+  # than the JWT issuer.
+  mcpAuthorizationServer: ""
+  mcpAuthDisabled: false
+  # Prefer replicas on different nodes without making scheduling fail when the
+  # cluster has fewer eligible nodes than replicas.
+  podAntiAffinity:
+    enabled: true
+  # At most one API replica may be voluntarily disrupted at a time.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+publisher:
+  replicas: 4
+  # Additional environment variables for the publisher deployment.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for the publisher pod. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  resources:
+    requests:
+      cpu: 1500m
+      memory: 2000Mi
+    limits:
+      cpu: 1900m
+      memory: 4000Mi
+  hermetiqAdminGroup: hermetiq-admin
+  # JWKS settings for the publisher core, rendered as GRPC_AUTH_* (the legacy
+  # JWKS_* names were removed from the application). `enabled` does not switch
+  # authentication off — see app.grpcAuthUserProvider. Keep it true for chart-managed
+  # JWKS settings. Set it false only when publisher.env supplies exactly one
+  # GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus GRPC_AUTH_ISSUER and
+  # GRPC_AUTH_AUDIENCE.
+  # Comma-separated CIDRs (bare IPs allowed) whose peers may call the Buildbarn
+  # Completed Action Logger on bep-nats-pub:50091 WITHOUT a user credential.
+  # Rendered as GRPC_AUTH_TRUSTED_CAL_CIDRS on the publisher core only.
+  #
+  # ⚠ LEAVING THIS EMPTY DISABLES CAL INGEST. Buildbarn workers are shared
+  # across projects and present no user credential, so network position is the
+  # only thing that admits them. Empty means the exemption is off and every CAL
+  # call is rejected with UNAUTHENTICATED — remote-execution action telemetry
+  # silently stops arriving. Set it to the cluster's pod CIDR (or the narrower
+  # range the Buildbarn workers run in), e.g. "10.244.0.0/16". There is no safe
+  # default the chart can guess, so it ships empty and fails closed.
+  trustedCalCidrs: ""
+
+  jwks:
+    enabled: true
+    url: ""
+    issuer: ""
+    # BES/CAL token audience. Comma-separated: a token matching any entry is
+    # accepted.
+    audience: ""
+    groupsClaim: hermetiq/roles
+    existingSecret: ""
+    json: ""
+  authProxy:
+    # Optional grpc-auth-proxy sidecar for no-JWKS publisher deployments. When
+    # staticForwardedUser is set and publisher.jwks.enabled=false, the
+    # bep-nats-pub Service points at the sidecar on 50081 and the sidecar
+    # forwards to the publisher container on 50091.
+    #
+    # ⚠ NO LONGER AUTHENTICATES ANYTHING. The core strips X-Forwarded-User
+    # (and every other caller-supplied identity header) before authenticating,
+    # so the static user this sidecar injects is discarded and the request
+    # arrives with no credential. Publisher pods configured this way reject
+    # BEP ingest. Move to publisher.jwks against a real IdP.
+    debug: false
+    # Additional environment variables for the grpc-auth-proxy sidecar.
+    env: {}
+    probes:
+      enabled: true
+      liveness:
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 1
+        failureThreshold: 3
+        successThreshold: 1
+      readiness:
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        timeoutSeconds: 1
+        failureThreshold: 3
+        successThreshold: 1
+    # Used by grpc-auth-proxy as X-Forwarded-User for publisher requests that
+    # have no user JWT.
+    staticForwardedUser: ""
+    resources:
+      requests:
+        memory: 300Mi
+      limits:
+        cpu: 500m
+        memory: 300Mi
+  # At most one publisher replica may be voluntarily disrupted at a time.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  # Prefer replicas on different nodes without making scheduling fail when the
+  # cluster has fewer eligible nodes than replicas.
+  podAntiAffinity:
+    enabled: true
+
+subscriber:
+  replicas: 1
+  # Additional environment variables for subscriber deployments.
+  env: {}
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for subscriber pods. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  resources:
+    requests:
+      cpu: 500m
+      memory: 900Mi
+    limits:
+      cpu: 1000m
+      memory: 1900Mi
+  fetch:
+    progressBatchSize: ""
+    progressMaxWait: ""
+    buildToolBatchSize: ""
+    buildToolMaxWait: ""
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+
+dashboard:
+  replicas: 1
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  # Set to true/false to override serviceAccount.automountServiceAccountToken
+  # for the dashboard pod. null preserves the ServiceAccount default.
+  automountServiceAccountToken: null
+  appPort: 3000
+  # Bazel --remote_cache URL shown on the dashboard Quickstart page. Leave
+  # empty to derive the normal on-prem Buildbarn frontend endpoint
+  # (grpcs://bb.<hosts.domainBase>), or the bbcal route when enabled. Override
+  # when Buildbarn uses a separate domain or explicit hosts.frontendGrpc value.
+  remoteCacheUrl: ""
+  # Additional environment variables for the dashboard deployment.
+  env: {}
+  prepareDashboardHtml:
+    # Additional environment variables for the dashboard HTML preparation init container.
+    env: {}
+  secretEnv: {}
+  # Optional static JSON consumed by the dashboard Quickstart page. Only Step 1
+  # customization is supported. Leave data empty to use the dashboard defaults.
+  quickstartConfig:
+    # Name of an existing ConfigMap containing configMapKey. Mutually exclusive
+    # with data.
+    existingConfigMap: ""
+    # ConfigMap key to mount as /quickstart-config/quickstart-config.json.
+    configMapKey: quickstart-config.json
+    # Inline JSON object rendered into a chart-managed ConfigMap.
+    data: {}
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  security:
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    dropCapabilities:
+      - ALL
+  probes:
+    enabled: true
+    liveness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 3
+      successThreshold: 1
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 3
+      successThreshold: 1
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+  oauth2Proxy:
+    enabled: true
+    # Additional environment variables for the oauth2-proxy sidecar.
+    env: {}
+    provider: oidc
+    oidcIssuerUrl: ""
+    scope: openid email profile offline_access
+    oidcGroupsClaim: groups
+    validateUrl: ""
+    # IdP logout URL. When `/oauth2/sign_out` is called, oauth2-proxy clears
+    # its cookie and then redirects the browser here so the IdP also ends
+    # the SSO session. Without this, signing out only clears the local
+    # cookie — re-visiting the dashboard silently re-authenticates from the
+    # still-active IdP session.
+    #
+    # Auth0 example (the `returnTo` host must be added to Auth0's
+    # "Allowed Logout URLs" application setting):
+    #   https://<tenant>.auth0.com/v2/logout?client_id=<clientId>&returnTo=https://dashboard.<domainBase>
+    #
+    # This value is rendered into the shared `oauth2-proxy-config-web-ui`
+    # ConfigMap, so the buildbarn browser oauth2-proxy reuses it.
+    backendLogoutUrl: ""
+    passUserHeaders: true
+    # Emit X-Auth-Request-* response headers, including groups, for ingress
+    # auth-request integrations in addition to X-Forwarded-* upstream headers.
+    setXAuthRequest: true
+    insecureOidcAllowUnverifiedEmail: false
+    insecureOidcSkipIssuerVerification: false
+    skipOidcDiscovery: false
+    skipProviderButton: true
+    skipJwtBearerTokens: true
+    sslInsecureSkipVerify: false
+    skipAuthPreflight: true
+    sessionCookieMinimal: false
+    showDebugOnError: false
+    cookieSecure: true
+    # Optional oauth2-proxy cookie lifetime, for example "8h". Leave empty to
+    # use the oauth2-proxy default.
+    cookieExpire: ""
+    # Optional oauth2-proxy cookie refresh interval, for example "55m".
+    # Must be less than the IdP access-token lifespan for silent refresh.
+    cookieRefresh: ""
+    # Optional shared cookie domains, for example [".example.com"] when multiple
+    # oauth2-proxy sidecars should share a session across subdomains.
+    cookieDomains: []
+    # Domains allowed as targets of `rd` redirects (oauth2-proxy
+    # OAUTH2_PROXY_WHITELIST_DOMAINS). A leading `.` allows subdomains.
+    # `.<hosts.domainBase>` is auto-included when domainBase is set, so
+    # chart-rendered services (dashboard, browser, grafana, ...) work without
+    # extra config. Add entries here for redirects to external domains.
+    whitelistDomains: []
+    skipAuthRoutes: ""
+    client:
+      existingSecret: ""
+      clientId: ""
+      clientSecret: ""
+      cookieSecret: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+slack:
+  channelId: ""
+  botToken:
+    existingSecret: ""
+    existingSecretKey: SLACK_BOT_TOKEN
+    value: ""
+
+cacheTtl:
+  # Cache TTLs are loaded from files/config/cache_ttl.json and rendered into the
+  # bep-cache-ttl-config ConfigMap by default. Set existingConfigMap to mount an
+  # externally managed ConfigMap instead.
+  existingConfigMap: ""
+  # ConfigMap key to mount as /config/cache-ttl/cache_ttl.json.
+  configMapKey: cache_ttl.json
+  # Optional value included in the api pod checksum annotation. When using
+  # existingConfigMap, set this to a hash or version of the external data to
+  # force a rollout when the ConfigMap contents change.
+  rolloutChecksum: ""
+
+promqlQueries:
+  # PromQL templates for the MCP Buildbarn infra tools are loaded from
+  # files/config/promql.json and rendered into the bep-promql-config ConfigMap by
+  # default. Override these only if your Buildbarn recording-rule names differ from
+  # Hermetiq's defaults (common with self-managed Buildbarn). Set existingConfigMap
+  # to mount an externally managed ConfigMap instead.
+  existingConfigMap: ""
+  # ConfigMap key to mount as /config/promql/promql.json.
+  configMapKey: promql.json
+  # Optional value included in the api pod checksum annotation. When using
+  # existingConfigMap, set this to a hash or version of the external data to
+  # force a rollout when the ConfigMap contents change.
+  rolloutChecksum: ""

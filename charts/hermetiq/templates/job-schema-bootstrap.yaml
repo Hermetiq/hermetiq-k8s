@@ -1,0 +1,121 @@
+{{- if and .Values.bootstrap.hook.enabled (not .Values.postgres.password.existingSecret) }}
+{{- fail "bootstrap.hook.enabled=true requires postgres.password.existingSecret because Helm pre-install hooks run before normal Secret resources are created" }}
+{{- end }}
+{{- if and .Values.bootstrap.projectId (not .Values.bootstrap.projectName) }}
+{{- fail "bootstrap.projectId requires bootstrap.projectName" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+{{/* In hook mode Helm deletes the previous Job before creating the next one, so
+     a stable name is fine. As an ordinary release resource it is not deleted,
+     and a Job's spec.template is immutable — a later `helm upgrade` would fail
+     with "field is immutable" trying to patch the existing Job. Suffix the name
+     with the revision so each upgrade creates a fresh Job instead. */}}
+{{- $jobName := ternary "database-schema-bootstrap" (printf "database-schema-bootstrap-%d" (int .Release.Revision)) .Values.bootstrap.hook.enabled }}
+metadata:
+  name: {{ $jobName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "bootstrap") | nindent 4 }}
+  {{- if .Values.bootstrap.hook.enabled }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: {{ .Values.bootstrap.hook.deletePolicy | quote }}
+  {{- else }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
+  {{- end }}
+spec:
+  backoffLimit: 0
+  {{- if .Values.bootstrap.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ .Values.bootstrap.activeDeadlineSeconds }}
+  {{- end }}
+  {{- if and (not .Values.bootstrap.hook.enabled) .Values.bootstrap.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ .Values.bootstrap.ttlSecondsAfterFinished }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" . "component" "bootstrap") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "hermetiq-core.automountServiceAccountToken" .Values.bootstrap | nindent 6 }}
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" . | nindent 8 }}
+      {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.bootstrap) | nindent 6 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
+          imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}
+          securityContext:
+            {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 12 }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |-
+              status=0
+              output=$(/app/dbadmin migrate-bootstrap \
+                --retention-days={{ .Values.bootstrap.retentionDays }} \
+                --premake={{ .Values.bootstrap.premake }} \
+                --partition-interval={{ .Values.bootstrap.partitionInterval | quote }} \
+              {{- if .Values.bootstrap.projectName }}
+                {{- if .Values.bootstrap.projectId }}
+                --bootstrap-project-id={{ .Values.bootstrap.projectId | quote }} \
+                {{- end }}
+                --bootstrap-project-name={{ .Values.bootstrap.projectName | quote }} \
+                --bootstrap-project-namespace={{ default .Release.Namespace .Values.bootstrap.projectNamespace | quote }} \
+                {{- if .Values.bootstrap.namespaceBrowserUrl }}
+                --bootstrap-namespace-browser-url={{ .Values.bootstrap.namespaceBrowserUrl | quote }} \
+                {{- end }}
+                {{- if .Values.bootstrap.namespaceDashboardUrl }}
+                --bootstrap-namespace-dashboard-url={{ .Values.bootstrap.namespaceDashboardUrl | quote }} \
+                {{- end }}
+              {{- end }}
+                2>&1) || status=$?
+              printf '%s\n' "$output"
+              if [ "$status" -ne 0 ]; then
+                case "$output" in
+                  *"bootstrap target is not empty"*)
+                    echo "database schema already bootstrapped; skipping"
+                    ;;
+                  *)
+                    exit "$status"
+                    ;;
+                esac
+              fi
+              echo "running database migrations..."
+              exec /app/dbadmin migrate
+          env:
+{{- with .Values.bootstrap.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: APP_ENVIRONMENT
+              value: {{ .Values.app.environment | quote }}
+            - name: DB_HOSTNAME
+              value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+            - name: DB_PORT
+              value: {{ required "postgres.port is required" .Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ required "postgres.database is required" .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ required "postgres.user is required" .Values.postgres.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.postgresSecretName" . }}
+                  key: {{ .Values.postgres.password.existingSecretKey }}
+            - name: PGSSLMODE
+              value: {{ .Values.postgres.sslMode | quote }}
+          resources:
+            {{- toYaml .Values.bootstrap.resources | nindent 12 }}

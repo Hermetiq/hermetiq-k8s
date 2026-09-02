@@ -1,0 +1,65 @@
+suite: oauth2-proxy web-ui ConfigMap rendering
+templates:
+  - templates/configmaps.yaml
+values:
+  - ../ci-values/ci.yaml
+set:
+  dashboard.oauth2Proxy.client.existingSecret: oauth2-client
+tests:
+  # Both the dashboard oauth2-proxy sidecar and the standalone Grafana
+  # oauth2-proxy read oauth2-proxy-config-web-ui through a non-optional envFrom.
+  # Gating the ConfigMap on dashboard.oauth2Proxy alone left the Grafana pod in
+  # CreateContainerConfigError whenever only the Grafana proxy was enabled.
+  - it: renders the ConfigMap when only the Grafana oauth2-proxy is enabled
+    set:
+      dashboard.oauth2Proxy.enabled: false
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: true
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - isKind:
+          of: ConfigMap
+
+  - it: renders the ConfigMap when only the dashboard oauth2-proxy is enabled
+    set:
+      dashboard.oauth2Proxy.enabled: true
+      grafana.oauth2Proxy.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - isKind:
+          of: ConfigMap
+
+  - it: renders the ConfigMap when both oauth2-proxies are enabled
+    set:
+      dashboard.oauth2Proxy.enabled: true
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: true
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - isKind:
+          of: ConfigMap
+
+  - it: omits the ConfigMap when neither oauth2-proxy consumes it
+    set:
+      dashboard.oauth2Proxy.enabled: false
+      grafana.oauth2Proxy.enabled: false
+    asserts:
+      - notMatchRegex:
+          path: metadata.name
+          pattern: ^oauth2-proxy-config-web-ui$
+
+  - it: omits the ConfigMap when the Grafana route is disabled and the dashboard proxy is off
+    set:
+      dashboard.oauth2Proxy.enabled: false
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: false
+    asserts:
+      - notMatchRegex:
+          path: metadata.name
+          pattern: ^oauth2-proxy-config-web-ui$

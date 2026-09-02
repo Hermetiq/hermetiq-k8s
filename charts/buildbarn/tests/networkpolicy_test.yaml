@@ -1,0 +1,55 @@
+suite: storage network policy
+templates:
+  - templates/networkpolicy-storage.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: restricts storage gRPC to buildbarn components when enabled
+    set:
+      storage.networkPolicy.enabled: true
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.podSelector.matchLabels.app
+          value: storage
+      - contains:
+          path: spec.ingress[0].from[0].podSelector.matchExpressions[0].values
+          content: frontend
+      - contains:
+          path: spec.ingress[0].from[0].podSelector.matchExpressions[0].values
+          content: worker
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8981
+      # metrics rule allows all sources unless metricsPeers narrows it
+      - notExists:
+          path: spec.ingress[1].from
+      - equal:
+          path: spec.ingress[1].ports[0].port
+          value: 9980
+
+  - it: appends additional client peers and narrows metrics scrapers
+    set:
+      storage.networkPolicy.enabled: true
+      storage.networkPolicy.additionalClientPeers:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: bb-worker
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rbe-workers
+      storage.networkPolicy.metricsPeers:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: victoriametrics
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchLabels["app.kubernetes.io/name"]
+          value: bb-worker
+      - equal:
+          path: spec.ingress[1].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: victoriametrics

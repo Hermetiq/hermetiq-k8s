@@ -1,0 +1,84 @@
+suite: manager watch scope and RBAC binding mode
+templates:
+  - templates/deployment.yaml
+  - templates/validate.yaml
+release:
+  name: o
+  namespace: bbwo
+tests:
+  - it: omits --watch-namespace by default, so the manager watches every namespace
+    template: templates/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: watch-namespace
+
+  - it: passes watchNamespace as --watch-namespace
+    template: templates/deployment.yaml
+    set:
+      watchNamespace: team-a
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --watch-namespace=team-a
+
+  # A namespaced RoleBinding authorizes only the release namespace. An unscoped
+  # manager list/watches RbeWorker, Deployment and ConfigMap cluster-scoped, gets
+  # Forbidden on all of them, and reconciles nothing without failing loudly.
+  - it: rejects namespace binding mode without a watch scope
+    template: templates/validate.yaml
+    set:
+      rbac.managerBindingMode: namespace
+    asserts:
+      - failedTemplate:
+          errorPattern: "rbac.managerBindingMode=namespace requires watchNamespace=bbwo"
+
+  - it: rejects a watch scope outside the namespace the RoleBinding covers
+    template: templates/validate.yaml
+    set:
+      rbac.managerBindingMode: namespace
+      watchNamespace: other
+    asserts:
+      - failedTemplate:
+          errorPattern: "grants permissions only in bbwo, but watchNamespace is other"
+
+  - it: accepts namespace binding mode scoped to the release namespace
+    template: templates/deployment.yaml
+    set:
+      rbac.managerBindingMode: namespace
+      watchNamespace: bbwo
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --watch-namespace=bbwo
+
+  # namespaceOverride moves the release's objects, so the RoleBinding follows it
+  # and the watch scope has to track that rather than .Release.Namespace.
+  - it: validates the watch scope against namespaceOverride when set
+    template: templates/validate.yaml
+    set:
+      namespaceOverride: bbwo-alt
+      rbac.managerBindingMode: namespace
+      watchNamespace: bbwo
+    asserts:
+      - failedTemplate:
+          errorPattern: "grants permissions only in bbwo-alt"
+
+  - it: leaves the watch scope unvalidated when the chart does not create RBAC
+    template: templates/validate.yaml
+    set:
+      rbac.managerBindingMode: namespace
+      rbac.create: false
+      serviceAccount.name: mine
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: allows a watch scope narrower than a cluster binding
+    template: templates/deployment.yaml
+    set:
+      rbac.managerBindingMode: cluster
+      watchNamespace: team-a
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --watch-namespace=team-a

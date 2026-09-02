@@ -1,0 +1,8 @@
+.DS_Store
+.git/
+.idea/
+*.swp
+*.tmp
+charts/
+tmp/
+docs/

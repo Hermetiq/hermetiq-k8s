@@ -1,0 +1,23 @@
+{{- $provider := include "hermetiq-core.routingProvider" . -}}
+{{- if and .Values.tls.certificate.enabled (has $provider (list "contour" "ingress")) }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.tls.certificate.name }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    {{- if .Values.tls.certificate.dnsNames }}
+    {{- toYaml .Values.tls.certificate.dnsNames | nindent 4 }}
+    {{- else }}
+    - {{ printf "*.%s" (required "hosts.domainBase or tls.certificate.dnsNames is required when tls.certificate.enabled=true" .Values.hosts.domainBase) | quote }}
+    {{- end }}
+  issuerRef:
+    {{- toYaml .Values.tls.certificate.issuerRef | nindent 4 }}
+  secretName: {{ .Values.tls.certificate.name }}
+  usages:
+    - digital signature
+    - key encipherment
+{{- end }}

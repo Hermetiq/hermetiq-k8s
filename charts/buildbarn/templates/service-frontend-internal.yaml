@@ -1,0 +1,24 @@
+{{- if .Values.frontend.internalService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ required "frontend.internalService.name is required when frontend.internalService.enabled=true" .Values.frontend.internalService.name | quote }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - name: grpc
+      port: 8980
+      targetPort: 8980
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+{{- end }}

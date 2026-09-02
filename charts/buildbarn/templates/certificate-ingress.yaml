@@ -1,0 +1,230 @@
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- if and .Values.certificate.enabled (not .Values.tls.secretName) (has $provider (list "contour" "ingress")) }}
+{{- $dnsNames := .Values.certificate.dnsNames -}}
+{{- if not $dnsNames -}}
+{{- $domainBase := required "hosts.domainBase is required when certificate.enabled=true; set it, or list certificate.dnsNames explicitly" .Values.hosts.domainBase -}}
+{{- $dnsNames = list (printf "*.%s" $domainBase) (include "buildbarn.browserHost" .) (include "buildbarn.frontendGrpcHost" .) (include "buildbarn.rbeWebHost" .) -}}
+{{- if .Values.remoteAsset.enabled -}}
+{{- $dnsNames = append $dnsNames (include "buildbarn.remoteAssetHost" .) -}}
+{{- end -}}
+{{- if .Values.portal.enabled -}}
+{{- $dnsNames = concat $dnsNames (list (include "buildbarn.portalHost" .) (include "buildbarn.besHost" .)) -}}
+{{- end -}}
+{{- end -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.certificate.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    {{- range $name := uniq $dnsNames }}
+    - {{ $name | quote }}
+    {{- end }}
+  issuerRef:
+    {{- toYaml .Values.certificate.issuerRef | nindent 4 }}
+  secretName: {{ include "buildbarn.tlsSecretName" . }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.rbeWeb.enabled (eq $provider "ingress") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.rbeWeb.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.rbeWebHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: scheduler
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - {{ include "buildbarn.rbeWebHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+---
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.browser.enabled (eq $provider "ingress") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.browser.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: {{ join "," (include "buildbarn.browserCorsAllowOrigins" . | fromYamlArray) | quote }}
+    nginx.ingress.kubernetes.io/cors-allow-headers: {{ join "," .Values.gateway.cors.allowHeaders | quote }}
+    nginx.ingress.kubernetes.io/cors-expose-headers: {{ join "," .Values.gateway.cors.exposeHeaders | quote }}
+    nginx.ingress.kubernetes.io/cors-allow-credentials: {{ .Values.gateway.cors.allowCredentials | quote }}
+    nginx.ingress.kubernetes.io/cors-max-age: {{ .Values.gateway.cors.maxAge | quote }}
+    nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.gateway.cors.allowMethods | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.browserHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: browser
+                port:
+                  name: {{ include "buildbarn.browserServicePortName" . }}
+  tls:
+    - hosts:
+        - {{ include "buildbarn.browserHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+---
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.frontendGrpc.enabled (eq $provider "ingress") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.frontendGrpc.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.frontendGrpcHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-grpc
+                port:
+                  name: grpc
+  tls:
+    - hosts:
+        - {{ include "buildbarn.frontendGrpcHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.remoteAsset.enabled .Values.ingress.remoteAssetGrpc.enabled (eq $provider "ingress") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.remoteAssetGrpc.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.remoteAssetHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: remote-asset-grpc
+                port:
+                  name: grpc
+  tls:
+    - hosts:
+        - {{ include "buildbarn.remoteAssetHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.portal.enabled .Values.ingress.portal.enabled (eq $provider "ingress") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.portal.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.portalHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bb-portal
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - {{ include "buildbarn.portalHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.portal.enabled .Values.ingress.besGrpc.enabled (eq $provider "ingress") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.besGrpc.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "buildbarn.besHost" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bb-portal
+                port:
+                  name: grpc-bes
+  tls:
+    - hosts:
+        - {{ include "buildbarn.besHost" . }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}

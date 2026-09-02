@@ -1,0 +1,852 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "definitions": {
+    "routeTimeout": {
+      "type": "object",
+      "description": "Envoy Gateway BackendTrafficPolicy spec.timeout.http for one gRPC route. An empty string omits the field, leaving Envoy's own default; \"0s\" disables the timeout outright.",
+      "properties": {
+        "requestTimeout": {
+          "type": "string",
+          "pattern": "^$|^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+        },
+        "maxStreamDuration": {
+          "type": "string",
+          "pattern": "^$|^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+        },
+        "connectionIdleTimeout": {
+          "type": "string",
+          "pattern": "^$|^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+        }
+      }
+    }
+  },
+  "properties": {
+    "namespaceOverride": {
+      "type": "string"
+    },
+    "global": {
+      "type": "object"
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "commonLabels": {
+      "type": "object"
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "commonAnnotations": {
+      "type": "object"
+    },
+    "extraObjects": {
+      "type": "array"
+    },
+    "standardLabels": {
+      "type": "object"
+    },
+    "images": {
+      "type": "object"
+    },
+    "app": {
+      "type": "object",
+      "properties": {
+        "invocationStartEvent": {
+          "type": "string",
+          "enum": [
+            "lifecycle",
+            "build_tool"
+          ]
+        },
+        "costReportTickerEnabled": {
+          "type": "boolean",
+          "description": "Enable the OpenCost-backed API ticker and expose cost reporting and pricing fields in the dashboard."
+        },
+        "openCostUrl": {
+          "type": "string",
+          "description": "OpenCost API base URL used when costReportTickerEnabled is true."
+        },
+        "adminEmails": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "grpcAuthUserProvider": {
+          "type": "string",
+          "enum": [
+            "jwks",
+            "stytch"
+          ],
+          "description": "Identity provider for every core that serves gRPC. Required by the process at startup; \"jwks\" for on-prem."
+        }
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "database": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "sslMode": {
+          "type": "string"
+        },
+        "password": {
+          "type": "object"
+        },
+        "readReplica": {
+          "type": "object"
+        }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "password": {
+          "type": "object"
+        }
+      }
+    },
+    "nats": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "streamConfig": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "victoriaMetrics": {
+      "type": "object",
+      "properties": {
+        "dashboardUrl": {
+          "type": "string"
+        },
+        "metricsDatasourceUid": {
+          "type": "string"
+        },
+        "logsDatasourceUid": {
+          "type": "string"
+        },
+        "natsPodScrape": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "port": {
+              "type": "string"
+            },
+            "selectorLabels": {
+              "type": "object"
+            }
+          }
+        },
+        "dragonflyPodScrape": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "port": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "selectorLabels": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "otel": {
+      "type": "object"
+    },
+    "license": {
+      "type": "object",
+      "required": [
+        "contactEmail",
+        "agreement"
+      ],
+      "properties": {
+        "agreement": {
+          "type": "object",
+          "description": "The Hermetiq Software License Agreement, packaged with the chart as SOFTWARE-LICENSE-AGREEMENT.md.",
+          "required": [
+            "accepted"
+          ],
+          "properties": {
+            "accepted": {
+              "type": "boolean",
+              "description": "Must be true to confirm acceptance of the Hermetiq Software License Agreement. Rendering fails while false."
+            },
+            "url": {
+              "type": "string",
+              "description": "Published copy of the agreement, referenced by the acceptance check and the install notes."
+            }
+          }
+        },
+        "contactEmail": {
+          "type": "string"
+        },
+        "key": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          }
+        },
+        "trial": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "airGapped": {
+          "type": "boolean"
+        },
+        "licenseFileSecretKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "fingerprintOverride": {
+          "type": "string",
+          "pattern": "^$|^[a-f0-9]{64}$"
+        },
+        "saasUrl": {
+          "type": "string"
+        }
+      }
+    },
+    "hosts": {
+      "type": "object"
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "",
+            "gateway",
+            "gateway-httproute-only",
+            "contour",
+            "ingress",
+            "none"
+          ]
+        }
+      }
+    },
+    "tls": {
+      "type": "object"
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "clientTrafficPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "sectionName": {
+              "type": "string"
+            },
+            "bufferLimit": {
+              "type": [
+                "string",
+                "integer"
+              ]
+            },
+            "http2": {
+              "type": "object",
+              "properties": {
+                "initialStreamWindowSize": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ]
+                },
+                "initialConnectionWindowSize": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ]
+                },
+                "maxConcurrentStreams": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "timeout": {
+              "type": "object",
+              "properties": {
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "idleTimeout": {
+                      "type": "string",
+                      "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+                    }
+                  }
+                }
+              }
+            },
+            "tcpKeepalive": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "idleTime": {
+                  "type": "string",
+                  "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+                },
+                "interval": {
+                  "type": "string",
+                  "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+                },
+                "probes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "timeouts": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "bepGrpc": {
+              "$ref": "#/definitions/routeTimeout"
+            },
+            "apiGrpc": {
+              "$ref": "#/definitions/routeTimeout"
+            },
+            "bbcalGrpc": {
+              "$ref": "#/definitions/routeTimeout"
+            }
+          }
+        }
+      }
+    },
+    "contour": {
+      "type": "object"
+    },
+    "ingress": {
+      "type": "object"
+    },
+    "bootstrap": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "projectNamespace": {
+          "type": "string"
+        },
+        "namespaceBrowserUrl": {
+          "type": "string"
+        },
+        "namespaceDashboardUrl": {
+          "type": "string"
+        },
+        "retentionDays": {
+          "type": "integer"
+        },
+        "premake": {
+          "type": "integer"
+        },
+        "partitionInterval": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object"
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "hook": {
+          "type": "object"
+        }
+      }
+    },
+    "partitionMaintenance": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object"
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer"
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      }
+    },
+    "progressesPartitionMaintenance": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object"
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer"
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      }
+    },
+    "targetTrendsRefresh": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "shortSchedule": {
+          "type": "string"
+        },
+        "longSchedule": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object"
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer"
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object"
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "object",
+          "properties": {
+            "rbeWorkers": {
+              "type": "boolean"
+            },
+            "clusterFingerprint": {
+              "type": "boolean"
+            },
+            "licenseState": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "security": {
+      "type": "object"
+    },
+    "k8sNodeScheduling": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "scheduling": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "autoscaling": {
+      "type": "object"
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "object",
+          "description": "Additional scalar environment variables for the API core. With app.grpcAuthUserProvider=jwks and api.jwt.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here."
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "authProxy": {
+          "type": "object"
+        },
+        "jwt": {
+          "type": "object",
+          "description": "Chart-managed JWKS authentication for the API core.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "jwksUrl": {
+              "type": "string"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "audience": {
+              "type": "string"
+            },
+            "groupsClaim": {
+              "type": "string"
+            },
+            "nameClaim": {
+              "type": "string"
+            }
+          }
+        },
+        "podAntiAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object"
+        }
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "object",
+          "description": "Additional scalar environment variables for the publisher core. With app.grpcAuthUserProvider=jwks and publisher.jwks.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here."
+        },
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "jwks": {
+          "type": "object",
+          "description": "Chart-managed JWKS authentication for the publisher core.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "url": {
+              "type": "string"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "audience": {
+              "type": "string"
+            },
+            "groupsClaim": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "json": {
+              "type": "string"
+            }
+          }
+        },
+        "authProxy": {
+          "type": "object",
+          "properties": {
+            "debug": {
+              "type": "boolean"
+            },
+            "env": {
+              "type": "object"
+            },
+            "probes": {
+              "type": "object"
+            },
+            "staticForwardedUser": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "podAntiAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object"
+        },
+        "trustedCalCidrs": {
+          "type": "string",
+          "description": "Comma-separated CIDRs whose peers may call the Buildbarn Completed Action Logger without a user credential. EMPTY DISABLES CAL INGEST."
+        }
+      }
+    },
+    "subscriber": {
+      "type": "object",
+      "properties": {
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "podDisruptionBudget": {
+          "type": "object"
+        }
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "properties": {
+        "automountServiceAccountToken": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "remoteCacheUrl": {
+          "type": "string"
+        },
+        "quickstartConfig": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        },
+        "prepareDashboardHtml": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "object"
+            }
+          }
+        },
+        "probes": {
+          "type": "object"
+        },
+        "podDisruptionBudget": {
+          "type": "object"
+        },
+        "oauth2Proxy": {
+          "type": "object",
+          "properties": {
+            "cookieExpire": {
+              "type": "string"
+            },
+            "cookieRefresh": {
+              "type": "string"
+            },
+            "env": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "grafana": {
+      "type": "object"
+    },
+    "slack": {
+      "type": "object"
+    },
+    "cacheTtl": {
+      "type": "object",
+      "properties": {
+        "existingConfigMap": {
+          "type": "string"
+        },
+        "configMapKey": {
+          "type": "string"
+        },
+        "rolloutChecksum": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

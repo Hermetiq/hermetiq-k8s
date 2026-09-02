@@ -1,0 +1,39 @@
+{{- if and .Values.metrics.enabled .Values.metrics.service.enabled .Values.metrics.vmServiceScrape.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: {{ include "bb-worker-operator.fullname" . }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.vmServiceScrape.labels }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "bb-worker-operator.namespace" . }}
+  selector:
+    matchLabels:
+      {{- include "bb-worker-operator.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: {{ include "bb-worker-operator.metricsPortName" . }}
+      path: {{ .Values.metrics.vmServiceScrape.path | quote }}
+      scheme: {{ include "bb-worker-operator.metricsScheme" . }}
+      interval: {{ .Values.metrics.vmServiceScrape.interval | quote }}
+      scrapeTimeout: {{ .Values.metrics.vmServiceScrape.scrapeTimeout | quote }}
+      {{- if .Values.metrics.secure }}
+      {{- with .Values.metrics.vmServiceScrape.authorization }}
+      authorization:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.metrics.vmServiceScrape.bearerTokenFile }}
+      bearerTokenFile: {{ . | quote }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.metrics.vmServiceScrape.tlsConfig }}
+      tlsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,108 @@
+# Drake pool using the examples/drake-runner-image Buildbarn runner. Build and
+# publish that image first (see its README), then replace the runner tag/digest
+# below and the matching container-image platform property. Buildbarn matches
+# platform properties exactly, so do not add Arch or OSFamily alongside
+# container-image or the worker stops matching the client's requested platform.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-drake
+spec:
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      concurrency: 11
+      inputDownloadConcurrency: 9
+      outputUploadConcurrency: 11
+      environmentVariables: {}
+      platformProperties:
+        - name: container-image
+          value: docker://<registry>/drake-runner@sha256:<digest>
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368 # 32 GiB
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776 # 24 GiB
+    rolloutOnChange: true
+  images:
+    runner: <registry>/drake-runner@sha256:<digest>
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      node-type: spot-std-large
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: hermetiq/allows-spot
+        operator: Exists
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 20
+    cooldownPeriodSeconds: 600
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_drake_active_or_queued_tasks
+      threshold: "11" # matches concurrency
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+    securityContext:
+      # Drake's build does not run Docker inside the runner, so this pool does
+      # not need the privileged/root runner container that the Testcontainers
+      # and Envoy pools require.
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir: {} # use a local-SSD hostPath (see docs/buildbarn-block-storage.md) for large Drake builds
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir: {}
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

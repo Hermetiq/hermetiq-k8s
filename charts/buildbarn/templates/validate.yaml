@@ -1,0 +1,201 @@
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- $validRoutingProviders := list "contour" "gateway" "gateway-httproute-only" "ingress" "none" -}}
+{{- $requestedRoutingProvider := default "" .Values.routing.provider -}}
+{{- if and $requestedRoutingProvider (not (has $requestedRoutingProvider $validRoutingProviders)) -}}
+{{- fail "routing.provider must be one of: contour, gateway, gateway-httproute-only, ingress, none" -}}
+{{- end -}}
+{{- if not (has $provider $validRoutingProviders) -}}
+{{- fail "routing.provider must be one of: contour, gateway, gateway-httproute-only, ingress, none" -}}
+{{- end -}}
+{{- if not (has .Values.storage.persistence.mode (list "pvc" "emptyDir" "hostPath")) -}}
+{{- fail "storage.persistence.mode must be one of: pvc, emptyDir, hostPath" -}}
+{{- end -}}
+{{- if not (has .Values.frontend.actionCache.putAuthorizer.mode (list "allow" "deny" "requireCanWriteToCache" "custom")) -}}
+{{- fail "frontend.actionCache.putAuthorizer.mode must be one of: allow, deny, requireCanWriteToCache, custom" -}}
+{{- end -}}
+{{- if and (eq .Values.frontend.actionCache.putAuthorizer.mode "custom") (not .Values.frontend.actionCache.putAuthorizer.custom) -}}
+{{- fail "frontend.actionCache.putAuthorizer.custom is required when frontend.actionCache.putAuthorizer.mode=custom" -}}
+{{- end -}}
+{{- if not (has .Values.storage.persistence.ac.keyLocationMap.type (list "inMemory" "blockDevice")) -}}
+{{- fail "storage.persistence.ac.keyLocationMap.type must be one of: inMemory, blockDevice" -}}
+{{- end -}}
+{{- if and .Values.tracing.enabled (not .Values.tracing.nodeLocal.enabled) (not .Values.tracing.endpoint) -}}
+{{- fail "tracing.endpoint is required when tracing.enabled=true and tracing.nodeLocal.enabled=false" -}}
+{{- end -}}
+{{- if and .Values.tracing.enabled .Values.tracing.tls.clientCertificate.enabled (not .Values.tracing.tls.enabled) -}}
+{{- fail "tracing.tls.enabled must be true when tracing.tls.clientCertificate.enabled=true" -}}
+{{- end -}}
+{{- $authorizerModes := list "allow" "deny" "requireCanWriteToCache" "custom" -}}
+{{- if not (has .Values.frontend.contentAddressableStorage.putAuthorizer.mode $authorizerModes) -}}
+{{- fail "frontend.contentAddressableStorage.putAuthorizer.mode must be one of: allow, deny, requireCanWriteToCache, custom" -}}
+{{- end -}}
+{{- if and (eq .Values.frontend.contentAddressableStorage.putAuthorizer.mode "custom") (not .Values.frontend.contentAddressableStorage.putAuthorizer.custom) -}}
+{{- fail "frontend.contentAddressableStorage.putAuthorizer.custom is required when frontend.contentAddressableStorage.putAuthorizer.mode=custom" -}}
+{{- end -}}
+{{- if not (has .Values.frontend.executeAuthorizer.mode $authorizerModes) -}}
+{{- fail "frontend.executeAuthorizer.mode must be one of: allow, deny, requireCanWriteToCache, custom" -}}
+{{- end -}}
+{{- if and (eq .Values.frontend.executeAuthorizer.mode "custom") (not .Values.frontend.executeAuthorizer.custom) -}}
+{{- fail "frontend.executeAuthorizer.custom is required when frontend.executeAuthorizer.mode=custom" -}}
+{{- end -}}
+{{/* --- Storage backend, sizing, raw block-device, and ISCC/FSAC validation --- */}}
+{{- $bd := .Values.storage.persistence.blockDevice -}}
+{{- if not (has $bd.deviceAccess (list "group" "chownInit")) -}}
+{{- fail "storage.persistence.blockDevice.deviceAccess must be one of: group, chownInit" -}}
+{{- end -}}
+{{- range $store := list "cas" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $store -}}
+{{- $active := or (eq $store "cas") (eq $store "ac") $s.enabled -}}
+{{- if $active -}}
+{{- if not (has $s.backend (list "filesystem" "blockDevice")) -}}
+{{- fail (printf "storage.persistence.%s.backend must be one of: filesystem, blockDevice" $store) -}}
+{{- end -}}
+{{- if and (ne $store "cas") (not (has $s.keyLocationMap.type (list "inMemory" "blockDevice"))) -}}
+{{- fail (printf "storage.persistence.%s.keyLocationMap.type must be one of: inMemory, blockDevice" $store) -}}
+{{- end -}}
+{{- $totalBlocks := add (int $s.spareBlocks) (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
+{{- if gt $totalBlocks 100 -}}
+{{- fail (printf "storage.persistence.%s: spareBlocks+oldBlocks+currentBlocks+newBlocks is %d; bb-storage supports at most 100 blocks per store" $store (int $totalBlocks)) -}}
+{{- end -}}
+{{- if and (eq $.Values.storage.persistence.mode "emptyDir") (not $s.emptyDir.sizeLimit) -}}
+{{- fail (printf "storage.persistence.%s.emptyDir.sizeLimit is required when storage.persistence.mode=emptyDir — an unbounded emptyDir can fill the node and get the pod evicted" $store) -}}
+{{- end -}}
+{{- if ne $s.backend "blockDevice" -}}
+{{/* Compare blocksSizeGi against whatever actually bounds the volume: the PVC
+     request in mode=pvc, or emptyDir.sizeLimit in mode=emptyDir. In hostPath
+     mode nothing in the chart bounds it — the host device does — so `size` is
+     inert there and comparing against it would reject valid configs. */}}
+{{- if eq $.Values.storage.persistence.mode "pvc" -}}
+{{- $storeSizeGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.size" $store) "value" $s.size) -}}
+{{- if ge (int $s.blocksSizeGi) (int $storeSizeGi) -}}
+{{- fail (printf "storage.persistence.%s.blocksSizeGi (%d) must be smaller than storage.persistence.%s.size (%s) to leave headroom for metadata" $store (int $s.blocksSizeGi) $store $s.size) -}}
+{{- end -}}
+{{- else if eq $.Values.storage.persistence.mode "emptyDir" -}}
+{{- $limitGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.emptyDir.sizeLimit" $store) "value" $s.emptyDir.sizeLimit) -}}
+{{- if ge (int $s.blocksSizeGi) (int $limitGi) -}}
+{{- fail (printf "storage.persistence.%s.blocksSizeGi (%d) must be smaller than storage.persistence.%s.emptyDir.sizeLimit (%s) to leave headroom for metadata" $store (int $s.blocksSizeGi) $store $s.emptyDir.sizeLimit) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $s.backend "blockDevice" -}}
+{{- if not (has $s.blockDevice.keyLocationMap (list "inMemory" "file")) -}}
+{{- fail (printf "storage.persistence.%s.blockDevice.keyLocationMap must be one of: inMemory, file" $store) -}}
+{{- end -}}
+{{- if not (has $.Values.storage.persistence.mode (list "pvc" "hostPath")) -}}
+{{- fail (printf "storage.persistence.%s.backend=blockDevice requires storage.persistence.mode to be pvc or hostPath (got %s)" $store $.Values.storage.persistence.mode) -}}
+{{- end -}}
+{{- if and (eq $.Values.storage.persistence.mode "hostPath") (not $bd.allowHostPath) -}}
+{{- fail (printf "storage.persistence.%s.backend=blockDevice with mode=hostPath requires storage.persistence.blockDevice.allowHostPath=true" $store) -}}
+{{- end -}}
+{{- if and (eq $.Values.storage.persistence.mode "pvc") (not $s.blockDevice.size) -}}
+{{- fail (printf "storage.persistence.%s.blockDevice.size is required when backend=blockDevice and mode=pvc (it sizes the Block PVC; with mode=hostPath the device's real size is authoritative)" $store) -}}
+{{- end -}}
+{{- if eq $s.blockDevice.keyLocationMap "file" -}}
+{{- if not $s.blockDevice.metadata.size -}}
+{{- fail (printf "storage.persistence.%s.blockDevice.metadata.size is required when blockDevice.keyLocationMap=file" $store) -}}
+{{- end -}}
+{{- $metadataSizeMi := include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.metadata.size" $store) "value" $s.blockDevice.metadata.size) -}}
+{{- $keyLocationMapSizeMi := int $s.blockDevice.metadata.keyLocationMapSizeMi -}}
+{{- if le (int $metadataSizeMi) $keyLocationMapSizeMi -}}
+{{- fail (printf "storage.persistence.%s.blockDevice.metadata.size (%s) must be larger than storage.persistence.%s.blockDevice.metadata.keyLocationMapSizeMi (%dMi) to leave headroom for persistent state" $store $s.blockDevice.metadata.size $store $keyLocationMapSizeMi) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.scheduler.sizeClassAnalysis.enabled (not .Values.storage.persistence.iscc.enabled) -}}
+{{- fail "scheduler.sizeClassAnalysis.enabled=true requires storage.persistence.iscc.enabled=true" -}}
+{{- end -}}
+{{- $are := .Values.config.actionCache.actionResultExpiring -}}
+{{- if $are.enabled -}}
+{{- if not $are.minimumValidity -}}
+{{- fail "config.actionCache.actionResultExpiring.minimumValidity is required when actionResultExpiring.enabled=true" -}}
+{{- end -}}
+{{/* bb-storage derives the jitter as `uint64(t.Unix()) * K % jitter`, so a
+     zero or absent value panics with an integer divide-by-zero on the first AC
+     hit. All three actionResultExpiring fields are CheckValid()d unconditionally
+     in bb-storage, which is why the template always renders them. */}}
+{{- if or (not $are.maximumValidityJitter) (regexMatch "^0+(\\.0+)?[a-z]*$" ($are.maximumValidityJitter | toString)) -}}
+{{- fail "config.actionCache.actionResultExpiring.maximumValidityJitter must be a NONZERO duration when actionResultExpiring.enabled=true (bb-storage takes a modulo by it, so zero panics with an integer divide-by-zero on the first Action Cache hit)" -}}
+{{- end -}}
+{{- end -}}
+{{/* Key-location-map capacity guard. A store whose KLM cannot index every object
+     its blocks device can hold will silently drop location records once the
+     table saturates: the blob is on disk but FindMissingBlobs reports it absent,
+     which clients surface as "Lost inputs no longer available remotely" (Bazel
+     exit 39). Opt-in via storage.keyLocationMapSizing.validate. */}}
+{{- $klm := .Values.storage.keyLocationMapSizing -}}
+{{- if $klm.validate -}}
+{{- $ratio := $klm.minimumRatio | float64 -}}
+{{- range $store := list "cas" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $store -}}
+{{- if or (eq $store "cas") (eq $store "ac") $s.enabled -}}
+{{- $isBlock := eq $s.backend "blockDevice" -}}
+{{/* Bytes the blocks device/file offers, and how many of its blocks hold data. */}}
+{{- $deviceMi := 0 -}}
+{{- if $isBlock -}}
+{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) -}}
+{{- else -}}
+{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 -}}
+{{- end -}}
+{{- $data := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
+{{- $total := add $data (int $s.spareBlocks) -}}
+{{- $usableMi := divf (mulf ($deviceMi | float64) ($data | float64)) ($total | float64) -}}
+{{- $avg := index $klm.averageObjectSizeBytes $store | float64 -}}
+{{- $maxObjects := divf (mulf $usableMi 1048576.0) $avg -}}
+{{/* Entries the configured KLM can actually index. A device/file-backed KLM
+     stores one 64-byte LocationRecord per slot. */}}
+{{- $entries := 0.0 -}}
+{{- $klmDesc := "" -}}
+{{/* Format sizes with %d/int64, never %v: Helm parses large YAML integers as
+     float64, so %v renders 20000000 as "2e+07" in the failure message. */}}
+{{- if $isBlock -}}
+{{- if eq $s.blockDevice.keyLocationMap "file" -}}
+{{- $entries = divf (mulf (int $s.blockDevice.metadata.keyLocationMapSizeMi | float64) 1048576.0) 64.0 -}}
+{{- $klmDesc = printf "blockDevice.metadata.keyLocationMapSizeMi=%d" (int64 $s.blockDevice.metadata.keyLocationMapSizeMi) -}}
+{{- else -}}
+{{- $entries = $s.blockDevice.keyLocationMapInMemoryEntries | float64 -}}
+{{- $klmDesc = printf "blockDevice.keyLocationMapInMemoryEntries=%d" (int64 $s.blockDevice.keyLocationMapInMemoryEntries) -}}
+{{- end -}}
+{{- else if eq $store "cas" -}}
+{{- $entries = divf (mulf (int $s.keyLocationMapSizeMi | float64) 1048576.0) 64.0 -}}
+{{- $klmDesc = printf "keyLocationMapSizeMi=%d" (int64 $s.keyLocationMapSizeMi) -}}
+{{- else if eq $s.keyLocationMap.type "blockDevice" -}}
+{{- $entries = divf (mulf (int $s.keyLocationMap.sizeMi | float64) 1048576.0) 64.0 -}}
+{{- $klmDesc = printf "keyLocationMap.sizeMi=%d" (int64 $s.keyLocationMap.sizeMi) -}}
+{{- else -}}
+{{- $entries = $s.keyLocationMap.entries | float64 -}}
+{{- $klmDesc = printf "keyLocationMap.entries=%d" (int64 $s.keyLocationMap.entries) -}}
+{{- end -}}
+{{- $required := mulf $ratio $maxObjects -}}
+{{- if lt $entries $required -}}
+{{- fail (printf "storage.persistence.%s: key-location map is too small for its blocks device. %s indexes %.0f objects, but %.0f MiB usable (%d of %d blocks) at storage.keyLocationMapSizing.averageObjectSizeBytes.%s=%.0f can hold %.0f objects — that is %.2fx, below the required %vx. Once the table saturates, blobs are written but become unreachable and clients fail with \"Lost inputs no longer available remotely\". Fix by raising the key-location map to at least %.0f entries, shrinking the blocks device, or switching to a device-backed key-location map (which is also persistent across restarts)." $store $klmDesc $entries $usableMi $data $total $store $avg $maxObjects (divf $entries $maxObjects) $klm.minimumRatio $required) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $w := list "workerUbuntu2204" "workerTestcontainers" "workerTestcontainersSysbox" -}}
+{{- $wv := index $.Values $w -}}
+{{- if and $wv $wv.config.prefetching.enabled -}}
+{{- if not $.Values.storage.persistence.fsac.enabled -}}
+{{- fail (printf "%s.config.prefetching.enabled=true requires storage.persistence.fsac.enabled=true" $w) -}}
+{{- end -}}
+{{- if not $wv.config.virtualBuildDirectory.enabled -}}
+{{- fail (printf "%s.config.prefetching.enabled=true requires %s.config.virtualBuildDirectory.enabled=true" $w $w) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.frontend.grpcCacheProxy.enabled -}}
+{{/* An empty natsUrl is legal: it runs the sidecar as a pure pass-through with
+     cache-event capture disabled. The subject prefix only matters when events
+     are actually published. */}}
+{{- if and .Values.frontend.grpcCacheProxy.natsUrl (not .Values.frontend.grpcCacheProxy.cacheEvents.subjectPrefix) -}}
+{{- fail "frontend.grpcCacheProxy.cacheEvents.subjectPrefix is required when frontend.grpcCacheProxy.natsUrl is set" -}}
+{{- end -}}
+{{- if and .Values.frontend.grpcCacheProxy.enforceAuth (or (not .Values.frontend.grpcCacheProxy.stytch.apiHost) (not .Values.frontend.grpcCacheProxy.stytch.existingSecret)) -}}
+{{- fail "frontend.grpcCacheProxy.stytch.apiHost and frontend.grpcCacheProxy.stytch.existingSecret are required when frontend.grpcCacheProxy.enforceAuth=true" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.browser.oauth2Proxy.enabled .Values.browser.service.targetPortOverride -}}
+{{- fail "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled — both claim the browser Service port" -}}
+{{- end -}}

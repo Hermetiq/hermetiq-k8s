@@ -1,0 +1,55 @@
+{{- if .Values.vmPodScrapes.enabled }}
+{{- $root := . -}}
+{{- $scrapes := list (dict "name" "browser-vmpodscrape" "app" "browser") (dict "name" "frontend-vmpodscrape" "app" "frontend") (dict "name" "scheduler-vmpodscrape" "app" "scheduler") (dict "name" "storage-vmpodscrape" "app" "storage") (dict "name" "worker-vmpodscrape" "app" "worker") -}}
+{{- if .Values.remoteAsset.enabled -}}
+{{- $scrapes = append $scrapes (dict "name" "remote-asset-vmpodscrape" "app" "remote-asset") -}}
+{{- end -}}
+{{- if .Values.portal.enabled -}}
+{{- $scrapes = append $scrapes (dict "name" "bb-portal-vmpodscrape" "app" "bb-portal") -}}
+{{- end -}}
+{{- range $scrape := $scrapes }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: {{ $scrape.name }}
+  namespace: {{ include "buildbarn.namespace" $root }}
+  labels:
+    {{- include "buildbarn.labels" $root | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" $scrape.app) | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "buildbarn.namespace" $root }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $root.Values.vmPodScrapes.interval }}
+      metricRelabelConfigs:
+        - targetLabel: hermetiq_project_id
+          replacement: {{ $root.Values.project.id | quote }}
+      {{- if eq $scrape.app "storage" }}
+      # The packaged VMRules and the bb-storage dashboards aggregate the
+      # blob-map eviction-age series by kubernetes_shard and
+      # kubernetes_replica. Nothing else emits those labels, so without this
+      # the per-shard panels plot a single collapsed series, the :min and :max
+      # recording rules are identical, and BuildbarnCacheRetentionLow renders
+      # a blank shard in its summary. Storage is a StatefulSet, so the pod
+      # ordinal is the shard and the pod name identifies the replica.
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          regex: .*-([0-9]+)
+          targetLabel: kubernetes_shard
+          replacement: $1
+          action: replace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: kubernetes_replica
+          action: replace
+      {{- end }}
+  podTargetLabels:
+    - kubernetes_service
+  selector:
+    matchLabels:
+      app: {{ $scrape.app }}
+---
+{{- end }}
+{{- end }}

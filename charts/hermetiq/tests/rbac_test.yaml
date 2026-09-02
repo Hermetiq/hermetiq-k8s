@@ -1,0 +1,86 @@
+suite: rbac
+templates:
+  - templates/rbac.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: grants bep-nats access to discover Buildbarn config from deployments and ConfigMaps
+    asserts:
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - equal:
+          path: rules[3].apiGroups[0]
+          value: apps
+        documentIndex: 0
+      - equal:
+          path: rules[3].resources[0]
+          value: deployments
+        documentIndex: 0
+      # Storage is a StatefulSet and mounts the shared component ConfigMap, so
+      # workload discovery has to see StatefulSets too.
+      - contains:
+          path: rules[3].resources
+          content: statefulsets
+        documentIndex: 0
+      - contains:
+          path: rules[3].verbs
+          content: get
+        documentIndex: 0
+      - contains:
+          path: rules[3].verbs
+          content: list
+        documentIndex: 0
+      - equal:
+          path: rules[4].apiGroups[0]
+          value: ""
+        documentIndex: 0
+      - equal:
+          path: rules[4].resources[0]
+          value: configmaps
+        documentIndex: 0
+      - contains:
+          path: rules[4].verbs
+          content: get
+        documentIndex: 0
+      - contains:
+          path: rules[4].verbs
+          content: list
+        documentIndex: 0
+      - equal:
+          path: rules[5].apiGroups[0]
+          value: bb.hermetiq.com
+        documentIndex: 0
+      - equal:
+          path: rules[5].resources[0]
+          value: rbeworkers
+        documentIndex: 0
+      - equal:
+          path: rules[5].verbs
+          value:
+            - get
+            - list
+        documentIndex: 0
+      - isKind:
+          of: RoleBinding
+        documentIndex: 1
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+        documentIndex: 1
+      - equal:
+          path: subjects[0].name
+          value: bep-nats
+        documentIndex: 1
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+        documentIndex: 1
+
+  - it: omits RbeWorker discovery access when disabled
+    set:
+      rbac.rules.rbeWorkers: false
+    asserts:
+      - notExists:
+          path: rules[?(@.resources[0] == "rbeworkers")]
+        documentIndex: 0

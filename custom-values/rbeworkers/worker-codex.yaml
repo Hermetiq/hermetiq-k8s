@@ -1,0 +1,108 @@
+# Codex pool using a codex-bazel runner image and a FUSE virtual build
+# directory. Edit platformProperties and the runner image to match the toolchain
+# your Bazel clients request.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-codex
+spec:
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      concurrency: 9
+      inputDownloadConcurrency: 9
+      outputUploadConcurrency: 11
+      environmentVariables: {}
+      platformProperties:
+        - name: Arch
+          value: amd64
+        - name: OSFamily
+          value: Linux
+        - name: container-image
+          value: docker://docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368 # 32 GiB
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776 # 24 GiB
+    rolloutOnChange: true
+  images:
+    runner: docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      node-type: spot-std-large
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: hermetiq/allows-spot
+        operator: Exists
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 20
+    cooldownPeriodSeconds: 450
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_codex_active_or_queued_tasks
+      threshold: "9" # matches concurrency
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsUser: 0
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir: {} # std-large nodes have no local SSD; boot-disk emptyDir
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir: {}
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+        ephemeral-storage: 42Gi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

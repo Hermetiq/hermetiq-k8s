@@ -1,0 +1,450 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermetiq-core.apiName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
+    app: {{ include "hermetiq-core.apiName" . }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.apiName" . }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" . "component" "api") | nindent 8 }}
+        app: {{ include "hermetiq-core.apiName" . }}
+        {{- if .Values.azureWorkloadIdentity.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        kubectl.kubernetes.io/default-container: api
+        hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
+        hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
+        {{- if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled (not .Values.api.jwt.audience) (not .Values.dashboard.oauth2Proxy.client.existingSecret) }}
+        hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+      {{- include "hermetiq-core.automountServiceAccountToken" .Values.api | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.app.terminationGracePeriodSeconds }}
+      dnsPolicy: ClusterFirst
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" . | nindent 8 }}
+      restartPolicy: Always
+      {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- if .Values.api.podAntiAffinity.enabled }}
+      {{- include "hermetiq-core.preferredPodAntiAffinity" (dict "app" (include "hermetiq-core.apiName" .)) | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.api) | nindent 6 }}
+      volumes:
+        - name: download-dir
+          emptyDir: {}
+        - name: cache-ttl-config
+          configMap:
+            name: {{ include "hermetiq-core.cacheTtlConfigName" . }}
+            items:
+              - key: {{ .Values.cacheTtl.configMapKey | quote }}
+                path: cache_ttl.json
+        - name: promql-config
+          configMap:
+            name: {{ include "hermetiq-core.promqlConfigName" . }}
+            items:
+              - key: {{ .Values.promqlQueries.configMapKey | quote }}
+                path: promql.json
+        # File-mount (not env) so the kubelet's ~1m Secret refresh enables
+        # license hot reload. Always mounted with optional: true so a trial
+        # install picks up the Secret when it is created later (paid-key
+        # arrival) with zero values changes or rollouts. No items: remapping —
+        # items referencing keys absent from an existing Secret break the
+        # mount; instead the Secret's keys project under their own names and
+        # the LICENSE_*_FILE env vars point straight at them.
+        - name: license-key
+          secret:
+            secretName: {{ include "hermetiq-core.licenseSecretName" . }}
+            optional: true
+        {{- if .Values.otel.mtls.enabled }}
+        - name: otel-exporter-client-mtls
+          secret:
+            secretName: {{ required "otel.mtls.secretName is required when otel.mtls.enabled=true" .Values.otel.mtls.secretName }}
+        {{- end }}
+      containers:
+        - name: grpc-auth-proxy
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.authProxy" "repository" .Values.images.authProxy.repository "tag" .Values.images.authProxy.tag "digest" .Values.images.authProxy.digest) }}
+          imagePullPolicy: {{ .Values.images.authProxy.pullPolicy }}
+          ports:
+            - containerPort: 50081
+              protocol: TCP
+          env:
+{{- with .Values.api.authProxy.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: DEBUG
+              value: {{ .Values.api.authProxy.debug | quote }}
+            - name: GRPC_PORT
+              value: "50081"
+            - name: PROXY_PORT
+              value: "50091"
+            {{- if .Values.api.jwt.enabled }}
+            - name: JWT_AUTH_ENABLED
+              value: "true"
+            {{- end }}
+            {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
+            - name: JWT_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.apiJwtIssuer" .) }}
+            - name: JWT_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.api.jwt.audience }}
+            - name: JWT_AUDIENCE
+              value: {{ .Values.api.jwt.audience | quote }}
+            {{- else if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled }}
+            - name: JWT_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
+                  key: OAUTH2_PROXY_CLIENT_ID
+            {{- end }}
+            {{- if .Values.api.jwt.groupsClaim }}
+            - name: JWT_GROUPS_CLAIM
+              value: {{ .Values.api.jwt.groupsClaim | quote }}
+            {{- end }}
+            {{- if .Values.api.jwt.nameClaim }}
+            - name: JWT_NAME_CLAIM
+              value: {{ .Values.api.jwt.nameClaim | quote }}
+            {{- end }}
+            {{- if .Values.publisher.hermetiqAdminGroup }}
+            - name: HERMETIQ_ADMIN_GROUP
+              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.adminEmails" .) }}
+            - name: ADMIN_EMAIL_ALLOWLIST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
+            # When set, the auth-proxy answers gRPC-web CORS preflight itself
+            # (in addition to translating gRPC-web ↔ gRPC). Useful when the
+            # upstream ingress controller can't answer preflight — e.g. GKE
+            # Gateway with H2C BackendService dropping non-gRPC traffic.
+            - name: CORS_ALLOWED_ORIGINS
+              value: {{ . | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.api.resources.authProxy | nindent 12 }}
+          {{- if .Values.api.authProxy.probes.enabled }}
+          livenessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.liveness) | nindent 12 }}
+          readinessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.readiness) | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        - name: api
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.api" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.apiTag "digest" .Values.images.bepNats.apiDigest) }}
+          imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}
+          ports:
+            - containerPort: 50091
+              name: grpc
+              protocol: TCP
+            - containerPort: 8008
+              name: api
+              protocol: TCP
+            - containerPort: 5150
+              name: mcp-http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "hermetiq-core.sharedEnvName" . }}
+          env:
+{{- with .Values.api.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: MCP_ENABLED
+              value: "true"
+            - name: MCP_RESOURCE_METADATA_URL
+              value: {{ include "hermetiq-core.mcpResourceUrl" . | quote }}
+            {{- with (include "hermetiq-core.mcpAuthorizationServer" .) }}
+            # Authorization server advertised in the protected-resource metadata.
+            # On-prem has no STYTCH_API_HOST fallback, so this must be set for
+            # OAuth discovery to work; derived from the OIDC issuer by default.
+            - name: MCP_AUTHORIZATION_SERVER
+              value: {{ . | quote }}
+            {{- end }}
+            - name: MCP_PROTO_INTEL_TOOLS_ENABLED
+              value: {{ .Values.app.mcpProtoIntelToolsEnabled | quote }}
+            - name: MCP_AUTH_DISABLED
+              value: {{ .Values.api.mcpAuthDisabled | quote }}
+            # gRPC authentication. The core is the authentication boundary now:
+            # it verifies bearer tokens itself for the gRPC API (50091) and the
+            # MCP HTTP server (5150), instead of trusting identity headers from
+            # the grpc-auth-proxy sidecar (which stays only for gRPC-web
+            # framing and CORS, and still reads its own JWT_* set above).
+            # Required — the process refuses to start without it.
+            - name: GRPC_AUTH_USER_PROVIDER
+              value: {{ include "hermetiq-core.grpcAuthUserProvider" . | quote }}
+            {{- if .Values.api.jwt.enabled }}
+            # Issuer/JWKS/groups come from api.jwt.* (shared with the sidecar).
+            {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
+            - name: GRPC_AUTH_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.apiJwtIssuer" .) }}
+            - name: GRPC_AUTH_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- $audiences := list (include "hermetiq-core.mcpResourceUrl" .) }}
+            {{- if .Values.api.jwt.audience }}
+            {{- $audiences = append $audiences .Values.api.jwt.audience }}
+            {{- end }}
+            {{- if eq (include "hermetiq-core.apiJwtAudienceFromOauth2Secret" .) "true" }}
+            # The gRPC API audience is the dashboard oauth2-proxy client ID,
+            # which lives in a Secret and so cannot be joined into the list at
+            # template time. It is injected here and interpolated below by the
+            # kubelet's $(VAR) expansion, which resolves env vars declared
+            # earlier in this same container.
+            - name: GRPC_AUTH_AUDIENCE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
+                  key: OAUTH2_PROXY_CLIENT_ID
+            {{- $audiences = append $audiences "$(GRPC_AUTH_AUDIENCE_CLIENT_ID)" }}
+            {{- end }}
+            # Comma-separated list; a token matching ANY entry is accepted. One
+            # process authenticates two callers with different audiences: the
+            # MCP endpoint, whose audience is the MCP resource URL itself
+            # (RFC 8707, derived from mcpResourceUrl / hosts.mcp, with
+            # trailing-slash differences normalized during verification), and
+            # the gRPC API, whose audience is api.jwt.audience or the
+            # oauth2-proxy client ID above.
+            - name: GRPC_AUTH_AUDIENCE
+              value: {{ join "," $audiences | quote }}
+            {{- if .Values.api.jwt.groupsClaim }}
+            - name: GRPC_AUTH_GROUPS_CLAIM
+              value: {{ .Values.api.jwt.groupsClaim | quote }}
+            {{- end }}
+            {{- if .Values.api.jwt.nameClaim }}
+            - name: GRPC_AUTH_NAME_CLAIM
+              value: {{ .Values.api.jwt.nameClaim | quote }}
+            {{- end }}
+            {{- end }}
+            # Admin resolution is split across two consumers: GRPC_AUTH_* is
+            # read by the token verifier, HERMETIQ_ADMIN_GROUP and
+            # ADMIN_EMAIL_ALLOWLIST (set below) by the claims-based user
+            # service. Both are set from the same values.
+            {{- if .Values.publisher.hermetiqAdminGroup }}
+            - name: GRPC_AUTH_ADMIN_GROUP
+              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.adminEmails" .) }}
+            - name: GRPC_AUTH_ADMIN_EMAIL_ALLOWLIST
+              value: {{ . | quote }}
+            {{- end }}
+            - name: CORS_ALLOWED_ORIGINS
+              value: {{ include "hermetiq-core.apiCorsAllowedOrigins" . | quote }}
+            - name: ENFORCE_PUB_AUTHZ
+              value: "false"
+            - name: APP_ENV
+              value: "on-prem"
+            # api mode serves query/MCP/REST only and drops the NATS
+            # dependency; BES ingest is served exclusively by bep-nats-pub
+            # (all bep/bbcal routes target the publisher Service).
+            - name: APP_MODE
+              value: api
+            - name: HTTP_PORT
+              value: "8008"
+            - name: K8S_POD_UID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: DB_HOSTNAME
+              value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+            - name: DB_PORT
+              value: {{ required "postgres.port is required" .Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ required "postgres.database is required" .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ required "postgres.user is required" .Values.postgres.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.postgresSecretName" . }}
+                  key: {{ .Values.postgres.password.existingSecretKey }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.redisSecretName" . }}
+                  key: {{ .Values.redis.password.existingSecretKey }}
+            - name: METRICS_ENABLED
+              value: {{ .Values.victoriaMetrics.metricsEnabled | default false | quote }}
+            - name: METRICS_PROJECT_LABEL_ENABLED
+              value: {{ .Values.victoriaMetrics.projectLabelEnabled | default false | quote }}
+            {{- with .Values.victoriaMetrics.baseUrl }}
+            - name: VM_BASE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: CACHE_EVENTS_ENABLED
+              value: {{ .Values.app.cacheEventsEnabled | default false | quote }}
+            - name: VICTORIA_LOGS_ENABLED
+              value: {{ .Values.app.victoriaLogsEnabled | default false | quote }}
+            - name: COST_REPORT_TICKER_ENABLED
+              value: {{ .Values.app.costReportTickerEnabled | default false | quote }}
+            {{- if .Values.app.openCostUrl }}
+            - name: OPEN_COST_URL
+              value: {{ .Values.app.openCostUrl | quote }}
+            {{- end }}
+            {{- if .Values.app.buildIdMode }}
+            - name: APP_BUILD_ID_MODE
+              value: {{ .Values.app.buildIdMode | quote }}
+            {{- end }}
+            {{- if .Values.app.buildIdRegex }}
+            - name: APP_BUILD_URL_BUILD_ID_REGEX
+              value: {{ .Values.app.buildIdRegex | quote }}
+            {{- end }}
+            - name: CACHE_TTL_CONFIG
+              value: /config/cache-ttl/cache_ttl.json
+            - name: PROMQL_CONFIG
+              value: /config/promql/promql.json
+            {{- if .Values.publisher.hermetiqAdminGroup }}
+            - name: HERMETIQ_ADMIN_GROUP
+              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.adminEmails" .) }}
+            - name: ADMIN_EMAIL_ALLOWLIST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.postgres.readReplica.host }}
+            - name: DB_READ_HOSTNAME
+              value: {{ .Values.postgres.readReplica.host | quote }}
+            - name: DB_READ_PORT
+              value: {{ default .Values.postgres.port .Values.postgres.readReplica.port | quote }}
+            {{- end }}
+            {{- if .Values.app.ghEnvDir }}
+            - name: GH_ENV_DIR
+              value: {{ .Values.app.ghEnvDir | quote }}
+            {{- end }}
+            {{- if .Values.app.rawBepExportBucket }}
+            - name: RAW_BEP_EXPORT_BUCKET
+              value: {{ .Values.app.rawBepExportBucket | quote }}
+            {{- end }}
+            {{- if .Values.app.taskQueueName }}
+            - name: TASK_QUEUE_NAME
+              value: {{ .Values.app.taskQueueName | quote }}
+            {{- end }}
+            {{- if .Values.slack.channelId }}
+            - name: SLACK_CHANNEL_ID
+              value: {{ .Values.slack.channelId | quote }}
+            {{- end }}
+            {{- if or .Values.slack.botToken.value .Values.slack.botToken.existingSecret }}
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.slackSecretName" . }}
+                  key: {{ .Values.slack.botToken.existingSecretKey }}
+            {{- end }}
+            # License enforcement (Keygen). Consulted only at startup, by the
+            # `license` readiness check, and by the read-only status endpoint
+            # — never on the request path.
+            - name: CONTACT_EMAIL
+              value: {{ .Values.license.contactEmail | quote }}
+            # Forwarded to the licensing service as trial/machine metadata.
+            - name: CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: LICENSE_TRIAL_ENABLED
+              value: {{ .Values.license.trial.enabled | quote }}
+            - name: LICENSE_AIRGAP
+              value: {{ .Values.license.airGapped | quote }}
+            - name: LICENSE_SAAS_URL
+              value: {{ .Values.license.saasUrl | quote }}
+            - name: LICENSE_STATE_SECRET_NAME
+              value: {{ include "hermetiq-core.licenseStateSecretName" . | quote }}
+            {{- if .Values.license.fingerprintOverride }}
+            - name: LICENSE_FINGERPRINT_OVERRIDE
+              value: {{ .Values.license.fingerprintOverride | quote }}
+            {{- end }}
+            # Paths track the Secret key names (no items: remapping on the
+            # volume). LICENSE_LIC_FILE is set unconditionally; the app only
+            # reads it in airgap mode.
+            - name: LICENSE_KEY_FILE
+              value: {{ printf "/config/license/%s" .Values.license.key.existingSecretKey | quote }}
+            - name: LICENSE_LIC_FILE
+              value: {{ printf "/config/license/%s" .Values.license.licenseFileSecretKey | quote }}
+            {{- if .Values.otel.mtls.enabled }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_KEY
+              value: {{ printf "%s/tls.key" .Values.otel.mtls.mountPath | quote }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE
+              value: {{ printf "%s/tls.crt" .Values.otel.mtls.mountPath | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: download-dir
+              mountPath: /tmp/artifact-downloads
+            - name: cache-ttl-config
+              mountPath: /config/cache-ttl
+              readOnly: true
+            - name: promql-config
+              mountPath: /config/promql
+              readOnly: true
+            - name: license-key
+              mountPath: /config/license
+              readOnly: true
+            {{- if .Values.otel.mtls.enabled }}
+            - name: otel-exporter-client-mtls
+              mountPath: {{ .Values.otel.mtls.mountPath }}
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.api.resources.api | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}

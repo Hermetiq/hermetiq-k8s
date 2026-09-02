@@ -1,0 +1,1921 @@
+# By default this chart renders all namespaced resources into hermetiq.
+namespaceOverride: hermetiq
+createNamespace: false
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+imagePullSecrets: []
+
+commonLabels: {}
+# Additional labels applied to every chart-managed Pod. Built-in identity,
+# selector, and metrics labels cannot be overridden. Changing these labels
+# rolls workloads.
+podLabels: {}
+commonAnnotations: {}
+extraObjects: []
+
+standardLabels:
+  appVersion: false
+
+serviceAccount:
+  # Set to true/false to apply a pod-level ServiceAccount token mount default
+  # across chart workloads. Leave null to preserve Kubernetes/default-SA behavior.
+  automountServiceAccountToken: null
+
+# Per-file overrides for the jsonnet configs in charts/buildbarn/files/config/.
+# Keys MUST match a filename present in that directory; an unknown key fails
+# `helm template` with the list of valid filenames. The value REPLACES that
+# file VERBATIM in the rendered ConfigMap — Helm templating is NOT applied,
+# so what you write is exactly what lands in the ConfigMap.
+#
+# Recommended use: copy a chart default as a starting point, customize, then
+# load via `--set-file`:
+#
+#   helm install ... \
+#     --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
+#
+# The chart's frontend.jsonnet and storage.jsonnet currently use Helm
+# templating (JWKS, OTEL endpoint, storage block size). If you override
+# either, you take responsibility for those features — inline the values
+# you need directly in your override.
+configOverrides: {}
+
+# Same pattern for files in charts/buildbarn/files/worker-config/.
+workerConfigOverrides: {}
+
+project:
+  id: "0" # hermetiq project ID (from bootstrap DB job)
+
+# Shared Buildbarn configuration knobs templated into files/config/*.
+config:
+  # Maximum gRPC message size in bytes, applied across all Buildbarn components
+  # via common.libsonnet (frontend, storage, scheduler, browser, workers,
+  # remote asset). Large unary payloads (BatchUpdateBlobs, Tree messages) must
+  # fit under this limit; streaming ByteStream traffic is unaffected.
+  maximumMessageSizeBytes: 10485760 # 10 MiB
+  actionCache:
+    # Hide ActionResults whose ExecutedActionMetadata.worker_completed_timestamp
+    # is older than minimumValidity (+ jitter), so every target is rebuilt
+    # periodically. This is a FRESHNESS knob, not a correctness one: it surfaces
+    # non-hermetic actions and inputs that are not really part of the action key
+    # (a moved base-image tag, a repo rule that fetches from the network).
+    #
+    # It is NOT what protects you from ActionResults referencing CAS blobs that
+    # have been evicted — completenessChecking (always rendered on the AC) does
+    # that by verifying every referenced blob still exists before returning a
+    # hit. You can leave this disabled and still be correct.
+    #
+    # Renders as blobstore.actionCache.actionResultExpiring wrapping
+    # completenessChecking in common.libsonnet.
+    actionResultExpiring:
+      enabled: false
+      # Floor on entry lifetime. Set this comfortably BELOW how long the CAS
+      # actually retains blobs, or you pay re-execution for entries whose
+      # outputs were still present. Derive CAS retention from the eviction rate:
+      #   retention ≈ (oldBlocks+currentBlocks+newBlocks) x blockBytes / bytesPerDay
+      # `bytesPerDay` comes from the blob_access Put counters; a store whose
+      # block_allocator_releases_total is still 0 has not evicted anything yet
+      # and its retention is unbounded so far.
+      minimumValidity: 2592000s # 30d
+      # Spreads expiry so a batch of ActionResults written by one large build
+      # does not all expire in the same instant and stampede the scheduler.
+      # Effective lifetime is minimumValidity + jitter, where jitter is derived
+      # deterministically from the ActionResult's own worker_completed_timestamp
+      # (bb-storage: `uint64(t.Unix()) * 0x936a0d2a41e8c779 % jitter`). Repeated
+      # lookups of one entry therefore agree on its expiry, though entries that
+      # completed in the same second share a jitter value — the spread comes from
+      # a build spanning many seconds.
+      #
+      # MUST BE NONZERO when enabled: that expression takes a modulo by this
+      # value, so 0s panics with an integer divide-by-zero on the first AC hit.
+      # Enforced in templates/validate.yaml.
+      maximumValidityJitter: 259200s # 3d
+      # Emergency AC flush: ActionResults completed before this RFC3339 instant
+      # are hidden regardless of minimumValidity. Bumping it to "now" invalidates
+      # the entire Action Cache, so treat it as a break-glass control rather than
+      # routine configuration.
+      #
+      # Empty => the Unix epoch, NOT an omitted field. bb-storage validates this
+      # field unconditionally and refuses to start on a nil Timestamp
+      # ("Invalid minimum timestamp: proto: invalid nil Timestamp"), so the chart
+      # always renders it. The epoch is the identity value: every ActionResult
+      # with a real worker_completed_timestamp clears it.
+      minimumTimestamp: ""
+
+images:
+  storage:
+    repository: ghcr.io/buildbarn/bb-storage
+    tag: 20260814T085338Z-fffe73b
+    digest: ""
+    pullPolicy: IfNotPresent
+  scheduler:
+    repository: ghcr.io/buildbarn/bb-scheduler
+    tag: 20260814T085403Z-13313e6
+    digest: ""
+    pullPolicy: IfNotPresent
+  browser:
+    repository: ghcr.io/buildbarn/bb-browser
+    tag: 20260415t065533z-ee35c54
+    digest: ""
+    pullPolicy: IfNotPresent
+  remoteAsset:
+    repository: ghcr.io/buildbarn/bb-remote-asset
+    tag: 20260817T230958Z-b6e412b
+    digest: ""
+    pullPolicy: IfNotPresent
+  worker:
+    repository: ghcr.io/buildbarn/bb-worker
+    tag: 20260814T085403Z-13313e6
+    digest: ""
+    pullPolicy: IfNotPresent
+  runnerInstaller:
+    repository: ghcr.io/buildbarn/bb-runner-installer
+    tag: 20260814T085403Z-13313e6
+    digest: ""
+    pullPolicy: IfNotPresent
+  runnerUbuntu2204:
+    image: ghcr.io/catthehacker/ubuntu:act-22.04@sha256:5f9c35c25db1d51a8ddaae5c0ba8d3c163c5e9a4a6cc97acd409ac7eae239448
+    pullPolicy: IfNotPresent
+  # Runner for the Testcontainers worker fleet. Defaults to the same image as
+  # runnerUbuntu2204; kept separate to allow divergence (e.g., a runner image
+  # that bundles a `docker` CLI for actions that shell out to it directly).
+  runnerTestcontainers:
+    image: ghcr.io/catthehacker/ubuntu:act-22.04@sha256:5f9c35c25db1d51a8ddaae5c0ba8d3c163c5e9a4a6cc97acd409ac7eae239448
+    pullPolicy: IfNotPresent
+  # Sysbox runner image for the separate Testcontainers Sysbox worker fleet.
+  # Must include Docker Engine/CLI and an entrypoint that starts dockerd before
+  # execing the bb_runner command passed by the Deployment.
+  runnerTestcontainersSysbox:
+    image: ""
+    pullPolicy: IfNotPresent
+  # Docker-in-Docker sidecar image for the Testcontainers worker fleet.
+  dind:
+    repository: docker
+    tag: 27.3.1-dind
+    digest: ""
+    pullPolicy: IfNotPresent
+  busybox:
+    image: busybox:1.31.1-uclibc
+    pullPolicy: IfNotPresent
+  oauth2Proxy:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: v7.15.1
+    digest: ""
+    pullPolicy: IfNotPresent
+  # Hermetiq grpc-cache-proxy sidecar for the frontend (frontend.grpcCacheProxy).
+  # Released public image; no imagePullSecret is required.
+  grpcCacheProxy:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
+    tag: v0.9.0
+    digest: ""
+    pullPolicy: IfNotPresent
+  # bb-portal build-event dashboard (portal.enabled). One image: the Go binary
+  # serves the embedded web UI, the gRPC-Web APIs, and the BES gRPC endpoint.
+  portal:
+    repository: ghcr.io/buildbarn/bb-portal
+    tag: 20260812T063819Z-57cd49d
+    digest: ""
+    pullPolicy: IfNotPresent
+
+secrets:
+  mtlsClientCert: client-mtls
+
+hosts:
+  # All buildbarn host DNS names derive from this base (browser.<domainBase>,
+  # bb.<domainBase>, rbe-web.<domainBase>, asset.<domainBase>). Override individual hosts below if needed.
+  domainBase: helm.hermetiq.dev
+  browser: ""
+  frontendGrpc: ""
+  rbeWeb: ""
+  remoteAsset: ""
+  # bb-portal hosts (portal.<domainBase> / bes.<domainBase> when empty).
+  portal: ""
+  bes: ""
+  # External hosts (different domain — set explicitly).
+  otel: otel.cloud-grpc.hermetiq.io
+
+bbcal:
+  address: bep-nats-pub.hermetiq.svc.cluster.local:50091
+
+tracing:
+  # Enables shared Buildbarn OTel tracing for storage, frontend, scheduler,
+  # browser, workers, runners, and the optional remote asset service.
+  enabled: false
+  nodeLocal:
+    # When enabled, spans are exported to K8S_LOCAL_NODE_IP:port.
+    enabled: true
+    port: 4317
+  # Used when nodeLocal.enabled=false.
+  endpoint: ""
+  tls:
+    enabled: false
+    # Defaults to hosts.otel when empty.
+    serverName: ""
+    clientCertificate:
+      enabled: false
+      # Defaults to secrets.mtlsClientCert when empty.
+      secretName: ""
+      mountPath: /etc/tracing-mtls-client-cert
+      certificatePath: tls.crt
+      privateKeyPath: tls.key
+      refreshInterval: 20000s
+  batchSpanProcessor:
+    batchTimeout: 10s
+    exportTimeout: 30s
+    maxExportBatchSize: 1024
+    maxQueueSize: 4096
+  sampler:
+    parentBasedMaximumRate:
+      samplesPerEpoch: 5
+      epochDuration: 1s
+
+routing:
+  # Set false to skip all chart-managed external routing resources, including
+  # Gateway/HTTPRoute/GRPCRoute, Contour HTTPProxy, Ingress, route TLS
+  # Certificates, Envoy Gateway policies, and GKE Gateway policies. Internal
+  # Services are still rendered so you can supply your own routing
+  # implementation.
+  enabled: true
+  # Supported providers: contour, gateway, gateway-httproute-only, ingress, none.
+  # Use gateway-httproute-only for GKE Gateway, which supports HTTPRoute but
+  # not GRPCRoute. Use gateway for Envoy Gateway and other GRPCRoute-capable
+  # Gateway API controllers.
+  # Set provider to none as an alternative to routing.enabled=false.
+  # Only the selected provider's resources are rendered. The per-provider
+  # enabled flags below (ingress.enabled, httpProxy.enabled, gateway.enabled)
+  # control sub-resources within that provider — you do not need to disable
+  # the other providers.
+  provider: contour
+
+k8sNodeScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+  tolerations: []
+
+storage:
+  replicas: 3
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  # Mounts secrets.mtlsClientCert into the storage pod. Use together with
+  # tracing.enabled + tracing.tls.clientCertificate.enabled for mTLS tracing.
+  mtlsClientCert:
+    enabled: false
+  resources:
+    requests:
+      cpu: 500m
+      # Covers the default in-memory key-location maps as they fill. With
+      # backend=blockDevice the defaults total 54M entries x 64 B = ~3.5 GiB;
+      # the filesystem defaults keep their maps on disk and need far less. Raise
+      # this whenever you raise keyLocationMapInMemoryEntries.
+      memory: 4Gi
+    limits:
+      cpu: 7100m
+      memory: 16Gi
+  env:
+    BB_PPROF_ENABLED: "false"
+#    GOMEMLIMIT: 15GiB
+#    GOMAXPROCS: "7"
+  # Key-location-map (KLM) capacity guard.
+  #
+  # Every bb-storage `local` store keeps a hash table mapping digest -> location
+  # on the blocks device. It is a FIXED-SIZE open-addressed table: writes probe
+  # up to keyLocationMapMaximumPutAttempts (64) slots, and once live records
+  # approach the table's capacity those probes start failing. A blob whose
+  # location record could not be stored is written to disk but is UNREACHABLE —
+  # FindMissingBlobs reports it absent while the bytes sit there. Clients see
+  # this as "Lost inputs no longer available remotely" / Bazel exit 39
+  # REMOTE_CACHE_EVICTED, which reads like an eviction problem but is not one.
+  #
+  # The table must therefore be sized against how many objects the DEVICE can
+  # hold, not against your current working set:
+  #
+  #   maxObjects = usableBytes / averageObjectSizeBytes
+  #   usableBytes = deviceBytes x (oldBlocks+currentBlocks+newBlocks)
+  #                              / (oldBlocks+currentBlocks+newBlocks+spareBlocks)
+  #   entries >= minimumRatio x maxObjects          (upstream advises 2-10x)
+  #
+  # An in-memory KLM costs ~64 B/entry of RSS as it fills (reserved lazily at
+  # startup, resident as touched), so a large device pushes you toward
+  # `keyLocationMap: file`, which puts the table on disk at the same 64 B/entry
+  # and additionally makes the store persistent across restarts.
+  #
+  # Measure averageObjectSizeBytes from your own cluster rather than trusting the
+  # defaults below — they come from one dev deployment:
+  #   buildbarn_blobstore_blob_access_operations_blob_size_bytes_sum{operation="Put"}
+  #     / ..._count{operation="Put"}
+  keyLocationMapSizing:
+    # Opt-in so upgrades cannot start failing for existing installs. Turning it
+    # on is recommended: it converts a silent, very confusing runtime failure
+    # into a `helm template` error that shows the arithmetic. Only checks stores
+    # whose size this chart can actually see (see minimumRatio note below).
+    validate: false
+    minimumRatio: 2
+    # For backend=blockDevice with mode=hostPath the real device size is not
+    # visible to Helm, so the check uses the documentary `blockDevice.size`.
+    # Keep that field truthful or the guard is meaningless.
+    averageObjectSizeBytes:
+      cas: 17408 # ~17 KiB
+      ac: 1152   # ~1.1 KiB; ActionResult protos
+      iscc: 512  # PreviousExecutionStats protos
+      fsac: 2048 # path bloom filters, capped by bloomFilterMaximumSizeBytes
+  persistence:
+    # Supported modes:
+    # - pvc: durable PersistentVolumeClaims via volumeClaimTemplates.
+    # - emptyDir: pod-lifetime ephemeral storage; on GKE, pair with Local
+    #   SSD-backed ephemeral storage node pools.
+    # - hostPath: node-local path, typically backed by mounted Local SSD/NVMe.
+    mode: pvc
+    # Global settings for the raw block-device backend (a store's
+    # `backend: blockDevice`). See README "Raw block-device storage".
+    blockDevice:
+      # Permit backend=blockDevice together with mode=hostPath (advanced; used
+      # for node-local NVMe carved by partition_ephemeral_disks). When false,
+      # blockDevice requires mode=pvc.
+      allowHostPath: false
+      # The storage pod runs as uid/gid 65534 and uses fsGroup to prepare
+      # filesystem PVC/emptyDir volumes without a root init container. For raw
+      # block stores, this also controls how the non-root storage container gets
+      # read/write on the device node:
+      #   group     - rely on pod securityContext fsGroup/supplementalGroups.
+      #               PSS "restricted"-compatible (no privileged init), but only
+      #               works if the CSI presents the device group-accessible.
+      #   chownInit - a root, CHOWN-capable init container chowns the device.
+      #               Requires a PSS "baseline" namespace / exemption.
+      deviceAccess: group
+      fsGroup: 65534
+      supplementalGroups: [6] # 6 = 'disk' on most distros; [] to disable
+      deviceInit:
+        # Only used when deviceAccess=chownInit. Escalate to privileged only if
+        # adding the CHOWN capability is insufficient on your runtime/CSI.
+        privileged: false
+        securityContext: {}
+    cas:
+      # filesystem: blocks live in a file on a Filesystem PVC (default).
+      # blockDevice: blocks live on a raw volumeMode:Block device; the KLM is in
+      #   memory by default (no persistence) or, when keyLocationMap=file, on a
+      #   small companion Filesystem PVC (persistent).
+      backend: filesystem
+      storageClassName: premium-rwo
+      size: 1000Gi
+      # Size of the CAS blocks file in GiB. Must be smaller than `size` to leave
+      # headroom for cas-keys.db and persistent state — typically ~10% smaller.
+      blocksSizeGi: 950
+      # 7168 MiB / 64 B = ~117M indexable objects, ~2.1x the ~57M objects that
+      # 885 GiB usable holds at keyLocationMapSizing.averageObjectSizeBytes.cas.
+      # See the keyLocationMapSizing block above before changing either number.
+      keyLocationMapSizeMi: 7168
+      # Block geometry. Block size = blocks bytes / (spareBlocks + oldBlocks +
+      # currentBlocks + newBlocks); one block is both the eviction unit and the
+      # largest storable blob. CHANGING ANY COUNT (or the blocks/device size)
+      # changes the derived block size, and a persistent store discards ALL
+      # existing data on next start — plan geometry changes as cache flushes.
+      oldBlocks: 8
+      currentBlocks: 30
+      newBlocks: 3
+      spareBlocks: 3
+      # Optional cap on parallel write syscalls against the blocks device/file
+      # (Buildbarn blockdevice writeConcurrencyLimit). Protects against OS
+      # thread exhaustion on slow disks; applies to both backends. null => omit.
+      writeConcurrencyLimit: null
+      emptyDir:
+        # Required when storage.persistence.mode=emptyDir: an unbounded emptyDir
+        # can fill the node and get the pod evicted.
+        sizeLimit: ""
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/cas
+        type: DirectoryOrCreate
+      # Used only when backend=blockDevice.
+      blockDevice:
+        storageClassName: ""     # StorageClass that provisions volumeMode:Block
+        # Raw device size; block size is auto-inferred. Defaulted to 200Gi rather
+        # than 1000Gi because the default key-location map below is in memory:
+        # ~186 GiB usable / 17408 B = ~11.5M blobs, indexed 2.1x by 24M entries
+        # for ~1.5 GiB of RSS. A 1000Gi device would need ~117M entries (~7.4 GiB)
+        # to hold the same ratio — at that scale switch keyLocationMap to `file`.
+        size: 200Gi
+        # Deprecated alias for storage.persistence.cas.writeConcurrencyLimit
+        # (honored only when backend=blockDevice). null => omit from config.
+        writeConcurrencyLimit: null
+        # inMemory (default; NOT persistent — the store returns empty after a
+        #   restart) | file (persistent; adds a small companion Filesystem PVC,
+        #   or with mode=hostPath a metadata.hostPath.path you must supply).
+        #
+        # Prefer `file` for anything large or production-facing: it keeps the map
+        # off the heap so it can be sized generously, and it makes the store
+        # survive restarts — which in turn lets you keep a longer
+        # frontend existenceCaching window safely. Size it with the formula in
+        # storage.keyLocationMapSizing above.
+        keyLocationMap: inMemory
+        keyLocationMapInMemoryEntries: 24000000
+        metadata:                # used only when keyLocationMap=file
+          storageClassName: premium-rwo
+          size: 10Gi
+          keyLocationMapSizeMi: 7360
+          # Advanced (mode=hostPath): node-local dir for the KLM file + state.
+          hostPath:
+            path: ""
+            type: DirectoryOrCreate
+        # Advanced (mode=hostPath): consume a pre-created node-local device node
+        # (e.g. an LVM LV from partition_ephemeral_disks) instead of a PVC.
+        hostPath:
+          devicePath: ""         # e.g. /dev/ephemeral/cas
+    ac:
+      backend: filesystem
+      storageClassName: premium-rwo
+      size: 12Gi
+      blocksSizeGi: 10
+      keyLocationMap:
+        type: inMemory # inMemory or blockDevice
+        # ~9.2 GiB usable at averageObjectSizeBytes.ac holds ~8.5M ActionResults,
+        # so keep this (or sizeMi x 1Mi / 64) at >= 2x that.
+        entries: 21000000
+        sizeMi: 1344
+      # See the CAS block-geometry comment: changing any count (or the blocks/
+      # device size) flushes a persistent store. newBlocks must stay 1 for the
+      # AC/ISCC/FSAC (mutable stores; enforced by bb-storage).
+      oldBlocks: 8
+      currentBlocks: 24
+      newBlocks: 1
+      spareBlocks: 3
+      # Optional cap on parallel write syscalls (see cas.writeConcurrencyLimit).
+      writeConcurrencyLimit: null
+      emptyDir:
+        # Required when storage.persistence.mode=emptyDir.
+        sizeLimit: ""
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/ac
+        type: DirectoryOrCreate
+      # Used only when backend=blockDevice.
+      blockDevice:
+        storageClassName: ""
+        # ~7.3 GiB usable / 1152 B per ActionResult = ~6.8M, indexed 2.1x by 14M.
+        size: 8Gi
+        # Deprecated alias for storage.persistence.ac.writeConcurrencyLimit.
+        writeConcurrencyLimit: null
+        keyLocationMap: inMemory
+        keyLocationMapInMemoryEntries: 14000000
+        metadata:
+          storageClassName: premium-rwo
+          size: 3Gi
+          keyLocationMapSizeMi: 1344
+          hostPath:
+            path: ""
+            type: DirectoryOrCreate
+        hostPath:
+          devicePath: ""
+    # Initial Size Class Cache (ISCC): consumed by bb-scheduler for size-class
+    # analysis. Only useful when worker platforms declare multiple size classes.
+    # Enable together with scheduler.sizeClassAnalysis.enabled.
+    iscc:
+      enabled: false
+      backend: filesystem
+      storageClassName: premium-rwo
+      # ISCC objects are small PreviousExecutionStats protos and there is at most
+      # one per distinct action, so this store is deliberately SMALL. Giving it a
+      # large device just means millions of indexable slots the key-location map
+      # would have to cover (see storage.keyLocationMapSizing above).
+      size: 2Gi
+      blocksSizeGi: 1
+      keyLocationMap:
+        type: inMemory # inMemory or blockDevice
+        entries: 4000000
+        sizeMi: 256
+      oldBlocks: 8
+      currentBlocks: 24
+      newBlocks: 1
+      spareBlocks: 3
+      writeConcurrencyLimit: null
+      emptyDir:
+        # Required when storage.persistence.mode=emptyDir.
+        sizeLimit: ""
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/iscc
+        type: DirectoryOrCreate
+      blockDevice:
+        storageClassName: ""
+        size: 2Gi
+        # Deprecated alias for storage.persistence.iscc.writeConcurrencyLimit.
+        writeConcurrencyLimit: null
+        keyLocationMap: inMemory
+        keyLocationMapInMemoryEntries: 8000000
+        metadata:
+          storageClassName: premium-rwo
+          size: 1Gi
+          keyLocationMapSizeMi: 512
+          hostPath:
+            path: ""
+            type: DirectoryOrCreate
+        hostPath:
+          devicePath: ""
+    # File System Access Cache (FSAC): consumed by workers for prefetching. Only
+    # useful with the virtual (FUSE/NFS) build directory. Enable together with a
+    # worker's prefetching.enabled.
+    fsac:
+      enabled: false
+      backend: filesystem
+      storageClassName: premium-rwo
+      # One path-bloom-filter per distinct action, each capped by the worker's
+      # prefetching.bloomFilterMaximumSizeBytes. Larger objects than the ISCC but
+      # still a small store — see storage.keyLocationMapSizing above.
+      size: 6Gi
+      blocksSizeGi: 4
+      keyLocationMap:
+        type: inMemory # inMemory or blockDevice
+        entries: 4000000
+        sizeMi: 256
+      oldBlocks: 8
+      currentBlocks: 24
+      newBlocks: 1
+      spareBlocks: 3
+      writeConcurrencyLimit: null
+      emptyDir:
+        # Required when storage.persistence.mode=emptyDir.
+        sizeLimit: ""
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/fsac
+        type: DirectoryOrCreate
+      blockDevice:
+        storageClassName: ""
+        size: 6Gi
+        # Deprecated alias for storage.persistence.fsac.writeConcurrencyLimit.
+        writeConcurrencyLimit: null
+        keyLocationMap: inMemory
+        keyLocationMapInMemoryEntries: 8000000
+        metadata:
+          storageClassName: premium-rwo
+          size: 1Gi
+          keyLocationMapSizeMi: 512
+          hostPath:
+            path: ""
+            type: DirectoryOrCreate
+        hostPath:
+          devicePath: ""
+  dataIntegrityValidationCache:
+    enabled: true
+    cacheSize: 100000
+    cacheDuration: 14400s
+    cacheReplacementPolicy: LEAST_RECENTLY_USED
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  podAntiAffinity:
+    # Storage shards must run on distinct nodes. With replicas=3, at least
+    # three eligible nodes are required while this is enabled.
+    enabled: true
+  # At most one storage shard may be voluntarily disrupted at a time.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  # Pod terminationGracePeriodSeconds (null => Kubernetes default, 30s).
+  # Persistent stores flush on shutdown with two full syncs of the blocks
+  # device plus a state write; on large network-attached volumes give this
+  # enough headroom or up to minimumEpochInterval (300s) of recent writes
+  # degrade to the crash-recovery bound.
+  terminationGracePeriodSeconds: null
+  # Optional NetworkPolicy for the storage tier. Storage gRPC (:8981) accepts
+  # unauthenticated traffic — authentication and cache-write authorization
+  # happen at the frontend — so any pod that can reach the port can read and
+  # write the whole cache. Enable to restrict ingress to Buildbarn components
+  # in this namespace (app: frontend/scheduler/browser/remote-asset/bb-portal/
+  # worker/storage) plus the peers listed below. Requires a
+  # CNI that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
+  networkPolicy:
+    enabled: false
+    # Extra NetworkPolicyPeer entries allowed to reach gRPC :8981 — e.g.
+    # operator-managed RbeWorker pods in another namespace:
+    #   - podSelector:
+    #       matchLabels:
+    #         app.kubernetes.io/name: bb-worker
+    #     namespaceSelector:
+    #       matchLabels:
+    #         kubernetes.io/metadata.name: rbe-workers
+    additionalClientPeers: []
+    # Peers allowed to scrape metrics :9980. Empty list => allow from anywhere
+    # (scrapers usually run in another namespace, e.g. victoriametrics).
+    metricsPeers: []
+
+frontend:
+  # 2 minimum. The frontend is the only component on the CLIENT path — Bazel
+  # reaches it through the ingress, while workers and the scheduler talk to the
+  # storage shards directly — so it absorbs the full concurrency of every build
+  # at once and is the first thing to saturate.
+  #
+  # One replica is not a capacity choice, it is a cliff. Observed on a single
+  # replica: a `--jobs=200` client drove 435k requests through the Envoy Gateway,
+  # the proxy could only hold 81 upstream connections open, requests queued
+  # waiting for one, and the gateway's default 1024-deep pending queue rejected
+  # 96k of them (22%) with "UNAVAILABLE ... reset reason: overflow". CAS
+  # operations averaged 776ms and peaked at 36s. Nothing crashed and no pod
+  # restarted — the tier simply had nowhere to put the work.
+  #
+  # A second replica halves per-replica in-flight load and makes
+  # podDisruptionBudget below meaningful (at 1 replica it can only ever block
+  # eviction or allow an outage). Scale further with client concurrency: roughly
+  # one replica per ~100 concurrent client jobs, and give each one CPU to match
+  # (the 300m default request throttles hard under real load).
+  replicas: 2
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  # Mounts secrets.mtlsClientCert into the frontend pod. Use together with
+  # tracing.enabled + tracing.tls.clientCertificate.enabled for mTLS tracing.
+  mtlsClientCert:
+    enabled: false
+  # JWT authentication for the frontend gRPC server. When enabled, the gRPC
+  # authenticationPolicy is rendered as `any` of (jwt, allow) — JWT-authenticated
+  # requests get `private.canWriteToCache=true` metadata, while unauthenticated
+  # requests still pass through. Use cache authorizers to gate writes on that flag.
+  #
+  # The frontend reads JWKS from a file mounted from `configMapName`. You may
+  # populate that ConfigMap yourself (kubectl, GitOps, sealed-secrets, etc.) or
+  # opt into the bundled `sync` CronJob below to fetch from a JWKS URL.
+  jwks:
+    enabled: false
+    issuer: ""    # optional; e.g. "https://dev-pwl1kfrxjue5nhgo.us.auth0.com/"
+    audience: ""  # optional; the API identifier configured in Auth0
+    # Optional override for the JMESPath claims-validation expression. When
+    # empty, an expression is built from `issuer`/`audience` above (or `true`
+    # if both are empty). Set to "`true`" (backticks included) to accept any
+    # signed JWT, or write your own JMESPath to validate additional claims.
+    claimsValidationExpression: ""
+    # ConfigMap mounted into the frontend pod containing the JWKS file.
+    # The frontend reloads the file every 300s; kubelet propagates ConfigMap
+    # updates to the mounted volume within ~60s, so key rotation is hands-off.
+    configMapName: frontend-jwks
+    configMapKey: jwks.json
+    # Optional: bundled CronJob using buildbarn's sync_jwks_to_configmap tool
+    # to fetch keys from a JWKS URL into the ConfigMap above. Skip this if you
+    # manage the ConfigMap externally.
+    sync:
+      enabled: false
+      url: ""                     # JWKS source URL (e.g. https://<tenant>.auth0.com/.well-known/jwks.json)
+      schedule: "0 */6 * * *"
+      # When true, also runs a one-shot Job on helm install/upgrade so the
+      # ConfigMap is populated before the frontend pod starts validating tokens.
+      initialSyncEnabled: true
+      # JWKS sync patches a ConfigMap through the Kubernetes API, so keep token
+      # mounting enabled even when serviceAccount.automountServiceAccountToken=false.
+      automountServiceAccountToken: true
+      # Optional CronJob/Job guardrails. Leave null to preserve existing behavior.
+      startingDeadlineSeconds: null
+      job:
+        activeDeadlineSeconds: null
+        ttlSecondsAfterFinished: null
+      initialJob:
+        activeDeadlineSeconds: null
+        ttlSecondsAfterFinished: null
+      image:
+        repository: ghcr.io/buildbarn/sync-jwks-to-configmap
+        tag: "20260417T091355Z-5ebb263"
+        digest: ""
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+  actionCache:
+    putAuthorizer:
+      # Supported modes: allow, deny, requireCanWriteToCache, custom.
+      mode: allow
+      # Used when mode=custom. This string is inserted as the body of
+      # `putAuthorizer: { ... }`.
+      custom: ""
+      requireCanWriteToCacheExpression: 'authenticationMetadata.private.canWriteToCache == `true`'
+  contentAddressableStorage:
+    # Server-side cache of FindMissingBlobs results, so repeated overlapping
+    # lookups from one client do not each hit the storage shards. Ignored when
+    # frontend.readCache.enabled=true (that path replaces this decorator).
+    #
+    # DURABILITY COUPLING: this cache remembers that a blob was PRESENT. For up
+    # to cacheDuration after a blob actually disappears, the frontend keeps
+    # telling clients it exists, so they skip re-uploading it and the action
+    # later fails with "Lost inputs no longer available remotely". Upstream
+    # states the backend "must also be robust enough to guarantee that objects
+    # don't disappear shortly after calling FindMissingBlobs".
+    #
+    # A store using an in-memory key-location map is NOT that robust: it comes
+    # back empty after any storage pod restart. Keep cacheDuration short (or set
+    # enabled=false) unless the stores behind it are persistent.
+    existenceCaching:
+      enabled: true
+      cacheSize: 1000000
+      cacheDuration: 300s
+    putAuthorizer:
+      # Supported modes: allow, deny, requireCanWriteToCache, custom.
+      mode: allow
+      # Used when mode=custom. This string is inserted as the body of
+      # `putAuthorizer: { ... }`.
+      custom: ""
+      requireCanWriteToCacheExpression: 'authenticationMetadata.private.canWriteToCache == `true`'
+  executeAuthorizer:
+    # Supported modes: allow, deny, requireCanWriteToCache, custom.
+    mode: allow
+    # Used when mode=custom. This string is inserted as the body of
+    # `executeAuthorizer: { ... }`.
+    custom: ""
+    requireCanWriteToCacheExpression: 'authenticationMetadata.private.canWriteToCache == `true`'
+  readCache:
+    enabled: false
+    mountPath: /storage-frontend-cas
+    keyLocationMapInMemoryEntries: 20971520
+    blocksSizeGi: 250
+    oldBlocks: 8
+    currentBlocks: 24
+    newBlocks: 3
+    spareBlocks: 3
+    volume:
+      emptyDir: {}
+      hostPath:
+        enabled: false
+        path: ""
+        type: DirectoryOrCreate
+  tracingAttributes:
+    actionCacheDigests:
+      enabled: true
+  # Optional ClusterIP Service for trusted in-cluster clients that need to
+  # bypass the grpc-cache-proxy. This Service always targets the Buildbarn
+  # frontend container on port 8980, even when grpcCacheProxy.enabled=true.
+  # It performs no authentication and does not emit grpc-cache-proxy events;
+  # do not attach an external route to it.
+  internalService:
+    enabled: true
+    name: frontend-internal
+  # Optional Hermetiq grpc-cache-proxy sidecar that captures cache hit/miss
+  # events from frontend gRPC traffic and publishes them to NATS. When enabled,
+  # the frontend-grpc Service targetPort switches from the frontend container
+  # (8980) to this sidecar, so externally routed traffic (Contour, Gateway,
+  # Ingress) flows through it with no route changes; the sidecar forwards to
+  # the frontend on 127.0.0.1:8980. Chart components (browser, portal, remote
+  # asset) read the storage shards directly and are unaffected.
+  grpcCacheProxy:
+    enabled: false
+    # gRPC listen port of the sidecar (GRPC_PORT). Becomes the frontend-grpc
+    # Service targetPort; the Service port stays 8980.
+    port: 50081
+    # NATS server cache events are published to (e.g.
+    # nats://nats.nats-system.svc:4222). Leave empty to run the sidecar as a
+    # plain pass-through proxy with cache-event capture switched off entirely.
+    # NOTE: only unauthenticated NATS endpoints are supported — the proxy has no
+    # values for NATS credentials, nkeys, or TLS.
+    natsUrl: ""
+    cacheEvents:
+      # Subject prefix for published cache events (e.g. prod_cache). Required
+      # when natsUrl is set.
+      subjectPrefix: ""
+      # MUST equal the bep-nats stream partition count (the hermetiq chart's
+      # app.streamPartitionCount / STREAM_PARTITION_COUNT). Events published to
+      # a shard nothing consumes are silently discarded.
+      numShards: 1
+    # Applied to both the sidecar's server and its upstream connection to the
+    # frontend, and floored at config.maximumMessageSizeBytes: a smaller limit
+    # here would reject Buildbarn responses with ResourceExhausted. A very large
+    # config.maximumMessageSizeBytes may therefore warrant raising resources
+    # below, since the proxy buffers a message while forwarding it.
+    maxMessageSizeBytes: 67108864
+    # Reject unauthenticated requests. Requires stytch.apiHost and
+    # stytch.existingSecret so the proxy can validate tokens. When false the
+    # sidecar is NOT an authorization boundary — it forwards every request and
+    # Buildbarn's own authorizers decide.
+    enforceAuth: false
+    debug: false
+    stytch:
+      # Stytch API host used to validate tokens (e.g. https://login.example.com).
+      apiHost: ""
+      # Pre-created Secret with Stytch credentials, exposed via envFrom. Only
+      # mounted when enforceAuth=true, since the proxy reads STYTCH_* only then.
+      # Set to "" to skip.
+      existingSecret: stytch-secret
+    otel:
+      # OTLP endpoint for the sidecar's OTEL_* env vars. Set this explicitly for
+      # a non-standard collector, or to override the chart-level tracing
+      # endpoint. Leave empty to derive it, in this order:
+      #   1. tracing.enabled + tracing.nodeLocal.enabled
+      #        -> <scheme>://$(K8S_LOCAL_NODE_IP):<tracing.nodeLocal.port>
+      #   2. tracing.enabled + tracing.endpoint -> <scheme>://<tracing.endpoint>
+      #   3. otherwise                          -> http://<hosts.otel>:4317
+      # <scheme> is https when tracing.tls.enabled, otherwise http. hosts.otel is
+      # required in case 3, since the sidecar's exporter is always configured and
+      # would otherwise fall back to the OTEL SDK default of localhost:4317.
+      # NOTE: hosts.otel defaults to a Hermetiq-operated host. On-prem installs
+      # should point it at their own in-cluster collector.
+      endpoint: ""
+      protocol: grpc
+      serviceName: grpc-cache-proxy
+      interval: 15s
+    # Native Kubernetes gRPC probes (k8s >= 1.24) against the sidecar's
+    # grpc.health.v1 service — no probe binary is needed in the image. Once the
+    # Service targetPort moves here these report the PROXY's health, not the
+    # frontend's; the frontend keeps its own HTTP probes on :9980.
+    probes:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    # Extra environment variables, name -> value (tpl-rendered). Use for the
+    # proxy's tuning knobs, e.g. CACHE_EVENT_BATCH_SIZE,
+    # CACHE_EVENT_FLUSH_INTERVAL, SHUTDOWN_DRAIN_DELAY, SHUTDOWN_TIMEOUT.
+    env: {}
+    resources:
+      requests:
+        cpu: 600m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+#  env:
+#    GOMEMLIMIT: 3GiB
+#    GOMAXPROCS: "2"
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  # Prefer replicas on different nodes without making scheduling fail when the
+  # cluster has fewer eligible nodes than replicas.
+  podAntiAffinity:
+    enabled: true
+  # At most one frontend replica may be voluntarily disrupted at a time.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+scheduler:
+  replicas: 1
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  defaultExecutionTimeout: 1800s
+  maximumExecutionTimeout: 7200s
+  platformQueueWithNoWorkersTimeout: 900s
+  # Feedback-driven initial-size-class analysis backed by the Initial Size Class
+  # Cache (ISCC). Requires storage.persistence.iscc.enabled=true, and only has an
+  # effect when platform queues declare multiple size classes.
+  sizeClassAnalysis:
+    enabled: false
+    failureCacheDuration: 86400s
+    historySize: 32
+    pageRank:
+      acceptableExecutionTimeIncreaseExponent: 0.5
+      smallerSizeClassExecutionTimeoutMultiplier: 1.5
+      minimumExecutionTimeout: 10s
+      maximumConvergenceError: 0.002
+  # Predeclared platform queues. REQUIRED to serve MULTIPLE size classes for a
+  # platform: the scheduler keeps a persistent queue per class so the
+  # feedback-driven analyzer + ISCC can route across them (they otherwise
+  # disappear when their workers stop synchronizing). Each entry:
+  #   platform:    list of {name, value} properties the worker pools advertise;
+  #                all pools in one size-class group share a SINGLE platform.
+  #   sizeClasses: increasing, POSITIVE size classes (recommend = worker CPU
+  #                cores; the largest retries actions that fail on smaller ones).
+  #                A single-class queue may use [0]. Must match the pools'
+  #                runners[].sizeClass.
+  #   instanceNamePrefix: optional; defaults to "" (matches all instance names).
+  # Example:
+  #   predeclaredPlatformQueues:
+  #     - platform:
+  #         - { name: pool, value: sizeclass }
+  #       sizeClasses: [1, 2]
+  predeclaredPlatformQueues: []
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+
+browser:
+  replicas: 1
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+  oauth2Proxy:
+    enabled: false
+    # By default, reuse the oauth2-proxy ConfigMap created by the hermetiq chart.
+    # Set to "" to render a Buildbarn-specific ConfigMap from the values below.
+    existingConfigMap: oauth2-proxy-config-web-ui
+    provider: oidc
+    # Required when enabled and existingConfigMap is empty: OIDC issuer URL.
+    oidcIssuerUrl: ""
+    scope: openid email profile
+    oidcGroupsClaim: groups
+    validateUrl: ""
+    backendLogoutUrl: ""
+    whitelistDomain: ""
+    passUserHeaders: true
+    # Emit X-Auth-Request-* response headers, including groups, for ingress
+    # auth-request integrations in addition to X-Forwarded-* upstream headers.
+    setXAuthRequest: true
+    insecureOidcAllowUnverifiedEmail: true
+    insecureOidcSkipIssuerVerification: true
+    skipOidcDiscovery: false
+    skipProviderButton: true
+    skipJwtBearerTokens: true
+    sslInsecureSkipVerify: true
+    skipAuthPreflight: true
+    sessionCookieMinimal: false
+    showDebugOnError: true
+    cookieSecure: true
+    # Optional shared cookie domains, for example [".example.com"] when dashboard
+    # and browser hosts share a parent domain.
+    cookieDomains: []
+    # Reuse the oauth2-proxy Secret created by the hermetiq chart by default.
+    # Set existingSecret to "" to render a Buildbarn-specific Secret from inline values.
+    client:
+      existingSecret: oauth2-proxy-client
+      clientId: ""
+      clientSecret: ""
+      cookieSecret: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  # Extension hook: extra containers appended verbatim to the browser pod
+  # (rendered through tpl). Use together with service.targetPortOverride to
+  # front the browser with a custom auth/proxy sidecar the chart does not
+  # model. Any referenced Secrets/ConfigMaps must be pre-created.
+  extraContainers: []
+  service:
+    # When set (a port NUMBER exposed by one of extraContainers), the browser
+    # Service serves and targets this port instead of the browser container
+    # (7984) or the oauth2-proxy port. All routing providers follow the
+    # Service automatically. Mutually exclusive with oauth2Proxy.enabled.
+    targetPortOverride: null
+
+remoteAsset:
+  enabled: false
+  replicas: 1
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  port: 8985
+  allowUpdatesForInstances: []
+  fetcher:
+    http:
+      enabled: true
+  tracingAttributes:
+    fetchBlobUris:
+      enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+  probes:
+    enabled: true
+    readiness:
+      httpGet:
+        path: /-/healthy
+        port: 9980
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      httpGet:
+        path: /-/healthy
+        port: 9980
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      timeoutSeconds: 3
+      failureThreshold: 5
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+
+portal:
+  # bb-portal build-event dashboard. A single Deployment serves everything: the
+  # web UI and HTTP/gRPC-Web APIs on portal.<domainBase> (:8081), and the Build
+  # Event Stream gRPC ingest endpoint on bes.<domainBase> (:8082, h2c). The UI
+  # is embedded in the binary, so there is no separate frontend workload.
+  # Requires a pre-created PostgreSQL credentials Secret (db.existingSecret).
+  #
+  # WARNING: bb-portal has no authentication. Both the HTTP API/UI on
+  # portal.<domainBase> and the BES gRPC ingest endpoint on bes.<domainBase>
+  # are served with `authenticationPolicy: { allow: {} }` and an `allow`
+  # instance-name authorizer, so anyone who can reach those hosts can read
+  # every build's events and publish their own. The chart does not front them
+  # with oauth2-proxy the way browser.oauth2Proxy fronts Buildbarn Browser.
+  # Only enable this behind an external auth layer, an internal-only Gateway
+  # or Ingress, or a NetworkPolicy that restricts who can reach the routes.
+  enabled: false
+  replicas: 1
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  db:
+    # Pre-created Secret with keys DB_USER, DB_PASSWORD, DB_HOSTNAME,
+    # DB_PORT, DB_NAME; DB_CONNECTION_STRING is composed from them at pod
+    # start. The chart never renders database credentials.
+    existingSecret: bbportal-db-env
+    # Connection pool bounds. Keep maxOpenConnections within the budget your
+    # PostgreSQL server allows across all portal replicas.
+    connectionPool:
+      maxOpenConnections: 10
+      maxIdleConnections: 10
+      connectionMaxLifetime: 120s
+      connectionMaxIdleTime: 30s
+  bes:
+    enableBepFileUpload: true
+    # Serves an unauthenticated GraphQL playground against the portal's
+    # schema. Turn this off for anything reachable beyond a trusted network.
+    enableGraphqlPlayground: true
+    # Minimum wall time between two event batches. Larger values trade
+    # dashboard freshness for less database load.
+    minEventBatchDuration: 0.1s
+    # buildTags key whose value groups invocations into one build. Invocations
+    # without it are not associated with any build. Set to "" to disable
+    # grouping.
+    #
+    # NOTE: build tags only exist if invocationMetadataExtractor below produces
+    # them. With no extractor configured, buildTags is always empty, so this key
+    # never matches and the Builds page stays empty (individual invocations
+    # still show up).
+    buildKey: build_id
+    # Raw buildbarn.configuration.jmespath.Expression, rendered into
+    # portal.jsonnet as besServiceConfiguration.invocationMetadataExtractor.
+    # It runs against {"env": <Bazel's env>, "files": {...}} and returns any of
+    # username, hostname, sourceControls, invocationTags, buildTags — which is
+    # what populates the Builds page, the per-user views, and the source-control
+    # tab. Leave empty to record none of it.
+    #
+    # Example (Buildkite):
+    #   invocationMetadataExtractor:
+    #     expression: |
+    #       {
+    #         "username": env.BUILDKITE_BUILD_CREATOR,
+    #         "buildTags": {"build_id": env.BUILDKITE_BUILD_ID},
+    #         "sourceControls": [{
+    #           "repo": env.BUILDKITE_REPO,
+    #           "ref": env.BUILDKITE_BRANCH,
+    #           "commit": env.BUILDKITE_COMMIT
+    #         }]
+    #       }
+    invocationMetadataExtractor: {}
+    cleanup:
+      cleanupInterval: 60s
+      invocationMessageTimeout: 1800s
+      invocationRetention: 604800s # 7 days
+  # Settings injected into the embedded web UI when it serves index.html.
+  frontend:
+    companyName: Hermetiq
+    # Page-level toggles. These only hide UI: the underlying APIs stay
+    # reachable, so do not treat them as an access control mechanism. Turning
+    # a page on requires the matching backend service — the bes.* pages need
+    # portal.bes, `browser` needs the CAS/AC stores, and `scheduler` needs the
+    # bb-scheduler connection.
+    featureFlags:
+      home:
+        fileUpload: true
+        instructions: true
+      bes:
+        pageBuilds: true
+        pageInvocations: true
+        pageTargets: true
+        pageTests: true
+        pageTrends: true
+      # bb-portal's own CAS/Action Cache browser. Turn off if you send people
+      # to Buildbarn Browser (browser.enabled) instead.
+      browser: true
+      scheduler: true
+    # Footer links, rendered in a row at the bottom of every page. Each entry
+    # is {text, href, icon}, where icon is {slack: {}}, {github: {}},
+    # {discord: {}}, or {url: "https://..."}.
+    footerContent: []
+    # Extra columns for the build and invocation tables, sourced from build or
+    # invocation tags. Each entry is {title, valueKey, urlKey}.
+    additionalBuildColumns: []
+    additionalBuildInvocationColumns: []
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+  nodeSelector: null
+  tolerations: null
+
+workerUbuntu2204:
+  # Legacy chart-managed worker Deployment. Disabled by default so worker pools
+  # are managed through the bb-worker-operator RbeWorker custom resource instead.
+  enabled: false
+  replicas: 0
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  config:
+    # Prefetch CAS objects using File System Access Cache (FSAC) profiles.
+    # Requires storage.persistence.fsac.enabled=true and the virtual build
+    # directory (virtualBuildDirectory.enabled=true).
+    prefetching:
+      enabled: false
+      bloomFilterBitsPerPath: 14
+      bloomFilterMaximumSizeBytes: 65536
+    concurrency: 11
+    platformProperties:
+      - name: container-image
+        value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+    environmentVariables: {}
+    inputDownloadConcurrency: 9
+    outputUploadConcurrency: 11
+    nativeBuildDirectory:
+      maximumCacheFileCount: 100000
+      maximumCacheSizeBytes: 5368709120
+    contentAddressableStorageReadCache:
+      keyLocationMapSizeBytes: 209715200
+      keyLocationMapMaximumGetAttempts: 8
+      keyLocationMapMaximumPutAttempts: 32
+      oldBlocks: 2
+      currentBlocks: 12
+      newBlocks: 1
+      blocksSizeBytes: 17179869184
+      spareBlocks: 1
+      dataIntegrityValidationCache:
+        enabled: true
+        cacheSize: 10000
+        cacheDuration: 14400s
+        cacheReplacementPolicy: LEAST_RECENTLY_USED
+    directoryCache:
+      maximumCount: 5000
+      maximumSizeBytes: 10240000
+      cacheReplacementPolicy: LEAST_RECENTLY_USED
+    completedActionLoggers:
+      enabled: true
+      maximumSendQueueSize: 1000
+    virtualBuildDirectory:
+      enabled: true
+      filePoolPath: /storage-worker-cas/file_pool
+      filePoolSizeBytes: 34359738368
+      maximumFilePoolFileCount: 200000
+      maximumFilePoolSizeBytes: 25769803776
+      maximumExecutionTimeoutCompensation: 3600s
+      maximumWritableFileUploadDelay: 60s
+      shuffleDirectoryListings: false
+      fuse:
+        directoryEntryValidity: 300s
+        inodeAttributeValidity: 300s
+        allowOther: true
+        mountMethod: DIRECT
+  worker:
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsUser: 0
+      runAsGroup: 0
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+#    env:
+#      GOMEMLIMIT: 1200MiB
+#      GOMAXPROCS: "1"
+  runner:
+    runCommandsAs:
+      enabled: false
+      userId: 1000
+      groupId: 1000
+    setTmpdirEnvironmentVariable: false
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+#    env:
+#      GOMEMLIMIT: 48GiB
+#      GOMAXPROCS: "13"
+  initResources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+  # GKE-specific defaults — override for other cloud providers.
+  storageWorkerCas:
+    hostPath:
+      path: /mnt/stateful_partition/kube-ephemeral-ssd/cas
+      type: DirectoryOrCreate
+  fuse:
+    enabled: true
+    hostPath:
+      path: /dev/fuse
+      type: CharDevice
+
+# Optional Testcontainers-aware worker fleet. Renders a parallel
+# Deployment/ScaledObject that schedules onto a dedicated, tainted GKE node
+# pool and runs a Docker-in-Docker sidecar so Bazel actions with matching
+# platform properties can spin up containers via the Testcontainers client.
+#
+# Routing: this fleet advertises platform property `pool=testcontainers`. The
+# existing workerUbuntu2204 fleet does NOT advertise `pool`, so:
+#   - actions that don't request `pool` route to workerUbuntu2204 (unchanged)
+#   - actions that request `pool=testcontainers` route only here
+# Bazel side: set exec_properties on tests/actions that need Docker:
+#   exec_properties = {"pool": "testcontainers"}
+# If this fleet advertises additional properties, such as container-image, the
+# action must request those too. Buildbarn's default action platform matching is
+# exact.
+#
+# Node pool prerequisites (provisioned out-of-band — see Pulumi micro-stack
+# at cloud-native/pulumi-iac/gke-test):
+#   - Label: workload=testcontainers
+#   - Taint: workload=testcontainers:NoSchedule
+#   - Ubuntu containerd node image (required for overlay2 inside DinD)
+#   - Local SSD mounted at /mnt/stateful_partition/kube-ephemeral-ssd
+#     (CAS hostPath, matches the convention used by workerUbuntu2204)
+workerTestcontainers:
+  enabled: false
+  replicas: 0
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  nodeSelector:
+    workload: testcontainers
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: testcontainers
+      effect: NoSchedule
+  config:
+    # Prefetch CAS objects using File System Access Cache (FSAC) profiles.
+    # Requires storage.persistence.fsac.enabled=true and the virtual build
+    # directory (virtualBuildDirectory.enabled=true).
+    prefetching:
+      enabled: false
+      bloomFilterBitsPerPath: 14
+      bloomFilterMaximumSizeBytes: 65536
+    # Conservative starting point: each concurrent action can spawn multiple
+    # test containers (Postgres, Redis, Kafka, ...). Raise after measuring
+    # pod memory usage under a representative test load.
+    concurrency: 2
+    # Routing keys for this fleet. Buildbarn's default platformKeyExtractor.action
+    # requires EXACT-match equality between an action's requested platform map
+    # and a worker's advertised map. If you leave container-image here, clients
+    # must request it as well, typically via
+    # --remote_default_exec_properties=container-image=docker://ghcr.io/catthehacker/ubuntu:act-22.04,
+    # while targets that need Docker add exec_properties = {"pool": "testcontainers"}.
+    # If your regular worker advertises no platform properties, override this
+    # list to only pool=testcontainers.
+    platformProperties:
+      - name: container-image
+        value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+      - name: pool
+        value: testcontainers
+    # Injected into every action's environment by bb_worker. Useful for
+    # non-test actions (genrules, custom rules) that need to reach the DinD
+    # socket. NOTE: Bazel's test wrapper strips environment variables by
+    # default — anything injected here will NOT reach a `*_test` target's
+    # process. For test targets, set the env on the rule directly:
+    #
+    #   go_test(
+    #     name = "...",
+    #     env = {
+    #       "DOCKER_HOST": "unix:///var/run/docker.sock",
+    #       "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE": "/var/run/docker.sock",
+    #       "TESTCONTAINERS_HOST_OVERRIDE": "localhost",
+    #     },
+    #     tags = ["requires-docker"],
+    #   )
+    #
+    # TESTCONTAINERS_HOST_OVERRIDE=localhost is correct because the dind
+    # sidecar shares the Pod's network namespace with the runner.
+    environmentVariables:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TESTCONTAINERS_HOST_OVERRIDE: localhost
+      TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
+    inputDownloadConcurrency: 4
+    outputUploadConcurrency: 4
+    nativeBuildDirectory:
+      maximumCacheFileCount: 100000
+      maximumCacheSizeBytes: 5368709120
+    contentAddressableStorageReadCache:
+      keyLocationMapSizeBytes: 209715200
+      keyLocationMapMaximumGetAttempts: 8
+      keyLocationMapMaximumPutAttempts: 32
+      oldBlocks: 2
+      currentBlocks: 12
+      newBlocks: 1
+      blocksSizeBytes: 17179869184
+      spareBlocks: 1
+      dataIntegrityValidationCache:
+        enabled: true
+        cacheSize: 10000
+        cacheDuration: 14400s
+        cacheReplacementPolicy: LEAST_RECENTLY_USED
+    directoryCache:
+      maximumCount: 5000
+      maximumSizeBytes: 10240000
+      cacheReplacementPolicy: LEAST_RECENTLY_USED
+    completedActionLoggers:
+      enabled: true
+      maximumSendQueueSize: 1000
+    virtualBuildDirectory:
+      enabled: true
+      filePoolPath: /storage-worker-cas/file_pool
+      filePoolSizeBytes: 34359738368
+      maximumFilePoolFileCount: 200000
+      maximumFilePoolSizeBytes: 25769803776
+      maximumExecutionTimeoutCompensation: 3600s
+      maximumWritableFileUploadDelay: 60s
+      shuffleDirectoryListings: false
+      fuse:
+        directoryEntryValidity: 300s
+        inodeAttributeValidity: 300s
+        allowOther: true
+        mountMethod: DIRECT
+  worker:
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsUser: 0
+      runAsGroup: 0
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+  runner:
+    runCommandsAs:
+      enabled: false
+      userId: 1000
+      groupId: 1000
+    setTmpdirEnvironmentVariable: false
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+    # Higher memory budget than ubuntu22-04: runner shares Pod memory with
+    # the DinD daemon and any test containers it spins up.
+    resources:
+      requests:
+        cpu: 4000m
+        memory: 16Gi
+      limits:
+        cpu: 8000m
+        memory: 32Gi
+  # Docker-in-Docker sidecar settings.
+  dind:
+    # Storage driver — overlay2 needs the kernel module on the node (present
+    # on GKE Ubuntu containerd). Fall back to vfs only if overlay2 fails.
+    storageDriver: overlay2
+    # Registry mirrors passed to dockerd as --registry-mirror flags. Add an
+    # internal Artifact Registry remote repo here to dodge Docker Hub rate
+    # limits.
+    registryMirrors:
+      - https://mirror.gcr.io
+    # Extra args appended to the dockerd command line.
+    extraArgs: []
+    # Additional environment variables for the dind container.
+    env: {}
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+  # Images to pull into the DinD daemon when the Pod starts, so the first
+  # test on a fresh worker isn't blocked on registry fetches. Examples:
+  #   - postgres:16
+  #   - redis:7
+  #   - confluentinc/cp-kafka:7.5
+  #   - testcontainers/ryuk:0.6.0
+  preloadImages: []
+  initResources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+  storageWorkerCas:
+    hostPath:
+      path: /mnt/stateful_partition/kube-ephemeral-ssd/cas
+      type: DirectoryOrCreate
+  fuse:
+    enabled: true
+    hostPath:
+      path: /dev/fuse
+      type: CharDevice
+
+# Optional Sysbox-backed Testcontainers worker fleet. This is separate from the
+# DinD `workerTestcontainers` fleet so both approaches can run in the same
+# Buildbarn cluster. It requires a dedicated node pool with Sysbox installed and
+# a Kubernetes RuntimeClass named by `runtimeClassName`.
+workerTestcontainersSysbox:
+  enabled: false
+  replicas: 0
+  # Set to true/false to override serviceAccount.automountServiceAccountToken.
+  automountServiceAccountToken: null
+  runtimeClassName: sysbox-runc
+  # Sysbox v0.7's Kubernetes integration relies on Kubernetes user namespaces.
+  # Kubernetes enables those per pod with hostUsers=false.
+  hostUsers: false
+  nodeSelector:
+    workload: testcontainers-sysbox
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: testcontainers-sysbox
+      effect: NoSchedule
+  config:
+    # Prefetch CAS objects using File System Access Cache (FSAC) profiles.
+    # Requires storage.persistence.fsac.enabled=true and the virtual build
+    # directory (virtualBuildDirectory.enabled=true).
+    prefetching:
+      enabled: false
+      bloomFilterBitsPerPath: 14
+      bloomFilterMaximumSizeBytes: 65536
+    concurrency: 2
+    platformProperties:
+      - name: pool
+        value: testcontainers-sysbox
+    # Injected into every action's environment by bb_worker. For Bazel test
+    # targets, also set these directly on the rule because Bazel's test wrapper
+    # does not preserve all worker-injected environment variables.
+    environmentVariables:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TESTCONTAINERS_HOST_OVERRIDE: localhost
+      TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
+    inputDownloadConcurrency: 4
+    outputUploadConcurrency: 4
+    nativeBuildDirectory:
+      maximumCacheFileCount: 100000
+      maximumCacheSizeBytes: 5368709120
+    contentAddressableStorageReadCache:
+      keyLocationMapSizeBytes: 209715200
+      keyLocationMapMaximumGetAttempts: 8
+      keyLocationMapMaximumPutAttempts: 32
+      oldBlocks: 2
+      currentBlocks: 12
+      newBlocks: 1
+      blocksSizeBytes: 17179869184
+      spareBlocks: 1
+      dataIntegrityValidationCache:
+        enabled: true
+        cacheSize: 10000
+        cacheDuration: 14400s
+        cacheReplacementPolicy: LEAST_RECENTLY_USED
+    directoryCache:
+      maximumCount: 5000
+      maximumSizeBytes: 10240000
+      cacheReplacementPolicy: LEAST_RECENTLY_USED
+    completedActionLoggers:
+      enabled: true
+      maximumSendQueueSize: 1000
+    # Keep the first Sysbox iteration on native build directories. FUSE virtual
+    # build directories can be evaluated later once compatibility is proven.
+    virtualBuildDirectory:
+      enabled: false
+      filePoolPath: /storage-worker-cas/file_pool
+      filePoolSizeBytes: 34359738368
+      maximumFilePoolFileCount: 200000
+      maximumFilePoolSizeBytes: 25769803776
+      maximumExecutionTimeoutCompensation: 3600s
+      maximumWritableFileUploadDelay: 60s
+      shuffleDirectoryListings: false
+      fuse:
+        directoryEntryValidity: 300s
+        inodeAttributeValidity: 300s
+        allowOther: true
+        mountMethod: DIRECT
+  worker:
+    env: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsUser: 0
+      runAsGroup: 0
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+  runner:
+    env: {}
+    runCommandsAs:
+      enabled: false
+      userId: 1000
+      groupId: 1000
+    setTmpdirEnvironmentVariable: false
+    # Leave unset so the Sysbox runner image can use its own USER/entrypoint
+    # setup for starting dockerd.
+    securityContext: {}
+    resources:
+      requests:
+        cpu: 4000m
+        memory: 16Gi
+      limits:
+        cpu: 8000m
+        memory: 32Gi
+  preloadImages: []
+  initResources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 100m
+      memory: 100Mi
+  storageWorkerCas:
+    hostPath:
+      path: /mnt/stateful_partition/kube-ephemeral-ssd/cas
+      type: DirectoryOrCreate
+
+keda:
+  enabled: true
+  prometheusServerAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  workerUbuntu2204:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 0
+    maxReplicaCount: 20
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    metricName: worker_ubuntu22_04_active_or_queued_tasks
+    threshold: "11"
+  workerTestcontainers:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    metricName: worker_testcontainers_active_or_queued_tasks
+    # Matches workerTestcontainers.config.concurrency.
+    threshold: "2"
+  workerTestcontainersSysbox:
+    pollingInterval: 30
+    cooldownPeriod: 900
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    metricName: worker_testcontainers_sysbox_active_or_queued_tasks
+    # Matches workerTestcontainersSysbox.config.concurrency.
+    threshold: "2"
+
+certificate:
+  # Only rendered for contour and ingress providers. Gateway mode expects TLS
+  # to be configured on the Gateway resource itself.
+  enabled: true
+  name: bb-wildcard-cert
+  # SANs for the Certificate. Empty derives them from hosts.* — the
+  # *.<hosts.domainBase> wildcard plus each enabled component host, which
+  # requires hosts.domainBase. Set this explicitly when you override every
+  # hosts.* value individually and have no shared base domain.
+  dnsNames: []
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: lets-encrypt-issuer
+
+tls:
+  # Existing wildcard TLS secret to share across all Contour HTTPProxy or
+  # Ingress resources. When set, the chart does not render a cert-manager
+  # Certificate even if certificate.enabled is true.
+  secretName: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  grpc:
+    proxyReadTimeoutSeconds: "300"
+    proxySendTimeoutSeconds: "300"
+  browser:
+    enabled: true
+    name: browser-bb
+    corsAllowOrigin: https://dashboard.hermetiq.io,https://web-dev.hermetiq.dev,http://localhost:3000
+  rbeWeb:
+    enabled: true
+    name: rbe-web-bb
+  frontendGrpc:
+    enabled: true
+    name: frontend-bb-cloud-grpc
+  remoteAssetGrpc:
+    enabled: false
+    name: remote-asset-bb-cloud-grpc
+  # bb-portal routes (rendered only when portal.enabled). Shared by the
+  # contour and ingress providers, mirroring remoteAssetGrpc.
+  portal:
+    enabled: true
+    name: portal-bb
+  besGrpc:
+    enabled: true
+    name: bb-portal-bes-grpc
+
+httpProxy:
+  enabled: true
+  name: frontend-bb-cloud-grpc
+  responseTimeout: 300s
+  # Idle timeout on the HTTP stream. RBE Execute is a server-streaming RPC
+  # that holds the stream open while a worker runs the action; default
+  # Contour idle timeouts can reset long-lived streams (RST_STREAM,
+  # INTERNAL_ERROR). Set to a long duration or "infinity" to disable.
+  # Empty string omits the field, leaving Contour's default in place.
+  idleTimeout: 1h
+  # Upstream connection idle timeout (Contour timeoutPolicy.idleConnection).
+  # Empty string omits the field.
+  idleConnectionTimeout: ""
+  # mTLS client certificate validation on the HTTPProxy. Requires the CA secret to exist
+  # in the chart's namespace. Disable if you don't have client certs to enforce.
+  clientValidation:
+    enabled: false
+    caSecret: ""
+    optionalClientCertificate: true
+    forwardClientCertificate:
+      cert: true
+      subject: true
+
+gateway:
+  enabled: true
+  name: ""
+  namespace: ""
+  httpRouteApiVersion: gateway.networking.k8s.io/v1
+  grpcRouteApiVersion: gateway.networking.k8s.io/v1
+  # Advanced override for route parentRefs. When empty, parentRefs are built
+  # from gateway.name and gateway.namespace.
+  parentRefs: []
+  httpRoutes:
+    browser:
+      enabled: true
+      name: browser-bb
+      pathPrefix: /
+    rbeWeb:
+      enabled: true
+      name: rbe-web-bb
+      pathPrefix: /
+    # Rendered only when portal.enabled.
+    portal:
+      enabled: true
+      name: portal-bb
+      pathPrefix: /
+  grpcRoutes:
+    frontend:
+      enabled: true
+      name: frontend-bb-cloud-grpc
+      # Envoy Gateway BackendTrafficPolicy extending the frontend GRPCRoute
+      # with long-lived stream timeouts for Bazel's Execute and ByteStream
+      # calls. RBE Execute is a server-streaming RPC, and large CAS uploads use
+      # client-streaming ByteStream/Write calls; default Envoy stream/idle
+      # timeouts can reset them mid-build (RST_STREAM, INTERNAL_ERROR).
+      backendTrafficPolicy:
+        enabled: true
+        name: frontend-bb-cloud-grpc-timeouts
+        # "0s" disables the per-request timeout; useful for long actions.
+        requestTimeout: "0s"
+        # "0s" disables the max HTTP/2 stream duration; needed for large
+        # ByteStream/Write uploads that can exceed Envoy's short default.
+        maxStreamDuration: "0s"
+        connectionIdleTimeout: "1h"
+        # Envoy Gateway defaults EVERY circuit-breaker field to 1024, applied per
+        # CLUSTER rather than per endpoint — so adding frontend replicas does not
+        # raise these budgets, only this policy does. Without a circuitBreaker
+        # block the route inherits those defaults silently.
+        #
+        # maxPendingRequests is the one that bites an RBE frontend. Requests wait
+        # in that queue for an upstream connection, and Bazel opens far fewer
+        # connections than it has in-flight requests (observed: 435k requests over
+        # 81 upstream connections from a single --jobs=200 client). Once the
+        # 1024-deep queue fills, Envoy resets everything after it with
+        # "UNAVAILABLE ... reset reason: overflow" — measured at 96k rejections,
+        # 22% of all requests, while no pod crashed or restarted.
+        #
+        # These are raised, not removed: the breaker is real backpressure, and
+        # setting it absurdly high just moves the failure from the proxy (clean
+        # resets) into the frontend (timeouts and OOM). Scale roughly with peak
+        # client concurrency; watch
+        #   cluster.grpcroute/<ns>/<route>/rule/0.upstream_rq_pending_overflow
+        # on the Envoy proxy's admin :19000/stats and raise if it is nonzero.
+        circuitBreaker:
+          enabled: true
+          maxConnections: 2048
+          maxPendingRequests: 8192
+          maxParallelRequests: 8192
+          maxParallelRetries: 1024
+          # null/0 => omit the field, leaving Envoy's default (unlimited). Setting
+          # it forces connection cycling, which costs handshakes on a gRPC path.
+          maxRequestsPerConnection: null
+    remoteAsset:
+      enabled: false
+      name: remote-asset-bb-cloud-grpc
+      # Remote Asset FetchBlob is unary but can fetch large artifacts, which
+      # Envoy Gateway's 15s default route timeout would cut off.
+      backendTrafficPolicy:
+        enabled: true
+        name: remote-asset-bb-cloud-grpc-timeouts
+        requestTimeout: "300s"
+        maxStreamDuration: "0s"
+        connectionIdleTimeout: "1h"
+        # Off by default: this route carries far less concurrency than the
+        # frontend, so Envoy Gateway's 1024 defaults are fine. Flip enabled=true
+        # if you see upstream_rq_pending_overflow on its cluster. See the
+        # frontend route above for what these mean.
+        circuitBreaker:
+          enabled: false
+          maxConnections: 1024
+          maxPendingRequests: 1024
+          maxParallelRequests: 1024
+          maxParallelRetries: 1024
+          maxRequestsPerConnection: null
+    # BES gRPC route for bb-portal (rendered only when portal.enabled).
+    bes:
+      enabled: true
+      name: bb-portal-bes-grpc
+      # Envoy Gateway applies a 15s default route timeout when no policy
+      # targets the route. BES upload drains happen after the client's
+      # half-close, which is when Envoy's route timer starts, so the request
+      # timeout and max stream duration are disabled here.
+      backendTrafficPolicy:
+        enabled: true
+        name: bb-portal-bes-grpc-timeouts
+        requestTimeout: "0s"
+        maxStreamDuration: "0s"
+        connectionIdleTimeout: "1h"
+        # Off by default: this route carries far less concurrency than the
+        # frontend, so Envoy Gateway's 1024 defaults are fine. Flip enabled=true
+        # if you see upstream_rq_pending_overflow on its cluster. See the
+        # frontend route above for what these mean.
+        circuitBreaker:
+          enabled: false
+          maxConnections: 1024
+          maxPendingRequests: 1024
+          maxParallelRequests: 1024
+          maxParallelRetries: 1024
+          maxRequestsPerConnection: null
+  # Envoy Gateway ClientTrafficPolicy tuning the downstream leg (Bazel client →
+  # Envoy) of the Gateway this chart's routes attach to. Rendered only when
+  # routing.provider=gateway.
+  #
+  # This exists for standalone Buildbarn installs. If you also install the
+  # hermetiq chart, enable it THERE instead — the policy is Gateway-scoped, so
+  # one covers both charts' routes, and enabling both is a misconfiguration:
+  # ClientTrafficPolicy resources do not merge, so the oldest wins and the other
+  # reports Overridden=True.
+  #
+  # Opt-in, deliberately: buffers are per-connection, the policy applies to
+  # every route on the targeted listener rather than just Buildbarn's, and an
+  # Envoy Gateway proxy is often a single replica. Enable it while watching the
+  # Envoy pod's memory.
+  #
+  # These are the values Envoy Gateway v1.7.2 programs into Envoy by default —
+  # all far below what a high-RTT Bazel client wants, which is what the
+  # overrides below exist to correct:
+  #   per_connection_buffer_limit_bytes  32Ki
+  #   initial_stream_window_size         64Ki
+  #   initial_connection_window_size     1Mi
+  #   max_concurrent_streams             100
+  #   idle_timeout                       1h
+  clientTrafficPolicy:
+    enabled: false
+    name: bb-gateway-client-traffic
+    # Optional Gateway listener (spec.listeners[].name) to scope the policy to.
+    # Empty targets every listener on the Gateway. Note that ClientTrafficPolicy
+    # resources do not merge: a listener-scoped policy fully overrides a
+    # Gateway-scoped one, so do not run both against the same listener.
+    sectionName: ""
+    # The important one. Envoy Gateway's 32Ki default triggers watermark
+    # backpressure almost immediately on CAS blob transfer, and every
+    # drain/refill cycle costs a full client round trip — 17ms on a
+    # cross-region path. Envoy's own default is 1Mi. This is per-connection
+    # memory on the proxy, so check Envoy's RSS before raising it further.
+    bufferLimit: 8Mi
+    http2:
+      # HTTP/2 flow control is a second cap, independent of bufferLimit: raising
+      # only bufferLimit can still yield 413 request_payload_too_large. Keep
+      # initialConnectionWindowSize >= initialStreamWindowSize, or the
+      # connection window throttles a single stream before its own window fills.
+      initialStreamWindowSize: 16Mi
+      initialConnectionWindowSize: 24Mi
+      # Bazel multiplexes concurrent RPCs onto one HTTP/2 connection, so the
+      # default of 100 caps effective parallelism well below a high --jobs.
+      maxConcurrentStreams: 1024
+    timeout:
+      http:
+        # Envoy's HTTP idle timeout is REQUEST-based: HTTP/2 PINGs and TCP
+        # keepalives do NOT reset it. A Bazel channel that goes quiet through a
+        # long analysis or local-execution phase gets dropped, and the next RPC
+        # pays full TCP+TLS setup again (~39ms cross-region) or eats a mid-build
+        # retry. Do not set 0 — Envoy warns that disabling it risks connection
+        # leaks from lost FINs; prefer a large finite value.
+        idleTimeout: 7200s
+    # Socket-level dead-peer detection. This does not hold the HTTP idle timeout
+    # open; it detects half-open connections quickly instead of letting Bazel
+    # hang until --remote_timeout fires. Set to null to omit the block.
+    tcpKeepalive:
+      idleTime: 60s
+      interval: 15s
+      probes: 5
+  gke:
+    # Rendered only when routing.provider=gateway-httproute-only.
+    healthCheckPolicy:
+      enabled: true
+      namePrefix: hc
+    backendPolicy:
+      enabled: true
+      namePrefix: bp
+      # Backend service timeout in seconds. Matches the previous Contour
+      # response timeout used for long-lived Bazel gRPC streams.
+      timeoutSec: 300
+  cors:
+    enabled: true
+    browserPolicyName: browser-bb-cors
+    # Defaults to ingress.browser.corsAllowOrigin when empty.
+    allowOrigins: []
+    allowMethods:
+      - GET
+      - POST
+      - OPTIONS
+      - HEAD
+    allowHeaders:
+      - authorization
+      - cache-control
+      - x-hermetiq-jwt
+      - x-grpc-web
+      - User-Agent
+      - x-accept-content-transfer-encoding
+      - x-accept-response-streaming
+      - x-user-agent
+      - grpc-timeout
+      - Grpc-Message
+      - Grpc-Status
+      - content-type
+      - format
+      - headers
+      - method
+      - x-hermetiq-bytestream-file
+      - x-hermetiq-bytestream-type
+    exposeHeaders:
+      - Content-Length
+      - Content-Range
+      - Content-Type
+      - Access-Control-Allow-Headers
+      - grpc-status
+      - grpc-message
+    allowCredentials: true
+    maxAge: 10m
+
+vmPodScrapes:
+  enabled: true
+  interval: 30s
+
+vmRules:
+  # Renders VictoriaMetrics VMRule resources from files/vmrules/.
+  # Disable this, and vmPodScrapes, on clusters without the VictoriaMetrics
+  # operator CRDs installed.
+  enabled: true
+  # Defaults to the chart namespace. Override when your VM operator only watches
+  # a dedicated observability namespace.
+  namespaceOverride: ""
+  labels: {}
+  annotations: {}
+
+# Additional worker pools (tensorflow, codex, monogres, envoy, ...) are managed
+# as RbeWorker custom resources reconciled by the bb-worker-operator chart, not
+# as chart-managed Deployments.

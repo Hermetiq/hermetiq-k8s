@@ -1,0 +1,21 @@
+apiVersion: v2
+name: buildbarn
+description: Buildbarn remote cache, CAS, and RBE deployment
+type: application
+home: https://www.hermetiq.com
+sources:
+  - https://github.com/Hermetiq/hermetiq-k8s
+version: 0.9.0
+appVersion: "20260814T085338Z"
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: "Initial release of Hermetiq Buildbarn chart"
+keywords:
+  - buildbarn
+  - remote-execution
+  - bazel
+  - remote cache
+maintainers:
+  - name: Hermetiq

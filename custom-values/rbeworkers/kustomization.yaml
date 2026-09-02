@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The standard worker bundle. Pools with additional scheduler, node-pool, or
+# runtime prerequisites remain opt-in and are not included here.
+resources:
+  - worker-ubuntu22-04.yaml
+  - worker-ubuntu24-04.yaml
+  - worker-codex.yaml
+  - worker-envoy.yaml

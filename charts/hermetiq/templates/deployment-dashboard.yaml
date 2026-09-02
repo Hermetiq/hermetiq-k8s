@@ -1,0 +1,208 @@
+{{- $dashboardRemoteCacheUrl := include "hermetiq-core.dashboardRemoteCacheUrl" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermetiq-core.dashboardName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
+    app: {{ include "hermetiq-core.dashboardName" . }}
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.dashboardName" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" . "component" "dashboard") | nindent 8 }}
+        app: {{ include "hermetiq-core.dashboardName" . }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        kubectl.kubernetes.io/default-container: {{ include "hermetiq-core.dashboardName" . }}
+        {{- if .Values.dashboard.oauth2Proxy.enabled }}
+        hermetiq.com/oauth2-proxy-config-checksum: {{ include "hermetiq-core.oauth2ProxyConfigChecksum" . }}
+        {{- if not .Values.dashboard.oauth2Proxy.client.existingSecret }}
+        hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
+        {{- end }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+      {{- include "hermetiq-core.automountServiceAccountToken" .Values.dashboard | nindent 6 }}
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" . | nindent 8 }}
+      restartPolicy: Always
+      {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.dashboard) | nindent 6 }}
+      volumes:
+        - name: dashboard-html
+          emptyDir: {}
+        - name: dashboard-nginx-cache
+          emptyDir: {}
+        - name: dashboard-nginx-run
+          emptyDir: {}
+        {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
+        - name: dashboard-quickstart-config
+          configMap:
+            name: {{ default (include "hermetiq-core.dashboardQuickstartConfigName" .) .Values.dashboard.quickstartConfig.existingConfigMap }}
+            items:
+              - key: {{ .Values.dashboard.quickstartConfig.configMapKey | quote }}
+                path: quickstart-config.json
+        {{- end }}
+      initContainers:
+        - name: prepare-dashboard-html
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.dashboard" "repository" .Values.images.dashboard.repository "tag" .Values.images.dashboard.tag "digest" .Values.images.dashboard.digest) }}
+          imagePullPolicy: {{ .Values.images.dashboard.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              cp -R /usr/share/nginx/html/. /workdir/html/
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          {{- with .Values.dashboard.prepareDashboardHtml.env }}
+          env:
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: dashboard-html
+              mountPath: /workdir/html
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: {{ .Values.dashboard.security.runAsNonRoot }}
+            runAsUser: {{ .Values.dashboard.security.runAsUser }}
+            runAsGroup: {{ .Values.dashboard.security.runAsGroup }}
+            {{- if .Values.dashboard.security.dropCapabilities }}
+            capabilities:
+              drop:
+                {{- range .Values.dashboard.security.dropCapabilities }}
+                - {{ . | quote }}
+                {{- end }}
+            {{- end }}
+      containers:
+        {{- if .Values.dashboard.oauth2Proxy.enabled }}
+        - name: oauth2-proxy
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.oauth2Proxy" "repository" .Values.images.oauth2Proxy.repository "tag" .Values.images.oauth2Proxy.tag "digest" .Values.images.oauth2Proxy.digest) }}
+          imagePullPolicy: {{ .Values.images.oauth2Proxy.pullPolicy }}
+          ports:
+            - name: proxy
+              containerPort: 8888
+          envFrom:
+            - configMapRef:
+                name: oauth2-proxy-config-web-ui
+            - secretRef:
+                name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
+          env:
+{{- with .Values.dashboard.oauth2Proxy.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: {{ printf "%s/oauth2/callback" (include "hermetiq-core.dashboardUrl" .) | quote }}
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: {{ printf "http://127.0.0.1:%v" .Values.dashboard.appPort | quote }}
+          resources:
+            {{- toYaml .Values.dashboard.oauth2Proxy.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- end }}
+        - name: {{ include "hermetiq-core.dashboardName" . }}
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.dashboard" "repository" .Values.images.dashboard.repository "tag" .Values.images.dashboard.tag "digest" .Values.images.dashboard.digest) }}
+          imagePullPolicy: {{ .Values.images.dashboard.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dashboard.appPort }}
+          {{- if .Values.dashboard.secretEnv }}
+          envFrom:
+            - secretRef:
+                name: web-ui-secret-env
+          {{- end }}
+          env:
+{{- with .Values.dashboard.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: {{ .Values.dashboard.appPort | quote }}
+            - name: REACT_APP_ENABLE_STYTCH
+              value: "false"
+            - name: REACT_APP_COST_INTEGRATION_ENABLED
+              value: {{ .Values.app.costReportTickerEnabled | default false | quote }}
+            - name: REACT_APP_ON_PREM
+              value: "true"
+            - name: REACT_APP_HMQ_METRICS_DASHBOARD_URL
+              value: {{ .Values.victoriaMetrics.dashboardUrl | quote }}
+            - name: REACT_APP_API_URL
+              value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
+            - name: REACT_APP_GRPC_WEB_URL
+              value: {{ printf "https://%s" (include "hermetiq-core.apiGrpcHost" .) | quote }}
+            - name: REACT_APP_HMQ_API_URL
+              value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
+            - name: REACT_APP_HMQ_BES_RESULTS_URL
+              value: {{ printf "%s/build/" (include "hermetiq-core.dashboardUrl" .) | quote }}
+            - name: REACT_APP_HMQ_BES_SVC
+              value: {{ printf "grpcs://%s" (include "hermetiq-core.bepGrpcHost" .) | quote }}
+            - name: REACT_APP_GOOGLE_FORM_ID
+              value: "1FAIpQLScrlDAO1bwLiZpsXsGLcK5CJUXZsmqEHXiORJ_vLaAYc4s79g"
+            - name: REACT_APP_HMQ_MCP_SERVER_URL
+              value: {{ printf "https://%s" (include "hermetiq-core.mcpHost" .) | quote }}
+            {{- if .Values.dashboard.oauth2Proxy.backendLogoutUrl }}
+            - name: REACT_APP_OAUTH2_LOGOUT_REDIRECT_URL
+              value: {{ .Values.dashboard.oauth2Proxy.backendLogoutUrl | quote }}
+            {{- end }}
+            {{- if $dashboardRemoteCacheUrl }}
+            - name: REACT_APP_HMQ_REMOTE_CACHE
+              value: {{ $dashboardRemoteCacheUrl | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          {{- if .Values.dashboard.probes.enabled }}
+          livenessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" "http" "settings" .Values.dashboard.probes.liveness) | nindent 12 }}
+          readinessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" "http" "settings" .Values.dashboard.probes.readiness) | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: dashboard-html
+              mountPath: /usr/share/nginx/html
+            {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
+            - name: dashboard-quickstart-config
+              mountPath: /usr/share/nginx/html/quickstart-config
+              readOnly: true
+            {{- end }}
+            - name: dashboard-nginx-cache
+              mountPath: /var/cache/nginx
+            - name: dashboard-nginx-run
+              mountPath: /var/run
+          securityContext:
+            {{- include "hermetiq-core.dashboardContainerSecurityContext" . | nindent 12 }}

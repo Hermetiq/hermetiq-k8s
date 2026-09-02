@@ -1,0 +1,58 @@
+suite: frontend internal Service
+templates:
+  - templates/service-frontend-internal.yaml
+tests:
+  - it: does not render by default
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: exposes the Buildbarn frontend directly when enabled
+    set:
+      namespaceOverride: buildbarn
+      frontend.internalService.enabled: true
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: frontend-internal
+      - equal:
+          path: metadata.namespace
+          value: buildbarn
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.selector.app
+          value: frontend
+      - equal:
+          path: spec.ports[0].port
+          value: 8980
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 8980
+      - equal:
+          path: spec.ports[0].appProtocol
+          value: kubernetes.io/h2c
+
+  - it: supports a custom Service name
+    set:
+      frontend.internalService.enabled: true
+      frontend.internalService.name: buildbarn-private
+    asserts:
+      - equal:
+          path: metadata.name
+          value: buildbarn-private
+
+  - it: rejects an empty Service name
+    set:
+      frontend.internalService.enabled: true
+      frontend.internalService.name: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: frontend.internalService.name is required when frontend.internalService.enabled=true

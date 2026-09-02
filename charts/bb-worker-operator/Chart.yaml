@@ -1,0 +1,22 @@
+apiVersion: v2
+name: bb-worker-operator
+description: Buildbarn worker pool operator for Kubernetes
+type: application
+home: https://www.hermetiq.com
+sources:
+  - https://github.com/Hermetiq/hermetiq-k8s
+version: 0.3.1
+appVersion: "v0.3.1"
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial release
+keywords:
+  - buildbarn
+  - bazel
+  - remote-execution
+  - operator
+  - kubebuilder
+maintainers:
+  - name: Hermetiq

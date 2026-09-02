@@ -1,0 +1,258 @@
+suite: buildbarn config generation
+templates:
+  - templates/configmaps.yaml
+tests:
+  - it: default config has no ISCC/FSAC stores and no raw block devices
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: initialSizeClassCache
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: fileSystemAccessCache
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath"
+
+  - it: enabling ISCC/FSAC adds storage stores and sharded backends
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.fsac.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "initialSizeClassCache:"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "fileSystemAccessCache:"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "initialSizeClassCache:"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "fileSystemAccessCache:"
+
+  - it: block-device backend emits a raw devicePath source
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/cas'"
+      # in-memory KLM (default) => no persistent block, no cas-blocks.db file
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cas-blocks.db"
+
+  # Persistence requires a persistent key-location map: an in-memory KLM store
+  # must not carry a `persistent` block (its blocks would reattach after a
+  # restart full of data the empty index can never reach).
+  - it: default in-memory-KLM stores render no persistent state config
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.fsac.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      # CAS on filesystem always uses a file-backed KLM => stays persistent.
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/persistent_state"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac/persistent_state"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-iscc/persistent_state"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-fsac/persistent_state"
+
+  - it: a disk-backed AC key-location map turns persistence back on
+    set:
+      storage.persistence.ac.keyLocationMap.type: blockDevice
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac/ac-keys.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac/persistent_state"
+
+  # writeConcurrencyLimit is a blockdevice.Configuration field: it must render
+  # inside `source`, or bb-storage rejects the config at startup.
+  - it: writeConcurrencyLimit renders inside the blockdevice source
+    set:
+      storage.persistence.cas.writeConcurrencyLimit: 64
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: 'writeConcurrencyLimit: 64,\n          \},\n          spareBlocks:'
+
+  - it: legacy blockDevice.writeConcurrencyLimit alias renders inside source
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.writeConcurrencyLimit: 32
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: 'writeConcurrencyLimit: 32,\n          \},'
+
+  - it: sizeClassAnalysis wires the feedback-driven analyzer + ISCC backend
+    set:
+      storage.persistence.iscc.enabled: true
+      scheduler.sizeClassAnalysis.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "feedbackDriven:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "initialSizeClassCache: common.initialSizeClassCache"
+
+  - it: default scheduler declares no predeclared platform queues
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: predeclaredPlatformQueues
+
+  - it: predeclaredPlatformQueues renders a multi-size-class queue when set
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: pool
+              value: sizeclass
+          sizeClasses: [1, 2]
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "predeclaredPlatformQueues:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "sizeClasses:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: sizeclass
+
+  - it: omits actionResultExpiring by default, leaving completenessChecking bare
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "actionCache: completenessCheckedActionCache"
+      - notMatchRegex:
+          path: data["common.libsonnet"]
+          pattern: "actionResultExpiring"
+
+  - it: wraps completenessChecking in actionResultExpiring when enabled
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+      config.actionCache.actionResultExpiring.minimumValidity: 2592000s
+      config.actionCache.actionResultExpiring.maximumValidityJitter: 259200s
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'minimumValidity: "2592000s"'
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'maximumValidityJitter: "259200s"'
+      # completenessChecking must survive underneath: it is the correctness layer.
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "backend: completenessCheckedActionCache"
+      # minimumTimestamp must ALWAYS render. bb-storage validates it
+      # unconditionally and dies on a nil Timestamp, so an unset value has to
+      # fall back to the epoch rather than omitting the field.
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'minimumTimestamp: "1970-01-01T00:00:00Z"'
+
+  - it: emits minimumTimestamp only when set
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+      config.actionCache.actionResultExpiring.minimumTimestamp: "2026-07-29T00:10:00Z"
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'minimumTimestamp: "2026-07-29T00:10:00Z"'
+
+  - it: renders a configurable frontend existence cache
+    set:
+      frontend.contentAddressableStorage.existenceCaching.cacheDuration: 30s
+      frontend.contentAddressableStorage.existenceCaching.cacheSize: 500000
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "cacheSize: 500000"
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "cacheDuration: \"30s\""
+
+  - it: drops the existence cache entirely when disabled
+    set:
+      frontend.contentAddressableStorage.existenceCaching.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "existenceCaching"
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "backend: common.blobstore.contentAddressableStorage"
+
+  - it: never omits minimumTimestamp, whatever the value
+    # Regression: omitting the field made bb-storage fail startup with
+    # "Invalid minimum timestamp: proto: invalid nil Timestamp".
+    set:
+      config.actionCache.actionResultExpiring.enabled: true
+      config.actionCache.actionResultExpiring.minimumTimestamp: ""
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "minimumTimestamp:"

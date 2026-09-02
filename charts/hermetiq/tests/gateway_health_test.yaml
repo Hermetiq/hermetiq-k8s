@@ -1,0 +1,73 @@
+suite: gateway health checks
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: renders Envoy Gateway backend health checks for API routes
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.healthCheck.active.type
+          value: TCP
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.healthCheck.active.tcp
+          value: {}
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.healthCheck.active.http.path
+          value: /ready
+        documentSelector:
+          path: metadata.name
+          value: api-web-health-check
+      - equal:
+          path: spec.healthCheck.active.http.path
+          value: /.well-known/oauth-protected-resource
+        documentSelector:
+          path: metadata.name
+          value: mcp-health-check
+
+  - it: renders GKE API Service health check against the API readiness port
+    templates:
+      - templates/gke-gateway-policies.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.default.config.type
+          value: HTTP
+        documentSelector:
+          path: metadata.name
+          value: hc-grpc-api
+      - equal:
+          path: spec.default.config.httpHealthCheck.portSpecification
+          value: USE_FIXED_PORT
+        documentSelector:
+          path: metadata.name
+          value: hc-grpc-api
+      - equal:
+          path: spec.default.config.httpHealthCheck.port
+          value: 8008
+        documentSelector:
+          path: metadata.name
+          value: hc-grpc-api
+      - equal:
+          path: spec.default.config.httpHealthCheck.requestPath
+          value: /ready
+        documentSelector:
+          path: metadata.name
+          value: hc-grpc-api
+      - equal:
+          path: spec.default.config.type
+          value: TCP
+        documentSelector:
+          path: metadata.name
+          value: hc-bep-nats-pub

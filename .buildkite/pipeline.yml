@@ -1,0 +1,97 @@
+# hermetiq-k8s — Buildkite pipeline (Phase 5).
+#
+# Uploaded by the `hermetiq-k8s` Buildkite pipeline's `buildkite-agent pipeline
+# upload` bootstrap step. For now this covers the signed OCI publish on release
+# tags; PR validation (helm lint/template/kubeconform/helm-unittest) and the
+# cloud-native → chart auto-bump are added here in later Phase-5 slices.
+#
+# Publish: on a `hermetiq-vX.Y.Z` / `buildbarn-vX.Y.Z` tag, publish-chart.sh
+# (running in google/cloud-sdk:slim with WIF creds for bk-on-prem-helm) verifies
+# the tag↔Chart.yaml version, lints/templates, then packages, pushes to
+# oci://ghcr.io/hermetiq, cosign-signs, and refuses to overwrite an existing
+# version. Secrets (ghcr-helm-token, cosign-private-key/password) come from GCP
+# Secret Manager.
+#
+# NOTE: the legacy .github/workflows/publish-charts.yml also triggers on these
+# tags — disable it when adopting this step, or the two will race (this one's
+# refuse-overwrite makes the loser fail).
+#
+# NOTE on the SA name: this repo was renamed on-prem-helm → hermetiq-k8s, but the
+# service account is still `bk-on-prem-helm` on purpose — renaming it would
+# recreate the SA and every secret-accessor grant it holds. Its WIF binding is
+# keyed to the `hermetiq-k8s` pipeline slug (cloud-native
+# pulumi-iac/buildkite-oidc/main.go), which is what actually gates impersonation.
+
+agents:
+  queue: "linux-medium"
+
+steps:
+  # PR validation (non-tag builds): per-chart lint + template (ci-values) +
+  # kubeconform + metadata gates + helm-unittest. No GCP/secrets needed.
+  - group: ":helm: chart validation"
+    if: build.tag == null
+    steps:
+      - label: ":helm: validate hermetiq"
+        command: "bash .buildkite/scripts/chart-checks.sh hermetiq"
+        plugins:
+          - docker#v5.13.0:
+              image: "debian:bookworm-slim"
+              propagate-environment: true
+      - label: ":helm: validate buildbarn"
+        command: "bash .buildkite/scripts/chart-checks.sh buildbarn"
+        plugins:
+          - docker#v5.13.0:
+              image: "debian:bookworm-slim"
+              propagate-environment: true
+      - label: ":helm: validate bb-worker-operator"
+        command: "bash .buildkite/scripts/chart-checks.sh bb-worker-operator"
+        plugins:
+          - docker#v5.13.0:
+              image: "debian:bookworm-slim"
+              propagate-environment: true
+
+  # Weekly Scheduled Build → poll ghcr.io/buildbarn/* for newer upstream images
+  # and open a review PR if any moved (never auto-merges). Create the weekly
+  # schedule in the pipeline's UI settings (branch main). See buildbarn-upstream.sh.
+  - group: ":robot_face: buildbarn upstream"
+    if: build.source == "schedule"
+    steps:
+      - label: ":mag: poll buildbarn upstream → PR"
+        command: "bash .buildkite/scripts/buildbarn-upstream.sh"
+        plugins:
+          - gcp-workload-identity-federation#v1.5.0:
+              audience: "//iam.googleapis.com/projects/896176954734/locations/global/workloadIdentityPools/buildkite/providers/buildkite-oidc"
+              service-account: "bk-on-prem-helm@hermetiq-cloud.iam.gserviceaccount.com"
+          - docker#v5.13.0:
+              image: "google/cloud-sdk:slim"
+              propagate-environment: true
+              expand-volume-vars: true
+              volumes:
+                - "$$BUILDKITE_OIDC_TMPDIR:$$BUILDKITE_OIDC_TMPDIR"
+              environment:
+                - "GOOGLE_APPLICATION_CREDENTIALS"
+                - "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"
+
+  - label: ":helm: publish + sign chart"
+    if: build.tag =~ /^(hermetiq|buildbarn|bb-worker-operator)-v[0-9]/
+    command: "bash .buildkite/scripts/publish-chart.sh"
+    concurrency: 1
+    concurrency_group: "onprem-helm/publish"
+    plugins:
+      - gcp-workload-identity-federation#v1.5.0:
+          # Same WIF provider as cloud-native; the SA differs (impersonable by the
+          # `hermetiq-k8s` pipeline slug). Verify the audience with:
+          #   pulumi stack output workloadIdentityAudience -s buildkite-oidc/prod-usc1
+          audience: "//iam.googleapis.com/projects/896176954734/locations/global/workloadIdentityPools/buildkite/providers/buildkite-oidc"
+          service-account: "bk-on-prem-helm@hermetiq-cloud.iam.gserviceaccount.com"
+      - docker#v5.13.0:
+          image: "google/cloud-sdk:slim"
+          propagate-environment: true
+          # Share the WIF credentials into the container so in-container gcloud is
+          # authenticated (the Phase-1 pattern; $$ defers interpolation to runtime).
+          expand-volume-vars: true
+          volumes:
+            - "$$BUILDKITE_OIDC_TMPDIR:$$BUILDKITE_OIDC_TMPDIR"
+          environment:
+            - "GOOGLE_APPLICATION_CREDENTIALS"
+            - "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"

@@ -1,0 +1,235 @@
+{{- if .Values.partitionMaintenance.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hermetiq-core.partitionMaintenanceName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "maintenance") | nindent 4 }}
+spec:
+  schedule: {{ .Values.partitionMaintenance.schedule | quote }}
+  {{- if .Values.partitionMaintenance.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.partitionMaintenance.startingDeadlineSeconds }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      {{- if .Values.partitionMaintenance.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ .Values.partitionMaintenance.activeDeadlineSeconds }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "hermetiq-core.podLabels" (dict "root" . "component" "maintenance") | nindent 12 }}
+            {{- if .Values.azureWorkloadIdentity.enabled }}
+            azure.workload.identity/use: "true"
+            {{- end }}
+        spec:
+          serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+          {{- include "hermetiq-core.automountServiceAccountToken" .Values.partitionMaintenance | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "hermetiq-core.podSecurityContext" . | nindent 12 }}
+          {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 10 }}
+          {{- end }}
+          {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.partitionMaintenance) | nindent 10 }}
+          containers:
+            - name: {{ include "hermetiq-core.partitionMaintenanceName" . }}
+              image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 16 }}
+              command:
+                - /app/dbadmin
+              args:
+                # No --retention-days here: run-maintenance reads retention from
+                # public.part_config, and dbadmin logs a WARNING and ignores the
+                # flag. bootstrap.retentionDays only seeds retention on first
+                # bootstrap; change it later with an UPDATE on public.part_config.
+                - run-maintenance
+              env:
+{{- with .Values.partitionMaintenance.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 16 }}
+{{- end }}
+                - name: APP_ENVIRONMENT
+                  value: {{ .Values.app.environment | quote }}
+                - name: DB_HOSTNAME
+                  value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+                - name: DB_PORT
+                  value: {{ required "postgres.port is required" .Values.postgres.port | quote }}
+                - name: DB_NAME
+                  value: {{ required "postgres.database is required" .Values.postgres.database | quote }}
+                - name: DB_USER
+                  value: {{ required "postgres.user is required" .Values.postgres.user | quote }}
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "hermetiq-core.postgresSecretName" . }}
+                      key: {{ .Values.postgres.password.existingSecretKey }}
+                - name: PGSSLMODE
+                  value: {{ .Values.postgres.sslMode | quote }}
+              resources:
+                {{- toYaml .Values.partitionMaintenance.resources | nindent 16 }}
+---
+{{- end }}
+{{- if .Values.progressesPartitionMaintenance.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hermetiq-core.progressesPartitionMaintenanceName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "maintenance") | nindent 4 }}
+spec:
+  schedule: {{ .Values.progressesPartitionMaintenance.schedule | quote }}
+  {{- if .Values.progressesPartitionMaintenance.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.progressesPartitionMaintenance.startingDeadlineSeconds }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      {{- if .Values.progressesPartitionMaintenance.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ .Values.progressesPartitionMaintenance.activeDeadlineSeconds }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "hermetiq-core.podLabels" (dict "root" . "component" "maintenance") | nindent 12 }}
+            {{- if .Values.azureWorkloadIdentity.enabled }}
+            azure.workload.identity/use: "true"
+            {{- end }}
+        spec:
+          serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+          {{- include "hermetiq-core.automountServiceAccountToken" .Values.progressesPartitionMaintenance | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "hermetiq-core.podSecurityContext" . | nindent 12 }}
+          {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 10 }}
+          {{- end }}
+          {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.progressesPartitionMaintenance) | nindent 10 }}
+          containers:
+            - name: {{ include "hermetiq-core.progressesPartitionMaintenanceName" . }}
+              image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 16 }}
+              command:
+                - /app/dbadmin
+              args:
+                - run-maintenance
+                - --parent-table=public.progresses
+              env:
+{{- with .Values.progressesPartitionMaintenance.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 16 }}
+{{- end }}
+                - name: APP_ENVIRONMENT
+                  value: {{ .Values.app.environment | quote }}
+                - name: DB_HOSTNAME
+                  value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+                - name: DB_PORT
+                  value: {{ required "postgres.port is required" .Values.postgres.port | quote }}
+                - name: DB_NAME
+                  value: {{ required "postgres.database is required" .Values.postgres.database | quote }}
+                - name: DB_USER
+                  value: {{ required "postgres.user is required" .Values.postgres.user | quote }}
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "hermetiq-core.postgresSecretName" . }}
+                      key: {{ .Values.postgres.password.existingSecretKey }}
+                - name: PGSSLMODE
+                  value: {{ .Values.postgres.sslMode | quote }}
+              resources:
+                {{- toYaml .Values.progressesPartitionMaintenance.resources | nindent 16 }}
+---
+{{- end }}
+{{- if .Values.targetTrendsRefresh.enabled }}
+{{- $root := . }}
+{{- range $job := list (dict "name" (include "hermetiq-core.targetTrendsShortName" $root) "schedule" $root.Values.targetTrendsRefresh.shortSchedule "windows" "3d,7d") (dict "name" (include "hermetiq-core.targetTrendsLongName" $root) "schedule" $root.Values.targetTrendsRefresh.longSchedule "windows" "15d,30d") }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $job.name }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "maintenance") | nindent 4 }}
+spec:
+  schedule: {{ $job.schedule | quote }}
+  {{- if $root.Values.targetTrendsRefresh.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ $root.Values.targetTrendsRefresh.startingDeadlineSeconds }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      {{- if $root.Values.targetTrendsRefresh.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ $root.Values.targetTrendsRefresh.activeDeadlineSeconds }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "hermetiq-core.podLabels" (dict "root" $root "component" "maintenance") | nindent 12 }}
+            {{- if $root.Values.azureWorkloadIdentity.enabled }}
+            azure.workload.identity/use: "true"
+            {{- end }}
+        spec:
+          serviceAccountName: {{ include "hermetiq-core.serviceAccountName" $root }}
+          {{- include "hermetiq-core.automountServiceAccountToken" $root.Values.targetTrendsRefresh | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "hermetiq-core.podSecurityContext" $root | nindent 12 }}
+          {{- with include "hermetiq-core.imagePullSecrets" $root }}
+{{ . | nindent 10 }}
+          {{- end }}
+          {{- include "hermetiq-core.podScheduling" (dict "root" $root "workload" $root.Values.targetTrendsRefresh) | nindent 10 }}
+          containers:
+            - name: {{ $job.name }}
+              image: {{ include "hermetiq-core.image" (dict "root" $root "name" "images.bepNats.bootstrap" "repository" $root.Values.images.bepNats.repository "tag" $root.Values.images.bepNats.bootstrapTag "digest" $root.Values.images.bepNats.bootstrapDigest) }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                {{- include "hermetiq-core.writableContainerSecurityContext" $root | nindent 16 }}
+              command:
+                - /app/dbadmin
+              args:
+                - refresh-target-trends
+                - {{ printf "--windows=%s" $job.windows | quote }}
+                - --concurrently
+              env:
+{{- with $root.Values.targetTrendsRefresh.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $root "env" .) | trim | nindent 16 }}
+{{- end }}
+                - name: APP_ENVIRONMENT
+                  value: {{ $root.Values.app.environment | quote }}
+                - name: DB_HOSTNAME
+                  value: {{ required "postgres.host is required" $root.Values.postgres.host | quote }}
+                - name: DB_PORT
+                  value: {{ required "postgres.port is required" $root.Values.postgres.port | quote }}
+                - name: DB_NAME
+                  value: {{ required "postgres.database is required" $root.Values.postgres.database | quote }}
+                - name: DB_USER
+                  value: {{ required "postgres.user is required" $root.Values.postgres.user | quote }}
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "hermetiq-core.postgresSecretName" $root }}
+                      key: {{ $root.Values.postgres.password.existingSecretKey }}
+                - name: PGSSLMODE
+                  value: {{ $root.Values.postgres.sslMode | quote }}
+              resources:
+                {{- toYaml $root.Values.targetTrendsRefresh.resources | nindent 16 }}
+---
+{{- end }}
+{{- end }}

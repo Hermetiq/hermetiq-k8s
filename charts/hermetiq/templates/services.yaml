@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermetiq-core.apiName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
+  {{- if eq (include "hermetiq-core.routingProvider" .) "contour" }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    projectcontour.io/upstream-protocol.h2c: "50091"
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "hermetiq-core.apiName" . }}
+  ports:
+    - name: grpc
+      port: 50091
+      targetPort: 50081
+      protocol: TCP
+      # Standard Kubernetes hint that the upstream speaks h2c (HTTP/2 cleartext).
+      # Honored by Contour (≥1.18), Envoy Gateway, Istio, and other Gateway API
+      # implementations — provisions the right backend protocol without needing
+      # the projectcontour-specific annotation. Ignored by controllers that
+      # don't recognize it.
+      appProtocol: kubernetes.io/h2c
+    {{- if eq (include "hermetiq-core.routingProvider" .) "gateway-httproute-only" }}
+    - name: grpc-web-preflight
+      port: 50092
+      targetPort: 50081
+      protocol: TCP
+    {{- end }}
+    - name: api
+      port: 80
+      targetPort: 8008
+      protocol: TCP
+    - name: mcp-http
+      port: 5150
+      targetPort: 5150
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermetiq-core.publisherName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
+  {{- if eq (include "hermetiq-core.routingProvider" .) "contour" }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    projectcontour.io/upstream-protocol.h2c: "50091"
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "hermetiq-core.publisherName" . }}
+  ports:
+    - name: grpc
+      port: 50091
+      targetPort: {{ ternary 50081 50091 (eq (include "hermetiq-core.publisherAuthProxyEnabled" .) "true") }}
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermetiq-core.dashboardName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "hermetiq-core.dashboardName" . }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ ternary 8888 .Values.dashboard.appPort .Values.dashboard.oauth2Proxy.enabled }}
+      protocol: TCP

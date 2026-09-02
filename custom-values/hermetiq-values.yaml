@@ -1,0 +1,321 @@
+namespaceOverride: hermetiq
+
+# REQUIRED: contact email for this installation. The install
+# fails without a valid address. With no license key configured, a 30-day
+# trial is issued automatically on first boot using this email — see the
+# "Licensing and trials" section of the Hermetiq chart README. Purchased keys go in a Secret
+# via license.key.existingSecret.
+license:
+  contactEmail: build-team@example.com
+  # REQUIRED. Installing Hermetiq confirms acceptance of the Hermetiq Software
+  # License Agreement (SOFTWARE-LICENSE-AGREEMENT.md in the chart package; URL
+  # in license.agreement.url). The install fails while accepted is false.
+  agreement:
+    accepted: true
+
+# Search and replace `helm.hermetiq.dev` with the base DNS name for your installation
+hosts:
+  domainBase: helm.hermetiq.dev
+
+# IMPORTANT: Make sure you configure your Postgres partition management settings correctly for your environment / scale.
+bootstrap:
+  # Keep this aligned with buildbarn-values.yaml project.id.
+  projectId: "0"
+  # Provide a short, but descriptive name for the initial project to create during initial database setup
+  projectName: build-analytics
+  # Defaults to the Helm release namespace. Set explicitly when Buildbarn lives
+  # in a different namespace from the Hermetiq services.
+  projectNamespace: hermetiq
+  # how many days of data to store in the Postgres DB using time range partitioning (via pg_partman)
+  retentionDays: 30
+  # number of future partitions to create during partition maintenance
+  premake: 30
+  # the time-range covered by each partition; tune before first bootstrap if your ingest profile needs
+  # a different partition count
+  partitionInterval: 6 hour
+  # Safety guardrails for the pre-install/pre-upgrade bootstrap hook. Increase
+  # activeDeadlineSeconds if your production migrations routinely exceed 2h.
+  activeDeadlineSeconds: 7200
+  # the URL for your Buildbarn browser service
+  namespaceBrowserUrl: https://browser.helm.hermetiq.dev
+  # the URL for the Grafana dashboard. hermetiq-demo is the uid of the overview
+  # dashboard the chart provisions; /d/hermetiq does not exist and 404s.
+  namespaceDashboardUrl: https://grafana.helm.hermetiq.dev/d/hermetiq-demo
+  hook:
+    enabled: true
+    # Keep successful migration jobs visible for logs/audit. Helm deletes the
+    # previous hook job before creating the next one on install/upgrade.
+    deletePolicy: before-hook-creation
+
+postgres:
+  host: <db-host> # db host or IP here
+  port: "5432"
+  database: hermetiq_helm
+  user: hermetiq_helm
+  password:
+    existingSecret: postgres-db
+    existingSecretKey: password
+# Uncomment to configure a read-replica for expensive OLAP oriented queries
+#  readReplica:
+#    host: hermetiq-postgres-read.example.com
+#    port: "5432"
+
+routing:
+  enabled: true
+  # gateway uses GRPCRoute-capable Gateway controllers. Use
+  # gateway-httproute-only for GKE Gateway, contour for Contour HTTPProxy,
+  # ingress for classic Ingress, or none when routing is managed elsewhere.
+  provider: gateway
+
+gateway:
+  enabled: true
+  name: hermetiq-gateway
+  namespace: hermetiq
+  gke:
+    # Rendered only with routing.provider=gateway-httproute-only.
+    healthCheckPolicy:
+      enabled: true
+    backendPolicy:
+      enabled: true
+      # Long-lived gRPC streams need a backend timeout above the short default.
+      timeoutSec: 300
+
+contour:
+  enabled: false
+  ingressClassName: contour
+  certManager:
+    enabled: true
+    clusterIssuer: dev-issuer
+
+# A redis compatible cache is required to run Hermetiq; dragonflydb is recommended
+redis:
+  host: dragonfly.hermetiq.svc.cluster.local
+  password:
+    existingSecret: dragonfly-auth
+    existingSecretKey: password
+
+# NATS JetStream is required to run Hermetiq
+nats:
+  url: nats://nats.hermetiq.svc:4222
+
+# Hermetiq uses the Go OTEL Exporter to ship metrics to an OTEL collector
+otel:
+  endpoint: http://otel-collector.hermetiq.svc.cluster.local:4317
+  protocol: grpc
+  serviceName: hermetiq
+
+victoriaMetrics:
+  # hermetiq-demo is the uid of the chart-provisioned overview dashboard.
+  dashboardUrl: https://grafana.helm.hermetiq.dev/d/hermetiq-demo
+  # Enables the MCP server's Buildbarn infra-health tools.
+  metricsEnabled: true
+  baseUrl: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  # Self-managed Buildbarn metrics usually do not include hermetiq_project_id.
+  # Set true only when your Buildbarn metrics are labeled per Hermetiq project.
+  projectLabelEnabled: false
+
+gcpWorkloadIdentity:
+  enabled: true
+  # The GCP service account bound to the bep-nats Kubernetes ServiceAccount
+  # (see the "Workload identity" section of the Hermetiq chart README).
+  serviceAccount: "hermetiq-bep@<gcp-project>.iam.gserviceaccount.com"
+
+# Optional hardened mode starting point. Leave commented until you have
+# confirmed which workloads need Kubernetes API access in your install.
+#
+# serviceAccount:
+#   automountServiceAccountToken: false
+#
+# Licensing always uses the Kubernetes API from grpc-api and bep-nats-pub for
+# the cluster fingerprint and license-state Secret. If the global token mount
+# is disabled, explicitly enable it for both api and publisher below.
+# Subscriber pods only need a token when optional lease coordination is enabled.
+
+app:
+  streamPartitionCount: 4
+  rawBepExportEnabled: false
+  # MCP proto/source-intel tools are available by default for on-prem installs.
+  mcpProtoIntelToolsEnabled: true
+  # OpenCost is optional on-prem infrastructure. Keep the Cost API ticker off
+  # unless OpenCost is installed and app.openCostUrl is set.
+  costReportTickerEnabled: false
+  # Sets OPEN_COST_URL on the API container when costReportTickerEnabled=true.
+  # openCostUrl: http://opencost.opencost.svc.cluster.local:9003
+  # Emails that should receive the Hermetiq admin role.
+  # adminEmails: ["tim@hermetiq.com"]
+  # Enable when customers send mixed HTTPS/SSH git remote forms and per-repo
+  # analytics should collapse them into one canonical host/owner/repo key.
+  # normalizeRepoUrls: false
+  # Enable if you have the grpc-cache-proxy sidecar enabled on your buildbarn frontend pods
+  cacheEventsEnabled: false
+  # How hermetiq gets user information to support auth on grpc requests
+  grpcAuthUserProvider: jwks
+
+k8sNodeScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+#    node-type: core8
+#  tolerations:
+#    - effect: NoSchedule
+#      key: hermetiq/core8
+#      operator: Exists
+
+# Single OIDC issuer wired into api.jwt, publisher.jwks, and dashboard.oauth2Proxy.
+# JWKS URLs default to <issuerUrl>.well-known/jwks.json. Override per-component
+# below if needed.
+oidc:
+  issuerUrl: https://issuer.example.com/
+
+api:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+  # Required for licensing when serviceAccount.automountServiceAccountToken is false.
+  # automountServiceAccountToken: true
+  # Uncomment only to expose the MCP server WITHOUT authentication (e.g. a
+  # fully private cluster). The default (false) enforces the bearer-token auth
+  # described in the Hermetiq chart README's "MCP Authentication" section.
+  # mcpAuthDisabled: true
+  # MCP OAuth clients and Auth0 API identifiers match the resource URL
+  # byte-for-byte, including any trailing slash. The chart derives
+  # https://mcp.<hosts.domainBase> when empty; uncomment this when your IdP API
+  # identifier or Claude MCP connector URL uses the trailing-slash form.
+  # mcpResourceUrl: "https://mcp.helm.hermetiq.dev/"
+  # Optional app-layer CORS allowlist for REST API and MCP HTTP traffic.
+  # Leave empty when Gateway/Contour is answering CORS preflight.
+  corsAllowedOrigins: ""
+  resources:
+    authProxy:
+      requests:
+        memory: 300Mi
+      limits:
+        cpu: 500m
+        memory: 300Mi
+    api:
+      requests:
+        cpu: 500m
+        memory: 1000Mi
+      limits:
+        cpu: 1900m
+        memory: 4000Mi
+
+  authProxy:
+    # Defense-in-depth CORS at the auth-proxy layer. Use only when your
+    # ingress/load balancer does not already handle CORS.
+    corsAllowedOrigins: ""
+    # TCP probes are enabled by default. Tune only if your auth proxy starts
+    # unusually slowly in your cluster.
+    # probes:
+    #   liveness:
+    #     initialDelaySeconds: 10
+
+  jwt:
+    enabled: true
+    groupsClaim: hermetiq/roles
+
+publisher:
+  replicas: 2
+  # Required for licensing when serviceAccount.automountServiceAccountToken is false.
+  # automountServiceAccountToken: true
+  podDisruptionBudget:
+    enabled: true
+  resources:
+    requests:
+      cpu: 600m
+      memory: 1200Mi
+    limits:
+      cpu: 1900m
+      memory: 4000Mi
+  # No-JWKS on-prem fallback. Enabling publisher.authProxy.staticForwardedUser
+  # injects grpc-auth-proxy in front of bep-nats-pub and forwards requests with
+  # only X-Forwarded-User set. Use only when no workable JWT/OIDC auth exists,
+  # and set jwks.enabled: false at the same time.
+  # authProxy:
+  #   staticForwardedUser: "some-on-prem-user-id"
+  jwks:
+    enabled: true
+    audience: https://bep.helm.hermetiq.dev # consult your provider's docs for how to determine the audience
+
+subscriber:
+  # it is strongly advised to have multiple streams via `app.streamPartitionCount` (which creates multiple deployments) and only 1 pod per subscriber deployment
+  replicas: 1
+  # Hardened mode: set true only when serviceAccount.automountServiceAccountToken
+  # is false and optional subscriber lease coordination is enabled.
+  # automountServiceAccountToken: true
+  # Optional PDB for multi-replica subscriber deployments. Keep disabled for
+  # the default single-replica-per-partition topology.
+  # podDisruptionBudget:
+  #   enabled: true
+  #   maxUnavailable: 1
+
+dashboard:
+  # Quickstart uses this for Bazel --remote_cache. Keep it aligned with the
+  # Buildbarn frontend gRPC host from buildbarn-values.yaml.
+  remoteCacheUrl: grpcs://bb.helm.hermetiq.dev
+  # Optional: customize the Quickstart page's Step 1 instructions when your
+  # environment provides its own credential helper workflow. Set
+  # existingConfigMap instead of data when GitOps owns the JSON.
+  # quickstartConfig:
+  #   existingConfigMap: ""
+  #   configMapKey: quickstart-config.json
+  #   data:
+  #     step1:
+  #       title: Install Your Company Credential Helper
+  #       bullets:
+  #         - Obtain the credential helper script from your platform administrator.
+  #         - - text: "Save it under "
+  #           - code: "%workspace%/tools"
+  #       downloads:
+  #         bash: false
+  #         python: false
+  #       actions:
+  #         - label: Open Internal Helper Docs
+  #           href: https://docs.example.com/hermetiq/credential-helper
+  #       warning:
+  #         title: Security Warning
+  #         paragraphs:
+  #           - Do not commit credential helper scripts or generated credentials.
+  oauth2Proxy:
+    enabled: true
+    # .<hosts.domainBase> is auto-whitelisted by the chart. Add issuer/external
+    # redirect domains here only when oauth2-proxy needs to redirect off-domain.
+    whitelistDomains:
+      - "TODO" # typically your OIDC issuer domain here
+    # IdP logout URL. Add the dashboard returnTo host to Auth0's
+    # "Allowed Logout URLs" first, or sign-out will clear only the local cookie.
+    backendLogoutUrl: "TODO"
+    client:
+      existingSecret: oauth2-proxy-client
+
+# Maintenance job schedules and guardrails. This guide runs the main partition
+# maintenance daily at 01:00 UTC (the chart's built-in default is every 12
+# hours). Deadline/resource defaults are generous; increase them if your
+# database is very large and maintenance refreshes need more room.
+partitionMaintenance:
+  enabled: true
+  schedule: "0 1 * * *"
+#   activeDeadlineSeconds: 21600
+#   resources:
+#     requests:
+#       cpu: 100m
+#       memory: 256Mi
+#     limits:
+#       cpu: 1000m
+#       memory: 1Gi
+# progressesPartitionMaintenance:
+#   activeDeadlineSeconds: 21600
+# targetTrendsRefresh:
+#   activeDeadlineSeconds: 21600
+
+rbac:
+  # Chart-managed RBAC, matching the chart default. The deployments/configMaps
+  # read rules back the MCP server's Buildbarn workload-discovery tools, so
+  # disabling this silently drops those tools.
+  enabled: true
+  # Hardened installs can drop unused rule groups. Keep secrets=true only when
+  # grpc-api needs runtime Secret access; keep leases=true only when subscriber
+  # lease coordination is enabled.
+  # rules:
+  #   secrets: false
+  #   leases: false

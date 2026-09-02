@@ -1,0 +1,175 @@
+{{- if .Values.workerTestcontainersSysbox.enabled }}
+{{- if not .Values.images.runnerTestcontainersSysbox.image }}
+{{- fail "images.runnerTestcontainersSysbox.image is required when workerTestcontainersSysbox.enabled=true" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-testcontainers-sysbox
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "worker") | nindent 4 }}
+    app: worker
+    hermetiq.com/worker-pool: testcontainers-sysbox
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.workerTestcontainersSysbox.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: worker
+      instance: testcontainers-sysbox
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "worker") | nindent 8 }}
+        app: worker
+        instance: testcontainers-sysbox
+        kubernetes_service: worker-testcontainers-sysbox
+        hermetiq.com/worker-pool: testcontainers-sysbox
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/worker-config: {{ include "buildbarn.workerConfigChecksum" (dict "root" . "files" (list "common.libsonnet" "worker-common.libsonnet" "runner-testcontainers-sysbox.jsonnet" "worker-testcontainers-sysbox.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.workerTestcontainersSysbox) | nindent 6 }}
+      runtimeClassName: {{ .Values.workerTestcontainersSysbox.runtimeClassName | quote }}
+      {{- if kindIs "bool" .Values.workerTestcontainersSysbox.hostUsers }}
+      hostUsers: {{ .Values.workerTestcontainersSysbox.hostUsers }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.worker" "repository" .Values.images.worker.repository "tag" .Values.images.worker.tag "digest" .Values.images.worker.digest) }}
+          imagePullPolicy: {{ .Values.images.worker.pullPolicy }}
+          args:
+            - /config/worker-testcontainers-sysbox.jsonnet
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-worker") | nindent 12 }}
+            {{- range $name, $value := .Values.workerTestcontainersSysbox.worker.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+          resources:
+            {{- toYaml .Values.workerTestcontainersSysbox.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.workerTestcontainersSysbox.worker.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+        - name: runner
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.runnerTestcontainersSysbox" "image" .Values.images.runnerTestcontainersSysbox.image) | quote }}
+          imagePullPolicy: {{ .Values.images.runnerTestcontainersSysbox.pullPolicy }}
+          args:
+            - /bb/bb_runner
+            - /config/runner-testcontainers-sysbox.jsonnet
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-runner") | nindent 12 }}
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: BUILDBARN_PRELOAD_IMAGES
+              value: {{ join " " .Values.workerTestcontainersSysbox.preloadImages | quote }}
+            {{- range $name, $value := .Values.workerTestcontainersSysbox.runner.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.workerTestcontainersSysbox.runner.resources | nindent 12 }}
+          {{- with .Values.workerTestcontainersSysbox.runner.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+              mountPropagation: HostToContainer
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+      dnsPolicy: ClusterFirst
+      initContainers:
+        - name: volume-init
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.busybox" "image" .Values.images.busybox.image) | quote }}
+          imagePullPolicy: {{ .Values.images.busybox.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - mkdir -pm 0777 /worker/build && mkdir -pm 0700 /worker/cache && mkdir -pm 0777 /storage-worker-cas/persistent_state && chmod 0777 /worker
+          resources:
+            {{- toYaml .Values.workerTestcontainersSysbox.initResources | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+      {{- with .Values.workerTestcontainersSysbox.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.workerTestcontainersSysbox.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: worker
+          emptyDir: {}
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.workerConfigName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: worker-common.libsonnet
+                path: worker-common.libsonnet
+              - key: runner-testcontainers-sysbox.jsonnet
+                path: runner-testcontainers-sysbox.jsonnet
+              - key: worker-testcontainers-sysbox.jsonnet
+                path: worker-testcontainers-sysbox.jsonnet
+        - name: storage-worker-cas
+          hostPath:
+            path: {{ .Values.workerTestcontainersSysbox.storageWorkerCas.hostPath.path | quote }}
+            type: {{ .Values.workerTestcontainersSysbox.storageWorkerCas.hostPath.type }}
+{{- end }}

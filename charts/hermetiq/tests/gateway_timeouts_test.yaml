@@ -1,0 +1,259 @@
+suite: gateway gRPC route timeouts
+values:
+  - ../ci-values/ci.yaml
+templates:
+  - templates/gateway-routes.yaml
+tests:
+  - it: disables the request timeout and stream duration on the BES route
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.connectionIdleTimeout
+          value: "1h"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+
+  - it: bounds the unary API route rather than disabling it
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "300s"
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      # maxStreamDuration defaults to "" for this route — the field must be
+      # omitted entirely so Envoy keeps its own default, not emitted as "".
+      - notExists:
+          path: spec.timeout.http.maxStreamDuration
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+
+  - it: gives the optional Bazel remote-cache route the streaming treatment
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bbcal-grpc-health-check
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bbcal-grpc-health-check
+
+  # Envoy Gateway applies the oldest policy and marks same-level duplicates
+  # Overridden, so the health check and the timeouts MUST share one resource
+  # per route. Two policies targeting one route would silently drop one.
+  - it: keeps the health check and the timeouts in a single policy per route
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      # 9 routes + 5 policies (bep, api, bbcal, api-web, mcp). Splitting the
+      # timeouts into their own policies would push this to 17 and is exactly
+      # the regression this count is here to catch.
+      - hasDocuments:
+          count: 14
+      - equal:
+          path: spec.healthCheck.active.type
+          value: TCP
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+
+  - it: leaves the health checks untouched when timeouts are disabled
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.timeouts.enabled: false
+    asserts:
+      - notExists:
+          path: spec.timeout
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - notExists:
+          path: spec.timeout
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.healthCheck.active.type
+          value: TCP
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+
+  - it: still renders timeouts for the gRPC routes when health checks are off
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.healthChecks.enabled: false
+    asserts:
+      - notExists:
+          path: spec.healthCheck
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "0s"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.targetRefs
+          value:
+            - group: gateway.networking.k8s.io
+              kind: GRPCRoute
+              name: bep-cloud-grpc
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+
+  - it: renders no BackendTrafficPolicy when both features are disabled
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.healthChecks.enabled: false
+      gateway.timeouts.enabled: false
+    asserts:
+      # Routes still render; only the five policies drop out (12 - 4 = 8, and
+      # bbcal is off by default).
+      - hasDocuments:
+          count: 8
+
+  - it: renders no Envoy Gateway policies in httproute-only mode
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+    asserts:
+      # Only the 6 HTTPRoutes render — GKE Gateway has no Envoy Gateway CRDs,
+      # so neither the health checks nor the timeouts may appear.
+      - hasDocuments:
+          count: 6
+
+  - it: omits fields left empty so Envoy keeps its own default
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.timeouts.bepGrpc.requestTimeout: ""
+      gateway.timeouts.bepGrpc.maxStreamDuration: ""
+    asserts:
+      - notExists:
+          path: spec.timeout.http.requestTimeout
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - notExists:
+          path: spec.timeout.http.maxStreamDuration
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.connectionIdleTimeout
+          value: "1h"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+
+  - it: drops the timeout block entirely when a route sets no fields at all
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.timeouts.apiGrpc.requestTimeout: ""
+      gateway.timeouts.apiGrpc.connectionIdleTimeout: ""
+    asserts:
+      - notExists:
+          path: spec.timeout
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.healthCheck.active.type
+          value: TCP
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+
+  # gateway.timeouts originally covered only the three gRPC routes, leaving the
+  # mcp and api-web HTTPRoutes on Envoy Gateway's 15s default route timeout.
+  - it: bounds the api-web HTTPRoute at 300s, matching apiGrpc
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    documentSelector:
+      path: metadata.name
+      value: api-web-health-check
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 300s
+      - equal:
+          path: spec.timeout.http.connectionIdleTimeout
+          value: 1h
+      - exists:
+          path: spec.healthCheck.active
+
+  - it: bounds the mcp HTTPRoute and disables its max stream duration
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    documentSelector:
+      path: metadata.name
+      value: mcp-health-check
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 300s
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: 0s
+      - exists:
+          path: spec.healthCheck.active
+
+  - it: leaves the mcp and api-web policies untimed when timeouts are disabled
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.timeouts.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: mcp-health-check
+    asserts:
+      - notExists:
+          path: spec.timeout
+      - exists:
+          path: spec.healthCheck.active

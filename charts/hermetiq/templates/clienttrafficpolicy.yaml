@@ -1,0 +1,60 @@
+{{- $provider := include "hermetiq-core.routingProvider" . -}}
+{{- if eq $provider "gateway" -}}
+{{- with .Values.gateway.clientTrafficPolicy }}
+{{- if .enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ .name }}
+  {{- /* A ClientTrafficPolicy can only target a Gateway in its own namespace. */}}
+  namespace: {{ include "hermetiq-core.gatewayNamespace" $ }}
+  labels:
+    {{- include "hermetiq-core.labels" $ | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ required "gateway.name is required when gateway.clientTrafficPolicy.enabled=true" $.Values.gateway.name | quote }}
+      {{- with .sectionName }}
+      sectionName: {{ . | quote }}
+      {{- end }}
+  {{- with .bufferLimit }}
+  connection:
+    bufferLimit: {{ . | quote }}
+  {{- end }}
+  {{- with .http2 }}
+  http2:
+    {{- with .initialStreamWindowSize }}
+    initialStreamWindowSize: {{ . | quote }}
+    {{- end }}
+    {{- with .initialConnectionWindowSize }}
+    initialConnectionWindowSize: {{ . | quote }}
+    {{- end }}
+    {{- with .maxConcurrentStreams }}
+    maxConcurrentStreams: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with .timeout }}
+  {{- with .http }}
+  timeout:
+    http:
+      {{- with .idleTimeout }}
+      idleTimeout: {{ . | quote }}
+      {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- with .tcpKeepalive }}
+  tcpKeepalive:
+    {{- with .idleTime }}
+    idleTime: {{ . | quote }}
+    {{- end }}
+    {{- with .interval }}
+    interval: {{ . | quote }}
+    {{- end }}
+    {{- with .probes }}
+    probes: {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

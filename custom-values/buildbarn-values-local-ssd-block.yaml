@@ -1,0 +1,156 @@
+# Optional overlay for GKE Standard raw-block Local SSD storage.
+#
+# Apply after the portable base values:
+#   helm upgrade --install ... -f buildbarn-values.yaml -f buildbarn-values-local-ssd-block.yaml
+#
+# Prerequisites:
+# - A non-preemptible storage node pool created with raw local SSDs, for example
+#   gcloud ... --local-nvme-ssd-block count=N
+# - Nodes labeled node-type=ssd-block and tainted hermetiq/ssd-block:NoSchedule.
+# - custom-values/partition-ephemeral-disks-daemonset.yaml applied first. It
+#   creates /dev/ephemeral/{cas,ac,iscc,fsac} and labels nodes
+#   hermetiq/ephemeral-lvm=ready.
+# - A namespace that permits privileged pods. HostPath raw block devices require
+#   privileged Buildbarn storage containers.
+
+storage:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      # In-memory key-location maps are RESERVED at startup and become resident
+      # as slots are touched. CAS 80M + AC 12M + ISCC 8M + FSAC 8M = 108M entries
+      # x 64 B = ~6.9 GiB fully populated; 12Gi covers that plus Go GC headroom
+      # and large gRPC message buffers.
+      #
+      # A 680Gi CAS is the point where `keyLocationMap: file` (the chart default
+      # for blockDevice) becomes the better trade: it moves this 5.1 GiB to disk
+      # AND makes the store survive restarts. It needs a metadata volume, which
+      # this LVM layout does not carve, so this overlay stays in-memory.
+      memory: 12Gi
+      # CAS/AC/ISCC/FSAC live on raw block devices; this only covers scratch.
+      ephemeral-storage: 2Gi
+    limits:
+      cpu: 7100m
+      memory: 24Gi
+      ephemeral-storage: 2Gi
+  # Checks every entries/size pair below against the ratio formula documented in
+  # the chart's storage.keyLocationMapSizing. An undersized map drops location
+  # records once it saturates, and clients see "Lost inputs no longer available
+  # remotely" (Bazel exit 39) for blobs that are actually on disk.
+  keyLocationMapSizing:
+    validate: true
+    minimumRatio: 2
+  persistence:
+    mode: hostPath
+    blockDevice:
+      allowHostPath: true
+      # GKE device-mapper nodes are root-owned, so grant the non-root storage
+      # container access through an init container.
+      deviceAccess: chownInit
+    cas:
+      backend: blockDevice
+      blockDevice:
+        keyLocationMap: inMemory
+        # ~634 GiB usable (41 of 44 blocks) / 17408 B average blob = ~39M
+        # indexable blobs, so 80M holds a 2.0x ratio. The previous 40M was 1.02x:
+        # enough to index the device exactly once, which is where put probes start
+        # failing and blobs become unreachable.
+        keyLocationMapInMemoryEntries: 80000000
+        # Documentation only in hostPath mode — but the sizing guard reads it, so
+        # it must match the real LV or the check is meaningless.
+        size: 680Gi
+        hostPath:
+          devicePath: /dev/ephemeral/cas
+    ac:
+      backend: blockDevice
+      blockDevice:
+        keyLocationMap: inMemory
+        # ~6.4 GiB usable / 1152 B per ActionResult = ~6M -> 2.0x.
+        keyLocationMapInMemoryEntries: 12000000
+        size: 7Gi
+        hostPath:
+          devicePath: /dev/ephemeral/ac
+    # ISCC/FSAC devices are deliberately SMALL: they hold one tiny object per
+    # distinct action, and a larger device only inflates the key-location map they
+    # need. Sizes match the LVs cut by partition-ephemeral-disks-daemonset.yaml.
+    iscc:
+      enabled: true
+      backend: blockDevice
+      blockDevice:
+        keyLocationMap: inMemory
+        # ~1.8 GiB usable / 512 B per PreviousExecutionStats = ~3.8M -> 2.1x.
+        keyLocationMapInMemoryEntries: 8000000
+        size: 2Gi
+        hostPath:
+          devicePath: /dev/ephemeral/iscc
+    fsac:
+      enabled: true
+      backend: blockDevice
+      blockDevice:
+        keyLocationMap: inMemory
+        # ~5.5 GiB usable / 2048 B per path bloom filter = ~2.9M -> 2.8x.
+        keyLocationMapInMemoryEntries: 8000000
+        size: 6Gi
+        hostPath:
+          devicePath: /dev/ephemeral/fsac
+  nodeSelector:
+    node-type: ssd-block
+    hermetiq/ephemeral-lvm: ready
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+  tolerations:
+    - effect: NoSchedule
+      key: hermetiq/ssd-block
+      operator: Exists
+  podAntiAffinity:
+    enabled: true
+
+config:
+  actionCache:
+    # Periodic-rebuild hygiene only. It is completenessChecking (always on) that
+    # keeps an AC hit from referencing evicted CAS blobs, so leaving this disabled
+    # is still correct. Keep minimumValidity comfortably BELOW real CAS retention
+    # — derive that from the eviction rate, not from the device size:
+    #   retention ~= (old+current+new) x blockBytes / bytesWrittenPerDay
+    # A store whose block_allocator_releases_total is still 0 has not evicted
+    # anything yet.
+    actionResultExpiring:
+      enabled: true
+      minimumValidity: 2592000s # 30d
+      maximumValidityJitter: 259200s # 3d — MUST be nonzero; bb-storage divides by it
+      minimumTimestamp: "" # break-glass AC flush; empty => omit
+
+frontend:
+  contentAddressableStorage:
+    # Two-sided trade, not a "shorter is safer" knob. Longer keeps
+    # FindMissingBlobs off the storage shards — the frontend is the only component
+    # on the client path, so each miss costs frontend CPU plus a storage round
+    # trip and lengthens request residency at the ingress. Shorter bounds the
+    # window in which this cache lies: it remembers a blob was PRESENT, and these
+    # stores use in-memory key-location maps so they come back EMPTY after a
+    # storage restart, during which clients skip re-uploading and their actions
+    # fail with "Lost inputs no longer available remotely".
+    #
+    # Nothing is evicted here yet (block_allocator_releases_total is 0), so a
+    # storage restart is the only way a blob vanishes and re-running the build is
+    # the recovery. 180s keeps most of the caching benefit at a 3-minute window.
+    # Switching these stores to blockDevice.keyLocationMap: file removes the
+    # hazard entirely and makes a long duration safe.
+    existenceCaching:
+      enabled: true
+      cacheSize: 1000000
+      cacheDuration: 180s
+
+scheduler:
+  # Requires storage.persistence.iscc.enabled=true above. Wires the ISCC into the
+  # scheduler and switches the analyzer to feedbackDriven, which is what actually
+  # writes to the ISCC store.
+  sizeClassAnalysis:
+    enabled: true
+  # Must match the worker-sizeclass-small/large RbeWorker manifests.
+  predeclaredPlatformQueues:
+    - platform:
+        - name: pool
+          value: sizeclass
+      sizeClasses: [1, 2]

@@ -1,0 +1,211 @@
+suite: storage statefulset
+templates:
+  - templates/statefulset-storage.yaml
+tests:
+  - it: renders the storage StatefulSet with the configured image tag
+    set:
+      images.storage.tag: test-tag-123
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: metadata.name
+          value: storage
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "storage")].image
+          pattern: bb-storage:test-tag-123$
+
+  # --- backward compatibility: default (filesystem) backend ---
+  - it: default filesystem backend keeps cas/ac claim names and no block plumbing
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: cas
+      - equal:
+          path: spec.volumeClaimTemplates[1].metadata.name
+          value: ac
+      - isNull:
+          path: spec.volumeClaimTemplates[0].spec.volumeMode
+      - isNull:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeDevices
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 65534
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 65534
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - isNull:
+          path: spec.template.spec.securityContext.supplementalGroups
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: volume-init
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 65534
+      - contains:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
+          content: ALL
+
+  # --- block-device backend, in-memory KLM (default), deviceAccess=group ---
+  - it: block backend renders Block PVCs, volumeDevices, and pod securityContext
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-blocks")].spec.volumeMode
+          value: Block
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeDevices[?(@.name == "cas-blocks")].devicePath
+          value: /dev/bb/cas
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 65534
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - contains:
+          path: spec.template.spec.securityContext.supplementalGroups
+          content: 6
+      # in-memory KLM => no companion metadata claim, ac stays filesystem
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-meta")]
+      - equal:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "ac")].spec.storageClassName
+          value: premium-rwo
+
+  # --- block-device backend, deviceAccess=chownInit ---
+  - it: chownInit adds a CHOWN-capable device-chown init container
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.blockDevice.deviceAccess: chownInit
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].name
+          value: device-chown
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].securityContext.capabilities.add
+          content: CHOWN
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].volumeDevices[?(@.name == "cas-blocks")].devicePath
+          value: /dev/bb/cas
+
+  # --- block-device backend, file KLM (persistent) ---
+  - it: file KLM adds a companion metadata claim and mount
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+    asserts:
+      # raw blocks volume is still Block; companion meta claim exists (Filesystem)
+      - equal:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-blocks")].spec.volumeMode
+          value: Block
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-meta")].metadata.name
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
+          value: /storage-cas-meta
+
+  # --- hostPath mode with a raw block device (node-local NVMe LV) ---
+  - it: hostPath block mode bind-mounts the device node and goes privileged
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].securityContext.privileged
+          value: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: cas-blocks
+            hostPath:
+              path: /dev/ephemeral/cas
+              type: BlockDevice
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-blocks")].mountPath
+          value: /dev/bb/cas
+      # hostPath sources cannot use volumeDevices, and no PVCs are templated
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeDevices
+      - notExists:
+          path: spec.volumeClaimTemplates
+
+  # --- terminationGracePeriodSeconds passthrough ---
+  - it: terminationGracePeriodSeconds is unset by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.terminationGracePeriodSeconds
+
+  - it: terminationGracePeriodSeconds passes through when set
+    set:
+      storage.terminationGracePeriodSeconds: 120
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
+
+  # The kubelet creates a DirectoryOrCreate hostPath as root:root 0755, and
+  # fsGroup is not applied to hostPath volumes, so an unprivileged volume-init
+  # could not mkdir inside it — the StatefulSet stuck in Init:Error.
+  - it: runs volume-init as root with CHOWN in hostPath mode
+    set:
+      storage.persistence.mode: hostPath
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: volume-init
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 0
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsNonRoot
+          value: false
+      - contains:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.add
+          content: CHOWN
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "chown 65534:65534 /storage-cas"
+
+  - it: keeps volume-init unprivileged in pvc mode, where fsGroup applies
+    set:
+      storage.persistence.mode: pvc
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 65534
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsNonRoot
+          value: true
+      - notExists:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.add
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: chown
+
+  - it: keeps volume-init unprivileged in emptyDir mode
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 65534
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: chown

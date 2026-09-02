@@ -1,0 +1,56 @@
+{{- if .Values.storage.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "storage") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      app: storage
+  policyTypes:
+    - Ingress
+  ingress:
+    # Storage gRPC is unauthenticated (authn/authz happens at the frontend):
+    # restrict it to Buildbarn components in this namespace plus any
+    # explicitly listed peers (e.g. RbeWorker pods in other namespaces).
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - frontend
+                  - scheduler
+                  - browser
+                  - remote-asset
+                  - bb-portal
+                  - worker
+                  - storage
+        {{- with .Values.storage.networkPolicy.additionalClientPeers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 8981
+          protocol: TCP
+    # Diagnostics/metrics: scrapers usually live outside this namespace, so
+    # allow :9980 from anywhere unless metricsPeers narrows it.
+    {{- if .Values.storage.networkPolicy.metricsPeers }}
+    - from:
+        {{- toYaml .Values.storage.networkPolicy.metricsPeers | nindent 8 }}
+      ports:
+        - port: 9980
+          protocol: TCP
+    {{- else }}
+    - ports:
+        - port: 9980
+          protocol: TCP
+    {{- end }}
+{{- end }}

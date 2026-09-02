@@ -1,0 +1,15 @@
+suite: buildbarn services
+templates:
+  - templates/services.yaml
+tests:
+  - it: storage headless Service publishes not-ready addresses
+    documentSelector:
+      path: metadata.name
+      value: storage
+    asserts:
+      - equal:
+          path: spec.clusterIP
+          value: None
+      - equal:
+          path: spec.publishNotReadyAddresses
+          value: true

@@ -1,0 +1,43 @@
+suite: gateway request header security
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: strips untrusted forwarded client certificates from the API GRPCRoute
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.rules[0].filters[0].type
+          value: RequestHeaderModifier
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: spec.rules[0].filters[0].requestHeaderModifier.remove[0]
+          value: x-forwarded-client-cert
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+
+  - it: strips untrusted forwarded client certificates from the API HTTPRoute
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.rules[1].filters[0].type
+          value: RequestHeaderModifier
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: spec.rules[1].filters[0].requestHeaderModifier.remove[0]
+          value: x-forwarded-client-cert
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc

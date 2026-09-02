@@ -1,0 +1,47 @@
+{
+  "bep": {
+    "buildToolStreamName": "BEP_BUILD_TOOL",
+    "dlqStreamName": "BEP_DLQ_STREAM",
+    "subjectPrefix": "bep",
+    "buildToolStream": { "maxAge": "30m", "maxBytes": 0, "storage": "file", "replicas": 3, "duplicates": "30s" },
+    "dlq": { "maxAge": "24h" },
+    "consumers": {
+      "buildTool": { "maxDeliver": 6, "ackWait": "3m", "backoff": ["3m", "6m"], "maxAckPending": 140000, "maxWaiting": 1024, "maxRequestBatch": 6000, "maxRequestExpires": "4s", "maxRequestMaxBytes": 90000000, "batchSize": 3000, "fetchMaxWait": "2s", "parallelism": 50, "storeBatchMaxEvents": 1000, "storeBatchMaxWait": "5ms", "storeBatchParallelism": 24 },
+      "progress": { "maxDeliver": 3, "ackWait": "90s", "backoff": [], "maxAckPending": 100000, "maxWaiting": 1024, "maxRequestBatch": 4000, "maxRequestExpires": "4s", "maxRequestMaxBytes": 90000000, "batchSize": 2000, "fetchMaxWait": "2s", "parallelism": 30 }
+    }
+  },
+  "forwarder": {
+    "streamName": "FWD_STREAM",
+    "stream": { "maxAge": "10m", "storage": "file", "replicas": 1, "duplicates": "30s" },
+    "consumer": { "maxDeliver": 4, "ackWait": "60s", "maxAckPending": 1000, "maxWaiting": 1024, "maxRequestBatch": 500, "maxRequestExpires": "1500ms", "batchSize": 500, "fetchMaxWait": "1500ms" }
+  },
+  "raw": {
+    "consumer": { "maxDeliver": 8, "ackWait": "120s", "maxAckPending": 4000, "maxWaiting": 1024, "maxRequestBatch": 500, "maxRequestExpires": "2s", "batchSize": 500, "fetchMaxWait": "2s" }
+  },
+  "cache": {
+    "enabled": true,
+    "streamName": "CACHE_EVENTS",
+    "dlqStreamName": "CACHE_DLQ_STREAM",
+    "subjectPrefix": "cache",
+    "stream": { "maxAge": "5m", "maxBytes": 134217728, "storage": "memory", "replicas": 1, "duplicates": "30s" },
+    "dlq": { "maxAge": "24h" },
+    "consumer": { "maxDeliver": 5, "ackWait": "60s", "maxAckPending": 4000, "maxWaiting": 1024, "maxRequestBatch": 1000, "maxRequestExpires": "1s", "batchSize": 1000, "fetchMaxWait": "1s" }
+  },
+  "cacheEnrich": {
+    "streamName": "CACHE_ENRICH",
+    "dlqStreamName": "CACHE_ENRICH_DLQ_STREAM",
+    "subjectPrefix": "cache_enrich",
+    "stream": { "maxAge": "1h", "storage": "file", "replicas": 1, "duplicates": "60s" },
+    "dlq": { "maxAge": "24h" },
+    "consumer": { "maxDeliver": 10, "ackWait": "120s", "maxAckPending": 512, "maxWaiting": 256, "maxRequestBatch": 64, "maxRequestExpires": "2s", "batchSize": 64, "fetchMaxWait": "2s" }
+  },
+  "action": {
+    "enabled": true,
+    "streamName": "ACTION_STREAM",
+    "dlqStreamName": "ACTION_DLQ_STREAM",
+    "subjectPrefix": "bb",
+    "stream": { "maxAge": "30m", "storage": "file", "replicas": 1, "duplicates": "30s" },
+    "dlq": { "maxAge": "6h" },
+    "consumer": { "maxDeliver": 4, "ackWait": "30s" }
+  }
+}

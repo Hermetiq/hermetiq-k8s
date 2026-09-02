@@ -1,0 +1,218 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "frontend") | nindent 8 }}
+        app: frontend
+        kubernetes_service: frontend
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "frontend.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend) | nindent 6 }}
+      {{- if .Values.frontend.podAntiAffinity.enabled }}
+      {{- include "buildbarn.preferredPodAntiAffinity" (dict "app" "frontend") | nindent 6 }}
+      {{- end }}
+      containers:
+        {{- $proxy := .Values.frontend.grpcCacheProxy }}
+        {{- if $proxy.enabled }}
+        - name: grpc-cache-proxy
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.grpcCacheProxy" "repository" .Values.images.grpcCacheProxy.repository "tag" .Values.images.grpcCacheProxy.tag "digest" .Values.images.grpcCacheProxy.digest) }}
+          imagePullPolicy: {{ .Values.images.grpcCacheProxy.pullPolicy }}
+          ports:
+            - name: grpc-proxy
+              containerPort: {{ $proxy.port }}
+              protocol: TCP
+          {{- /* Only mounted when the proxy actually authenticates: it reads the
+                 STYTCH_* vars only under enforceAuth, and referencing a Secret
+                 the operator has not created fails the pod with
+                 CreateContainerConfigError. */}}
+          {{- if and $proxy.enforceAuth $proxy.stytch.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ $proxy.stytch.existingSecret }}
+          {{- end }}
+          env:
+            - name: K8S_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: ENFORCE_AUTH
+              value: {{ $proxy.enforceAuth | quote }}
+            {{- with $proxy.stytch.apiHost }}
+            - name: STYTCH_API_HOST
+              value: {{ . | quote }}
+            {{- end }}
+            - name: DEBUG
+              value: {{ $proxy.debug | quote }}
+            - name: GRPC_PORT
+              value: {{ $proxy.port | quote }}
+            - name: PROXY_PORT
+              value: "8980"
+            - name: MAX_MESSAGE_SIZE_BYTES
+              value: {{ include "buildbarn.grpcCacheProxyMaxMessageSize" . | quote }}
+            - name: NATS_URL
+              value: {{ $proxy.natsUrl | quote }}
+            {{- if $proxy.natsUrl }}
+            - name: CACHE_EVENT_NUM_SHARDS
+              value: {{ $proxy.cacheEvents.numShards | quote }}
+            - name: CACHE_EVENT_SUBJECT_PREFIX
+              value: {{ $proxy.cacheEvents.subjectPrefix | quote }}
+            {{- end }}
+            {{- if and (not $proxy.otel.endpoint) .Values.tracing.enabled .Values.tracing.nodeLocal.enabled }}
+            - name: K8S_LOCAL_NODE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            {{- end }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "buildbarn.grpcCacheProxyOtelEndpoint" . | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ $proxy.otel.protocol | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ $proxy.otel.serviceName | quote }}
+            - name: OTEL_INTERVAL
+              value: {{ $proxy.otel.interval | quote }}
+            {{- range $name, $value := $proxy.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          {{- if $proxy.probes.enabled }}
+          readinessProbe:
+            grpc:
+              port: {{ $proxy.port }}
+            initialDelaySeconds: {{ $proxy.probes.initialDelaySeconds }}
+            periodSeconds: {{ $proxy.probes.periodSeconds }}
+            timeoutSeconds: {{ $proxy.probes.timeoutSeconds }}
+            failureThreshold: {{ $proxy.probes.failureThreshold }}
+          livenessProbe:
+            grpc:
+              port: {{ $proxy.port }}
+            initialDelaySeconds: {{ $proxy.probes.initialDelaySeconds }}
+            periodSeconds: {{ $proxy.probes.periodSeconds }}
+            timeoutSeconds: {{ $proxy.probes.timeoutSeconds }}
+            failureThreshold: {{ $proxy.probes.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml $proxy.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+        {{- end }}
+        - name: frontend
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.storage" "repository" .Values.images.storage.repository "tag" .Values.images.storage.tag "digest" .Values.images.storage.digest) }}
+          imagePullPolicy: {{ .Values.images.storage.pullPolicy }}
+          args:
+            - /config/frontend.jsonnet
+          {{- if or .Values.tracing.enabled .Values.frontend.env }}
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "frontend") | nindent 12 }}
+            {{- range $name, $value := .Values.frontend.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+            - containerPort: 8980
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            {{- if .Values.frontend.mtlsClientCert.enabled }}
+            - name: mtls-client-cert
+              readOnly: true
+              mountPath: /etc/mtls-client-cert
+            {{- end }}
+            {{- if .Values.frontend.jwks.enabled }}
+            - mountPath: /etc/buildbarn/jwks
+              name: jwks
+              readOnly: true
+            {{- end }}
+            {{- if .Values.frontend.readCache.enabled }}
+            - mountPath: {{ .Values.frontend.readCache.mountPath | quote }}
+              name: frontend-cas-cache
+            {{- end }}
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.frontend) | nindent 6 }}
+      volumes:
+        {{- if .Values.frontend.mtlsClientCert.enabled }}
+        - name: mtls-client-cert
+          secret:
+            secretName: {{ required "secrets.mtlsClientCert is required when frontend.mtlsClientCert.enabled is true" .Values.secrets.mtlsClientCert }}
+        {{- end }}
+        {{- if .Values.frontend.jwks.enabled }}
+        - name: jwks
+          configMap:
+            name: {{ .Values.frontend.jwks.configMapName }}
+        {{- end }}
+        {{- if .Values.frontend.readCache.enabled }}
+        - name: frontend-cas-cache
+          {{- if .Values.frontend.readCache.volume.hostPath.enabled }}
+          hostPath:
+            path: {{ required "frontend.readCache.volume.hostPath.path is required when hostPath is enabled" .Values.frontend.readCache.volume.hostPath.path | quote }}
+            type: {{ .Values.frontend.readCache.volume.hostPath.type }}
+          {{- else }}
+          emptyDir:
+            {{- toYaml .Values.frontend.readCache.volume.emptyDir | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.configName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: frontend.jsonnet
+                path: frontend.jsonnet

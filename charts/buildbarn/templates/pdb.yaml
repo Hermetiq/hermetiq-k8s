@@ -1,0 +1,81 @@
+{{- if .Values.storage.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: storage
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "storage") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.storage.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: storage
+---
+{{- end }}
+{{- if .Values.frontend.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.frontend.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: frontend
+---
+{{- end }}
+{{- if .Values.scheduler.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: scheduler-ubuntu22-04
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.scheduler.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: scheduler
+      instance: ubuntu22-04
+---
+{{- end }}
+{{- if .Values.browser.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: browser
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "browser") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.browser.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: browser
+---
+{{- end }}
+{{- if and .Values.remoteAsset.enabled .Values.remoteAsset.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: remote-asset
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.remoteAsset.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: remote-asset
+---
+{{- end }}

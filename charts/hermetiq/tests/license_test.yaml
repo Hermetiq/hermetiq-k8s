@@ -1,0 +1,465 @@
+suite: licensing
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/secrets.yaml
+  - templates/rbac.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  # --- env contract ---------------------------------------------------------
+  - it: sets the license env on the api container and runs APP_MODE=api
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "APP_MODE")].value
+          value: api
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "CONTACT_EMAIL")].value
+          value: ci@hermetiq.test
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_TRIAL_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_AIRGAP")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_SAAS_URL")].value
+          value: https://api.cloud-usc1.hermetiq.io
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_STATE_SECRET_NAME")].value
+          value: hermetiq-license-state
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_FINGERPRINT_OVERRIDE")]
+      # No key Secret configured: the optional license volume is still
+      # mounted so a later-created hermetiq-license Secret (paid-key arrival)
+      # hot-loads without a values change or rollout.
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.secretName
+          value: hermetiq-license
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.optional
+          value: true
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.items
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].volumeMounts[?(@.name == "license-key")].mountPath
+          value: /config/license
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].volumeMounts[?(@.name == "license-key")].readOnly
+          value: true
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_KEY_FILE")].value
+          value: /config/license/license.key
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_LIC_FILE")].value
+          value: /config/license/license.lic
+
+  - it: sets the license env on the publisher container which stays APP_MODE=pub
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "APP_MODE")].value
+          value: pub
+      # APP_ENV=on-prem is load-bearing on the publisher too: without it the
+      # pod runs IsOnPrem()==false and never constructs the trial client.
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "APP_ENV")].value
+          value: on-prem
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "CONTACT_EMAIL")].value
+          value: ci@hermetiq.test
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_TRIAL_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_AIRGAP")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_SAAS_URL")].value
+          value: https://api.cloud-usc1.hermetiq.io
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_STATE_SECRET_NAME")].value
+          value: hermetiq-license-state
+      # Same always-mounted optional license volume as the api pod.
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.secretName
+          value: hermetiq-license
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.optional
+          value: true
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.items
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "license-key")].mountPath
+          value: /config/license
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_KEY_FILE")].value
+          value: /config/license/license.key
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_LIC_FILE")].value
+          value: /config/license/license.lic
+
+  - it: forwards the chart version as trial/machine metadata on both pods
+    chart:
+      version: 9.9.9-test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "CHART_VERSION")].value
+          value: 9.9.9-test
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "CHART_VERSION")].value
+          value: 9.9.9-test
+        template: templates/deployment-publisher.yaml
+
+  - it: passes the fingerprint override through when set
+    template: templates/deployment-api.yaml
+    set:
+      license.fingerprintOverride: 4f5d0b6a9c8e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_FINGERPRINT_OVERRIDE")].value
+          value: 4f5d0b6a9c8e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192
+
+  # --- chart-created Secret -------------------------------------------------
+  - it: renders the hermetiq-license Secret for an inline key
+    template: templates/secrets.yaml
+    set:
+      license.key.value: inline-test-key
+    documentSelector:
+      path: metadata.name
+      value: hermetiq-license
+    asserts:
+      - isKind:
+          of: Secret
+      - equal:
+          path: stringData["license.key"]
+          value: inline-test-key
+
+  - it: does not render the license Secret when no inline key is set
+    template: templates/secrets.yaml
+    asserts:
+      # ci-values render exactly one fallback Secret (redis; postgres defaults
+      # to an existingSecret) and no license Secret.
+      - hasDocuments:
+          count: 1
+
+  - it: does not render the license Secret when an existing Secret is named
+    template: templates/secrets.yaml
+    set:
+      license.key.existingSecret: customer-license
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: prefers the existing Secret when both an inline key and a Secret name are set
+    template: templates/secrets.yaml
+    set:
+      license.key.value: inline-test-key
+      license.key.existingSecret: customer-license
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # --- key Secret volume + mount --------------------------------------------
+  - it: mounts an existing license Secret on the api pod
+    template: templates/deployment-api.yaml
+    set:
+      license.key.existingSecret: customer-license
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.secretName
+          value: customer-license
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.optional
+          value: true
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.items
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].volumeMounts[?(@.name == "license-key")].mountPath
+          value: /config/license
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].volumeMounts[?(@.name == "license-key")].readOnly
+          value: true
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_KEY_FILE")].value
+          value: /config/license/license.key
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "LICENSE_LIC_FILE")].value
+          value: /config/license/license.lic
+
+  - it: mounts the chart-created license Secret on the publisher pod for an inline key
+    template: templates/deployment-publisher.yaml
+    set:
+      license.key.value: inline-test-key
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.secretName
+          value: hermetiq-license
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.optional
+          value: true
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "license-key")].mountPath
+          value: /config/license
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_KEY_FILE")].value
+          value: /config/license/license.key
+
+  - it: points the file envs at custom Secret key names in air-gapped mode
+    template: templates/deployment-publisher.yaml
+    set:
+      license.airGapped: true
+      license.trial.enabled: false
+      license.key.existingSecret: customer-license
+      license.key.existingSecretKey: my-key
+      license.licenseFileSecretKey: my-lic
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_AIRGAP")].value
+          value: "true"
+      # No items: remapping — the Secret's keys project under their own names
+      # and the env paths follow the configured key names.
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.items
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "license-key")].secret.secretName
+          value: customer-license
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_KEY_FILE")].value
+          value: /config/license/my-key
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "LICENSE_LIC_FILE")].value
+          value: /config/license/my-lic
+
+  # --- RBAC -----------------------------------------------------------------
+  - it: appends the fingerprint and license-state RBAC documents by default
+    template: templates/rbac.yaml
+    asserts:
+      - hasDocuments:
+          count: 6
+      - isKind:
+          of: ClusterRole
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-cluster-fingerprint
+        documentIndex: 2
+      - equal:
+          path: rules[0].resources[0]
+          value: namespaces
+        documentIndex: 2
+      - equal:
+          path: rules[0].verbs
+          value:
+            - get
+        documentIndex: 2
+      - equal:
+          path: rules[0].resourceNames
+          value:
+            - kube-system
+        documentIndex: 2
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 3
+      - equal:
+          path: subjects[0].name
+          value: bep-nats
+        documentIndex: 3
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-cluster-fingerprint
+        documentIndex: 3
+      - isKind:
+          of: Role
+        documentIndex: 4
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-license-state
+        documentIndex: 4
+      - equal:
+          path: rules[0].resources[0]
+          value: secrets
+        documentIndex: 4
+      - equal:
+          path: rules[0].resourceNames
+          value:
+            - hermetiq-license-state
+        documentIndex: 4
+      - equal:
+          path: rules[0].verbs
+          value:
+            - get
+            - update
+            - patch
+        documentIndex: 4
+      # create cannot be name-scoped in Kubernetes RBAC.
+      - equal:
+          path: rules[1].verbs
+          value:
+            - create
+        documentIndex: 4
+      - notExists:
+          path: rules[1].resourceNames
+        documentIndex: 4
+      # Own-namespace fallback fingerprint (namespaced special case).
+      - equal:
+          path: rules[2].resources[0]
+          value: namespaces
+        documentIndex: 4
+      - isKind:
+          of: RoleBinding
+        documentIndex: 5
+      - equal:
+          path: roleRef.kind
+          value: Role
+        documentIndex: 5
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-license-state
+        documentIndex: 5
+
+  - it: omits the fingerprint RBAC when rbac.rules.clusterFingerprint=false
+    template: templates/rbac.yaml
+    set:
+      rbac.rules.clusterFingerprint: false
+    asserts:
+      - hasDocuments:
+          count: 4
+      - isKind:
+          of: Role
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-license-state
+        documentIndex: 2
+
+  - it: omits the license-state RBAC when rbac.rules.licenseState=false
+    template: templates/rbac.yaml
+    set:
+      rbac.rules.licenseState: false
+    asserts:
+      - hasDocuments:
+          count: 4
+      - isKind:
+          of: ClusterRole
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-cluster-fingerprint
+        documentIndex: 2
+
+  - it: omits both license RBAC grants when both flags are false
+    template: templates/rbac.yaml
+    set:
+      rbac.rules.clusterFingerprint: false
+      rbac.rules.licenseState: false
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  # --- validate.yaml guards --------------------------------------------------
+  - it: fails to template without a contact email
+    template: templates/validate.yaml
+    set:
+      license.contactEmail: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.contactEmail is required"
+
+  - it: rejects a malformed contact email
+    template: templates/validate.yaml
+    set:
+      license.contactEmail: not-an-email
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be a syntactically valid email address"
+
+  - it: fails to template until the EULA is accepted
+    template: templates/validate.yaml
+    set:
+      license.agreement.accepted: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.agreement.accepted must be true"
+
+  - it: rejects air-gapped mode without a key Secret
+    template: templates/validate.yaml
+    set:
+      license.airGapped: true
+      license.trial.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.airGapped=true requires a license key Secret"
+
+  - it: rejects air-gapped mode with only an inline key value
+    template: templates/validate.yaml
+    set:
+      license.airGapped: true
+      license.trial.enabled: false
+      license.key.value: some-inline-key
+    asserts:
+      - failedTemplate:
+          errorPattern: "an inline license.key.value cannot carry the license file"
+
+  - it: rejects air-gapped mode with trials enabled
+    template: templates/validate.yaml
+    set:
+      license.airGapped: true
+      license.key.existingSecret: customer-license
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.trial.enabled must be false when license.airGapped=true"
+
+  - it: rejects a malformed fingerprint override
+    template: templates/validate.yaml
+    set:
+      license.fingerprintOverride: not-hex
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.fingerprintOverride"
+
+  # An empty Secret data-key name renders LICENSE_*_FILE as the
+  # /config/license/ directory itself — guaranteed broken at runtime.
+  - it: rejects an empty license key Secret data key
+    template: templates/validate.yaml
+    set:
+      license.key.existingSecretKey: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.key.existingSecretKey"
+
+  - it: rejects an empty license file Secret data key
+    template: templates/validate.yaml
+    set:
+      license.licenseFileSecretKey: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.licenseFileSecretKey"
+
+  - it: rejects a license key Secret data key with invalid characters
+    template: templates/validate.yaml
+    set:
+      license.key.existingSecretKey: foo/bar
+    asserts:
+      - failedTemplate:
+          errorPattern: "license.key.existingSecretKey"
+
+  - it: accepts custom but valid license Secret data keys
+    template: templates/validate.yaml
+    set:
+      license.key.existingSecretKey: my-key.v2
+      license.licenseFileSecretKey: my_lic.v2
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts a valid air-gapped configuration
+    template: templates/validate.yaml
+    set:
+      license.airGapped: true
+      license.trial.enabled: false
+      license.key.existingSecret: customer-license
+    asserts:
+      - notFailedTemplate: {}

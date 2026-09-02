@@ -1,0 +1,51 @@
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: dragonfly
+  namespace: hermetiq
+  labels:
+    app.kubernetes.io/name: dragonfly
+    app.kubernetes.io/instance: dragonfly
+spec:
+  replicas: 1
+  image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.38.0
+  imagePullPolicy: IfNotPresent
+
+  args:
+    - --cache_mode=true
+    - --dbnum=4
+    - --logtostdout=true
+    - --proactor_threads=4
+
+  authentication:
+    passwordFromSecret:
+      name: dragonfly-auth
+      key: password
+
+  resources:
+    requests:
+      memory: 2000Mi
+    limits:
+      memory: 2000Mi
+
+  podSecurityContext:
+    fsGroup: 2000
+
+  containerSecurityContext:
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  serviceSpec:
+    name: dragonfly
+    type: ClusterIP
+
+  # Mirrors the Helm deployment's lack of persistence.
+  # Leave snapshot/tiering unset.
+
+  # The current operator creates a NetworkPolicy by default. Set this to false
+  # if you want behavior closer to the Helm chart install.
+  networkPolicyEnabled: false

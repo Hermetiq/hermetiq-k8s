@@ -1,0 +1,131 @@
+# Docker-in-Docker Testcontainers worker pool.
+#
+# Bazel tests select this pool with exec_properties = {"pool": "testcontainers"}.
+# For test rules, also set DOCKER_HOST, TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE,
+# and TESTCONTAINERS_HOST_OVERRIDE on the rule env; Bazel's test wrapper may
+# strip worker-injected environment variables.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-testcontainers
+spec:
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 10
+    pollingIntervalSeconds: 30
+    cooldownPeriodSeconds: 450
+    fallback:
+      failureThreshold: 3
+      replicas: 0
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_testcontainers_active_or_queued_tasks
+      threshold: "2"
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      platformProperties:
+        - name: pool
+          value: testcontainers
+      concurrency: 2
+      inputDownloadConcurrency: 4
+      outputUploadConcurrency: 4
+      environmentVariables: {}
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776
+      runner:
+        setTmpdirEnvironmentVariable: false
+    rolloutOnChange: true
+  docker:
+    mode: dind
+    socketPath: /var/run/docker.sock
+    # Add common images here to warm the DinD daemon on new pods.
+    preloadImages: []
+    dind:
+      image: docker:27.3.1-dind
+      imagePullPolicy: IfNotPresent
+      storageDriver: overlay2
+      registryMirrors:
+        - https://mirror.gcr.io
+      storageVolume:
+        emptyDir:
+          sizeLimit: 64Gi
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+  images:
+    runner: ghcr.io/catthehacker/ubuntu:act-22.04@sha256:5f9c35c25db1d51a8ddaae5c0ba8d3c163c5e9a4a6cc97acd409ac7eae239448
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      workload: testcontainers
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: workload
+        operator: Equal
+        value: testcontainers
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 4000m
+        memory: 16Gi
+      limits:
+        cpu: 8000m
+        memory: 32Gi
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir:
+        sizeLimit: 64Gi
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir:
+        sizeLimit: 64Gi
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

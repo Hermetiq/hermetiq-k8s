@@ -1,0 +1,20 @@
+# Routing to the Testcontainers worker fleet is set per-target via
+# `exec_properties = {"pool": "testcontainers"}` on go_test rules — Bazel's
+# `--modify_execution_info` flag matches only on the action mnemonic, not
+# on tags, so a `.*@requires-docker` regex silently never fires.
+
+
+# RBE configuration is intentionally left out — supply your endpoint, mTLS
+# credentials, and exec/host platforms via a `--config=rbe` block below or
+# via a user-level bazelrc. Example placeholders:
+#
+# build:rbe --remote_executor=grpcs://bb.helm.hermetiq.dev:443
+# build:rbe --remote_instance_name=
+# build:rbe --remote_timeout=600
+# build:rbe --jobs=64
+# build:rbe --extra_execution_platforms=@rules_go//go/toolchain:linux_amd64
+# build:rbe --host_platform=@rules_go//go/toolchain:linux_amd64
+# build:rbe --tls_client_certificate=...
+# build:rbe --tls_client_key=...
+#
+# Then: `bazel test --config=rbe //...`

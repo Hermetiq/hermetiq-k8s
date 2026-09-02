@@ -1,0 +1,199 @@
+# Install this chart into the operator namespace with `helm install -n <namespace>`.
+# RbeWorker custom resources can be created in any namespace the operator watches.
+namespaceOverride: ""
+createNamespace: false
+
+# Single namespace the manager watches, passed as --watch-namespace. Empty (the
+# default) watches all namespaces, which is what rbac.managerBindingMode=cluster
+# grants.
+#
+# Required when rbac.managerBindingMode=namespace, and must equal the release
+# namespace: a namespaced RoleBinding authorizes only that namespace, so an
+# unscoped manager (or one pointed elsewhere) is Forbidden on every list/watch.
+#
+# Requires an operator image that accepts --watch-namespace. Older images exit
+# with "flag provided but not defined", so change this together with image.tag.
+watchNamespace: ""
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+replicaCount: 1
+revisionHistoryLimit: 5
+minReadySeconds: 5
+
+image:
+  repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-worker-operator
+  # Empty => Chart.appVersion. The CRD shipped in crds/ and the operator binary
+  # must move together: the CRD is what ACCEPTS a field, the binary is what acts
+  # on it. A chart whose CRD is newer than its image installs fields the operator
+  # silently ignores — no error, the feature just never appears in the generated
+  # worker Jsonnet.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+commonLabels: {}
+commonAnnotations: {}
+extraObjects: []
+
+standardLabels:
+  appVersion: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # The controller needs a Kubernetes API token to watch RbeWorker resources and
+  # reconcile Deployments, ConfigMaps, and KEDA ScaledObjects.
+  automountServiceAccountToken: true
+
+rbac:
+  create: true
+  # How the manager ClusterRole is bound to the operator ServiceAccount.
+  # - cluster: ClusterRoleBinding grants worker management across namespaces.
+  # - namespace: RoleBinding grants the same ClusterRole only in the operator namespace.
+  managerBindingMode: cluster
+  # Create unbound ClusterRoles that cluster admins can bind to humans or CI.
+  rbeWorkerRoles:
+    create: true
+  metricsReader:
+    create: true
+
+leaderElection:
+  enabled: true
+
+metrics:
+  enabled: true
+  bindAddress: ":8443"
+  containerPort: 8443
+  secure: true
+  authProxy:
+    # Required when metrics.secure=true and controller-runtime metrics authn/authz is used.
+    create: true
+  cert:
+    existingSecret: ""
+    mountPath: /certs/metrics
+    certName: tls.crt
+    keyName: tls.key
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8443
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    # With metrics.secure=true the controller-runtime metrics endpoint runs its
+    # authn/authz filter with anonymous access disabled, so an unauthenticated
+    # scrape gets 401. Default to the scraping pod's own ServiceAccount token;
+    # that ServiceAccount needs the ClusterRole from rbac.metricsReader.create
+    # bound to it. Set to "" to scrape without credentials.
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    # Optional replacement for bearerTokenFile, e.g.
+    #   authorization: {credentials: {name: my-secret, key: token}}
+    authorization: {}
+    tlsConfig:
+      insecureSkipVerify: true
+  vmServiceScrape:
+    enabled: false
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    # With metrics.secure=true the controller-runtime metrics endpoint runs its
+    # authn/authz filter with anonymous access disabled, so an unauthenticated
+    # scrape gets 401. Default to the scraping pod's own ServiceAccount token;
+    # that ServiceAccount needs the ClusterRole from rbac.metricsReader.create
+    # bound to it. Set to "" to scrape without credentials.
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    # Optional replacement for bearerTokenFile, e.g.
+    #   authorization: {credentials: {name: my-secret, key: token}}
+    authorization: {}
+    tlsConfig:
+      insecureSkipVerify: true
+
+healthProbe:
+  bindAddress: ":8081"
+  port: 8081
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+otel:
+  metrics:
+    enabled: false
+  logs:
+    enabled: false
+  endpoint: ""
+  insecure: false
+  # Defaults to the Helm fullname when empty.
+  serviceName: ""
+  # Comma-separated OTEL resource attributes, for example:
+  # service.namespace=buildbarn,deployment.environment=prod
+  resourceAttributes: ""
+
+enableHTTP2: false
+extraArgs: []
+extraEnv: []
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: null
+  maxUnavailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+terminationGracePeriodSeconds: 10
+extraVolumeMounts: []
+extraVolumes: []

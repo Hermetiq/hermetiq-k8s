@@ -1,0 +1,342 @@
+suite: bb-portal
+templates:
+  - templates/deployment-portal.yaml
+  - templates/services.yaml
+  - templates/httpproxy.yaml
+  - templates/certificate-ingress.yaml
+  - templates/gateway-routes.yaml
+  - templates/vmpodscrapes.yaml
+  - templates/configmaps.yaml
+  - templates/networkpolicy-storage.yaml
+tests:
+  - it: renders no portal workload by default
+    template: templates/deployment-portal.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # One Deployment, one container: the web UI is embedded in the bb-portal
+  # binary, so there is no second workload to proxy to.
+  - it: renders a single portal Deployment serving UI, APIs, and BES
+    template: templates/deployment-portal.yaml
+    set:
+      portal.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: bb-portal
+      - equal:
+          path: spec.selector.matchLabels.app
+          value: bb-portal
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/buildbarn/bb-portal:20260812T063819Z-57cd49d
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - containerPort: 8081
+              protocol: TCP
+              name: http
+            - containerPort: 8082
+              protocol: TCP
+              name: grpc-bes
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+
+  - it: composes DB env from the existing secret
+    template: templates/deployment-portal.yaml
+    set:
+      portal.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_CONNECTION_STRING
+            value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOSTNAME):$(DB_PORT)/$(DB_NAME)"
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: bbportal-db-env
+
+  # BEP file uploads spill oversized multipart parts to os.TempDir(), which
+  # needs a writable /tmp under readOnlyRootFilesystem.
+  - it: keeps the hardened securityContext with a writable /tmp
+    template: templates/deployment-portal.yaml
+    set:
+      portal.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.runAsNonRoot
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            mountPath: /tmp
+            name: tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+
+  - it: serves the embedded frontend rather than proxying one
+    template: templates/configmaps.yaml
+    set:
+      portal.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "frontendSource: \\{ embedded: \\{\\} \\}"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "grpcBackendUrl: 'grpcs://bes.helm.hermetiq.dev'"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: 'companyName: "Hermetiq"'
+      # frontendProxyUrl, allowedOrigins, and browserServiceConfiguration are
+      # reserved fields upstream; emitting any of them fails config parsing.
+      - notMatchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "frontendProxyUrl|allowedOrigins|browserServiceConfiguration"
+      # Blob browsing config moved to the top level alongside the CAS.
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "\\n  contentAddressableStorage: common.blobstore.contentAddressableStorage,"
+
+  # buildKey reads from the buildTags this extractor returns; with no extractor
+  # buildTags is always empty and the Builds page stays empty.
+  - it: omits the invocation metadata extractor unless one is set
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["portal.jsonnet"]
+          pattern: invocationMetadataExtractor
+
+  - it: passes an invocation metadata extractor through to the BES config
+    template: templates/configmaps.yaml
+    set:
+      portal.enabled: true
+      portal.bes.invocationMetadataExtractor.expression: '{"buildTags": {"build_id": env.BUILDKITE_BUILD_ID}}'
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: 'invocationMetadataExtractor: \{"expression":.*BUILDKITE_BUILD_ID'
+
+  - it: drops a page from the UI when its feature flag is off
+    template: templates/configmaps.yaml
+    set:
+      portal.enabled: true
+      portal.frontend.featureFlags.browser: false
+      portal.frontend.featureFlags.bes.pageTrends: false
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "browser: \\{\\},"
+      - notMatchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "pageTrends"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "scheduler: \\{\\},"
+
+  - it: renders one portal Service with h2c on the BES port
+    template: templates/services.yaml
+    set:
+      portal.enabled: true
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: http
+              port: 8081
+              targetPort: 8081
+              protocol: TCP
+            - name: grpc-bes
+              port: 8082
+              targetPort: 8082
+              protocol: TCP
+              appProtocol: kubernetes.io/h2c
+            - name: metrics
+              port: 9980
+              targetPort: metrics
+              protocol: TCP
+        documentSelector:
+          path: metadata.name
+          value: bb-portal
+      # 4 core Services (browser, frontend-grpc, scheduler, storage) + exactly
+      # one for the portal: UI, APIs, and BES all come from the same pod.
+      - hasDocuments:
+          count: 5
+
+  - it: renders contour HTTPProxies for portal and bes
+    template: templates/httpproxy.yaml
+    set:
+      portal.enabled: true
+    asserts:
+      - equal:
+          path: spec.virtualhost.fqdn
+          value: portal.helm.hermetiq.dev
+        documentSelector:
+          path: metadata.name
+          value: portal-bb
+      - equal:
+          path: spec.routes[0].services[0].protocol
+          value: h2c
+        documentSelector:
+          path: metadata.name
+          value: bb-portal-bes-grpc
+
+  - it: adds portal hosts to the certificate SANs
+    template: templates/certificate-ingress.yaml
+    set:
+      portal.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: bb-wildcard-cert
+    asserts:
+      - contains:
+          path: spec.dnsNames
+          content: portal.helm.hermetiq.dev
+      - contains:
+          path: spec.dnsNames
+          content: bes.helm.hermetiq.dev
+
+  - it: renders gateway routes for portal and a GRPCRoute for bes
+    template: templates/gateway-routes.yaml
+    set:
+      portal.enabled: true
+      routing.provider: gateway
+      gateway.name: gw
+    asserts:
+      - isKind:
+          of: HTTPRoute
+        documentSelector:
+          path: metadata.name
+          value: portal-bb
+      - isKind:
+          of: GRPCRoute
+        documentSelector:
+          path: metadata.name
+          value: bb-portal-bes-grpc
+
+  - it: renders the bes route as HTTPRoute in httproute-only mode
+    template: templates/gateway-routes.yaml
+    set:
+      portal.enabled: true
+      routing.provider: gateway-httproute-only
+      gateway.name: gw
+    asserts:
+      - isKind:
+          of: HTTPRoute
+        documentSelector:
+          path: metadata.name
+          value: bb-portal-bes-grpc
+
+  # The portal reads blobs straight from the storage shards, so the storage
+  # NetworkPolicy has to admit its renamed app label.
+  - it: allows the portal pod through the storage NetworkPolicy
+    template: templates/networkpolicy-storage.yaml
+    set:
+      portal.enabled: true
+      storage.networkPolicy.enabled: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].from[0].podSelector.matchExpressions[0].values
+          content: bb-portal
+
+  - it: scrapes the portal pod
+    template: templates/vmpodscrapes.yaml
+    set:
+      portal.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: bb-portal-vmpodscrape
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels.app
+          value: bb-portal
+
+  # Envoy Gateway applies a 15s default route timeout to any route no policy
+  # targets, which truncated BES upload drains and large Remote Asset fetches.
+  - it: gives the BES gRPC route its own BackendTrafficPolicy
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: eg
+      gateway.namespace: envoy-gateway
+      portal.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: bb-portal-bes-grpc-timeouts
+    asserts:
+      - isKind:
+          of: BackendTrafficPolicy
+      - equal:
+          path: spec.targetRefs[0].name
+          value: bb-portal-bes-grpc
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 0s
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: 0s
+
+  - it: gives the Remote Asset gRPC route its own BackendTrafficPolicy
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: eg
+      gateway.namespace: envoy-gateway
+      remoteAsset.enabled: true
+      gateway.grpcRoutes.remoteAsset.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: remote-asset-bb-cloud-grpc-timeouts
+    asserts:
+      - isKind:
+          of: BackendTrafficPolicy
+      - equal:
+          path: spec.targetRefs[0].name
+          value: remote-asset-bb-cloud-grpc
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 300s
+
+  - it: omits the Envoy BackendTrafficPolicies in gateway-httproute-only mode
+    templates:
+      - templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: eg
+      gateway.namespace: envoy-gateway
+      portal.enabled: true
+      remoteAsset.enabled: true
+      gateway.grpcRoutes.remoteAsset.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: kind
+          pattern: ^BackendTrafficPolicy$

@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.sharedEnvName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+{{- include "hermetiq-core.sharedEnvData" . | nindent 2 }}
+{{- if not .Values.nats.streamConfig.existingConfigMap }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.natsStreamConfigName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.nats.streamConfig.configMapKey | quote }}: |-
+    {{- .Files.Get "files/config/nats_streams.json" | nindent 4 }}
+{{- end }}
+{{- if not .Values.cacheTtl.existingConfigMap }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.cacheTtlConfigName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.cacheTtl.configMapKey | quote }}: |-
+    {{- .Files.Get "files/config/cache_ttl.json" | nindent 4 }}
+{{- end }}
+{{- if not .Values.promqlQueries.existingConfigMap }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.promqlConfigName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.promqlQueries.configMapKey | quote }}: |-
+    {{- .Files.Get "files/config/promql.json" | nindent 4 }}
+{{- end }}
+{{- if .Values.dashboard.quickstartConfig.data }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.dashboardQuickstartConfigName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.dashboard.quickstartConfig.configMapKey | quote }}: |-
+    {{- .Values.dashboard.quickstartConfig.data | toPrettyJson | nindent 4 }}
+{{- end }}
+{{- $root := . }}
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "hermetiq-grafana-dashboard-%s" ((base $path) | trimSuffix ".json") | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  {{ base $path }}: |-
+    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.namespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
+{{- end }}
+{{- range $path, $_ := .Files.Glob "files/dashboards/buildbarn/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "hermetiq-grafana-dashboard-%s" ((base $path) | trimSuffix ".json") | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  {{ base $path }}: |-
+    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.namespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
+{{- end }}
+{{/* Both the dashboard sidecar and the standalone Grafana oauth2-proxy read this
+     ConfigMap through a non-optional envFrom, so render it whenever either one
+     is enabled. Gating it on dashboard.oauth2Proxy alone left the Grafana pod in
+     CreateContainerConfigError when only the Grafana proxy was on. */}}
+{{- if or .Values.dashboard.oauth2Proxy.enabled (and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-config-web-ui
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+{{- include "hermetiq-core.oauth2ProxyConfigData" . | nindent 2 }}
+{{- end }}

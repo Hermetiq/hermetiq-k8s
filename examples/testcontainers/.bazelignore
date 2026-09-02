@@ -1,0 +1,6 @@
+bazel-bin
+bazel-out
+bazel-testcontainers
+bazel-testcontainers-redis
+bazel-testcontainers_redis_example
+bazel-testlogs

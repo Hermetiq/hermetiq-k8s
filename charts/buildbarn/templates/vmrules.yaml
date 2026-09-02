@@ -1,0 +1,28 @@
+{{- if .Values.vmRules.enabled }}
+{{- $root := . -}}
+{{- range $path, $_ := .Files.Glob "files/vmrules/*.yaml" }}
+{{- $rule := $root.Files.Get $path | fromYaml -}}
+---
+apiVersion: {{ $rule.apiVersion | default "operator.victoriametrics.com/v1beta1" }}
+kind: VMRule
+metadata:
+  name: {{ required (printf "%s metadata.name is required" $path) $rule.metadata.name }}
+  namespace: {{ default (include "buildbarn.namespace" $root) $root.Values.vmRules.namespaceOverride }}
+  labels:
+    {{- include "buildbarn.labels" $root | nindent 4 }}
+    {{- with $root.Values.vmRules.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if or $root.Values.commonAnnotations $root.Values.vmRules.annotations }}
+  annotations:
+    {{- with $root.Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $root | nindent 4 }}
+    {{- end }}
+    {{- with $root.Values.vmRules.annotations }}
+    {{- include "buildbarn.tplvalues.render" (dict "value" . "context" $root) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- toYaml $rule.spec | nindent 2 }}
+{{- end }}
+{{- end }}

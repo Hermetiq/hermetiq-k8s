@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler-ubuntu22-04
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
+spec:
+  replicas: {{ .Values.scheduler.replicas }}
+  selector:
+    matchLabels:
+      app: scheduler
+      instance: ubuntu22-04
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "scheduler") | nindent 8 }}
+        app: scheduler
+        instance: ubuntu22-04
+        kubernetes_service: scheduler-ubuntu22-04
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "scheduler.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
+      containers:
+        - name: scheduler
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.scheduler" "repository" .Values.images.scheduler.repository "tag" .Values.images.scheduler.tag "digest" .Values.images.scheduler.digest) }}
+          imagePullPolicy: {{ .Values.images.scheduler.pullPolicy }}
+          args:
+            - /config/scheduler.jsonnet
+          {{- if .Values.tracing.enabled }}
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-scheduler") | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+            - containerPort: 8982
+              protocol: TCP
+            - containerPort: 8983
+              protocol: TCP
+            - containerPort: 7982
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
+      volumes:
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.configName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: scheduler.jsonnet
+                path: scheduler.jsonnet

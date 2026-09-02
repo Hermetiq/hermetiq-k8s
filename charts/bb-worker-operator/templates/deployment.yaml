@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bb-worker-operator.fullname" . }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  minReadySeconds: {{ .Values.minReadySeconds }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "bb-worker-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "bb-worker-operator.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        kubectl.kubernetes.io/default-container: manager
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "bb-worker-operator.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bb-worker-operator.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with include "bb-worker-operator.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: {{ include "bb-worker-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /manager
+          args:
+            - --metrics-bind-address={{ ternary .Values.metrics.bindAddress "0" .Values.metrics.enabled }}
+            - --metrics-secure={{ .Values.metrics.secure }}
+            - --health-probe-bind-address={{ .Values.healthProbe.bindAddress }}
+            {{- with .Values.watchNamespace }}
+            - --watch-namespace={{ . }}
+            {{- end }}
+            {{- if .Values.leaderElection.enabled }}
+            - --leader-elect
+            {{- end }}
+            {{- if .Values.enableHTTP2 }}
+            - --enable-http2
+            {{- end }}
+            {{- if .Values.metrics.cert.existingSecret }}
+            - --metrics-cert-path={{ .Values.metrics.cert.mountPath }}
+            - --metrics-cert-name={{ .Values.metrics.cert.certName }}
+            - --metrics-cert-key={{ .Values.metrics.cert.keyName }}
+            {{- end }}
+            {{- if .Values.otel.metrics.enabled }}
+            - --otel-metrics-enabled=true
+            {{- end }}
+            {{- if .Values.otel.logs.enabled }}
+            - --otel-logs-enabled=true
+            {{- end }}
+            {{- with .Values.otel.endpoint }}
+            - --otel-endpoint={{ . }}
+            {{- end }}
+            {{- if .Values.otel.insecure }}
+            - --otel-insecure=true
+            {{- end }}
+            - --otel-service-name={{ include "bb-worker-operator.otelServiceName" . }}
+            {{- with .Values.otel.resourceAttributes }}
+            - --otel-resource-attributes={{ . }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- with .Values.extraEnv }}
+            {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.containerPort }}
+              protocol: TCP
+            {{- end }}
+            - name: health
+              containerPort: {{ .Values.healthProbe.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthProbe.liveness.path }}
+              port: health
+            initialDelaySeconds: {{ .Values.healthProbe.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthProbe.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthProbe.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthProbe.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthProbe.readiness.path }}
+              port: health
+            initialDelaySeconds: {{ .Values.healthProbe.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthProbe.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthProbe.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthProbe.readiness.failureThreshold }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.metrics.cert.existingSecret .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- if .Values.metrics.cert.existingSecret }}
+            - name: metrics-certs
+              mountPath: {{ .Values.metrics.cert.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+      {{- if or .Values.metrics.cert.existingSecret .Values.extraVolumes }}
+      volumes:
+        {{- if .Values.metrics.cert.existingSecret }}
+        - name: metrics-certs
+          secret:
+            secretName: {{ .Values.metrics.cert.existingSecret | quote }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}

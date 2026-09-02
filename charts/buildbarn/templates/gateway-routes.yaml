@@ -1,0 +1,266 @@
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- $httpRouteOnly := eq $provider "gateway-httproute-only" -}}
+{{- if and .Values.gateway.enabled (has $provider (list "gateway" "gateway-httproute-only")) }}
+{{- if .Values.gateway.httpRoutes.browser.enabled }}
+apiVersion: {{ .Values.gateway.httpRouteApiVersion }}
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.httpRoutes.browser.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.browserHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.gateway.httpRoutes.browser.pathPrefix | quote }}
+      backendRefs:
+        - name: browser
+          port: {{ include "buildbarn.browserServicePort" . }}
+---
+{{- end }}
+{{- if .Values.gateway.httpRoutes.rbeWeb.enabled }}
+apiVersion: {{ .Values.gateway.httpRouteApiVersion }}
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.httpRoutes.rbeWeb.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.rbeWebHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.gateway.httpRoutes.rbeWeb.pathPrefix | quote }}
+      backendRefs:
+        - name: scheduler
+          port: 7982
+---
+{{- end }}
+{{- if .Values.gateway.grpcRoutes.frontend.enabled }}
+apiVersion: {{ ternary .Values.gateway.httpRouteApiVersion .Values.gateway.grpcRouteApiVersion $httpRouteOnly }}
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.grpcRoutes.frontend.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.frontendGrpcHost" . | quote }}
+  rules:
+    {{- if $httpRouteOnly }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend-grpc
+          port: 8980
+    {{- else }}
+    - backendRefs:
+        - name: frontend-grpc
+          port: 8980
+    {{- end }}
+---
+{{- if not $httpRouteOnly }}
+{{- with .Values.gateway.grpcRoutes.frontend.backendTrafficPolicy }}
+{{- if .enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "buildbarn.namespace" $ }}
+  labels:
+    {{- include "buildbarn.labels" $ | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ $.Values.gateway.grpcRoutes.frontend.name }}
+  timeout:
+    http:
+      requestTimeout: {{ .requestTimeout | quote }}
+      {{- with .maxStreamDuration }}
+      maxStreamDuration: {{ . | quote }}
+      {{- end }}
+      connectionIdleTimeout: {{ .connectionIdleTimeout | quote }}
+{{- include "buildbarn.circuitBreaker" . }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.portal.enabled .Values.gateway.httpRoutes.portal.enabled }}
+apiVersion: {{ .Values.gateway.httpRouteApiVersion }}
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.httpRoutes.portal.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.portalHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.gateway.httpRoutes.portal.pathPrefix | quote }}
+      backendRefs:
+        - name: bb-portal
+          port: 8081
+---
+{{- end }}
+{{- if and .Values.portal.enabled .Values.gateway.grpcRoutes.bes.enabled }}
+apiVersion: {{ ternary .Values.gateway.httpRouteApiVersion .Values.gateway.grpcRouteApiVersion $httpRouteOnly }}
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.grpcRoutes.bes.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.besHost" . | quote }}
+  rules:
+    {{- if $httpRouteOnly }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: bb-portal
+          port: 8082
+    {{- else }}
+    - backendRefs:
+        - name: bb-portal
+          port: 8082
+    {{- end }}
+---
+{{- if not $httpRouteOnly }}
+{{- with .Values.gateway.grpcRoutes.bes.backendTrafficPolicy }}
+{{- if .enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "buildbarn.namespace" $ }}
+  labels:
+    {{- include "buildbarn.labels" $ | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ $.Values.gateway.grpcRoutes.bes.name }}
+  timeout:
+    http:
+      requestTimeout: {{ .requestTimeout | quote }}
+      {{- with .maxStreamDuration }}
+      maxStreamDuration: {{ . | quote }}
+      {{- end }}
+      connectionIdleTimeout: {{ .connectionIdleTimeout | quote }}
+{{- include "buildbarn.circuitBreaker" . }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.remoteAsset.enabled .Values.gateway.grpcRoutes.remoteAsset.enabled }}
+apiVersion: {{ ternary .Values.gateway.httpRouteApiVersion .Values.gateway.grpcRouteApiVersion $httpRouteOnly }}
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.grpcRoutes.remoteAsset.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "buildbarn.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "buildbarn.remoteAssetHost" . | quote }}
+  rules:
+    {{- if $httpRouteOnly }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: remote-asset-grpc
+          port: {{ .Values.remoteAsset.port }}
+    {{- else }}
+    - backendRefs:
+        - name: remote-asset-grpc
+          port: {{ .Values.remoteAsset.port }}
+    {{- end }}
+---
+{{- if not $httpRouteOnly }}
+{{- with .Values.gateway.grpcRoutes.remoteAsset.backendTrafficPolicy }}
+{{- if .enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "buildbarn.namespace" $ }}
+  labels:
+    {{- include "buildbarn.labels" $ | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ $.Values.gateway.grpcRoutes.remoteAsset.name }}
+  timeout:
+    http:
+      requestTimeout: {{ .requestTimeout | quote }}
+      {{- with .maxStreamDuration }}
+      maxStreamDuration: {{ . | quote }}
+      {{- end }}
+      connectionIdleTimeout: {{ .connectionIdleTimeout | quote }}
+{{- include "buildbarn.circuitBreaker" . }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) .Values.gateway.cors.enabled .Values.gateway.httpRoutes.browser.enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: {{ .Values.gateway.cors.browserPolicyName }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.httpRoutes.browser.name }}
+  cors:
+    allowOrigins:
+      {{- include "buildbarn.browserCorsAllowOrigins" . | nindent 6 }}
+    allowMethods:
+      {{- toYaml .Values.gateway.cors.allowMethods | nindent 6 }}
+    allowHeaders:
+      {{- toYaml .Values.gateway.cors.allowHeaders | nindent 6 }}
+    exposeHeaders:
+      {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 6 }}
+    allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
+    maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+{{- end }}
+{{- end }}

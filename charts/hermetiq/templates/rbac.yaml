@@ -1,0 +1,199 @@
+{{- if .Values.rbac.enabled }}
+{{- $rbacRulesEnabled := or .Values.rbac.rules.certManager .Values.rbac.rules.secrets .Values.rbac.rules.leases .Values.rbac.rules.deployments .Values.rbac.rules.configMaps .Values.rbac.rules.rbeWorkers }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+rules:
+  {{- if not $rbacRulesEnabled }}
+  []
+  {{- end }}
+  {{- if .Values.rbac.rules.certManager }}
+  - apiGroups:
+      - cert-manager.io
+    resources:
+      - certificates
+      - certificates/status
+      - certificaterequests
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+  {{- end }}
+  {{- if .Values.rbac.rules.secrets }}
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  {{- end }}
+  {{- if .Values.rbac.rules.leases }}
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
+      - update
+  {{- end }}
+  {{- if .Values.rbac.rules.deployments }}
+  # Workload discovery for the Buildbarn MCP tools: which ConfigMaps each
+  # component mounts (the worker jsonnet lives in a ConfigMap that only the
+  # worker Deployments mount), and the worker pools' container images. Storage
+  # is a StatefulSet and mounts the shared component ConfigMap; get_buildbarn_status
+  # also reports its replica count, which is the shard count that the per-shard
+  # storage metrics key on.
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+    verbs:
+      - get
+      - list
+  {{- end }}
+  {{- if .Values.rbac.rules.configMaps }}
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+  {{- end }}
+  {{- if .Values.rbac.rules.rbeWorkers }}
+  # Namespaced worker-pool discovery for grpc-api cost and behavior reporting.
+  # The RoleBinding below limits this ClusterRole rule to the release namespace.
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers
+    verbs:
+      - get
+      - list
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.rbac.roleBindingName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hermetiq-core.serviceAccountName" . }}
+    namespace: {{ include "hermetiq-core.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}
+{{- if .Values.rbac.rules.clusterFingerprint }}
+---
+# License cluster fingerprint: metadata read of ONE cluster-scoped object —
+# the kube-system Namespace — whose UID is the stable identity of the cluster
+# for the lifetime of the cluster (same pattern used by Datadog/Replicated
+# agents). resourceNames pins the grant to that single Namespace object: it
+# can NOT list namespaces and grants nothing INSIDE kube-system — Secrets,
+# ConfigMaps, and Pods there are separate resources this role has no verbs
+# on. A ClusterRoleBinding is required because Namespace objects are
+# cluster-scoped; a namespaced RoleBinding cannot grant this read. Opting
+# out (rbac.rules.clusterFingerprint=false) falls back to the own-namespace
+# UID fingerprint granted by the license-state Role below.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+    resourceNames:
+      - kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hermetiq-core.serviceAccountName" . }}
+    namespace: {{ include "hermetiq-core.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
+{{- end }}
+{{- if .Values.rbac.rules.licenseState }}
+---
+# License state writer: the app persists its auto-issued trial key and the
+# signed validation cache (offline grace) in the hermetiq-license-state
+# Secret via the K8s API. Write verbs are resourceNames-scoped to that one
+# Secret; create carries no resourceNames because Kubernetes cannot
+# name-scope creation. The namespaces `get` rule is the RBAC special case
+# where a namespaced Role grants read of its OWN Namespace object only —
+# the fallback fingerprint source when rbac.rules.clusterFingerprint is
+# disabled.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-license-state" .Release.Name }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - {{ include "hermetiq-core.licenseStateSecretName" . }}
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-license-state" .Release.Name }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hermetiq-core.serviceAccountName" . }}
+    namespace: {{ include "hermetiq-core.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-license-state" .Release.Name }}
+{{- end }}
+{{- end }}

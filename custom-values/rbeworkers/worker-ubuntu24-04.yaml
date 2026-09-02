@@ -1,0 +1,114 @@
+# General-purpose Ubuntu 24.04 pool. This sample advertises the same
+# container-image platform property that many Bazel clients already request for
+# Ubuntu actions; edit platformProperties to match your remote execution setup.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-ubuntu24-04
+spec:
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      concurrency: 11
+      inputDownloadConcurrency: 9
+      outputUploadConcurrency: 11
+      environmentVariables: {}
+      platformProperties:
+        - name: container-image
+          value: docker://ghcr.io/catthehacker/ubuntu:act-24.04
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368 # 32 GiB
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776 # 24 GiB
+    rolloutOnChange: true
+  images:
+    runner: ghcr.io/catthehacker/ubuntu:act-24.04@sha256:62d572b92f9f32d3427b6d220ad1f9dca9c7b6ffad37d295425037dbff78abaf
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      cloud.google.com/gke-ephemeral-storage-local-ssd: "true"
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      node-type: spot-ssd
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: hermetiq/allows-spot
+        operator: Exists
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 20
+    cooldownPeriodSeconds: 600
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_ubuntu24_04_active_or_queued_tasks
+      threshold: "11" # matches concurrency
+    # Optional scheduled warm-up window. KEDA treats cron triggers as a replica
+    # floor during the window, then lets the Prometheus trigger scale normally.
+    # cron:
+    #   - name: weekday-morning-floor
+    #     timezone: America/Denver
+    #     start: "0 6 * * 1-5"
+    #     end: "0 9 * * 1-5"
+    #     desiredReplicas: 8
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      hostPath:
+        # Formatted local-SSD path on spot-ssd nodes. Use a distinct path per
+        # worker pool if multiple pools can land on the same node.
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/cas-ubuntu24-04
+        type: DirectoryOrCreate
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir: {}
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

@@ -1,0 +1,113 @@
+# Size-class worker pool (small). Pair with worker-sizeclass-large.yaml and
+# buildbarn-values-local-ssd-block.yaml to exercise the ISCC scheduler path.
+#
+# Both size-class pools advertise the same platform (pool=sizeclass) and differ
+# only by spec.config.generated.sizeClass. They must match
+# scheduler.predeclaredPlatformQueues in the Buildbarn values overlay.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-sizeclass-small
+spec:
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 10
+    pollingIntervalSeconds: 30
+    cooldownPeriodSeconds: 450
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      projectID: "0"
+      metricName: worker_sizeclass_small_active_or_queued_tasks
+      sizeClass: "1"
+      threshold: "4" # matches concurrency
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      platformProperties:
+        - name: pool
+          value: sizeclass
+      sizeClass: 1
+      concurrency: 4
+      inputDownloadConcurrency: 9
+      outputUploadConcurrency: 11
+      environmentVariables: {}
+      # FSAC-driven input prefetching: read this action's recorded input-root
+      # access pattern from the File System Access Cache and warm those paths
+      # before the action runs, instead of faulting them in one lazy FUSE read at
+      # a time. Requires storage.persistence.fsac.enabled=true in the buildbarn
+      # chart (the store this points at) and the virtualBuildDirectory below.
+      # Defaults shown; omit the values to take them.
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776
+    rolloutOnChange: true
+  images:
+    runner: ghcr.io/catthehacker/ubuntu:act-22.04@sha256:5f9c35c25db1d51a8ddaae5c0ba8d3c163c5e9a4a6cc97acd409ac7eae239448
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+  pod:
+    nodeSelector:
+      cloud.google.com/gke-ephemeral-storage-local-ssd: "true"
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+      node-type: spot-ssd
+    schedulerName: default-scheduler
+    terminationGracePeriodSeconds: 30
+    tolerations:
+      - effect: NoSchedule
+        key: hermetiq/allows-spot
+        operator: Exists
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 13000m
+        memory: 48Gi
+      limits:
+        cpu: 13000m
+        memory: 48Gi
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsUser: 65534
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      hostPath:
+        # Distinct per pool. Two worker pools must not share one local CAS
+        # read-cache blocks file.
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/cas-sizeclass-small
+        type: DirectoryOrCreate
+    fuse:
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir:
+        sizeLimit: 64Gi
+  worker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1300Mi
+      limits:
+        cpu: 1000m
+        memory: 1300Mi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0
