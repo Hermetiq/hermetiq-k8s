@@ -1,0 +1,11 @@
+The Buildbarn worker operator was installed into namespace {{ include "bb-worker-operator.namespace" . }}.
+
+Check the controller:
+  kubectl -n {{ include "bb-worker-operator.namespace" . }} rollout status deployment/{{ include "bb-worker-operator.fullname" . }}
+
+List RbeWorker custom resources:
+  kubectl get rbeworkers.bb.hermetiq.com -A
+
+{{- if .Values.metrics.service.enabled }}
+The metrics Service is {{ include "bb-worker-operator.metricsServiceName" . }} on port {{ .Values.metrics.service.port }}.
+{{- end }}

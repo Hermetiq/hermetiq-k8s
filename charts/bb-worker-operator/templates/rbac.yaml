@@ -1,0 +1,306 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.managerClusterRoleName" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - keda.sh
+    resources:
+      - scaledobjects
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+{{- if eq .Values.rbac.managerBindingMode "cluster" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-manager" (include "bb-worker-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "bb-worker-operator.managerClusterRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bb-worker-operator.serviceAccountName" . }}
+    namespace: {{ include "bb-worker-operator.namespace" . }}
+{{- else if eq .Values.rbac.managerBindingMode "namespace" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-manager" (include "bb-worker-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "bb-worker-operator.managerClusterRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bb-worker-operator.serviceAccountName" . }}
+    namespace: {{ include "bb-worker-operator.namespace" . }}
+{{- else }}
+{{- fail "rbac.managerBindingMode must be one of: cluster, namespace" }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "bb-worker-operator.leaderElectionRoleName" . }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-leader-election" (include "bb-worker-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "bb-worker-operator.leaderElectionRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bb-worker-operator.serviceAccountName" . }}
+    namespace: {{ include "bb-worker-operator.namespace" . }}
+{{- if and .Values.metrics.secure .Values.metrics.authProxy.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.metricsAuthClusterRoleName" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-metrics-auth" (include "bb-worker-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "bb-worker-operator.metricsAuthClusterRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bb-worker-operator.serviceAccountName" . }}
+    namespace: {{ include "bb-worker-operator.namespace" . }}
+{{- end }}
+{{- if .Values.rbac.metricsReader.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.metricsReaderClusterRoleName" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
+{{- end }}
+{{- if .Values.rbac.rbeWorkerRoles.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-admin
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/status
+    verbs:
+      - get
+      - patch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-editor
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/status
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-viewer
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - bb.hermetiq.com
+    resources:
+      - rbeworkers/status
+    verbs:
+      - get
+{{- end }}
+{{- end }}

@@ -1,0 +1,70 @@
+{{- if .Values.remoteAsset.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remote-asset
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
+spec:
+  replicas: {{ .Values.remoteAsset.replicas }}
+  selector:
+    matchLabels:
+      app: remote-asset
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "remote-asset") | nindent 8 }}
+        app: remote-asset
+        kubernetes_service: remote-asset
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "asset.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.remoteAsset) | nindent 6 }}
+      containers:
+        - name: remote-asset
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.remoteAsset" "repository" .Values.images.remoteAsset.repository "tag" .Values.images.remoteAsset.tag "digest" .Values.images.remoteAsset.digest) }}
+          imagePullPolicy: {{ .Values.images.remoteAsset.pullPolicy }}
+          args:
+            - /config/asset.jsonnet
+          {{- if .Values.tracing.enabled }}
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-remote-asset") | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+            - containerPort: {{ .Values.remoteAsset.port }}
+              protocol: TCP
+              name: grpc
+          {{- if .Values.remoteAsset.probes.enabled }}
+          readinessProbe:
+            {{- toYaml .Values.remoteAsset.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.remoteAsset.probes.liveness | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.remoteAsset.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.remoteAsset) | nindent 6 }}
+      volumes:
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.configName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: asset.jsonnet
+                path: asset.jsonnet
+{{- end }}

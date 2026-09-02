@@ -1,0 +1,103 @@
+{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
+    app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+spec:
+  replicas: {{ .Values.grafana.oauth2Proxy.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" . "component" "grafana-auth-proxy") | nindent 8 }}
+        app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+      {{- if .Values.dashboard.oauth2Proxy.enabled }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        hermetiq.com/oauth2-proxy-config-checksum: {{ include "hermetiq-core.oauth2ProxyConfigChecksum" . }}
+        {{- if not .Values.dashboard.oauth2Proxy.client.existingSecret }}
+        hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+      {{- include "hermetiq-core.automountServiceAccountToken" .Values.grafana.oauth2Proxy | nindent 6 }}
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" . | nindent 8 }}
+      restartPolicy: Always
+      {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.grafana.oauth2Proxy) | nindent 6 }}
+      containers:
+        - name: oauth2-proxy
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.oauth2Proxy" "repository" .Values.images.oauth2Proxy.repository "tag" .Values.images.oauth2Proxy.tag "digest" .Values.images.oauth2Proxy.digest) }}
+          imagePullPolicy: {{ .Values.images.oauth2Proxy.pullPolicy }}
+          ports:
+            - name: proxy
+              containerPort: 8888
+          envFrom:
+            - configMapRef:
+                name: oauth2-proxy-config-web-ui
+            - secretRef:
+                name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
+          env:
+{{- with .Values.grafana.oauth2Proxy.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: OAUTH2_PROXY_HTTP_ADDRESS
+              value: "0.0.0.0:8888"
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: {{ printf "https://%s/oauth2/callback" (include "hermetiq-core.grafanaHost" .) | quote }}
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: {{ printf "http://%s:%v" .Values.gateway.routes.grafanaService .Values.gateway.routes.grafanaServicePort | quote }}
+          resources:
+            {{- toYaml .Values.grafana.oauth2Proxy.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8888
+      protocol: TCP
+{{- end }}

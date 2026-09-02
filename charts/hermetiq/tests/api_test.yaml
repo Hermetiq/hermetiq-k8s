@@ -1,0 +1,67 @@
+suite: api deployment
+templates:
+  - templates/deployment-api.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: renders the api Deployment with the configured bep-nats apiTag
+    set:
+      images.bepNats.apiTag: test-api-tag
+    asserts:
+      - isKind:
+          of: Deployment
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "api")].image
+          pattern: ":test-api-tag$"
+
+  - it: mounts cache TTL config from an existing ConfigMap when configured
+    set:
+      cacheTtl.existingConfigMap: custom-cache-ttl
+      cacheTtl.configMapKey: custom-cache-ttl.json
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "cache-ttl-config")].configMap.name
+          value: custom-cache-ttl
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "cache-ttl-config")].configMap.items[0].key
+          value: custom-cache-ttl.json
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "cache-ttl-config")].configMap.items[0].path
+          value: cache_ttl.json
+
+  - it: disables on-prem optional feature flags by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "APP_ENV")].value
+          value: "on-prem"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "CACHE_EVENTS_ENABLED")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "VICTORIA_LOGS_ENABLED")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "COST_REPORT_TICKER_ENABLED")].value
+          value: "false"
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "OPEN_COST_URL")]
+
+  - it: allows on-prem optional feature flags to be enabled
+    set:
+      app.cacheEventsEnabled: true
+      app.victoriaLogsEnabled: true
+      app.costReportTickerEnabled: true
+      app.openCostUrl: http://opencost.opencost.svc.cluster.local:9003
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "CACHE_EVENTS_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "VICTORIA_LOGS_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "COST_REPORT_TICKER_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "OPEN_COST_URL")].value
+          value: http://opencost.opencost.svc.cluster.local:9003

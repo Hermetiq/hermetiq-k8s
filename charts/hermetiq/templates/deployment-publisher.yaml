@@ -1,0 +1,364 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermetiq-core.publisherName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
+    app: {{ include "hermetiq-core.publisherName" . }}
+spec:
+  {{- if not .Values.autoscaling.publisher.enabled }}
+  replicas: {{ .Values.publisher.replicas }}
+  {{- end }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.publisherName" . }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" . "component" "publisher") | nindent 8 }}
+        app: {{ include "hermetiq-core.publisherName" . }}
+        {{- if .Values.azureWorkloadIdentity.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        kubectl.kubernetes.io/default-container: bep-nats
+        hermetiq.com/runtime-config-checksum: {{ include "hermetiq-core.natsStreamConfigChecksum" . }}
+        hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
+    spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+      {{- include "hermetiq-core.automountServiceAccountToken" .Values.publisher | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.app.terminationGracePeriodSeconds }}
+      dnsPolicy: ClusterFirst
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" . | nindent 8 }}
+      restartPolicy: Always
+      {{- with include "hermetiq-core.imagePullSecrets" . }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- if .Values.publisher.podAntiAffinity.enabled }}
+      {{- include "hermetiq-core.preferredPodAntiAffinity" (dict "app" (include "hermetiq-core.publisherName" .)) | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.publisher) | nindent 6 }}
+      volumes:
+        - name: download-dir
+          emptyDir: {}
+        - name: nats-stream-config
+          configMap:
+            name: {{ include "hermetiq-core.natsStreamConfigName" . }}
+            items:
+              - key: {{ .Values.nats.streamConfig.configMapKey | quote }}
+                path: nats_streams.json
+        {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) }}
+        - name: publisher-jwks
+          secret:
+            secretName: {{ include "hermetiq-core.pubJwksSecretName" . }}
+        {{- end }}
+        # File-mount (not env) so the kubelet's ~1m Secret refresh enables
+        # license hot reload. Always mounted with optional: true so a trial
+        # install picks up the Secret when it is created later (paid-key
+        # arrival) with zero values changes or rollouts. No items: remapping —
+        # items referencing keys absent from an existing Secret break the
+        # mount; instead the Secret's keys project under their own names and
+        # the LICENSE_*_FILE env vars point straight at them.
+        - name: license-key
+          secret:
+            secretName: {{ include "hermetiq-core.licenseSecretName" . }}
+            optional: true
+        {{- if .Values.otel.mtls.enabled }}
+        - name: otel-exporter-client-mtls
+          secret:
+            secretName: {{ required "otel.mtls.secretName is required when otel.mtls.enabled=true" .Values.otel.mtls.secretName }}
+        {{- end }}
+      containers:
+        {{- if eq (include "hermetiq-core.publisherAuthProxyEnabled" .) "true" }}
+        - name: grpc-auth-proxy
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.authProxy" "repository" .Values.images.authProxy.repository "tag" .Values.images.authProxy.tag "digest" .Values.images.authProxy.digest) }}
+          imagePullPolicy: {{ .Values.images.authProxy.pullPolicy }}
+          ports:
+            - containerPort: 50081
+              protocol: TCP
+          env:
+{{- with .Values.publisher.authProxy.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: DEBUG
+              value: {{ .Values.publisher.authProxy.debug | quote }}
+            - name: GRPC_PORT
+              value: "50081"
+            - name: PROXY_PORT
+              value: "50091"
+            - name: STATIC_FORWARDED_USER
+              value: {{ trim .Values.publisher.authProxy.staticForwardedUser | quote }}
+          resources:
+            {{- toYaml .Values.publisher.authProxy.resources | nindent 12 }}
+          {{- if .Values.publisher.authProxy.probes.enabled }}
+          livenessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.publisher.authProxy.probes.liveness) | nindent 12 }}
+          readinessProbe:
+            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.publisher.authProxy.probes.readiness) | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- end }}
+        - name: bep-nats
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.pub" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.pubTag "digest" .Values.images.bepNats.pubDigest) }}
+          imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}
+          ports:
+            - containerPort: 50091
+              name: grpc
+              protocol: TCP
+            - containerPort: 8008
+              name: api
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "hermetiq-core.sharedEnvName" . }}
+          env:
+{{- with .Values.publisher.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: MCP_ENABLED
+              value: "true"
+            - name: MCP_RESOURCE_METADATA_URL
+              value: {{ include "hermetiq-core.mcpResourceUrl" . | quote }}
+            - name: MCP_PROTO_INTEL_TOOLS_ENABLED
+              value: {{ .Values.app.mcpProtoIntelToolsEnabled | quote }}
+            - name: ENFORCE_PUB_AUTHZ
+              value: "false"
+            - name: APP_MODE
+              value: pub
+            - name: HTTP_PORT
+              value: "8008"
+            - name: K8S_POD_UID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: DB_HOSTNAME
+              value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+            - name: DB_PORT
+              value: {{ required "postgres.port is required" .Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ required "postgres.database is required" .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ required "postgres.user is required" .Values.postgres.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.postgresSecretName" . }}
+                  key: {{ .Values.postgres.password.existingSecretKey }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.redisSecretName" . }}
+                  key: {{ .Values.redis.password.existingSecretKey }}
+            - name: METRICS_ENABLED
+              value: "false"
+            {{- if .Values.app.buildIdMode }}
+            - name: APP_BUILD_ID_MODE
+              value: {{ .Values.app.buildIdMode | quote }}
+            {{- end }}
+            {{- if .Values.app.buildIdRegex }}
+            - name: APP_BUILD_URL_BUILD_ID_REGEX
+              value: {{ .Values.app.buildIdRegex | quote }}
+            {{- end }}
+            - name: NATS_STREAM_CONFIG
+              value: /config/nats-streams/nats_streams.json
+            {{- if .Values.publisher.hermetiqAdminGroup }}
+            - name: HERMETIQ_ADMIN_GROUP
+              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.adminEmails" .) }}
+            - name: ADMIN_EMAIL_ALLOWLIST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.postgres.readReplica.host }}
+            - name: DB_READ_HOSTNAME
+              value: {{ .Values.postgres.readReplica.host | quote }}
+            - name: DB_READ_PORT
+              value: {{ default .Values.postgres.port .Values.postgres.readReplica.port | quote }}
+            {{- end }}
+            {{- if .Values.app.ghEnvDir }}
+            - name: GH_ENV_DIR
+              value: {{ .Values.app.ghEnvDir | quote }}
+            {{- end }}
+            {{- if .Values.app.rawBepExportBucket }}
+            - name: RAW_BEP_EXPORT_BUCKET
+              value: {{ .Values.app.rawBepExportBucket | quote }}
+            {{- end }}
+            {{- if .Values.app.taskQueueName }}
+            - name: TASK_QUEUE_NAME
+              value: {{ .Values.app.taskQueueName | quote }}
+            {{- end }}
+            {{- if .Values.slack.channelId }}
+            - name: SLACK_CHANNEL_ID
+              value: {{ .Values.slack.channelId | quote }}
+            {{- end }}
+            {{- if or .Values.slack.botToken.value .Values.slack.botToken.existingSecret }}
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.slackSecretName" . }}
+                  key: {{ .Values.slack.botToken.existingSecretKey }}
+            {{- end }}
+            # gRPC authentication. The core verifies BES and Completed Action
+            # Logger credentials itself; the optional grpc-auth-proxy sidecar
+            # above no longer authenticates anything. Required — the process
+            # refuses to start without it.
+            - name: GRPC_AUTH_USER_PROVIDER
+              value: {{ include "hermetiq-core.grpcAuthUserProvider" . | quote }}
+            # Buildbarn workers reach the Completed Action Logger on
+            # bep-nats-pub:50091 directly and carry no user credential, so they
+            # are admitted by network position instead. The core treats an
+            # unset/empty list as disabled and rejects every CAL call — see
+            # publisher.trustedCalCidrs.
+            {{- with .Values.publisher.trustedCalCidrs }}
+            - name: GRPC_AUTH_TRUSTED_CAL_CIDRS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.publisher.jwks.enabled }}
+            {{- $jwksUrl := include "hermetiq-core.publisherJwksUrl" . }}
+            {{- if $jwksUrl }}
+            - name: GRPC_AUTH_JWKS_URL
+              value: {{ $jwksUrl | quote }}
+            {{- else }}
+            - name: GRPC_AUTH_JWKS_FILE
+              value: /config/jwks/jwks.json
+            {{- end }}
+            {{- if .Values.publisher.jwks.groupsClaim }}
+            - name: GRPC_AUTH_GROUPS_CLAIM
+              value: {{ .Values.publisher.jwks.groupsClaim | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.publisherJwksIssuer" .) }}
+            - name: GRPC_AUTH_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.publisher.jwks.audience }}
+            # Comma-separated; a token matching any entry is accepted.
+            - name: GRPC_AUTH_AUDIENCE
+              value: {{ .Values.publisher.jwks.audience | quote }}
+            {{- end }}
+            {{- end }}
+            # Admin resolution is split across two consumers: GRPC_AUTH_* is
+            # read by the token verifier, HERMETIQ_ADMIN_GROUP and
+            # ADMIN_EMAIL_ALLOWLIST (set above) by the claims-based user
+            # service. Both are set from the same values.
+            {{- if .Values.publisher.hermetiqAdminGroup }}
+            - name: GRPC_AUTH_ADMIN_GROUP
+              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+            {{- end }}
+            {{- with (include "hermetiq-core.adminEmails" .) }}
+            - name: GRPC_AUTH_ADMIN_EMAIL_ALLOWLIST
+              value: {{ . | quote }}
+            {{- end }}
+            # License enforcement (Keygen). The publisher enforces too — it
+            # serves the full query API alongside BES ingest. Consulted only
+            # at startup, by the `license` readiness check, and by the
+            # read-only status endpoint — never on the request path.
+            # APP_ENV=on-prem is required here just like on grpc-api: without
+            # it the publisher runs IsOnPrem()==false — it would never
+            # construct the trial-issuance client (silently depending on the
+            # api pod to populate the state Secret), skip CONTACT_EMAIL
+            # startup validation, and report a misleading keyless message.
+            - name: APP_ENV
+              value: "on-prem"
+            - name: CONTACT_EMAIL
+              value: {{ .Values.license.contactEmail | quote }}
+            # Forwarded to the licensing service as trial/machine metadata.
+            - name: CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: LICENSE_TRIAL_ENABLED
+              value: {{ .Values.license.trial.enabled | quote }}
+            - name: LICENSE_AIRGAP
+              value: {{ .Values.license.airGapped | quote }}
+            - name: LICENSE_SAAS_URL
+              value: {{ .Values.license.saasUrl | quote }}
+            - name: LICENSE_STATE_SECRET_NAME
+              value: {{ include "hermetiq-core.licenseStateSecretName" . | quote }}
+            {{- if .Values.license.fingerprintOverride }}
+            - name: LICENSE_FINGERPRINT_OVERRIDE
+              value: {{ .Values.license.fingerprintOverride | quote }}
+            {{- end }}
+            # Paths track the Secret key names (no items: remapping on the
+            # volume). LICENSE_LIC_FILE is set unconditionally; the app only
+            # reads it in airgap mode.
+            - name: LICENSE_KEY_FILE
+              value: {{ printf "/config/license/%s" .Values.license.key.existingSecretKey | quote }}
+            - name: LICENSE_LIC_FILE
+              value: {{ printf "/config/license/%s" .Values.license.licenseFileSecretKey | quote }}
+            {{- if .Values.otel.mtls.enabled }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_KEY
+              value: {{ printf "%s/tls.key" .Values.otel.mtls.mountPath | quote }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE
+              value: {{ printf "%s/tls.crt" .Values.otel.mtls.mountPath | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: download-dir
+              mountPath: /tmp/artifact-downloads
+            - name: nats-stream-config
+              mountPath: /config/nats-streams
+              readOnly: true
+            {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) }}
+            - name: publisher-jwks
+              mountPath: /config/jwks
+              readOnly: true
+            {{- end }}
+            - name: license-key
+              mountPath: /config/license
+              readOnly: true
+            {{- if .Values.otel.mtls.enabled }}
+            - name: otel-exporter-client-mtls
+              mountPath: {{ .Values.otel.mtls.mountPath }}
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.publisher.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}

@@ -1,0 +1,434 @@
+suite: gRPC authentication (GRPC_AUTH_*)
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: renders a complete chart-managed JWKS contract on both cores
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_USER_PROVIDER")].value
+          value: jwks
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_USER_PROVIDER")].value
+          value: jwks
+        template: templates/deployment-publisher.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+        template: templates/deployment-api.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+        template: templates/deployment-api.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+        template: templates/deployment-api.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+        template: templates/deployment-publisher.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+        template: templates/deployment-publisher.yaml
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+        template: templates/deployment-publisher.yaml
+
+  - it: accepts complete custom JWKS contracts when chart-managed settings are disabled
+    set:
+      api.jwt.enabled: false
+      api.env.GRPC_AUTH_JWKS_INLINE: '{"keys":[]}'
+      api.env.GRPC_AUTH_ISSUER: https://custom-api-issuer.ci.test/
+      api.env.GRPC_AUTH_AUDIENCE: https://custom-api.ci.test
+      publisher.jwks.enabled: false
+      publisher.env.GRPC_AUTH_JWKS_URL: https://custom-publisher-issuer.ci.test/.well-known/jwks.json
+      publisher.env.GRPC_AUTH_ISSUER: https://custom-publisher-issuer.ci.test/
+      publisher.env.GRPC_AUTH_AUDIENCE: https://custom-bep.ci.test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_INLINE")].value
+          value: '{"keys":[]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://custom-api-issuer.ci.test/
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://custom-api.ci.test
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://custom-publisher-issuer.ci.test/.well-known/jwks.json
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://custom-publisher-issuer.ci.test/
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://custom-bep.ci.test
+        template: templates/deployment-publisher.yaml
+
+  - it: validates and renders tpl-expanded custom env values
+    set:
+      api.jwt.enabled: false
+      api.env.GRPC_AUTH_JWKS_URL: '{{ .Values.oidc.issuerUrl }}.well-known/jwks.json'
+      api.env.GRPC_AUTH_ISSUER: '{{ .Values.oidc.issuerUrl }}'
+      api.env.GRPC_AUTH_AUDIENCE: https://custom-api.ci.test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://oidc.ci.test/.well-known/jwks.json
+        template: templates/deployment-api.yaml
+
+  # The corrected core treats an unset/empty trusted-CAL list as disabled. The
+  # chart therefore omits the variable for its empty default, and it belongs
+  # only on the publisher — the api core does not register the logger.
+  - it: disables the CAL exemption by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_TRUSTED_CAL_CIDRS")]
+        template: templates/deployment-publisher.yaml
+
+  - it: trusts the configured CAL peers on the publisher core only
+    set:
+      publisher.trustedCalCidrs: "10.244.0.0/16,10.245.0.1"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_TRUSTED_CAL_CIDRS")].value
+          value: "10.244.0.0/16,10.245.0.1"
+        template: templates/deployment-publisher.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_TRUSTED_CAL_CIDRS")]
+        template: templates/deployment-api.yaml
+
+  # XFCC stays off unless the deployment terminates mTLS in front of bep-nats,
+  # which this chart never does.
+  - it: never trusts XFCC peers
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_TRUSTED_XFCC_CIDRS")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_TRUSTED_XFCC_CIDRS")]
+        template: templates/deployment-publisher.yaml
+
+  # The api core authenticates the gRPC API and the MCP endpoint in one
+  # process, and the two carry different audiences.
+  - it: lists both the MCP resource URL and an explicit gRPC API audience
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: "https://mcp.ci.hermetiq.test,https://api.ci.hermetiq.test"
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE_CLIENT_ID")]
+        template: templates/deployment-api.yaml
+
+  # With no explicit audience the gRPC API audience is the dashboard
+  # oauth2-proxy client ID, which lives in a Secret — so it is injected as its
+  # own env var and interpolated by the kubelet's $(VAR) expansion.
+  - it: falls back to the oauth2-proxy client ID for the gRPC API audience
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: ""
+      dashboard.oauth2Proxy.enabled: true
+      dashboard.oauth2Proxy.client.clientId: ci-client-id
+      dashboard.oauth2Proxy.client.clientSecret: ci-client-secret
+      dashboard.oauth2Proxy.client.cookieSecret: ci-cookie-secret
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: "https://mcp.ci.hermetiq.test,$(GRPC_AUTH_AUDIENCE_CLIENT_ID)"
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE_CLIENT_ID")].valueFrom.secretKeyRef.key
+          value: OAUTH2_PROXY_CLIENT_ID
+        template: templates/deployment-api.yaml
+
+  - it: derives the api core JWKS source and issuer from the OIDC provider
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://oidc.ci.test/.well-known/jwks.json
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://oidc.ci.test/
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_GROUPS_CLAIM")].value
+          value: hermetiq/roles
+        template: templates/deployment-api.yaml
+
+  - it: keeps custom claims and admin grants coherent across the core and sidecar
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+      api.jwt.groupsClaim: custom/groups
+      api.jwt.nameClaim: custom/name
+      publisher.jwks.enabled: true
+      publisher.jwks.audience: https://bep.ci.hermetiq.test
+      publisher.jwks.groupsClaim: publisher/groups
+      publisher.hermetiqAdminGroup: platform-admins
+      app.adminEmails:
+        - alice@example.com
+        - bob@example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_GROUPS_CLAIM")].value
+          value: custom/groups
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_NAME_CLAIM")].value
+          value: custom/name
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JWT_GROUPS_CLAIM")].value
+          value: custom/groups
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JWT_NAME_CLAIM")].value
+          value: custom/name
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_GROUPS_CLAIM")].value
+          value: publisher/groups
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_ADMIN_GROUP")].value
+          value: platform-admins
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ADMIN_GROUP")].value
+          value: platform-admins
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_ADMIN_EMAIL_ALLOWLIST")].value
+          value: alice@example.com,bob@example.com
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ADMIN_EMAIL_ALLOWLIST")].value
+          value: alice@example.com,bob@example.com
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "HERMETIQ_ADMIN_GROUP")].value
+          value: platform-admins
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "ADMIN_EMAIL_ALLOWLIST")].value
+          value: alice@example.com,bob@example.com
+        template: templates/deployment-api.yaml
+
+  # A publisher with no reachable JWKS URL mounts the static keyset Secret
+  # instead; GRPC_AUTH_JWKS_FILE replaces the legacy JWKS_KEY_FILE.
+  - it: points the publisher at the mounted keyset when no JWKS URL resolves
+    set:
+      oidc.issuerUrl: ""
+      api.jwt.jwksUrl: https://api-idp.ci.test/.well-known/jwks.json
+      api.jwt.issuer: https://api-idp.ci.test/
+      publisher.jwks.enabled: true
+      publisher.jwks.issuer: https://idp.ci.test/
+      publisher.jwks.audience: https://bep.ci.hermetiq.test
+      publisher.jwks.existingSecret: ci-publisher-jwks
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_FILE")].value
+          value: /config/jwks/jwks.json
+        template: templates/deployment-publisher.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")]
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://bep.ci.hermetiq.test
+        template: templates/deployment-publisher.yaml
+
+  # The legacy names were removed from the application outright, with no
+  # aliases, so any survivor here is a silently unauthenticated deployment.
+  - it: emits no legacy JWKS_* variables on either core
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+      publisher.jwks.enabled: true
+      publisher.jwks.audience: https://bep.ci.hermetiq.test
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JWKS_AUTH_ENABLED")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JWKS_URL")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JWKS_AUDIENCE")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "JWKS_AUTH_ENABLED")]
+        template: templates/deployment-publisher.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "JWKS_KEY_FILE")]
+        template: templates/deployment-publisher.yaml
+
+  # The sidecar binary was not changed: the api pods keep it for gRPC-web
+  # framing and CORS, and it still reads JWT_*.
+  - it: leaves the grpc-auth-proxy sidecar on the legacy JWT_* variables
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JWT_AUTH_ENABLED")].value
+          value: "true"
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JWT_AUDIENCE")].value
+          value: https://api.ci.hermetiq.test
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JWT_ISSUER")].value
+          value: https://oidc.ci.test/
+        template: templates/deployment-api.yaml
+
+  # --- validate.yaml guards --------------------------------------------------
+  # Issuer and audience used to be optional, and unset meant "accept any".
+  # The core now rejects both at startup, so catch it at template time.
+  # values.schema.json enums these first, the same way it does routing.provider
+  # (validate.yaml keeps a matching guard for --skip-schema-validation).
+  - it: rejects an unsupported user provider
+    template: templates/validate.yaml
+    set:
+      app.grpcAuthUserProvider: none
+    asserts:
+      - failedTemplate:
+          errorPattern: "grpcAuthUserProvider"
+
+  - it: rejects required custom auth env mixed with chart-managed api JWKS
+    template: templates/validate.yaml
+    set:
+      api.jwt.enabled: true
+      api.env.GRPC_AUTH_JWKS_INLINE: '{"keys":[]}'
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.jwt.enabled=true cannot be combined"
+
+  - it: rejects api JWT auth with no resolvable issuer
+    template: templates/validate.yaml
+    set:
+      oidc.issuerUrl: ""
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.jwt.issuer or oidc.issuerUrl is required"
+
+  - it: rejects custom api JWKS auth with no source
+    template: templates/validate.yaml
+    set:
+      api.jwt.enabled: false
+      api.env.GRPC_AUTH_ISSUER: https://custom-api-issuer.ci.test/
+      api.env.GRPC_AUTH_AUDIENCE: https://custom-api.ci.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.env to set exactly one non-empty GRPC_AUTH_JWKS_URL"
+
+  - it: rejects custom api JWKS auth with no issuer
+    template: templates/validate.yaml
+    set:
+      api.jwt.enabled: false
+      api.env.GRPC_AUTH_JWKS_URL: https://custom-api-issuer.ci.test/.well-known/jwks.json
+      api.env.GRPC_AUTH_AUDIENCE: https://custom-api.ci.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires a non-empty GRPC_AUTH_ISSUER in api.env"
+
+  - it: rejects custom api JWKS auth with no audience
+    template: templates/validate.yaml
+    set:
+      api.jwt.enabled: false
+      api.env.GRPC_AUTH_JWKS_URL: https://custom-api-issuer.ci.test/.well-known/jwks.json
+      api.env.GRPC_AUTH_ISSUER: https://custom-api-issuer.ci.test/
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires a non-empty GRPC_AUTH_AUDIENCE in api.env"
+
+  - it: rejects api JWT auth with no gRPC API audience to fall back on
+    template: templates/validate.yaml
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: ""
+      dashboard.oauth2Proxy.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.jwt.audience is required"
+
+  - it: rejects publisher JWKS auth with no audience
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.enabled: true
+      publisher.jwks.audience: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "publisher.jwks.audience is required"
+
+  - it: rejects publisher JWKS auth with no resolvable issuer
+    template: templates/validate.yaml
+    set:
+      oidc.issuerUrl: ""
+      api.jwt.jwksUrl: https://api-idp.ci.test/.well-known/jwks.json
+      api.jwt.issuer: https://api-idp.ci.test/
+      publisher.jwks.enabled: true
+      publisher.jwks.audience: https://bep.ci.hermetiq.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "publisher.jwks.issuer or oidc.issuerUrl is required"
+
+  - it: rejects chart-managed publisher JWKS auth with no URL or static keyset
+    template: templates/validate.yaml
+    set:
+      oidc.issuerUrl: ""
+      api.jwt.jwksUrl: https://api-idp.ci.test/.well-known/jwks.json
+      api.jwt.issuer: https://api-idp.ci.test/
+      publisher.jwks.enabled: true
+      publisher.jwks.issuer: https://publisher-idp.ci.test/
+      publisher.jwks.audience: https://bep.ci.hermetiq.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "publisher.jwks.json or publisher.jwks.existingSecret is required"
+
+  - it: rejects custom publisher JWKS auth with no source
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.enabled: false
+      publisher.env.GRPC_AUTH_ISSUER: https://custom-publisher-issuer.ci.test/
+      publisher.env.GRPC_AUTH_AUDIENCE: https://custom-bep.ci.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "publisher.env to set exactly one non-empty GRPC_AUTH_JWKS_URL"
+
+  - it: rejects custom publisher JWKS auth with no issuer
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.enabled: false
+      publisher.env.GRPC_AUTH_JWKS_URL: https://custom-publisher-issuer.ci.test/.well-known/jwks.json
+      publisher.env.GRPC_AUTH_AUDIENCE: https://custom-bep.ci.test
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires a non-empty GRPC_AUTH_ISSUER in publisher.env"
+
+  - it: rejects custom publisher JWKS auth with no audience
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.enabled: false
+      publisher.env.GRPC_AUTH_JWKS_URL: https://custom-publisher-issuer.ci.test/.well-known/jwks.json
+      publisher.env.GRPC_AUTH_ISSUER: https://custom-publisher-issuer.ci.test/
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires a non-empty GRPC_AUTH_AUDIENCE in publisher.env"

@@ -1,0 +1,41 @@
+# Minimal values to render the hermetiq chart in CI. The chart `required`s these
+# runtime settings, so `helm template` / kubeconform need them supplied. This is
+# NOT a real deployment — just enough to render for validation.
+hosts:
+  domainBase: ci.hermetiq.test
+routing:
+  provider: contour
+contour:
+  certManager:
+    clusterIssuer: ci-cluster-issuer
+postgres:
+  host: postgres.ci.svc.cluster.local
+  database: hermetiq
+  user: hermetiq
+  password:
+    value: ci-postgres-password
+redis:
+  host: redis.ci.svc.cluster.local
+  password:
+    value: ci-redis-password
+nats:
+  url: nats://nats.ci.svc.cluster.local:4222
+otel:
+  endpoint: http://otel-collector.ci.svc.cluster.local:4317
+oidc:
+  issuerUrl: https://oidc.ci.test/
+api:
+  jwt:
+    enabled: true
+    audience: https://api.ci.hermetiq.test
+publisher:
+  jwks:
+    enabled: true
+    audience: https://bep.ci.hermetiq.test
+license:
+  contactEmail: ci@hermetiq.test
+# Disable the dashboard oauth2-proxy for the render fixture (it requires client
+# id/secret/cookie creds). A fixture exercising the oauth2-proxy path is a follow-on.
+dashboard:
+  oauth2Proxy:
+    enabled: false

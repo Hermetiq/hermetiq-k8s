@@ -1,0 +1,46 @@
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- $gatewayRoutes := and (has $provider (list "gateway" "gateway-httproute-only")) .Values.gateway.enabled -}}
+{{- $ingressRoutes := and (eq $provider "ingress") .Values.ingress.enabled -}}
+{{- $contourRoutes := eq $provider "contour" -}}
+{{- $browserExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.browser.enabled) (and $ingressRoutes .Values.ingress.browser.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.browser.enabled) -}}
+{{- $rbeWebExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.rbeWeb.enabled) (and $ingressRoutes .Values.ingress.rbeWeb.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.rbeWeb.enabled) -}}
+{{- $frontendGrpcExposed := or (and $gatewayRoutes .Values.gateway.grpcRoutes.frontend.enabled) (and $ingressRoutes .Values.ingress.frontendGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled) -}}
+{{- $remoteAssetExposed := and .Values.remoteAsset.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.remoteAsset.enabled) (and $ingressRoutes .Values.ingress.remoteAssetGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled .Values.ingress.remoteAssetGrpc.enabled)) -}}
+{{- $portalExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.httpRoutes.portal.enabled) (and $ingressRoutes .Values.ingress.portal.enabled) (and $contourRoutes .Values.ingress.portal.enabled)) -}}
+{{- $besExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.bes.enabled) (and $ingressRoutes .Values.ingress.besGrpc.enabled) (and $contourRoutes .Values.ingress.besGrpc.enabled)) -}}
+{{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
+Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
+
+{{ if $anyEndpoint -}}
+EXTERNAL ENDPOINTS — via {{ $provider }}
+{{- if $browserExposed }}
+  Browser:                  https://{{ include "buildbarn.browserHost" . }}
+{{- end }}
+{{- if $rbeWebExposed }}
+  RBE web:                  https://{{ include "buildbarn.rbeWebHost" . }}
+{{- end }}
+{{- if $portalExposed }}
+  bb-portal:                https://{{ include "buildbarn.portalHost" . }}
+{{- end }}
+{{- if $frontendGrpcExposed }}
+  Remote cache / execution: grpcs://{{ include "buildbarn.frontendGrpcHost" . }}
+{{- end }}
+{{- if $remoteAssetExposed }}
+  Remote Asset gRPC:        grpcs://{{ include "buildbarn.remoteAssetHost" . }}
+{{- end }}
+{{- if $besExposed }}
+  BES gRPC:                 grpcs://{{ include "buildbarn.besHost" . }}
+{{- end }}
+{{- else if eq $provider "none" -}}
+EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
+{{- else -}}
+EXTERNAL ENDPOINTS — none (no {{ $provider }} routes are enabled).
+{{- end }}
+
+{{- if and .Values.configOverrides (hasKey .Values.configOverrides "common.libsonnet") }}
+WARNING: configOverrides["common.libsonnet"] replaces the chart-generated
+client config wholesale. The storage shard map and namespace are then no
+longer derived from storage.replicas — keep the override's shard list in
+lockstep with storage.replicas, or added/removed storage pods silently
+receive no traffic.
+{{- end }}

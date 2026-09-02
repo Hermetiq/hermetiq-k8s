@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "namespaceOverride": { "type": "string" },
+    "createNamespace": { "type": "boolean" },
+    "global": { "type": "object" },
+    "imagePullSecrets": { "type": "array" },
+    "commonLabels": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "commonAnnotations": { "type": "object" },
+    "extraObjects": { "type": "array" },
+    "standardLabels": { "type": "object" },
+    "serviceAccount": { "type": "object" },
+    "configOverrides": { "type": "object" },
+    "workerConfigOverrides": { "type": "object" },
+    "project": { "type": "object" },
+    "images": { "type": "object" },
+    "secrets": { "type": "object" },
+    "hosts": { "type": "object" },
+    "bbcal": { "type": "object" },
+    "tracing": { "type": "object" },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": {
+          "type": "string",
+          "enum": ["", "gateway", "gateway-httproute-only", "contour", "ingress", "none"]
+        }
+      }
+    },
+    "k8sNodeScheduling": { "type": ["object", "null"] },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "podAntiAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "properties": {
+        "podAntiAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "scheduler": { "type": "object" },
+    "browser": { "type": "object" },
+    "remoteAsset": { "type": "object" },
+    "portal": { "type": "object" },
+    "workerUbuntu2204": { "type": "object" },
+    "workerTestcontainers": { "type": "object" },
+    "workerTestcontainersSysbox": { "type": "object" },
+    "keda": { "type": "object" },
+    "certificate": { "type": "object" },
+    "tls": { "type": "object" },
+    "ingress": { "type": "object" },
+    "httpProxy": { "type": "object" },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "clientTrafficPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "name": { "type": "string" },
+            "sectionName": { "type": "string" },
+            "bufferLimit": { "type": ["string", "integer"] },
+            "http2": {
+              "type": "object",
+              "properties": {
+                "initialStreamWindowSize": { "type": ["string", "integer"] },
+                "initialConnectionWindowSize": { "type": ["string", "integer"] },
+                "maxConcurrentStreams": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+              }
+            },
+            "timeout": {
+              "type": "object",
+              "properties": {
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "idleTimeout": { "type": "string", "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$" }
+                  }
+                }
+              }
+            },
+            "tcpKeepalive": {
+              "type": ["object", "null"],
+              "properties": {
+                "idleTime": { "type": "string", "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$" },
+                "interval": { "type": "string", "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$" },
+                "probes": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "vmPodScrapes": { "type": "object" },
+    "vmRules": { "type": "object" }
+  }
+}

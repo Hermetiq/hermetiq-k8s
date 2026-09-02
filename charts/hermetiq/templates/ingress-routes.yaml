@@ -1,0 +1,282 @@
+{{- if eq (include "hermetiq-core.routingProvider" .) "ingress" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.bepGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- if .Values.ingress.cors.enabled }}
+    {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.bepGrpc.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.bepGrpcHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.publisherName" . }}
+                port:
+                  name: grpc
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.bepGrpcHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bepGrpcName "secretName" "") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.apiGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- if .Values.ingress.cors.enabled }}
+    {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.apiGrpc.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.apiGrpcHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.apiName" . }}
+                port:
+                  name: grpc
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.apiGrpcHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.apiGrpcName "secretName" "") }}
+{{- if .Values.gateway.routes.bbcalGrpcEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.bbcalGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- with .Values.ingress.bbcalGrpc.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.bbcalGrpcHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                # CompletedActionLogger publishes to NATS, so it only exists
+                # on NATS-ingest pods — the publisher, now that grpc-api runs
+                # APP_MODE=api (which serves no ingest gRPC services).
+                name: {{ include "hermetiq-core.publisherName" . }}
+                port:
+                  name: grpc
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.bbcalGrpcHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bbcalGrpcName "secretName" "") }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.apiWebName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    {{- if .Values.ingress.cors.enabled }}
+    {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- with .Values.ingress.apiWeb.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.apiHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.apiName" . }}
+                port:
+                  name: api
+            path: {{ .Values.gateway.routes.apiWebPathPrefix }}
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.apiHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.apiWebName) "secretName" "") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.dashboardName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  {{- if or (eq (include "hermetiq-core.renderPerRouteCertificates" .) "true") .Values.ingress.dashboard.annotations .Values.commonAnnotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.dashboard.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.dashboardHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.dashboardName" . }}
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.dashboardHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.dashboardName) "secretName" "") }}
+{{- if .Values.gateway.routes.grafanaEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.grafanaName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  {{- if or (eq (include "hermetiq-core.renderPerRouteCertificates" .) "true") .Values.ingress.grafana.annotations .Values.commonAnnotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.grafana.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.grafanaHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.grafanaUpstreamService" . }}
+                port:
+                  number: {{ include "hermetiq-core.grafanaUpstreamServicePort" . }}
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.grafanaHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.grafanaName) "secretName" "") }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.gateway.routes.mcpName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
+    {{- end }}
+    {{- if .Values.ingress.cors.enabled }}
+    {{- include "hermetiq-core.nginxMcpCorsAnnotations" . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.mcp.annotations }}
+    {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "hermetiq-core.mcpHost" . }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "hermetiq-core.apiName" . }}
+                port:
+                  name: mcp-http
+            path: {{ .Values.gateway.routes.mcpPathPrefix }}
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ include "hermetiq-core.mcpHost" . }}
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.mcpName) "secretName" "") }}
+{{- end }}

@@ -1,0 +1,6 @@
+# Buildbarn renders with its default values, so this fixture is minimal — it just
+# gives PR validation an explicit values file to point helm template / kubeconform
+# at, and pins a routing provider for the render. Add overrides here to exercise
+# other routing providers (gateway, ingress, none).
+routing:
+  provider: contour

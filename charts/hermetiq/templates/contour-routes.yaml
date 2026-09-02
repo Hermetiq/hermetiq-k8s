@@ -1,0 +1,403 @@
+{{- if eq (include "hermetiq-core.routingProvider" .) "contour" }}
+{{/* ============================================================ */}}
+{{/* HTTPProxy: BEP gRPC                                          */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.bepGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.bepGrpcHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ required "contour.certManager.clusterIssuer is required" .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bepGrpcName "secretName" .Values.contour.tls.bepGrpc.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.bepGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+          protocol: h2c
+      loadBalancerPolicy:
+        strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
+      timeoutPolicy:
+        response: {{ .Values.contour.httpProxy.responseTimeout | quote }}
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.bepGrpcHost" . }}
+    {{- if .Values.contour.cors.enabled }}
+    corsPolicy:
+      allowCredentials: {{ .Values.contour.cors.allowCredentials }}
+      allowPrivateNetwork: {{ .Values.contour.cors.allowPrivateNetwork }}
+      allowOrigin:
+        {{- if .Values.contour.cors.allowOrigins }}
+        {{- toYaml .Values.contour.cors.allowOrigins | nindent 8 }}
+        {{- else }}
+        - {{ include "hermetiq-core.dashboardUrl" . | quote }}
+        {{- end }}
+      allowMethods:
+        {{- toYaml .Values.contour.cors.allowMethods | nindent 8 }}
+      allowHeaders:
+        {{- toYaml .Values.contour.cors.allowHeaders | nindent 8 }}
+      exposeHeaders:
+        {{- toYaml .Values.contour.cors.exposeHeaders | nindent 8 }}
+      maxAge: {{ .Values.contour.cors.maxAge | quote }}
+    {{- end }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bepGrpcName "secretName" .Values.contour.tls.bepGrpc.secretName) }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: API gRPC                                          */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.apiGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.apiGrpcHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.apiGrpcName "secretName" .Values.contour.tls.apiGrpc.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.apiGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 50091
+          protocol: h2c
+      loadBalancerPolicy:
+        strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
+      timeoutPolicy:
+        response: {{ .Values.contour.httpProxy.responseTimeout | quote }}
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.apiGrpcHost" . }}
+    {{- if .Values.contour.cors.enabled }}
+    corsPolicy:
+      allowCredentials: {{ .Values.contour.cors.allowCredentials }}
+      allowPrivateNetwork: {{ .Values.contour.cors.allowPrivateNetwork }}
+      allowOrigin:
+        {{- if .Values.contour.cors.allowOrigins }}
+        {{- toYaml .Values.contour.cors.allowOrigins | nindent 8 }}
+        {{- else }}
+        - {{ include "hermetiq-core.dashboardUrl" . | quote }}
+        {{- end }}
+      allowMethods:
+        {{- toYaml .Values.contour.cors.allowMethods | nindent 8 }}
+      allowHeaders:
+        {{- toYaml .Values.contour.cors.allowHeaders | nindent 8 }}
+      exposeHeaders:
+        {{- toYaml .Values.contour.cors.exposeHeaders | nindent 8 }}
+      maxAge: {{ .Values.contour.cors.maxAge | quote }}
+    {{- end }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.apiGrpcName "secretName" .Values.contour.tls.apiGrpc.secretName) }}
+{{- if .Values.gateway.routes.bbcalGrpcEnabled }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: BBCal gRPC (optional)                             */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.bbcalGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.bbcalGrpcHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bbcalGrpcName "secretName" .Values.contour.tls.bbcalGrpc.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.bbcalGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        # CompletedActionLogger publishes to NATS, so it only exists on
+        # NATS-ingest pods — the publisher, now that grpc-api runs
+        # APP_MODE=api (which serves no ingest gRPC services).
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+          protocol: h2c
+      loadBalancerPolicy:
+        strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
+      timeoutPolicy:
+        response: {{ .Values.contour.httpProxy.responseTimeout | quote }}
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.bbcalGrpcHost" . }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" .Values.gateway.routes.bbcalGrpcName "secretName" .Values.contour.tls.bbcalGrpc.secretName) }}
+      {{- if .Values.contour.tls.bbcalGrpc.clientValidation.enabled }}
+      clientValidation:
+        caSecret: {{ required "contour.tls.bbcalGrpc.clientValidation.caSecret is required" .Values.contour.tls.bbcalGrpc.clientValidation.caSecret }}
+        optionalClientCertificate: {{ .Values.contour.tls.bbcalGrpc.clientValidation.optionalClientCertificate }}
+        skipClientCertValidation: {{ .Values.contour.tls.bbcalGrpc.clientValidation.skipClientCertValidation }}
+        forwardClientCertificate:
+          cert: true
+          subject: true
+      {{- end }}
+{{- end }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: API Web                                           */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.apiWebName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.apiHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.apiWebName) "secretName" .Values.contour.tls.apiWeb.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.apiWebName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: {{ .Values.gateway.routes.apiWebPathPrefix }}
+      services:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 80
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.apiHost" . }}
+    {{- if .Values.contour.cors.enabled }}
+    corsPolicy:
+      allowCredentials: {{ .Values.contour.cors.allowCredentials }}
+      allowPrivateNetwork: {{ .Values.contour.cors.allowPrivateNetwork }}
+      allowOrigin:
+        {{- if .Values.contour.cors.allowOrigins }}
+        {{- toYaml .Values.contour.cors.allowOrigins | nindent 8 }}
+        {{- else }}
+        - {{ include "hermetiq-core.dashboardUrl" . | quote }}
+        {{- end }}
+      allowMethods:
+        {{- toYaml .Values.contour.cors.allowMethods | nindent 8 }}
+      allowHeaders:
+        {{- toYaml .Values.contour.cors.allowHeaders | nindent 8 }}
+      exposeHeaders:
+        {{- toYaml .Values.contour.cors.exposeHeaders | nindent 8 }}
+      maxAge: {{ .Values.contour.cors.maxAge | quote }}
+    {{- end }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.apiWebName) "secretName" .Values.contour.tls.apiWeb.secretName) }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: Dashboard                                         */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.dashboardName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.dashboardHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.dashboardName) "secretName" .Values.contour.tls.dashboard.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.dashboardName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: {{ include "hermetiq-core.dashboardName" . }}
+          port: 80
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.dashboardHost" . }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.dashboardName) "secretName" .Values.contour.tls.dashboard.secretName) }}
+{{- if .Values.gateway.routes.grafanaEnabled }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: Grafana                                           */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.grafanaName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.grafanaHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.grafanaName) "secretName" .Values.contour.tls.grafana.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.grafanaName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: {{ include "hermetiq-core.grafanaUpstreamService" . }}
+          port: {{ include "hermetiq-core.grafanaUpstreamServicePort" . }}
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.grafanaHost" . }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.grafanaName) "secretName" .Values.contour.tls.grafana.secretName) }}
+{{- end }}
+---
+{{/* ============================================================ */}}
+{{/* HTTPProxy: MCP                                               */}}
+{{/* ============================================================ */}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.routes.mcpName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "hermetiq-core.mcpHost" . | quote }}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.contour.certManager.clusterIssuer }}
+  secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.mcpName) "secretName" .Values.contour.tls.mcp.secretName) }}
+  usages:
+    - digital signature
+    - key encipherment
+---
+{{- end }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.gateway.routes.mcpName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: {{ .Values.gateway.routes.mcpPathPrefix }}
+      services:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 5150
+  virtualhost:
+    fqdn: {{ include "hermetiq-core.mcpHost" . }}
+    {{- if .Values.contour.cors.enabled }}
+    corsPolicy:
+      allowCredentials: {{ .Values.contour.cors.allowCredentials }}
+      allowPrivateNetwork: {{ .Values.contour.cors.allowPrivateNetwork }}
+      allowOrigin:
+        {{- toYaml .Values.contour.cors.mcpAllowOrigins | nindent 8 }}
+      allowMethods:
+        {{- toYaml .Values.contour.cors.allowMethods | nindent 8 }}
+      allowHeaders:
+        - mcp-protocol-version
+        {{- toYaml .Values.contour.cors.allowHeaders | nindent 8 }}
+      exposeHeaders:
+        {{- toYaml .Values.contour.cors.exposeHeaders | nindent 8 }}
+        - mcp-protocol-version
+      maxAge: {{ .Values.contour.cors.maxAge | quote }}
+    {{- end }}
+    tls:
+      secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.mcpName) "secretName" .Values.contour.tls.mcp.secretName) }}
+{{- end }}

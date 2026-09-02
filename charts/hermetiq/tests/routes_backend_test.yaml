@@ -1,0 +1,91 @@
+suite: routing backends
+# Regression pins: BES/BEP ingest and bbcal (CompletedActionLogger) must
+# target the publisher Service (bep-nats-pub) on every routing provider.
+# CompletedActionLogger publishes to NATS, so it only registers on NATS-ingest
+# pods — grpc-api runs APP_MODE=api and serves no ingest gRPC services.
+values:
+  - ../ci-values/ci.yaml
+templates:
+  - templates/gateway-routes.yaml
+  - templates/contour-routes.yaml
+  - templates/ingress-routes.yaml
+tests:
+  - it: routes BES and bbcal ingest to the publisher Service (gateway)
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bbcal-grpc
+
+  - it: routes BES and bbcal ingest to the publisher Service (gateway-httproute-only)
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bbcal-grpc
+
+  - it: routes BES and bbcal ingest to the publisher Service (contour)
+    template: templates/contour-routes.yaml
+    set:
+      # ci-values already select routing.provider=contour. Per-route
+      # cert-manager Certificates share the HTTPProxies' metadata.name, so
+      # select the HTTPProxy documents by virtualhost fqdn instead.
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      - equal:
+          path: spec.routes[0].services[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: bep.ci.hermetiq.test
+      - equal:
+          path: spec.routes[0].services[0].name
+          value: bep-nats-pub
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: bbcal.ci.hermetiq.test
+
+  - it: routes BES and bbcal ingest to the publisher Service (ingress)
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+      gateway.routes.bbcalGrpcEnabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: bep-nats-pub
+        documentSelector:
+          path: metadata.name
+          value: bbcal-grpc

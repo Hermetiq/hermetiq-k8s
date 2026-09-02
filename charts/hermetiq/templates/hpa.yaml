@@ -1,0 +1,30 @@
+{{- if .Values.autoscaling.publisher.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "hermetiq-core.publisherName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "hermetiq-core.publisherName" . }}
+  minReplicas: {{ .Values.autoscaling.publisher.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.publisher.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.publisher.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.publisher.targetMemoryUtilizationPercentage }}
+{{- end }}

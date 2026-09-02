@@ -1,0 +1,69 @@
+{{- if and .Values.gateway.enabled (eq (include "buildbarn.routingProvider" .) "gateway-httproute-only") }}
+{{- if .Values.gateway.gke.healthCheckPolicy.enabled }}
+{{- $services := list -}}
+{{- if .Values.gateway.httpRoutes.browser.enabled -}}
+{{- $services = append $services "browser" -}}
+{{- end -}}
+{{- if .Values.gateway.httpRoutes.rbeWeb.enabled -}}
+{{- $services = append $services "scheduler" -}}
+{{- end -}}
+{{- if .Values.gateway.grpcRoutes.frontend.enabled -}}
+{{- $services = append $services "frontend-grpc" -}}
+{{- end -}}
+{{- if and .Values.remoteAsset.enabled .Values.gateway.grpcRoutes.remoteAsset.enabled -}}
+{{- $services = append $services "remote-asset-grpc" -}}
+{{- end -}}
+{{- if and .Values.portal.enabled (or .Values.gateway.httpRoutes.portal.enabled .Values.gateway.grpcRoutes.bes.enabled) -}}
+{{- $services = append $services "bb-portal" -}}
+{{- end -}}
+{{- range $svc := uniq $services }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ printf "%s-%s" $.Values.gateway.gke.healthCheckPolicy.namePrefix $svc | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "buildbarn.namespace" $ }}
+  labels:
+    {{- include "buildbarn.labels" $ | nindent 4 }}
+spec:
+  default:
+    config:
+      type: TCP
+      tcpHealthCheck:
+        portSpecification: USE_SERVING_PORT
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ $svc }}
+---
+{{- end }}
+{{- end }}
+{{- if .Values.gateway.gke.backendPolicy.enabled }}
+{{- $grpcServices := list -}}
+{{- if .Values.gateway.grpcRoutes.frontend.enabled -}}
+{{- $grpcServices = append $grpcServices "frontend-grpc" -}}
+{{- end -}}
+{{- if and .Values.remoteAsset.enabled .Values.gateway.grpcRoutes.remoteAsset.enabled -}}
+{{- $grpcServices = append $grpcServices "remote-asset-grpc" -}}
+{{- end -}}
+{{- if and .Values.portal.enabled .Values.gateway.grpcRoutes.bes.enabled -}}
+{{- $grpcServices = append $grpcServices "bb-portal" -}}
+{{- end -}}
+{{- range $svc := uniq $grpcServices }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: {{ printf "%s-%s" $.Values.gateway.gke.backendPolicy.namePrefix $svc | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "buildbarn.namespace" $ }}
+  labels:
+    {{- include "buildbarn.labels" $ | nindent 4 }}
+spec:
+  default:
+    timeoutSec: {{ $.Values.gateway.gke.backendPolicy.timeoutSec }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ $svc }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

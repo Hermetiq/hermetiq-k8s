@@ -1,0 +1,28 @@
+{{- if and .Values.metrics.enabled .Values.metrics.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bb-worker-operator.metricsServiceName" . }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+  {{- if or .Values.commonAnnotations .Values.metrics.service.annotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "bb-worker-operator.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- with .Values.metrics.service.annotations }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: {{ .Values.metrics.service.type }}
+  selector:
+    {{- include "bb-worker-operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: {{ include "bb-worker-operator.metricsPortName" . }}
+      port: {{ .Values.metrics.service.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

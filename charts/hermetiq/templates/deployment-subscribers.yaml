@@ -1,0 +1,197 @@
+{{- if gt (int .Values.subscriber.replicas) 0 }}
+{{- $root := . }}
+{{- range $partition := until (int .Values.app.streamPartitionCount) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bep-nats-sub-{{ $partition }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "subscriber") | nindent 4 }}
+    app: bep-nats-sub-{{ $partition }}
+    app-mode: bep-nats-sub
+    hermetiq.com/stream-partition: {{ $partition | quote }}
+spec:
+  replicas: {{ $root.Values.subscriber.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: bep-nats-sub-{{ $partition }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        {{- include "hermetiq-core.podLabels" (dict "root" $root "component" "subscriber") | nindent 8 }}
+        app: bep-nats-sub-{{ $partition }}
+        app-mode: bep-nats-sub
+        hermetiq.com/stream-partition: {{ $partition | quote }}
+        {{- if $root.Values.azureWorkloadIdentity.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        {{- with $root.Values.commonAnnotations }}
+        {{- include "hermetiq-core.commonAnnotations" $root | nindent 8 }}
+        {{- end }}
+        kubectl.kubernetes.io/default-container: bep-nats-sub
+        hermetiq.com/runtime-config-checksum: {{ include "hermetiq-core.natsStreamConfigChecksum" $root }}
+        hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" $root }}
+    spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" $root }}
+      {{- include "hermetiq-core.automountServiceAccountToken" $root.Values.subscriber | nindent 6 }}
+      terminationGracePeriodSeconds: {{ $root.Values.app.terminationGracePeriodSeconds }}
+      dnsPolicy: ClusterFirst
+      securityContext:
+        {{- include "hermetiq-core.podSecurityContext" $root | nindent 8 }}
+      restartPolicy: Always
+      {{- with include "hermetiq-core.imagePullSecrets" $root }}
+{{ . | nindent 6 }}
+      {{- end }}
+      {{- include "hermetiq-core.podScheduling" (dict "root" $root "workload" $root.Values.subscriber) | nindent 6 }}
+      volumes:
+        - name: tmp-dir
+          emptyDir: {}
+        - name: nats-stream-config
+          configMap:
+            name: {{ include "hermetiq-core.natsStreamConfigName" $root }}
+            items:
+              - key: {{ $root.Values.nats.streamConfig.configMapKey | quote }}
+                path: nats_streams.json
+        {{- if $root.Values.otel.mtls.enabled }}
+        - name: otel-exporter-client-mtls
+          secret:
+            secretName: {{ required "otel.mtls.secretName is required when otel.mtls.enabled=true" $root.Values.otel.mtls.secretName }}
+        {{- end }}
+      containers:
+        - name: bep-nats-sub
+          image: {{ include "hermetiq-core.image" (dict "root" $root "name" "images.bepNats.sub" "repository" $root.Values.images.bepNats.repository "tag" $root.Values.images.bepNats.subTag "digest" $root.Values.images.bepNats.subDigest) }}
+          imagePullPolicy: {{ $root.Values.images.bepNats.pullPolicy }}
+          ports:
+            - containerPort: 8008
+              name: api
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "hermetiq-core.sharedEnvName" $root }}
+          env:
+{{- with $root.Values.subscriber.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $root "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: K8S_POD_UID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: APP_MODE
+              value: sub
+            - name: STREAM_PARTITION
+              value: {{ $partition | quote }}
+            - name: DB_HOSTNAME
+              value: {{ required "postgres.host is required" $root.Values.postgres.host | quote }}
+            - name: DB_PORT
+              value: {{ required "postgres.port is required" $root.Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ required "postgres.database is required" $root.Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ required "postgres.user is required" $root.Values.postgres.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.postgresSecretName" $root }}
+                  key: {{ $root.Values.postgres.password.existingSecretKey }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hermetiq-core.redisSecretName" $root }}
+                  key: {{ $root.Values.redis.password.existingSecretKey }}
+            - name: METRICS_ENABLED
+              value: "false"
+            {{- if $root.Values.app.buildIdMode }}
+            - name: APP_BUILD_ID_MODE
+              value: {{ $root.Values.app.buildIdMode | quote }}
+            {{- end }}
+            {{- if $root.Values.app.buildIdRegex }}
+            - name: APP_BUILD_URL_BUILD_ID_REGEX
+              value: {{ $root.Values.app.buildIdRegex | quote }}
+            {{- end }}
+            - name: NATS_STREAM_CONFIG
+              value: /config/nats-streams/nats_streams.json
+            {{- if $root.Values.app.rawBepExportBucket }}
+            - name: RAW_BEP_EXPORT_BUCKET
+              value: {{ $root.Values.app.rawBepExportBucket | quote }}
+            {{- end }}
+            {{- if $root.Values.subscriber.fetch.progressBatchSize }}
+            - name: FETCH_PROGRESS_BATCH_SIZE
+              value: {{ $root.Values.subscriber.fetch.progressBatchSize | quote }}
+            {{- end }}
+            {{- if $root.Values.subscriber.fetch.progressMaxWait }}
+            - name: FETCH_PROGRESS_MAX_WAIT
+              value: {{ $root.Values.subscriber.fetch.progressMaxWait | quote }}
+            {{- end }}
+            {{- if $root.Values.subscriber.fetch.buildToolBatchSize }}
+            - name: FETCH_BUILD_TOOL_BATCH_SIZE
+              value: {{ $root.Values.subscriber.fetch.buildToolBatchSize | quote }}
+            {{- end }}
+            {{- if $root.Values.subscriber.fetch.buildToolMaxWait }}
+            - name: FETCH_BUILD_TOOL_MAX_WAIT
+              value: {{ $root.Values.subscriber.fetch.buildToolMaxWait | quote }}
+            {{- end }}
+            {{- if $root.Values.otel.mtls.enabled }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_KEY
+              value: {{ printf "%s/tls.key" $root.Values.otel.mtls.mountPath | quote }}
+            - name: OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE
+              value: {{ printf "%s/tls.crt" $root.Values.otel.mtls.mountPath | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp/bep-tmp
+            - name: nats-stream-config
+              mountPath: /config/nats-streams
+              readOnly: true
+            {{- if $root.Values.otel.mtls.enabled }}
+            - name: otel-exporter-client-mtls
+              mountPath: {{ $root.Values.otel.mtls.mountPath }}
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml $root.Values.subscriber.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8008
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" $root | nindent 12 }}
+{{- end }}
+{{- end }}

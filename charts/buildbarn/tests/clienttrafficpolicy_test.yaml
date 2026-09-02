@@ -1,0 +1,142 @@
+suite: gateway client traffic policy
+templates:
+  - templates/clienttrafficpolicy.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing when enabled under a non-Envoy-Gateway provider
+    set:
+      routing.provider: contour
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing in httproute-only mode, which has no Envoy Gateway CRDs
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the tuned policy targeting the Gateway
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClientTrafficPolicy
+      - isAPIVersion:
+          of: gateway.envoyproxy.io/v1alpha1
+      - equal:
+          path: metadata.name
+          value: bb-gateway-client-traffic
+      - equal:
+          path: spec.targetRefs
+          value:
+            - group: gateway.networking.k8s.io
+              kind: Gateway
+              name: gw
+      - equal:
+          path: spec.connection.bufferLimit
+          value: "8Mi"
+      - equal:
+          path: spec.http2.initialStreamWindowSize
+          value: "16Mi"
+      - equal:
+          path: spec.http2.initialConnectionWindowSize
+          value: "24Mi"
+      - equal:
+          path: spec.http2.maxConcurrentStreams
+          value: 1024
+      - equal:
+          path: spec.timeout.http.idleTimeout
+          value: "7200s"
+      - equal:
+          path: spec.tcpKeepalive
+          value:
+            idleTime: "60s"
+            interval: "15s"
+            probes: 5
+
+  - it: lands in the Gateway namespace, not the chart's own namespace
+    release:
+      namespace: buildbarn
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.namespace: gateway-system
+      gateway.clientTrafficPolicy.enabled: true
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: gateway-system
+
+  - it: falls back to the chart namespace when the Gateway namespace is unset
+    release:
+      namespace: buildbarn
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+      namespaceOverride: bb-override
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: bb-override
+
+  - it: falls back to the release namespace with no namespace overrides at all
+    release:
+      namespace: buildbarn
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+      namespaceOverride: ""
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: buildbarn
+
+  - it: scopes to a single listener when sectionName is set
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+      gateway.clientTrafficPolicy.sectionName: https
+    asserts:
+      - equal:
+          path: spec.targetRefs[0].sectionName
+          value: https
+
+  - it: requires a Gateway name
+    set:
+      routing.provider: gateway
+      gateway.clientTrafficPolicy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "gateway.name is required when gateway.clientTrafficPolicy.enabled=true"
+
+  - it: omits blocks that are explicitly nulled
+    set:
+      routing.provider: gateway
+      gateway.name: gw
+      gateway.clientTrafficPolicy.enabled: true
+      gateway.clientTrafficPolicy.tcpKeepalive: null
+      gateway.clientTrafficPolicy.http2: null
+    asserts:
+      - notExists:
+          path: spec.tcpKeepalive
+      - notExists:
+          path: spec.http2
+      - exists:
+          path: spec.connection.bufferLimit

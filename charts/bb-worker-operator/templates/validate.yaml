@@ -1,0 +1,32 @@
+{{- if and .Values.rbac.create (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) -}}
+{{- fail "serviceAccount.name is required when rbac.create=true and serviceAccount.create=false" -}}
+{{- end -}}
+{{- if and (not .Values.metrics.enabled) .Values.metrics.service.enabled -}}
+{{- fail "metrics.service.enabled requires metrics.enabled=true" -}}
+{{- end -}}
+{{- if and (not .Values.metrics.service.enabled) .Values.metrics.serviceMonitor.enabled -}}
+{{- fail "metrics.serviceMonitor.enabled requires metrics.service.enabled=true" -}}
+{{- end -}}
+{{- if and (not .Values.metrics.service.enabled) .Values.metrics.vmServiceScrape.enabled -}}
+{{- fail "metrics.vmServiceScrape.enabled requires metrics.service.enabled=true" -}}
+{{- end -}}
+{{- if and (or .Values.otel.metrics.enabled .Values.otel.logs.enabled) (not .Values.otel.endpoint) -}}
+{{- fail "otel.endpoint is required when otel.metrics.enabled=true or otel.logs.enabled=true" -}}
+{{- end -}}
+{{- if not (has .Values.rbac.managerBindingMode (list "cluster" "namespace")) -}}
+{{- fail (printf "rbac.managerBindingMode must be one of: cluster, namespace (got %s)" .Values.rbac.managerBindingMode) -}}
+{{- end -}}
+{{/* A namespaced RoleBinding only authorizes the release namespace, so in
+     namespace mode the manager's informers must be scoped to that namespace via
+     --watch-namespace. Unscoped, it issues cluster-scoped list/watch for
+     RbeWorker, Deployment and ConfigMap, gets Forbidden on all of them, and
+     reconciles nothing without ever failing loudly. */}}
+{{- $ns := include "bb-worker-operator.namespace" . -}}
+{{- if and .Values.rbac.create (eq .Values.rbac.managerBindingMode "namespace") -}}
+{{- if not .Values.watchNamespace -}}
+{{- fail (printf "rbac.managerBindingMode=namespace requires watchNamespace=%s. A namespaced RoleBinding cannot authorize the cluster-scoped list/watch an unscoped manager performs, so no RbeWorker would ever reconcile. Set watchNamespace, or use managerBindingMode=cluster." $ns) -}}
+{{- end -}}
+{{- if ne .Values.watchNamespace $ns -}}
+{{- fail (printf "rbac.managerBindingMode=namespace grants permissions only in %s, but watchNamespace is %s, where the manager would be Forbidden on every list/watch. Set watchNamespace=%s, or use managerBindingMode=cluster to watch a different or wider scope." $ns .Values.watchNamespace $ns) -}}
+{{- end -}}
+{{- end -}}

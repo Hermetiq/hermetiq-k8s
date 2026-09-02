@@ -1,0 +1,196 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: buildbarn-recording-rules
+  namespace: hermetiq
+spec:
+  groups:
+    - name: buildbarn-recording-rules
+      rules:
+        - record: backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_blob_size_bytes_count[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, operation, storage_type)
+        - record: backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_find_missing_batch_size_count[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, storage_type)
+          labels:
+            operation: FindMissing
+        - record: backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_duration_seconds_bucket[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, le, operation, storage_type)
+        - record: backend_type_grpc_code_kubernetes_service_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_count:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_duration_seconds_count[1m])) by (backend_type, grpc_code, hermetiq_project_id, kubernetes_service, storage_type)
+        - record: backend_type_kubernetes_service_le_storage_type:buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, le, storage_type)
+        - record: backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m
+          expr: sum(irate(buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, le, operation, storage_type)
+        - record: kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds
+          expr: min(time() - buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_replica, kubernetes_shard, storage_type)
+        - record: kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
+          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_replica, storage_type)
+        - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max
+          expr: max(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, storage_type)
+        - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
+          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, storage_type)
+        - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_count[1m])) by (hermetiq_project_id, storage_type, outcome)
+        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total[1m])) by (hermetiq_project_id, storage_type)
+        - record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket[1m])) by (hermetiq_project_id, le, storage_type)
+        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid_total[1m])) by (hermetiq_project_id, storage_type)
+        - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_count[1m])) by (hermetiq_project_id, outcome, storage_type)
+        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total[1m])) by (hermetiq_project_id, storage_type)
+        - record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket[1m])) by (hermetiq_project_id, le, storage_type)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_scheduled_total[1m])) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_count[1m])) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: grpc_code_instance_name_prefix_platform_result_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_count[1m])) by (grpc_code, hermetiq_project_id, instance_name_prefix, platform, result, size_class)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_removed:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_count[1m])) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:sum
+          expr: sum(buildbarn_builder_in_memory_build_queue_tasks_scheduled_total) by (hermetiq_project_id, instance_name_prefix, platform, size_class) - sum(buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_count) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:sum
+          expr: sum(buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_count) by (hermetiq_project_id, instance_name_prefix, platform, size_class) - sum(buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_count) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:sum
+          expr: sum(buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_count) by (hermetiq_project_id, instance_name_prefix, platform, size_class) - sum(buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_count) by (hermetiq_project_id, instance_name_prefix, platform, size_class)
+        - record: instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_bucket[1m])) by (hermetiq_project_id, instance_name_prefix, le, platform, size_class)
+        - record: instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_bucket[1m])) by (hermetiq_project_id, instance_name_prefix, le, platform, size_class)
+        - record: instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_bucket[1m])) by (hermetiq_project_id, instance_name_prefix, le, platform, size_class)
+        - record: instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_retries_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_executing_retries_bucket[1m])) by (hermetiq_project_id, instance_name_prefix, le, platform, size_class)
+        - record: kubernetes_service:buildbarn_builder_build_executor_operations:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_duration_seconds_count[1m])) by (hermetiq_project_id, kubernetes_service)
+        - record: kubernetes_service_le_stage:buildbarn_builder_build_executor_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_duration_seconds_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le, stage)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_virtual_execution_duration_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_virtual_execution_duration_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_user_time_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_user_time_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_system_time_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_system_time_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_maximum_resident_set_size_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_maximum_resident_set_size_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_page_reclaims_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_page_reclaims_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_page_faults_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_page_faults_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_swaps_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_swaps_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_block_input_operations_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_block_input_operations_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_block_output_operations_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_block_output_operations_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_messages_sent_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_messages_sent_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_messages_received_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_messages_received_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_signals_received_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_signals_received_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_voluntary_context_switches_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_voluntary_context_switches_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_posix_involuntary_context_switches_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_posix_involuntary_context_switches_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_file_pool_files_created_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_file_pool_files_created_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_file_pool_files_count_peak_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_file_pool_files_count_peak_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le:buildbarn_builder_build_executor_file_pool_files_size_bytes_peak_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_file_pool_files_size_bytes_peak_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le)
+        - record: kubernetes_service_le_operation:buildbarn_builder_build_executor_file_pool_operations_count_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_file_pool_operations_count_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le, operation)
+        - record: kubernetes_service_le_operation:buildbarn_builder_build_executor_file_pool_operations_size_bytes_bucket:irate1m
+          expr: sum(irate(buildbarn_builder_build_executor_file_pool_operations_size_bytes_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le, operation)
+        - record: kubernetes_service_name_operation:buildbarn_eviction_set_operations:rate1h
+          expr: sum(rate(buildbarn_eviction_set_operations_total[1h])) by (hermetiq_project_id, kubernetes_service, name, operation)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_client_in_flight:sum
+          expr: |
+            sum(
+              grpc_client_started_total
+              -
+              sum(grpc_client_handled_total) without (grpc_code)
+            ) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_client_handled:irate1m
+          expr: sum(irate(grpc_client_handled_total[1m])) by (grpc_code, grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_client_msg_sent:irate1m
+          expr: sum(irate(grpc_client_msg_sent_total[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_client_msg_received:irate1m
+          expr: sum(irate(grpc_client_msg_received_total[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service_le:grpc_client_handling_seconds_bucket:irate1m
+          expr: sum(irate(grpc_client_handling_seconds_bucket[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service, le)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_server_in_flight:sum
+          expr: |
+            sum(
+              grpc_server_started_total
+              -
+              sum(grpc_server_handled_total) without (grpc_code)
+            ) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m
+          expr: sum(irate(grpc_server_handled_total[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m
+          expr: sum(irate(grpc_server_handled_total[1m])) by (grpc_code, grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_server_msg_sent:irate1m
+          expr: sum(irate(grpc_server_msg_sent_total[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service:grpc_server_msg_received:irate1m
+          expr: sum(irate(grpc_server_msg_received_total[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service)
+        - record: grpc_method_grpc_service_kubernetes_service_le:grpc_server_handling_seconds_bucket:irate1m
+          expr: sum(irate(grpc_server_handling_seconds_bucket[1m])) by (grpc_method, grpc_service, hermetiq_project_id, kubernetes_service, le)
+        - record: status_code:buildbarn_fuse_raw_file_system_callbacks_and_operations:irate1m
+          expr: |
+            sum(
+              irate(buildbarn_fuse_raw_file_system_callbacks_total[1m])
+              or
+              irate(buildbarn_fuse_raw_file_system_operations_duration_seconds_count[1m])
+            ) by (hermetiq_project_id, status_code)
+        - record: kubernetes_service_operation_status_code:buildbarn_fuse_raw_file_system_operations_duration_seconds_count:irate1m
+          expr: sum(irate(buildbarn_fuse_raw_file_system_operations_duration_seconds_count[1m])) by (hermetiq_project_id, kubernetes_service, operation, status_code)
+        - record: kubernetes_service_le_operation_status_code:buildbarn_fuse_raw_file_system_operations_duration_seconds_bucket:irate1m
+          expr: sum(irate(buildbarn_fuse_raw_file_system_operations_duration_seconds_bucket[1m])) by (hermetiq_project_id, kubernetes_service, le, operation, status_code)
+        - record: callback_kubernetes_service_status_code:buildbarn_fuse_raw_file_system_callbacks:irate1m
+          expr: sum(irate(buildbarn_fuse_raw_file_system_callbacks_total[1m])) by (callback, hermetiq_project_id, kubernetes_service, status_code)
+    - name: buildbarn-storage-alerts
+      rules:
+        # An undersized key-location map fails silently: Put() drops index
+        # entries, so newly written blobs occupy disk but are unreachable, and
+        # builds see spurious NOT_FOUND. Grow the KLM (entries/sizeMi — and the
+        # storage memory request when in-memory) together with any disk growth.
+        - alert: BuildbarnKeyLocationMapPutsDropped
+          expr: storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Buildbarn {{ $labels.storage_type }} key-location map is dropping writes'
+            description: 'Put() on the {{ $labels.storage_type }} store exhausted its iteration budget — the key-location map is undersized relative to the blocks it fronts; newly written blobs are unreachable.'
+        - alert: BuildbarnKeyLocationMapGetsExhausted
+          expr: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Buildbarn {{ $labels.storage_type }} key-location map lookups hit the attempt limit'
+            description: 'Get() on the {{ $labels.storage_type }} store exceeded its probe budget, returning NOT_FOUND for objects that may exist — the key-location map is over-utilized; grow it.'
+        # Worst-case retention: age of the youngest data ever evicted from the
+        # store. Below a day, the store cycles faster than a working day and
+        # long builds risk losing blobs mid-flight. bb-storage initializes this
+        # gauge to "now", so suppress the alert until storage pods have been up
+        # for at least the retention threshold.
+        - alert: BuildbarnCacheRetentionLow
+          expr: |
+            kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min < 86400
+              and on (hermetiq_project_id)
+            min by (hermetiq_project_id) (
+              time() - process_start_time_seconds{kubernetes_service="storage"}
+            ) > 86400
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Buildbarn {{ $labels.storage_type }} shard {{ $labels.kubernetes_shard }} retains data for under 24h'
+            description: 'The youngest block evicted from the {{ $labels.storage_type }} store on shard {{ $labels.kubernetes_shard }} was inserted less than 24h ago — the store cycles too fast for its workload; grow the blocks volume and the key-location map together.'

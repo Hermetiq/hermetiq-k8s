@@ -1,0 +1,48 @@
+suite: buildbarn vmpodscrapes
+templates:
+  - templates/vmpodscrapes.yaml
+tests:
+  # The packaged VMRules and bb-storage dashboards group the eviction-age series
+  # by kubernetes_shard/kubernetes_replica; nothing else emits those labels, so
+  # without this the per-shard panels collapse to one series, the :min and :max
+  # recording rules are identical, and BuildbarnCacheRetentionLow reports a
+  # blank shard.
+  - it: derives kubernetes_shard and kubernetes_replica on the storage scrape
+    documentSelector:
+      path: metadata.name
+      value: storage-vmpodscrape
+    asserts:
+      - equal:
+          path: spec.podMetricsEndpoints[0].relabelConfigs[0].targetLabel
+          value: kubernetes_shard
+      - equal:
+          path: spec.podMetricsEndpoints[0].relabelConfigs[0].regex
+          value: .*-([0-9]+)
+      - equal:
+          path: spec.podMetricsEndpoints[0].relabelConfigs[0].sourceLabels[0]
+          value: __meta_kubernetes_pod_name
+      - equal:
+          path: spec.podMetricsEndpoints[0].relabelConfigs[1].targetLabel
+          value: kubernetes_replica
+
+  - it: does not add shard relabeling to non-storage scrapes
+    documentSelector:
+      path: metadata.name
+      value: frontend-vmpodscrape
+    asserts:
+      - notExists:
+          path: spec.podMetricsEndpoints[0].relabelConfigs
+
+  - it: still stamps hermetiq_project_id on every scrape
+    documentSelector:
+      path: metadata.name
+      value: storage-vmpodscrape
+    set:
+      project.id: "7"
+    asserts:
+      - equal:
+          path: spec.podMetricsEndpoints[0].metricRelabelConfigs[0].targetLabel
+          value: hermetiq_project_id
+      - equal:
+          path: spec.podMetricsEndpoints[0].metricRelabelConfigs[0].replacement
+          value: "7"

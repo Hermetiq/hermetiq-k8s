@@ -1,0 +1,103 @@
+{{- if .Values.portal.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bb-portal
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "portal") | nindent 4 }}
+spec:
+  replicas: {{ .Values.portal.replicas }}
+  selector:
+    matchLabels:
+      app: bb-portal
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "portal") | nindent 8 }}
+        app: bb-portal
+        kubernetes_service: bb-portal
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "portal.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.portal) | nindent 6 }}
+      containers:
+        # One process serves the whole portal: the web UI is embedded in the
+        # binary (frontendServiceConfiguration.frontendSource.embedded), so
+        # there is no separate frontend workload to proxy to.
+        - name: bb-portal
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.portal" "repository" .Values.images.portal.repository "tag" .Values.images.portal.tag "digest" .Values.images.portal.digest) }}
+          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          args:
+            - /config/portal.jsonnet
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-portal") | nindent 12 }}
+            - name: DB_CONNECTION_STRING
+              value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOSTNAME):$(DB_PORT)/$(DB_NAME)"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.portal.db.existingSecret }}
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+              name: http
+            - containerPort: 8082
+              protocol: TCP
+              name: grpc-bes
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9980
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.portal.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            # Scratch space for BEP file uploads under readOnlyRootFilesystem:
+            # ParseMultipartForm spills oversized parts to os.TempDir().
+            - mountPath: /tmp
+              name: tmp
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.portal) | nindent 6 }}
+      volumes:
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.configName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: portal.jsonnet
+                path: portal.jsonnet
+        - name: tmp
+          emptyDir: {}
+{{- end }}

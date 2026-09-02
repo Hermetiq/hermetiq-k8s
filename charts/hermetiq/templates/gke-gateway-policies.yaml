@@ -1,0 +1,57 @@
+{{- if eq (include "hermetiq-core.routingProvider" .) "gateway-httproute-only" }}
+{{- if .Values.gateway.gke.healthCheckPolicy.enabled }}
+{{- $apiName := include "hermetiq-core.apiName" . -}}
+{{- $services := list (include "hermetiq-core.publisherName" .) (include "hermetiq-core.apiName" .) (include "hermetiq-core.dashboardName" .) -}}
+{{- if .Values.gateway.routes.grafanaEnabled -}}
+{{- $services = append $services (include "hermetiq-core.grafanaUpstreamService" .) -}}
+{{- end -}}
+{{- range $svc := uniq $services }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ printf "%s-%s" $.Values.gateway.gke.healthCheckPolicy.namePrefix $svc | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" $ }}
+  labels:
+    {{- include "hermetiq-core.labels" $ | nindent 4 }}
+spec:
+  default:
+    config:
+      {{- if eq $svc $apiName }}
+      type: HTTP
+      httpHealthCheck:
+        portSpecification: USE_FIXED_PORT
+        port: 8008
+        requestPath: /ready
+      {{- else }}
+      type: TCP
+      tcpHealthCheck:
+        portSpecification: USE_SERVING_PORT
+      {{- end }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ $svc }}
+---
+{{- end }}
+{{- end }}
+{{- if .Values.gateway.gke.backendPolicy.enabled }}
+{{- $grpcServices := list (include "hermetiq-core.publisherName" .) (include "hermetiq-core.apiName" .) -}}
+{{- range $svc := uniq $grpcServices }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: {{ printf "%s-%s" $.Values.gateway.gke.backendPolicy.namePrefix $svc | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" $ }}
+  labels:
+    {{- include "hermetiq-core.labels" $ | nindent 4 }}
+spec:
+  default:
+    timeoutSec: {{ $.Values.gateway.gke.backendPolicy.timeoutSec }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ $svc }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

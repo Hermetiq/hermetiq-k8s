@@ -1,0 +1,34 @@
+apiVersion: v2
+name: bb-worker-operator
+description: Buildbarn worker pool operator for Kubernetes
+type: application
+version: 0.3.1
+appVersion: "v0.3.1"
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Add RbeWorker spec.manageReplicas for external HPA or KEDA ownership of Deployment replicas.
+    - kind: added
+      description: Add RbeWorker KEDA cron, additional trigger, annotation, fallback behavior, and advanced HPA/scaling modifier schema support.
+    - kind: added
+      description: Add generated config sizeClass to the RbeWorker CRD schema.
+    - kind: added
+      description: Add watchNamespace, rendered as --watch-namespace, to scope the manager's informers to a single namespace. Empty (the default) watches every namespace. Requires an operator image that accepts the flag - older images exit with "flag provided but not defined" - so change it together with image.tag.
+    - kind: added
+      description: Add rbac.managerBindingMode to select how the manager ClusterRole is bound. namespace mode now requires watchNamespace to equal the release namespace (honoring namespaceOverride), and the chart fails the render otherwise. A namespaced RoleBinding authorizes only that namespace, so an unscoped manager - or one pointed at a different namespace - starts, gets Forbidden on every list/watch of RbeWorker, Deployment and ConfigMap, and reconciles nothing without failing loudly. The operator watches one namespace at a time; use managerBindingMode=cluster with an empty watchNamespace to manage RbeWorker resources across namespaces.
+    - kind: fixed
+      description: Send credentials on the opt-in ServiceMonitor and VMServiceScrape when metrics.secure=true (the default). Both rendered an https /metrics endpoint with no bearer token, and controller-runtime's metrics authn filter has anonymous access disabled, so every scrape was rejected with 401. Defaults to the scraping pod's ServiceAccount token via metrics.<scrape>.bearerTokenFile, with metrics.<scrape>.authorization as an override and "" to opt out. The scraping ServiceAccount needs the ClusterRole created by rbac.metricsReader.create bound to it.
+    - kind: fixed
+      description: Drop the invalid autoscaling block from the README's fully-custom-KEDA-ScaledObject example. The CRD requires autoscaling.prometheus whenever spec.autoscaling is present, so an autoscaling block carrying only enabled=false was rejected by the API server; spec.manageReplicas=false alone is the correct way to hand scaling to an external ScaledObject.
+    - kind: changed
+      description: Rename the CRD from Worker/workers to RbeWorker/rbeworkers.
+    - kind: added
+      description: Initial Helm chart for installing the Buildbarn worker operator and RbeWorker CRD.
+keywords:
+  - buildbarn
+  - bazel
+  - remote-execution
+  - operator
+  - kubebuilder
+maintainers:
+  - name: Hermetiq

@@ -1,0 +1,83 @@
+suite: shared env ConfigMap and rollout checksum
+templates:
+  - templates/configmaps.yaml
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: renders the shared env ConfigMap keys the workloads read via envFrom
+    template: templates/configmaps.yaml
+    documentIndex: 0
+    set:
+      app.invocationStartEvent: build_tool
+      nats.url: nats://n:4222
+      redis.host: redis.example.svc
+      otel.endpoint: otel.example.svc:4317
+    asserts:
+      - equal:
+          path: metadata.name
+          value: bep-nats-shared-env
+      - equal:
+          path: data.INVOCATION_START_EVENT
+          value: build_tool
+      - equal:
+          path: data.NATS_URL
+          value: nats://n:4222
+      - equal:
+          path: data.REDIS_HOST
+          value: redis.example.svc
+      - equal:
+          path: data.OTEL_EXPORTER_OTLP_ENDPOINT
+          value: otel.example.svc:4317
+
+  # Every consumer reads this ConfigMap through envFrom, which the kubelet does
+  # not re-read after container start. Without the checksum annotation a
+  # values-only upgrade rewrites the ConfigMap and leaves the pods on stale env.
+  - it: stamps the shared env checksum on the api pod template
+    template: templates/deployment-api.yaml
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+
+  - it: stamps the shared env checksum on the publisher pod template
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+
+  - it: stamps the shared env checksum on subscriber pod templates
+    template: templates/deployment-subscribers.yaml
+    documentIndex: 0
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+
+  # Pins the checksum for the unmodified ci-values render, so the two tests
+  # below prove the annotation actually tracks shared env content rather than
+  # being a constant. Recompute if ci-values or the shared env keys change.
+  - it: matches the pinned checksum for the unmodified ci values
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+          value: 47903e04cebc0855f0f692c5cd8ba9e24ec4940aac64f8d30fd826ca4ae0ad6e
+
+  - it: changes the api shared env checksum when nats.url changes
+    template: templates/deployment-api.yaml
+    set:
+      nats.url: nats://changed:4222
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+          value: 47903e04cebc0855f0f692c5cd8ba9e24ec4940aac64f8d30fd826ca4ae0ad6e
+
+  - it: changes the publisher shared env checksum when invocationStartEvent changes
+    template: templates/deployment-publisher.yaml
+    set:
+      app.invocationStartEvent: lifecycle
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
+          value: 47903e04cebc0855f0f692c5cd8ba9e24ec4940aac64f8d30fd826ca4ae0ad6e

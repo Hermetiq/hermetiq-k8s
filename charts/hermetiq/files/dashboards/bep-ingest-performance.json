@@ -1,0 +1,5290 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "BEP publisher, JetStream consumer, event-store, forwarding, and background ingest performance for bep-nats",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 29,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 2
+          },
+          "id": 2,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", subject=~\"bep_[^.]+[.](build_tool|progress_v2)\", status=\"success\"}[$__rate_interval]))",
+              "legendFormat": "published {{project}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "decoded {{project}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "BEP Publish vs Decode Rate",
+          "type": "timeseries",
+          "description": "Compares only build-tool/progress messages accepted by JetStream with subscriber-decoded Bazel events. Decoded events intentionally exclude stream-control envelopes, so this is not a direct database write-rate comparison. Treat only sustained separation accompanied by Durable Pending / Ack-Pending growth as subscriber backlog."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 2
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (stream, le) (rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", delivery_bucket=\"1\"}[5m])))",
+              "legendFormat": "queue p95 {{stream}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (stream, event_type, le) (rate(hermetiq_bep_process_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[5m])))",
+              "legendFormat": "process p95 {{stream}} {{event_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Queue and Process p95",
+          "type": "timeseries",
+          "description": "p95 first-delivery queue latency from NATS message timestamp to consumer/store handling, plus process latency grouped by stream and event type. Redeliveries and unlabeled legacy samples are excluded from the queue-latency target so this panel reflects healthy-path backlog/freshness."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 2
+          },
+          "id": 4,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, error_type) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=\"error\"}[$__rate_interval]))",
+              "legendFormat": "publish {{project}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, error_type) (rate(hermetiq_consume_error_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "consume {{project}} {{error_type}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, error_type) (rate(hermetiq_bep_store_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\", path=~\"${path_regex:raw}\", status=\"error\"}[$__rate_interval]))",
+              "legendFormat": "store {{project}} {{error_type}}",
+              "range": true,
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, error_type) (rate(hermetiq_dlq_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "dlq {{project}} {{error_type}}",
+              "range": true,
+              "refId": "D"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, error_type) (rate(hermetiq_publish_async_error_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "async publish {{project}} {{error_type}}",
+              "range": true,
+              "refId": "E"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_publish_capacity_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", publisher_connection=~\"${publisher_connection_regex:raw}\", status=\"timeout\"}[$__rate_interval]))",
+              "legendFormat": "capacity timeout {{project}}",
+              "range": true,
+              "refId": "F"
+            }
+          ],
+          "title": "Error Rate",
+          "type": "timeseries",
+          "description": "Combined error-rate view for publish failures, consumer processing failures, store failures, DLQ moves, async publish ack errors, and async capacity timeouts. Use this to identify which pipeline stage fails first."
+        }
+      ],
+      "title": "Overview",
+      "type": "row",
+      "description": "Top-level BEP ingest health across the selected filters: JetStream acceptance, subscriber processing, queue/process latency, and broad error rates."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 5,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 3
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject, status) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{subject}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Publish Attempts",
+          "type": "timeseries",
+          "description": "Rate of JetStream publish attempts recorded after publish ack/error, grouped by project, subject, and status. `status=\"success\"` is the canonical accepted-by-JetStream rate."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 3
+          },
+          "id": 7,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, subject, le) (rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Publish Duration Percentiles",
+          "type": "timeseries",
+          "description": "Duration of a single JetStream publish attempt, excluding retry loops. p95 uses a 5m window for stable tails; p50 uses the dashboard rate interval for responsiveness."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 11
+          },
+          "id": 8,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, subject, le) (rate(hermetiq_publish_request_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "request p95 {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_request_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "request p50 {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Publish Request Percentiles",
+          "type": "timeseries",
+          "description": "End-to-end logical publish request duration, including retry time and duplicate-in-progress retry loops. This is broader than Publish Duration and closer to publish-side client delay."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 11
+          },
+          "id": 9,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject, attempt, error_type) (rate(hermetiq_publish_retry_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "retry {{project}} {{subject}} attempt {{attempt}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject) (rate(hermetiq_publish_duplicate_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "duplicate {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Retries and Duplicates",
+          "type": "timeseries",
+          "description": "JetStream retry and duplicate-ack rates. Retry labels include attempt and error type; duplicate indicates JetStream acknowledged the message ID as already published."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 19
+          },
+          "id": 42,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (\"k8s.pod.name\", publisher_connection) (hermetiq_publish_async_inflight{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", publisher_connection=~\"${publisher_connection_regex:raw}\"})",
+              "legendFormat": "{{k8s.pod.name}} c{{publisher_connection}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Async Inflight by Connection",
+          "type": "timeseries",
+          "description": "Exact count of application-observed async publishes still awaiting settlement for each physical pod connection under the selected project and subject filters. High values near the per-connection limit indicate local capacity pressure."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 19
+          },
+          "id": 43,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject) (hermetiq_publish_async_inflight{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"})",
+              "legendFormat": "live {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Async Inflight Total",
+          "type": "timeseries",
+          "description": "Exact count of application-observed async publishes still awaiting settlement across publisher connections. High values indicate global backlog even if one connection is not saturated."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 27
+          },
+          "id": 44,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, subject, le) (rate(hermetiq_publish_async_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "settlement p95 {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_async_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "settlement p50 {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "JetStream Publish Settlement Percentiles",
+          "type": "timeseries",
+          "description": "Time from async JetStream publish enqueue until the application observer records an ack, error, or local safety timeout. Settlement is observed independently of FIFO gRPC response ordering; compare with gRPC Response Percentiles to identify ordering/send delay. Error series can include an unknown outcome when the NATS client never settles a future. Historical samples before this instrumentation change included FIFO observation delay."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 27
+          },
+          "id": 45,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject, error_type) (rate(hermetiq_publish_async_error_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{subject}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Async Errors",
+          "type": "timeseries",
+          "description": "Async JetStream publish future errors by subject and low-cardinality error type. Empty is healthy; nonzero errors mean the future resolved with an ack failure."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
+          "id": 46,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, subject, publisher_connection) (rate(hermetiq_publish_capacity_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", publisher_connection=~\"${publisher_connection_regex:raw}\", status=\"timeout\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{subject}} c{{publisher_connection}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Capacity Timeouts",
+          "type": "timeseries",
+          "description": "Rate of async publisher capacity waits ending in timeout, by publisher connection. Nonzero values mean requests could not enter the async publish window before deadline."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 43
+          },
+          "id": 58,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_bep_build_tool_streams_active)",
+              "legendFormat": "active build-tool streams",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_bep_build_tool_drain_pending_acks)",
+              "legendFormat": "draining pending ACKs",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_publish_async_inflight{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"})",
+              "legendFormat": "unsettled async publishes",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Graceful Shutdown Drain State",
+          "type": "timeseries",
+          "description": "Current publisher drain state used to diagnose gRPC graceful-stop timeouts: active BEP build-tool streams, accepted events being flushed to ordered ACK responses during shutdown, and the exact additive count of async publishes whose application observers have not settled."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 51
+          },
+          "id": 47,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_bep_grpc_received_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", outcome=~\"publishable|skipped\"}[$__rate_interval]))",
+              "legendFormat": "received (SLO) {{project}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_bep_grpc_received_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", outcome=\"skipped\"}[$__rate_interval]))",
+              "legendFormat": "dropped at publisher {{project}}",
+              "range": true,
+              "refId": "D"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=\"success\"}[$__rate_interval]))",
+              "legendFormat": "accepted {{project}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (rate(hermetiq_bep_grpc_response_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=\"success\"}[$__rate_interval]))",
+              "legendFormat": "responded {{project}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Received vs Accepted vs Responded Rate",
+          "type": "timeseries",
+          "description": "End-to-end rate comparison for build_tool stream events. RECEIVED is the ingest SLO: everything Bazel successfully sent that the publisher handled, i.e. outcome publishable OR skipped — a deliberately dropped event was handled, not lost. outcome=error is excluded on purpose so failures cannot masquerade as throughput. DROPPED AT PUBLISHER counts events discarded before NATS (named_set_of_files when the project disables output files, symlink actions, successful actions when the project disables them, empty progress); expect roughly 15% on a typical Bazel profile with output files off. ACCEPTED is what reached JetStream, so received minus dropped should track it. RESPONDED is successful gRPC Send. Divergence between accepted and responded identifies publish stalls; divergence between received and accepted is expected and equals dropped."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "id": 48,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, subject, le) (rate(hermetiq_publish_grpc_to_js_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, subject, le) (rate(hermetiq_publish_grpc_to_js_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "gRPC to JetStream Settlement Percentiles",
+          "type": "timeseries",
+          "description": "Time from successful gRPC Recv until the application observer records an async JetStream ack, error, or local safety timeout for build_tool events. Settlement is observed independently of FIFO response ordering. p95/p99 use 5m windows; compare with gRPC Response Percentiles, but do not subtract aggregate quantiles."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 59
+          },
+          "id": 49,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, subject, le) (rate(hermetiq_bep_grpc_response_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, subject, le) (rate(hermetiq_bep_grpc_response_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "gRPC Response Percentiles",
+          "type": "timeseries",
+          "description": "Client-visible gap from successful gRPC Recv to `req.Send(...)` completion for build_tool events. This includes publish/ack wait plus response ordering and send time."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 67
+          },
+          "id": 50,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, publisher_connection, subject, le) (rate(hermetiq_publish_capacity_wait_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", publisher_connection=~\"${publisher_connection_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} c{{publisher_connection}} {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, publisher_connection, subject, le) (rate(hermetiq_publish_capacity_wait_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", publisher_connection=~\"${publisher_connection_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}} c{{publisher_connection}} {{subject}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Capacity Wait Percentiles",
+          "type": "timeseries",
+          "description": "Time spent waiting for async JetStream publish capacity before enqueue. High tails or timeout status indicate local async window or max-pending pressure."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 67
+          },
+          "id": 82,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, outcome) (rate(hermetiq_bep_invocation_start_direct_write_total{project=~\"${project_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{outcome}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Direct Invocation Start Outcomes",
+          "type": "timeseries",
+          "description": "Publisher direct-to-DB invocation-start rate by outcome. `created` is the true new-invocations-per-second rate; `conflict` is an idempotent duplicate. `timeout`, `error`, `canceled`, and `saturated` fall back to JetStream."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 75
+          },
+          "id": 83,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (project, outcome, le) (rate(hermetiq_bep_invocation_start_direct_write_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{project}} {{outcome}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, outcome, le) (rate(hermetiq_bep_invocation_start_direct_write_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{outcome}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, outcome, le) (rate(hermetiq_bep_invocation_start_direct_write_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}} {{outcome}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Direct Invocation Start SQL Latency",
+          "type": "timeseries",
+          "description": "Publisher-side latency of actual direct invocation-start SQL attempts. Saturated requests are excluded because they never enter the database; correlate latency errors with the outcome-rate panel to see JetStream fallbacks."
+        }
+      ],
+      "title": "Publisher",
+      "type": "row",
+      "description": "Publisher-side view of Bazel gRPC event ingest, direct invocation-start SQL writes, and JetStream publish behavior before subscribers consume events."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 2
+      },
+      "id": 10,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 4
+          },
+          "id": 11,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, status) (rate(hermetiq_consumer_fetch_total{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "fetch {{consumer_type}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Fetch Rate",
+          "type": "timeseries",
+          "description": "Rate of JetStream pull consumer Fetch calls by consumer type and status. Drops or errors here indicate consumers are not pulling batches normally."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 4
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_fetch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_fetch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Fetch Request Duration Percentiles",
+          "type": "timeseries",
+          "description": "Duration of the JetStream Fetch call that creates an asynchronous MessageBatch. This does not include waiting for that batch's message channel to fill or expire; that delivery wait is included in Batch Drain and Dispatch Duration."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 4
+          },
+          "id": 13,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Batch Drain and Dispatch Duration",
+          "type": "timeseries",
+          "description": "On the pipelined path, time spent draining the asynchronous JetStream MessageBatch channel, parsing messages, and dispatching worker shards. It includes waiting until the pull fills or expires but excludes worker store/ACK time; a high value with low pod CPU can therefore mean delivery starvation rather than parser saturation."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 12
+          },
+          "id": 14,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_messages_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_messages_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Batch Size Percentiles",
+          "type": "timeseries",
+          "description": "Distribution of message counts returned in each consumer batch. Low batch size during high load can indicate fetch limits, partition skew, or insufficient available messages."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 12
+          },
+          "id": 15,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, action, status) (rate(hermetiq_consumer_ack_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{consumer_type}} {{action}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "ACK / NAK Rate",
+          "type": "timeseries",
+          "description": "Rate of consumer ACK/NAK operations by action and status. `nak_delay` and `ack_dlq` reveal retry/DLQ behavior; ack errors mean JetStream did not confirm the consumer action."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 12
+          },
+          "id": 16,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type, stream, consumer, state) (hermetiq_consumer_state{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", stream=~\"${stream_regex:raw}\", state=~\"num_pending|num_ack_pending\"})",
+              "legendFormat": "{{consumer_type}} {{stream}} {{consumer}} {{state}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Durable Pending / Ack-Pending",
+          "type": "timeseries",
+          "description": "Current per-durable JetStream backlog, split by consumer kind and de-duplicated across pods reporting the same consumer. NumPending is filter-matching messages not yet delivered; NumAckPending is delivered but unsettled. These two states are the authoritative current backlog signals."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 20
+          },
+          "id": 59,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (rate(hermetiq_consumer_fetch_total{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=\"success\"}[$__rate_interval]))",
+              "legendFormat": "fetch calls {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (rate(hermetiq_consumer_ack_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\", action=~\"ack|ack_nil|ack_dlq|progress_chunk_buffered\", status=\"success\"}[$__rate_interval]))",
+              "legendFormat": "settled messages {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Fetch Calls vs Settled Messages",
+          "type": "timeseries",
+          "description": "Compares pull fetch-call rate with successful terminal ACK actions, including blob-progress ack-on-buffer, ignored nil payloads, and DLQ settlement. A large lifecycle gap can be deliberate low-latency polling/empty fetch churn; use Pending/Ack-Pending for backlog."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 20
+          },
+          "id": 60,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (stream, le) (rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", stream=~\".*LIFECYCLE.*\", delivery_bucket=\"1\"}[15m])))",
+              "legendFormat": "p95 {{stream}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (stream, le) (rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", stream=~\".*LIFECYCLE.*\", delivery_bucket=\"1\"}[15m])))",
+              "legendFormat": "p99 {{stream}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Lifecycle Queue Tail (15m)",
+          "type": "timeseries",
+          "description": "Lifecycle-only first-delivery queue latency over a 15m rolling window. Redeliveries and unlabeled legacy samples are excluded so this stays focused on user-visible start freshness."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 20
+          },
+          "id": 61,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (stream, le) (rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", stream=~\".*BUILD_TOOL.*\", delivery_bucket=\"1\"}[15m])))",
+              "legendFormat": "p95 {{stream}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (stream, le) (rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", stream=~\".*BUILD_TOOL.*\", delivery_bucket=\"1\"}[15m])))",
+              "legendFormat": "p99 {{stream}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Build-Tool / Progress Queue Tail (15m)",
+          "type": "timeseries",
+          "description": "Build-tool/progress first-delivery queue latency over a 15m rolling window. Redeliveries and unlabeled legacy samples are excluded so this panel reflects healthy-path backlog/freshness."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 28
+          },
+          "id": 62,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, consumer_type, outcome, message_count_bucket) (rate(hermetiq_consumer_lifecycle_start_wait_duration_seconds_count{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{consumer_type}} {{outcome}} {{message_count_bucket}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Lifecycle Start Wait Outcomes",
+          "type": "timeseries",
+          "description": "Rate of build-tool/progress batches that waited for lifecycle-start visibility, grouped by outcome and message-count bucket. Spikes here explain invocation_start_time_unavailable retry pressure."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 28
+          },
+          "id": 63,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, consumer_type, outcome, le) (rate(hermetiq_consumer_lifecycle_start_wait_duration_seconds_bucket{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{consumer_type}} {{outcome}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, consumer_type, outcome, le) (rate(hermetiq_consumer_lifecycle_start_wait_duration_seconds_bucket{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}} {{consumer_type}} {{outcome}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Lifecycle Start Wait Duration",
+          "type": "timeseries",
+          "description": "Tail duration spent waiting for lifecycle-start visibility before retrying build-tool/progress events in memory."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 28
+          },
+          "id": 64,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, message_count_bucket, le) (rate(hermetiq_consumer_worker_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}} {{message_count_bucket}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, message_count_bucket, le) (rate(hermetiq_consumer_worker_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}} {{message_count_bucket}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Worker Batch Duration",
+          "type": "timeseries",
+          "description": "Duration to store and ACK one in-process worker shard, grouped by consumer type and batch-size bucket. Use this when queue latency rises without matching store-duration movement."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 36
+          },
+          "id": 67,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type, worker_index) (hermetiq_consumer_worker_queue_depth{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "{{consumer_type}} w{{worker_index}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Worker Queue Depth",
+          "type": "timeseries",
+          "description": "Per-worker pipeline queue depth (max across pods). One worker pinned high while its siblings sit near zero is the noisy-invocation signature: that invocation is concentrated on its hash-affine worker while the rest of the pipeline keeps flowing."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 36
+          },
+          "id": 68,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (hermetiq_consumer_queued_messages{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "total {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type) (hermetiq_consumer_queued_messages{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "hottest pod {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Pipeline Queued Messages",
+          "type": "timeseries",
+          "description": "Messages held by the worker pipeline per durable (queued plus in-process). The hottest pod approaching pipelineMaxQueuedMessages (default 2x batchSize) means dispatch is backpressuring fetch — either the DB is slow or one worker owns a sustained backlog."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 36
+          },
+          "id": 69,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (hermetiq_consumer_queued_bytes{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "total {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type) (hermetiq_consumer_queued_bytes{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "hottest pod {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Pipeline Queued Bytes",
+          "type": "timeseries",
+          "description": "Payload bytes held by the worker pipeline per durable, bounding subscriber-pod memory. The hottest pod approaching pipelineMaxQueuedBytes (default 2x maxRequestMaxBytes, or 128MiB) means the byte budget, not the message budget, is gating fetch-ahead."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 44
+          },
+          "id": 70,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_queue_residence_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_queue_residence_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Queue Residence Percentiles",
+          "type": "timeseries",
+          "description": "Time a message waits in its worker queue between enqueue and dequeue. It must stay well below the durable's configured AckWait; residence approaching AckWait precedes lease expiry. Cross-check current NumAckPending first, then Current Redelivery Pressure for evidence of repeated deliveries."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 44
+          },
+          "id": 75,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (max by (consumer_type, stream, consumer) (hermetiq_consumer_state{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", stream=~\"${stream_regex:raw}\", state=\"num_pending\"}))",
+              "legendFormat": "pending {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (max by (consumer_type, stream, consumer) (hermetiq_consumer_state{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", stream=~\"${stream_regex:raw}\", state=\"num_ack_pending\"}))",
+              "legendFormat": "ack-pending {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Fleet Backlog by Durable Kind",
+          "type": "timeseries",
+          "description": "Fleet totals for current NumPending and NumAckPending after taking one value per durable consumer. This prevents shared consumer state reported by multiple subscriber replicas from being counted more than once."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 44
+          },
+          "id": 76,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, max by (consumer_type, stream, consumer) (hermetiq_consumer_state{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", stream=~\"${stream_regex:raw}\", state=\"num_redelivered\"}))",
+              "legendFormat": "{{consumer_type}} {{consumer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Current Redelivery Pressure",
+          "type": "timeseries",
+          "description": "Top durable consumers by JetStream NumRedelivered: messages currently in redelivery state and not yet acknowledged. Each message is counted once while unsettled, so this value can fall as messages are acknowledged. It does not expose whether NAK, AckWait expiry, pod loss, or connection loss caused the redelivery."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 52
+          },
+          "id": 77,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, max by (consumer_type, stream, consumer) (hermetiq_consumer_state{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", stream=~\"${stream_regex:raw}\", state=\"consumer_lag\"}))",
+              "legendFormat": "{{consumer_type}} {{consumer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "ACK-Floor Sequence Gap (Diagnostic Only)",
+          "type": "timeseries",
+          "description": "Delivered consumer sequence minus ACK-floor sequence. This is not a message backlog count: one old unsettled delivery can hold the ACK floor behind many already-settled later messages. Correlate it with that durable's NumAckPending."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 60
+          },
+          "id": 85,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (hermetiq_consumer_dispatcher_held_messages{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "dispatcher held {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (hermetiq_consumer_queued_messages{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "worker pipeline {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Dispatcher-Held vs Worker Pipeline",
+          "type": "timeseries",
+          "description": "Fetched messages in the dispatcher tail were previously invisible: JetStream counted them as ACK-pending, but the pipeline queued gauge began only after worker enqueue. A large dispatcher-held tail with low worker depth localizes the missing lease time before worker ownership."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 60
+          },
+          "id": 86,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, scope, status) (rate(hermetiq_consumer_lease_renewal_total{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{consumer_type}} {{scope}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Lease Renewal Outcomes",
+          "type": "timeseries",
+          "description": "InProgress outcomes by bounded scope: dispatcher_held, worker_dequeue, coalescer_wait, coalescer_pre_store, and missing_start. Any sustained error series directly explains silent AckWait expiry; high success volume identifies where messages are spending their lease."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 60
+          },
+          "id": 87,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (consumer_type, le) (rate(hermetiq_consumer_lease_disposition_age_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 lease age {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type) (hermetiq_consumer_ack_deadline_seconds{consumer_type=~\"${consumer_type_regex:raw}\"})",
+              "legendFormat": "effective deadline {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (consumer_type) (hermetiq_consumer_ack_deadline_seconds{consumer_type=~\"${consumer_type_regex:raw}\"}) - on (consumer_type) histogram_quantile(0.99, sum by (consumer_type, le) (rate(hermetiq_consumer_lease_disposition_age_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 headroom {{consumer_type}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Lease Age and Deadline Headroom",
+          "type": "timeseries",
+          "description": "Age since the most recent successful delivery or InProgress renewal when ownership finishes. First deliveries are sampled 1/64; every redelivery is retained. Headroom at or below zero means the p99 disposition reached the effective BackOff[0]/AckWait deadline."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 68
+          },
+          "id": 88,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (consumer_type, action, le) (rate(hermetiq_consumer_delivery_disposition_age_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{consumer_type}} {{action}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, action, le) (rate(hermetiq_consumer_delivery_disposition_age_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}} {{action}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Delivery-to-Disposition Age",
+          "type": "timeseries",
+          "description": "Total local ownership age through ACK, delayed NAK, skip, or shutdown abandonment. Compare this with lease age: a high delivery age with low lease age proves renewals are successfully protecting long-lived work."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 68
+          },
+          "id": 89,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, action) (rate(hermetiq_consumer_ack_deadline_exceeded_total{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "deadline exceeded {{consumer_type}} {{action}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, event_type) (rate(hermetiq_consumer_lease_expired_total{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "expired copy {{consumer_type}} {{event_type}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type) (rate(hermetiq_consumer_redelivery_observed_total{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\"}[$__rate_interval]))",
+              "legendFormat": "observed redelivery {{consumer_type}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Deadline Exceeded and Expired Copies",
+          "type": "timeseries",
+          "description": "Observed delivery attempts 2+ overlaid with sampled dispositions at or beyond the effective deadline and unsampled local expired-copy skips. Expired copies directly confirm AckWait expiry; a remaining gap is server-side or process-loss redelivery that the application could not observe at the prior disposition."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 76
+          },
+          "id": 90,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, event_type, status, error_type) (rate(hermetiq_consumer_ack_confirmation_duration_seconds_count{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{consumer_type}} {{event_type}} {{status}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Server-Confirmed ACK Sample Rate",
+          "type": "timeseries",
+          "description": "JetStream DoubleAck samples confirmed by the consumer leader: 1/1024 of first deliveries and 1/128 of redeliveries, selected deterministically by stream sequence. An error means confirmation was not received, not that the ACK was necessarily unapplied; correlate errors with route/leader health and durable deletion or recreation."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 76
+          },
+          "id": 91,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, event_type, status, le) (rate(hermetiq_consumer_ack_confirmation_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{consumer_type}} {{event_type}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Server-Confirmed ACK Latency p95",
+          "type": "timeseries",
+          "description": "Round-trip time from the subscriber through NATS to the durable consumer leader for the bounded DoubleAck sample. Rising latency before redeliveries while local disposition age remains low implicates the ACK route; confirmation errors can also mean a replaced durable generation or a lost/late reply."
+        }
+      ],
+      "title": "Consumers",
+      "type": "row",
+      "description": "JetStream pull consumer health: fetch calls, batch processing, ACK/NAK operations, de-duplicated backlog, lifecycle-start freshness, queue tails split by stream class, worker-pipeline fetch-ahead, dispatcher-held deliveries, acknowledgement lease renewal/expiry diagnostics, and sampled consumer-leader ACK confirmation."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 3
+      },
+      "id": 17,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 5
+          },
+          "id": 18,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, path, event_type, status) (rate(hermetiq_bep_store_total{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{path}} {{event_type}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Store Operation Rate",
+          "type": "timeseries",
+          "description": "Rate of event-store operations by path, BEP event type, project, and status. Paths distinguish single writes, deferred single writes, bulk writes, and bulk fallbacks."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 5
+          },
+          "id": 19,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (path, event_type, le) (rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{path}} {{event_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (path, event_type, le) (rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{path}} {{event_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Store Duration Percentiles",
+          "type": "timeseries",
+          "description": "Duration of event-store operations by write path and event type. Use with Store Operation Rate to separate frequent write paths from slow ones."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 5
+          },
+          "id": 20,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (event_type, status) (rate(hermetiq_bulk_flush_rows_total{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "rows {{event_type}} {{status}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (event_type, status, error_type) (rate(hermetiq_bulk_fallback_total{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "fallback {{event_type}} {{status}} {{error_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Bulk Flush Rows and Fallbacks",
+          "type": "timeseries",
+          "description": "Bulk SQL flush throughput and fallback count by event type. Fallbacks mean a bulk write failed and the store attempted per-row writes instead."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 13
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (event_type, le) (rate(hermetiq_bulk_flush_duration_seconds_bucket{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{event_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (event_type, le) (rate(hermetiq_bulk_flush_duration_seconds_bucket{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{event_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Bulk Flush Duration Percentiles",
+          "type": "timeseries",
+          "description": "Duration of bulk SQL flushes by event type. Tail spikes here identify database batch commit/write latency, separate from per-event store duration."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 13
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, result) (rate(hermetiq_build_metrics_total{project=~\"${project_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "result {{project}} {{result}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "BuildMetrics Outcomes",
+          "type": "timeseries",
+          "description": "BuildMetrics persistence outcomes by project. Result labels show whether BuildMetrics payloads were inserted, skipped, or errored."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 13
+          },
+          "id": 41,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, result, le) (rate(hermetiq_build_metrics_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}} {{result}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (project, result, le) (rate(hermetiq_build_metrics_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{project}} {{result}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "BuildMetrics Duration",
+          "type": "timeseries",
+          "description": "Duration of BuildMetrics persistence by project and result. Result labels show inserted, skipped, or error outcomes."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 21
+          },
+          "id": 51,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, le) (rate(hermetiq_bep_final_build_tool_event_db_lag_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, le) (rate(hermetiq_bep_final_build_tool_event_db_lag_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Final Build-Tool Event to DB Lag Percentiles",
+          "type": "timeseries",
+          "description": "Lag from Bazel client timestamp on the final build_tool BuildFinished event to the successful invocation DB update. Use as a proxy for final-event end-to-DB visibility."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "For each project over the dashboard range: `started` = build_tool started events, `final event` = finished events the subscriber saw, `final DB update` = finished events successfully persisted, and `missing final` = started minus finished, clamped to 0.",
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 21
+          },
+          "id": 52,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"started\"}[$__range]))",
+              "instant": true,
+              "legendFormat": "started {{project}}",
+              "range": false,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"finished\"}[$__range]))",
+              "instant": true,
+              "legendFormat": "final event {{project}}",
+              "range": false,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "(sum by (project) (increase(hermetiq_bep_final_build_tool_event_db_lag_duration_seconds_count{project=~\"${project_regex:raw}\"}[$__range])) or on(project) 0 * sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"started\"}[$__range])))",
+              "instant": true,
+              "legendFormat": "final DB update {{project}}",
+              "range": false,
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "clamp_min(sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"started\"}[$__range])) - (sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"finished\"}[$__range])) or on(project) 0 * sum by (project) (increase(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=\"started\"}[$__range]))), 0)",
+              "instant": true,
+              "legendFormat": "missing final {{project}}",
+              "range": false,
+              "refId": "D"
+            }
+          ],
+          "title": "Build-Tool Invocation Finality Counts",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Committed and ACKed build_tool messages over the selected dashboard range, grouped by project and decoded Bazel BuildEvent payload type.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "decimals": 0,
+              "min": 0,
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 29
+          },
+          "id": 65,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": true
+            },
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "Value"
+              }
+            ]
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sort_desc(sum by (project, bazel_event_type) (increase(hermetiq_consumer_ack_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", event_type=\"build_tool\", action=\"ack\", status=\"success\"}[$__range])))",
+              "instant": true,
+              "legendFormat": "{{project}} {{bazel_event_type}}",
+              "range": false,
+              "refId": "A",
+              "format": "table"
+            }
+          ],
+          "title": "Build-Tool Event Type Counts",
+          "type": "table",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "includeByName": {},
+                "indexByName": {},
+                "renameByName": {
+                  "Value": "count",
+                  "bazel_event_type": "event_type"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "BES upload lag per project: attempt_finish_time (lifecycle InvocationAttemptFinished, emitted after the BES upload drains) minus finish_time (BuildFinished, the actual build end). Measures how long Bazel clients wait on BEP upload after the build completes.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 37
+          },
+          "id": 66,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (project, le) (rate(hermetiq_bep_bes_upload_lag_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{project}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (project, le) (rate(hermetiq_bep_bes_upload_lag_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{project}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "BES Upload Lag Percentiles",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 45
+          },
+          "id": 71,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[$__rate_interval])))",
+              "legendFormat": "p95 events {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[$__rate_interval])))",
+              "legendFormat": "p50 events {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Coalesced Store Batch Size",
+          "type": "timeseries",
+          "description": "Events per coalesced StoreEvents call — the SQL density the coalescer exists to create. Healthy is near the delivered pull size up to storeBatchMaxEvents; worker-shard-sized values mean no cross-worker coalescing is happening (check Batch Requests)."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 45
+          },
+          "id": 72,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[$__rate_interval])))",
+              "legendFormat": "p95 requests {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[$__rate_interval])))",
+              "legendFormat": "p50 requests {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (flush_reason) (rate(hermetiq_consumer_store_batch_requests_count[$__rate_interval]))",
+              "legendFormat": "flushes/s {{flush_reason}}",
+              "range": true,
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_consumer_store_batch_requests_count{outcome!=\"success\"}[$__rate_interval]))",
+              "legendFormat": "non-success flushes/s",
+              "range": true,
+              "refId": "D"
+            }
+          ],
+          "title": "Coalesced Store Batch Requests",
+          "type": "timeseries",
+          "description": "Complete worker requests combined per store call — p50 above 1 proves cross-worker coalescing. Flushes/s by reason shows whether the event cap or the age cap drives flushing; non-success covers panic and result_mismatch outcomes and should be flat zero."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 45
+          },
+          "id": 73,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[$__rate_interval])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Coalesced Store Batch Wait",
+          "type": "timeseries",
+          "description": "Age of the oldest worker request when its store call begins, including time queued for a flush lane. Sustained growth means the lanes are saturated: raise storeBatchParallelism or lower storeBatchMaxEvents."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 53
+          },
+          "id": 74,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[$__rate_interval])))",
+              "legendFormat": "p95 {{consumer_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[$__rate_interval])))",
+              "legendFormat": "p50 {{consumer_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Coalesced Store Batch Duration",
+          "type": "timeseries",
+          "description": "Duration of the coalesced StoreEvents call. Read together with Batch Size: duration scaling linearly with events means per-row cost dominates at this batch size and bigger batches buy nothing — prefer more lanes over a higher event cap."
+        }
+      ],
+      "title": "Store and Persistence",
+      "type": "row",
+      "description": "Database persistence health for BEP events, bulk write paths, BuildMetrics, build_tool payload mix, and final build_tool event lag."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 23,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 6
+          },
+          "id": 24,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, event_type, error_type) (rate(hermetiq_consume_error_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{event_type}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consume Errors",
+          "type": "timeseries",
+          "description": "Consumer processing errors before final recovery handling, grouped by project, event type, and low-cardinality error type. These typically precede retries or DLQ moves."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 6
+          },
+          "id": 25,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, event_type) (rate(hermetiq_fk_error_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "fk {{project}} {{event_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, event_type, error_type) (rate(hermetiq_dlq_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "dlq {{project}} {{event_type}} {{error_type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "DLQ and FK Errors",
+          "type": "timeseries",
+          "description": "Foreign-key dependency errors and DLQ moves. FK errors often mean build_tool child rows arrived before prerequisite rows; DLQ means max deliveries were exhausted and the event was parked."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 6
+          },
+          "id": 26,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, consumer_type, mechanism, reason, delivery_bucket, status) (rate(hermetiq_consumer_redelivery_trigger_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{consumer_type}} {{mechanism}} {{reason}} delivery {{delivery_bucket}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Application Redelivery Triggers",
+          "type": "timeseries",
+          "description": "Application paths that explicitly NAK/NakWithDelay or knowingly leave a delivery unacked, grouped by exact local reason. status=error means the NAK call itself failed. This cannot include a pod crash, lost connection, or other server-only cause because the process cannot report what it did not observe."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 14
+          },
+          "id": 27,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, job_type) (rate(hermetiq_async_drop_total{project=~\"${project_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{job_type}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Async Drops",
+          "type": "timeseries",
+          "description": "Dropped in-process async enrichment jobs, such as background work queues that were full. These are not JetStream publish drops."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 14
+          },
+          "id": 28,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, action, error_type) (rate(hermetiq_consumer_ack_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\", status=\"error\"}[$__rate_interval]))",
+              "legendFormat": "ack {{consumer_type}} {{action}} {{error_type}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (consumer_type, error_type) (rate(hermetiq_consumer_fetch_total{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=\"error\"}[$__rate_interval]))",
+              "legendFormat": "fetch {{consumer_type}} {{error_type}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, path, error_type) (rate(hermetiq_bep_store_total{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=\"error\"}[$__rate_interval]))",
+              "legendFormat": "store {{project}} {{path}} {{error_type}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Failed Operations",
+          "type": "timeseries",
+          "description": "Failed operational actions across consumer ACK/NAK, Fetch, and event-store writes. Good first stop when broad Error Rate is too aggregated."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 22
+          },
+          "id": 84,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, consumer_type, event_type, delivery_bucket) (rate(hermetiq_consumer_redelivery_observed_total{project=~\"${project_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{consumer_type}} {{event_type}} delivery {{delivery_bucket}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Observed Redelivery Attempts",
+          "type": "timeseries",
+          "description": "Actual second-or-later delivery attempts observed by the BEP consumer. This counts attempts, not unique messages. Compare it with Application Redelivery Triggers: any excess is server-unattributed and may be AckWait expiry, pod loss, connection loss, or another path that could not emit a trigger before disappearing."
+        }
+      ],
+      "title": "Errors and Recovery",
+      "type": "row",
+      "description": "Failure paths that determine whether messages retry, enter the DLQ, or drop async background work."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 29,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "id": 33,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (project, source, status) (rate(hermetiq_log_compress_total{project=~\"${project_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{project}} {{source}} {{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Log Compression Outcomes",
+          "type": "timeseries",
+          "description": "Log compression operation outcomes by trigger source and status. Sources include finish-triggered, ticker, consumer, or Temporal paths where present."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "id": 34,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (source, le) (rate(hermetiq_log_compress_duration_seconds_bucket{project=~\"${project_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{source}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (source, le) (rate(hermetiq_log_compress_duration_seconds_bucket{project=~\"${project_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{source}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Log Compression Duration",
+          "type": "timeseries",
+          "description": "Duration of completed log compression attempts by source. Queueing and noop outcomes may appear in the outcome count without duration samples."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 15
+          },
+          "id": 78,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_progress_chunk_buffered_records)",
+              "legendFormat": "buffered records",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_progress_chunk_open_buffers)",
+              "legendFormat": "open invocation buffers",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_progress_chunk_upload_queue_depth)",
+              "legendFormat": "queued chunks",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Progress Chunk Writer Depth",
+          "type": "timeseries",
+          "description": "Blob-progress records and invocation buffers currently held in memory, plus sealed chunks queued for upload. Progress messages are ACKed when buffered, so these gauges—not progress durable AckPending—show whether the asynchronous writer is accumulating work."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 15
+          },
+          "id": 79,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(hermetiq_progress_chunk_buffered_bytes)",
+              "legendFormat": "fleet buffered bytes",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max(hermetiq_progress_chunk_buffered_bytes)",
+              "legendFormat": "hottest pod buffered bytes",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Progress Chunk Buffered Bytes",
+          "type": "timeseries",
+          "description": "Unsealed blob-progress payload bytes in memory, fleet total and hottest pod. Compare the hottest pod with PROGRESS_BLOB_BUFFER_MAX_BYTES; sustained pressure near the cap should coincide with dropped flush outcomes."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 15
+          },
+          "id": 80,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (outcome) (rate(hermetiq_progress_chunk_flush_total{project=~\"${project_regex:raw}\"}[$__rate_interval]))",
+              "legendFormat": "{{outcome}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Progress Chunk Flush Outcomes",
+          "type": "timeseries",
+          "description": "Sealed progress chunks by outcome: uploaded is healthy; spilled means blob upload failed and records fell back to PostgreSQL; failed means both paths failed; dropped means best-effort shedding because buffer/queue/shutdown capacity was exhausted."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 23
+          },
+          "id": 81,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (outcome, le) (rate(hermetiq_progress_chunk_flush_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{outcome}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (outcome, le) (rate(hermetiq_progress_chunk_flush_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{outcome}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Progress Chunk Flush Duration",
+          "type": "timeseries",
+          "description": "Duration of asynchronous blob upload or fallback handling by outcome. Blob I/O is intentionally off the JetStream ACK path, so increasing duration matters when upload queue depth, buffered bytes, or spill/drop outcomes rise with it."
+        }
+      ],
+      "title": "Background Work",
+      "type": "row",
+      "description": "Background work outside the main event write path, including legacy log-compression signals and the asynchronous blob-backed progress chunk writer."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 53,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "id": 54,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "hermetiq_db_partition_future_coverage_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 86400",
+              "legendFormat": "{{database}} {{parent_table}} coverage",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "hermetiq_db_partition_future_coverage_threshold_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 86400",
+              "legendFormat": "{{database}} {{parent_table}} threshold",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "DB Partition Future Coverage",
+          "type": "timeseries",
+          "description": "Future partition coverage per table in days, computed from the latest child partition upper bound minus monitor time. The threshold series comes from `DB_PARTITION_MONITOR_MIN_FUTURE_COVERAGE`."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "id": 55,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "hermetiq_db_partition_available_future_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}",
+              "legendFormat": "{{database}} {{parent_table}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "DB Partition Future Partitions",
+          "type": "timeseries",
+          "description": "Count of child partitions whose lower bound is in the future, by database and parent table. Drops toward zero mean premake maintenance is falling behind."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "id": 56,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "hermetiq_db_partition_aged_out_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}",
+              "instant": false,
+              "legendFormat": "{{database}} {{parent_table}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Aged-Out DB Partitions",
+          "type": "stat",
+          "description": "Partitions older than retention plus grace that still exist, by database and parent table. Nonzero means partition cleanup failed or is delayed."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "h"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "id": 57,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "hermetiq_db_partition_oldest_aged_out_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 3600",
+              "legendFormat": "{{database}} {{parent_table}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Oldest Aged-Out Partition Overdue",
+          "type": "timeseries",
+          "description": "How long the oldest undeleted aged-out partition is overdue beyond retention plus grace, in hours. Zero means no aged-out partitions remain."
+        }
+      ],
+      "title": "DB Partition Health",
+      "type": "row",
+      "description": "Database-wide partition maintenance health. These metrics have database/table labels rather than project labels because partitions are shared infrastructure."
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 35,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "id": 36,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 3,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", delivery_bucket=\"1\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Queue Latency Heatmap",
+          "type": "heatmap",
+          "description": "Raw first-delivery queue-latency histogram buckets. Redeliveries and unlabeled legacy samples are excluded so this heatmap reflects healthy-path queue age."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "id": 37,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 3,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_bep_process_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Process Latency Heatmap",
+          "type": "heatmap",
+          "description": "Raw process-latency histogram buckets for selected streams and event types. Useful when p95 is unstable and you need to see where observations land."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "id": 38,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 3,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Publish Duration Heatmap",
+          "type": "heatmap",
+          "description": "Raw JetStream publish-duration histogram buckets for selected subjects and statuses. This shows single publish-attempt latency distribution."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "id": 39,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 3,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consumer Batch Duration Heatmap",
+          "type": "heatmap",
+          "description": "Raw consumer batch-duration histogram buckets. Use this to verify whether batch p95 comes from a broad tail or a small number of high-bucket samples."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 24
+          },
+          "id": 40,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 3,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Store Duration Heatmap",
+          "type": "heatmap",
+          "description": "Raw event-store duration histogram buckets for selected write paths and event types. Useful for distinguishing DB write tail shape from quantile artifacts."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Distribution of outgoing NATS message sizes, recorded once per message before any retry. Use it with JetStream Publish Settlement Percentiles to test whether a heavy payload tail correlates with higher replication latency.",
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 32
+          },
+          "id": 92,
+          "maxPerRow": 2,
+          "options": {
+            "calculate": false,
+            "cellGap": 2,
+            "color": {
+              "exponent": 0.5,
+              "mode": "scheme",
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "filterValues": {
+              "le": 1e-9
+            },
+            "legend": {
+              "show": true
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "bytes"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Publish Payload Size Heatmap",
+          "type": "heatmap"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Payload size split by subject kind, so build_tool can be compared directly against progress on the same partition. Grouped by subject only so the comparison stays readable. p99/p95 use a 5m window for stable tails; p50 uses the dashboard rate interval.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 32
+          },
+          "id": 93,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.99, sum by (subject, le) (rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[5m])))",
+              "legendFormat": "p99 {{subject}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (subject, le) (rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[5m])))",
+              "legendFormat": "p95 {{subject}}",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.50, sum by (subject, le) (rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval])))",
+              "legendFormat": "p50 {{subject}}",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Publish Payload Size Percentiles by Subject",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Histograms",
+      "type": "row",
+      "description": "Raw histogram bucket views for latency distributions. Use these when quantiles look unstable or when checking bucket saturation."
+    }
+  ],
+  "preload": false,
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": [
+    "bep",
+    "ingest",
+    "latency",
+    "errors",
+    "histogram"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "VictoriaMetrics",
+          "value": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+        },
+        "includeAll": false,
+        "label": "Data source",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "label": "Database Regex",
+        "multi": false,
+        "name": "database_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "hermetiq",
+            "value": "hermetiq"
+          }
+        ],
+        "query": ".*,hermetiq",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "label": "Parent Table Regex",
+        "multi": false,
+        "name": "parent_table_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "public.invocations",
+            "value": "public.invocations"
+          },
+          {
+            "selected": false,
+            "text": "public.targets",
+            "value": "public.targets"
+          },
+          {
+            "selected": false,
+            "text": "public.actions",
+            "value": "public.actions"
+          },
+          {
+            "selected": false,
+            "text": "public.tests",
+            "value": "public.tests"
+          },
+          {
+            "selected": false,
+            "text": "public.cache_events",
+            "value": "public.cache_events"
+          },
+          {
+            "selected": false,
+            "text": "public.remote_actions",
+            "value": "public.remote_actions"
+          },
+          {
+            "selected": false,
+            "text": "public.logs",
+            "value": "public.logs"
+          },
+          {
+            "selected": false,
+            "text": "public.output_files",
+            "value": "public.output_files"
+          },
+          {
+            "selected": false,
+            "text": "public.build_metrics",
+            "value": "public.build_metrics"
+          },
+          {
+            "selected": false,
+            "text": "public.ci_contexts",
+            "value": "public.ci_contexts"
+          },
+          {
+            "selected": false,
+            "text": "public.command_line_args",
+            "value": "public.command_line_args"
+          },
+          {
+            "selected": false,
+            "text": "public.action_data",
+            "value": "public.action_data"
+          },
+          {
+            "selected": false,
+            "text": "public.build_files",
+            "value": "public.build_files"
+          },
+          {
+            "selected": false,
+            "text": "public.critical_path_entries",
+            "value": "public.critical_path_entries"
+          },
+          {
+            "selected": false,
+            "text": "public.tags",
+            "value": "public.tags"
+          },
+          {
+            "selected": false,
+            "text": "public.progresses",
+            "value": "public.progresses"
+          }
+        ],
+        "query": ".*,public.invocations,public.targets,public.actions,public.tests,public.cache_events,public.remote_actions,public.logs,public.output_files,public.build_metrics,public.ci_contexts,public.command_line_args,public.action_data,public.build_files,public.critical_path_entries,public.tags,public.progresses",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "label": "Project Regex",
+        "name": "project_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "label": "Subject Regex",
+        "name": "subject_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "label": "Publisher Connection Regex",
+        "name": "publisher_connection_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "label": "Event Type Regex",
+        "name": "event_type_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "label": "Consumer Type Regex",
+        "multi": false,
+        "name": "consumer_type_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "lifecycle",
+            "value": "lifecycle"
+          },
+          {
+            "selected": false,
+            "text": "build_tool_progress",
+            "value": "build_tool_progress"
+          },
+          {
+            "selected": false,
+            "text": "progress",
+            "value": "progress"
+          },
+          {
+            "selected": false,
+            "text": "cache_enrich",
+            "value": "cache_enrich"
+          }
+        ],
+        "query": ".*,lifecycle,build_tool_progress,progress,cache_enrich",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "label": "Stream Regex",
+        "name": "stream_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "label": "Store Path Regex",
+        "multi": false,
+        "name": "path_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "single",
+            "value": "single"
+          },
+          {
+            "selected": false,
+            "text": "single_direct",
+            "value": "single_direct"
+          },
+          {
+            "selected": false,
+            "text": "single_deferred",
+            "value": "single_deferred"
+          },
+          {
+            "selected": false,
+            "text": "bulk",
+            "value": "bulk"
+          },
+          {
+            "selected": false,
+            "text": "bulk_fallback",
+            "value": "bulk_fallback"
+          }
+        ],
+        "query": ".*,single,single_direct,single_deferred,bulk,bulk_fallback",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "label": "Status Regex",
+        "multi": false,
+        "name": "status_regex",
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "success",
+            "value": "success"
+          },
+          {
+            "selected": false,
+            "text": "error",
+            "value": "error"
+          },
+          {
+            "selected": false,
+            "text": "timeout",
+            "value": "timeout"
+          },
+          {
+            "selected": false,
+            "text": "canceled",
+            "value": "canceled"
+          },
+          {
+            "selected": false,
+            "text": "noop",
+            "value": "noop"
+          }
+        ],
+        "query": ".*,success,error,timeout,canceled,noop",
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "BEP Ingest Performance",
+  "uid": "bep-ingest-performance",
+  "version": 1
+}

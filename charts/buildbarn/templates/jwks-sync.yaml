@@ -1,0 +1,225 @@
+{{- if and .Values.frontend.jwks.enabled .Values.frontend.jwks.sync.enabled }}
+{{- $url := required "frontend.jwks.sync.url is required when frontend.jwks.sync.enabled=true" .Values.frontend.jwks.sync.url -}}
+{{- $ns := include "buildbarn.namespace" . -}}
+{{- $cmName := .Values.frontend.jwks.configMapName -}}
+{{- $cmKey := .Values.frontend.jwks.configMapKey -}}
+{{- $saName := "jwks-sync" -}}
+{{- $configCMName := "jwks-sync-config" -}}
+---
+# Seed ConfigMap so the frontend pod can mount the volume on first deploy
+# (before the sync Job/CronJob has populated real keys). An empty `keys`
+# array is valid JWKS JSON; any JWT will fail validation until the sync
+# runs, but the `any` policy falls through to `allow: {}`.
+#
+# Seeded via `binaryData` (NOT `data`) because that's where the buildbarn
+# sync_jwks_to_configmap binary writes — Kubernetes rejects ConfigMaps with
+# the same key present in both fields. ConfigMap volume mounts surface both
+# fields as plain files, so this is transparent to the frontend reader.
+#
+# Rendered as a hook (NOT a regular release resource) so Helm doesn't try to
+# re-apply this manifest on every upgrade. After the initial Job runs,
+# `sync_jwks_to_configmap` takes server-side-apply ownership of
+# `binaryData.jwks.json` with Force: true — if Helm tried to apply the
+# (stale, empty) seed over it, SSA would reject it as a conflict.
+#
+# It also runs `pre-upgrade`, but only when the ConfigMap does not already
+# exist. Without that, newly enabling frontend.jwks on an existing release
+# left the frontend Deployment mounting a ConfigMap nothing had created yet:
+# the rollout stalled on `configmap "frontend-jwks" not found` until the
+# post-upgrade sync Job ran, which Helm will not reach while it is waiting on
+# that rollout. The `lookup` guard keeps the seed from clobbering already
+# synced keys on a normal upgrade. (`lookup` returns empty during
+# `helm template`/`--dry-run`, so the seed always shows up in a rendered
+# preview — that is cosmetic.)
+{{- if not (lookup "v1" "ConfigMap" $ns $cmName) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+binaryData:
+  {{ $cmKey }}: {{ printf "{\"keys\":[]}" | b64enc }}
+{{- end }}
+---
+# Configuration for sync_jwks_to_configmap (jsonnet-formatted protobuf message).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $configCMName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+data:
+  sync_jwks_to_configmap.jsonnet: |
+    {
+      httpClient: {},
+      jwksUrl: {{ $url | quote }},
+      configMapNamespace: {{ $ns | quote }},
+      configMapName: {{ $cmName | quote }},
+      configMapKey: {{ $cmKey | quote }},
+    }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ $cmName | quote }}]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $saName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $ns }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: jwks-sync
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+spec:
+  schedule: {{ .Values.frontend.jwks.sync.schedule | quote }}
+  {{- with .Values.frontend.jwks.sync.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ . }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  # Keep the last N failed Jobs (and their pods) for debugging. With
+  # restartPolicy: Never below, each backoffLimit retry creates a new pod,
+  # so prior failure logs aren't overwritten in place.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      {{- with .Values.frontend.jwks.sync.job.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.frontend.jwks.sync.job.ttlSecondsAfterFinished }}
+      ttlSecondsAfterFinished: {{ . }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "buildbarn.podLabels" (dict "root" . "component" "jwks-sync") | nindent 12 }}
+        spec:
+          serviceAccountName: {{ $saName }}
+          {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 10 }}
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: {{ include "buildbarn.image" (dict "root" . "name" "frontend.jwks.sync.image" "repository" .Values.frontend.jwks.sync.image.repository "tag" .Values.frontend.jwks.sync.image.tag "digest" .Values.frontend.jwks.sync.image.digest) | quote }}
+              imagePullPolicy: {{ .Values.frontend.jwks.sync.image.pullPolicy }}
+              args:
+                - /etc/jwks-sync/sync_jwks_to_configmap.jsonnet
+              resources:
+                {{- toYaml .Values.frontend.jwks.sync.resources | nindent 16 }}
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/jwks-sync
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: {{ $configCMName }}
+{{- if .Values.frontend.jwks.sync.initialSyncEnabled }}
+---
+# One-shot sync that runs on helm install/upgrade so the JWKS ConfigMap is
+# populated before the frontend rolls out. Uses helm hooks so it's idempotent.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jwks-sync-initial
+  namespace: {{ $ns }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "jwks-sync") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    helm.sh/hook: post-install,post-upgrade
+    # Note: only delete on hook-succeeded. A failed hook Job lingers so logs
+    # can be pulled with `kubectl logs job/jwks-sync-initial`. The next
+    # `helm upgrade` deletes it via before-hook-creation before retrying.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "0"
+spec:
+  backoffLimit: 3
+  {{- with .Values.frontend.jwks.sync.initialJob.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ . }}
+  {{- end }}
+  {{- with .Values.frontend.jwks.sync.initialJob.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "jwks-sync") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $saName }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 6 }}
+      # Never (vs. OnFailure) so each backoffLimit retry produces a fresh
+      # pod instead of restarting the container in place — prior failure
+      # logs survive on the older pods.
+      restartPolicy: Never
+      containers:
+        - name: sync
+          image: {{ include "buildbarn.image" (dict "root" . "name" "frontend.jwks.sync.image" "repository" .Values.frontend.jwks.sync.image.repository "tag" .Values.frontend.jwks.sync.image.tag "digest" .Values.frontend.jwks.sync.image.digest) | quote }}
+          imagePullPolicy: {{ .Values.frontend.jwks.sync.image.pullPolicy }}
+          args:
+            - /etc/jwks-sync/sync_jwks_to_configmap.jsonnet
+          resources:
+            {{- toYaml .Values.frontend.jwks.sync.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/jwks-sync
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $configCMName }}
+{{- end }}
+{{- end }}

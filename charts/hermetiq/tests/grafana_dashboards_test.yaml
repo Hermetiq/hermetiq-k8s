@@ -1,0 +1,56 @@
+suite: Grafana dashboard datasource UID substitution
+templates:
+  - templates/configmaps.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: substitutes the default datasource UIDs
+    documentSelector:
+      path: metadata.name
+      value: hermetiq-grafana-dashboard-hermetiq-demo
+    asserts:
+      - matchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"uid": "VictoriaMetrics"'
+      - matchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"uid": "VictoriaLogs"'
+      - notMatchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: __HERMETIQ_(METRICS|LOGS)_DATASOURCE_UID__
+
+  - it: substitutes overridden datasource UIDs
+    set:
+      victoriaMetrics.metricsDatasourceUid: custom-metrics
+      victoriaMetrics.logsDatasourceUid: custom-logs
+    documentSelector:
+      path: metadata.name
+      value: hermetiq-grafana-dashboard-hermetiq-demo
+    asserts:
+      - matchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"uid": "custom-metrics"'
+      - matchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"uid": "custom-logs"'
+      - notMatchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: __HERMETIQ_(METRICS|LOGS)_DATASOURCE_UID__
+
+  - it: packages the synchronized dashboard without the obsolete ingress row
+    documentSelector:
+      path: metadata.name
+      value: hermetiq-grafana-dashboard-hermetiq-demo
+    asserts:
+      - matchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"title": "gRPC Requests"'
+      - notMatchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: '"title": "Ingress"'
+      - notMatchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: 'contour_namespace|envoy_cluster'
+      - notMatchRegex:
+          path: data["hermetiq-demo.json"]
+          pattern: __HERMETIQ_(PROJECT_ID|NAMESPACE)__

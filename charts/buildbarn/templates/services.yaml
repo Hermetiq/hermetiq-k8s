@@ -1,0 +1,213 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: browser
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "browser") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: browser
+  ports:
+    - name: {{ include "buildbarn.browserServicePortName" . }}
+      port: {{ include "buildbarn.browserServicePort" . }}
+      targetPort: {{ include "buildbarn.browserServiceTargetPort" . }}
+      protocol: TCP
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+---
+{{- if .Values.remoteAsset.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: remote-asset
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: remote-asset
+  ports:
+    - name: grpc
+      port: {{ .Values.remoteAsset.port }}
+      targetPort: {{ .Values.remoteAsset.port }}
+      protocol: TCP
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: remote-asset-grpc
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: remote-asset
+  ports:
+    - name: grpc
+      port: {{ .Values.remoteAsset.port }}
+      targetPort: {{ .Values.remoteAsset.port }}
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-grpc
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - name: grpc
+      port: 8980
+      targetPort: {{ include "buildbarn.frontendGrpcTargetPort" . }}
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: scheduler
+    instance: ubuntu22-04
+  ports:
+    - name: client-grpc
+      port: 8982
+      targetPort: 8982
+      protocol: TCP
+    - name: worker-grpc
+      port: 8983
+      targetPort: 8983
+      protocol: TCP
+    - name: http
+      port: 7982
+      targetPort: 7982
+      protocol: TCP
+    - name: build-queue-state
+      port: 8984
+      targetPort: 8984
+      protocol: TCP
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "storage") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  clusterIP: None
+  # Clients address individual shards (storage-N.storage) directly; publish
+  # per-pod DNS records even before readiness so a restarting shard resolves
+  # immediately and gRPC clients reconnect without NXDOMAIN backoff.
+  publishNotReadyAddresses: true
+  selector:
+    app: storage
+  ports:
+    - name: grpc
+      port: 8981
+      targetPort: 8981
+      protocol: TCP
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+{{- if .Values.portal.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bb-portal
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "portal") | nindent 4 }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: bb-portal
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: grpc-bes
+      port: 8082
+      targetPort: 8082
+      protocol: TCP
+      appProtocol: kubernetes.io/h2c
+    - name: metrics
+      port: 9980
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

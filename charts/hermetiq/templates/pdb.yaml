@@ -1,0 +1,84 @@
+{{- if .Values.api.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hermetiq-core.apiName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.api.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.apiName" . }}
+---
+{{- end }}
+{{- if .Values.publisher.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hermetiq-core.publisherName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.publisher.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.publisherName" . }}
+---
+{{- end }}
+{{- if .Values.dashboard.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hermetiq-core.dashboardName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.dashboard.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.dashboardName" . }}
+---
+{{- end }}
+{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled .Values.grafana.oauth2Proxy.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.grafana.oauth2Proxy.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+---
+{{- end }}
+{{- if and (gt (int .Values.subscriber.replicas) 0) .Values.subscriber.podDisruptionBudget.enabled }}
+{{- $root := . }}
+{{- range $partition := until (int .Values.app.streamPartitionCount) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bep-nats-sub-{{ $partition }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "subscriber") | nindent 4 }}
+    hermetiq.com/stream-partition: {{ $partition | quote }}
+spec:
+  maxUnavailable: {{ $root.Values.subscriber.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: bep-nats-sub-{{ $partition }}
+---
+{{- end }}
+{{- end }}

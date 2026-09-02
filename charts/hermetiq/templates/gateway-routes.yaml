@@ -1,0 +1,379 @@
+{{- $provider := include "hermetiq-core.routingProvider" . -}}
+{{- $httpRouteOnly := eq $provider "gateway-httproute-only" -}}
+{{- if has $provider (list "gateway" "gateway-httproute-only") }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.routes.bepGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.bepGrpcHost" . | quote }}
+  rules:
+    {{- if $httpRouteOnly }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+    {{- else }}
+    - backendRefs:
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+    {{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.routes.apiGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.apiGrpcHost" . | quote }}
+  rules:
+    {{- if $httpRouteOnly }}
+    - matches:
+        - headers:
+            - name: Access-Control-Request-Method
+              type: Exact
+              value: POST
+      backendRefs:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 50092
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 50091
+    {{- else }}
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 50091
+    {{- end }}
+{{- if .Values.gateway.routes.bbcalGrpcEnabled }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: {{ ternary "HTTPRoute" "GRPCRoute" $httpRouteOnly }}
+metadata:
+  name: {{ .Values.gateway.routes.bbcalGrpcName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.bbcalGrpcHost" . | quote }}
+  rules:
+    {{/* CompletedActionLogger publishes to NATS, so it only exists on
+         NATS-ingest pods — the publisher, now that grpc-api runs
+         APP_MODE=api (which serves no ingest gRPC services). */}}
+    {{- if $httpRouteOnly }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+    {{- else }}
+    - backendRefs:
+        - name: {{ include "hermetiq-core.publisherName" . }}
+          port: 50091
+    {{- end }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.routes.apiWebName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.apiHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.gateway.routes.apiWebPathPrefix | quote }}
+      backendRefs:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.routes.dashboardName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.dashboardHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "hermetiq-core.dashboardName" . }}
+          port: 80
+{{- if .Values.gateway.routes.grafanaEnabled }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.routes.grafanaName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.grafanaHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "hermetiq-core.grafanaUpstreamService" . }}
+          port: {{ include "hermetiq-core.grafanaUpstreamServicePort" . }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.routes.mcpName }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "hermetiq-core.parentRefs" . | nindent 4 }}
+  hostnames:
+    - {{ include "hermetiq-core.mcpHost" . | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.gateway.routes.mcpPathPrefix | quote }}
+      backendRefs:
+        - name: {{ include "hermetiq-core.apiName" . }}
+          port: 5150
+{{- $hcEnabled := .Values.gateway.healthChecks.enabled -}}
+{{- $bepTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "bepGrpc") | trim -}}
+{{- $apiTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "apiGrpc") | trim -}}
+{{- $bbcalTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "bbcalGrpc") | trim -}}
+{{- $apiWebTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "apiWeb") | trim -}}
+{{- $mcpTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "mcp") | trim -}}
+{{/* One BackendTrafficPolicy per gRPC route carrying both the health check and
+     the stream timeouts. They cannot be split into two resources: Envoy Gateway
+     does not merge policies of the same kind targeting the same route at the
+     same level — it applies the oldest by creation timestamp and marks the rest
+     Overridden. The `-health-check` suffix predates the timeouts and is kept so
+     upgrades update these policies in place instead of recreating them. */}}
+{{- if and (not $httpRouteOnly) (or $hcEnabled $bepTimeout) }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-health-check" .Values.gateway.routes.bepGrpcName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ .Values.gateway.routes.bepGrpcName }}
+  {{- if $hcEnabled }}
+  healthCheck:
+    active:
+      type: TCP
+      tcp: {}
+  {{- end }}
+  {{- with $bepTimeout }}
+  {{- . | nindent 2 }}
+  {{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) (or $hcEnabled $apiTimeout) }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-health-check" .Values.gateway.routes.apiGrpcName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ .Values.gateway.routes.apiGrpcName }}
+  {{- if $hcEnabled }}
+  healthCheck:
+    active:
+      type: TCP
+      tcp: {}
+  {{- end }}
+  {{- with $apiTimeout }}
+  {{- . | nindent 2 }}
+  {{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) .Values.gateway.routes.bbcalGrpcEnabled (or $hcEnabled $bbcalTimeout) }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-health-check" .Values.gateway.routes.bbcalGrpcName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ .Values.gateway.routes.bbcalGrpcName }}
+  {{- if $hcEnabled }}
+  healthCheck:
+    active:
+      type: TCP
+      tcp: {}
+  {{- end }}
+  {{- with $bbcalTimeout }}
+  {{- . | nindent 2 }}
+  {{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) $hcEnabled }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-health-check" .Values.gateway.routes.apiWebName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.routes.apiWebName }}
+  {{- with $apiWebTimeout }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  healthCheck:
+    active:
+      type: HTTP
+      http:
+        path: /ready
+        method: GET
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-health-check" .Values.gateway.routes.mcpName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.routes.mcpName }}
+  {{- with $mcpTimeout }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  healthCheck:
+    active:
+      type: HTTP
+      http:
+        path: /.well-known/oauth-protected-resource
+        method: GET
+{{- end }}
+{{- if and (not $httpRouteOnly) .Values.gateway.cors.enabled }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gateway-cors-policy
+  namespace: {{ include "hermetiq-core.gatewayNamespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ required "gateway.name is required" .Values.gateway.name }}
+  cors:
+    allowOrigins:
+      {{- if .Values.gateway.cors.allowOrigins }}
+      {{- toYaml .Values.gateway.cors.allowOrigins | nindent 6 }}
+      {{- else }}
+      - {{ include "hermetiq-core.dashboardUrl" . | quote }}
+      {{- end }}
+    allowMethods:
+      {{- toYaml .Values.gateway.cors.allowMethods | nindent 6 }}
+    allowHeaders:
+      {{- toYaml .Values.gateway.cors.allowHeaders | nindent 6 }}
+    exposeHeaders:
+      {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 6 }}
+    allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
+    maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: mcp-cors-policy
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.routes.mcpName }}
+  cors:
+    allowOrigins:
+      {{- toYaml .Values.gateway.cors.mcpAllowOrigins | nindent 6 }}
+    allowMethods:
+      {{- toYaml .Values.gateway.cors.allowMethods | nindent 6 }}
+    allowHeaders:
+      - mcp-protocol-version
+      {{- toYaml .Values.gateway.cors.allowHeaders | nindent 6 }}
+    exposeHeaders:
+      {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 6 }}
+      - mcp-protocol-version
+    allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
+    maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+{{- end }}
+{{- end }}

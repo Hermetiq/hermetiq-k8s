@@ -1,0 +1,42 @@
+suite: dashboard deployment
+templates:
+  - templates/deployment-dashboard.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: disables dashboard cost integration by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
+          value: "false"
+
+  - it: enables dashboard cost integration with the backend ticker
+    set:
+      app.costReportTickerEnabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
+          value: "true"
+
+  - it: renders the default on-prem Buildbarn frontend remote cache URL
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_REMOTE_CACHE")].value
+          value: grpcs://bb.ci.hermetiq.test
+
+  - it: allows the dashboard remote cache URL to be overridden
+    set:
+      dashboard.remoteCacheUrl: grpcs://cache.internal.example.com:443
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_REMOTE_CACHE")].value
+          value: grpcs://cache.internal.example.com:443
+
+  - it: keeps the bbcal route as the remote cache fallback when enabled
+    set:
+      gateway.routes.bbcalGrpcEnabled: true
+      hosts.bbcalGrpc: bbcal.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_REMOTE_CACHE")].value
+          value: grpcs://bbcal.example.com

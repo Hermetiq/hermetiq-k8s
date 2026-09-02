@@ -1,0 +1,284 @@
+{{- if .Values.workerTestcontainers.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-testcontainers
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "worker") | nindent 4 }}
+    app: worker
+    hermetiq.com/worker-pool: testcontainers
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    prometheus.io/port: "9980"
+    prometheus.io/scrape: "true"
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.workerTestcontainers.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: worker
+      instance: testcontainers
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "buildbarn.podLabels" (dict "root" . "component" "worker") | nindent 8 }}
+        app: worker
+        instance: testcontainers
+        kubernetes_service: worker-testcontainers
+        hermetiq.com/worker-pool: testcontainers
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/worker-config: {{ include "buildbarn.workerConfigChecksum" (dict "root" . "files" (list "common.libsonnet" "worker-common.libsonnet" "runner-testcontainers.jsonnet" "worker-testcontainers.jsonnet")) }}
+    spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.workerTestcontainers) | nindent 6 }}
+      containers:
+        - name: worker
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.worker" "repository" .Values.images.worker.repository "tag" .Values.images.worker.tag "digest" .Values.images.worker.digest) }}
+          imagePullPolicy: {{ .Values.images.worker.pullPolicy }}
+          args:
+            - /config/worker-testcontainers.jsonnet
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-worker") | nindent 12 }}
+            {{- range $name, $value := .Values.workerTestcontainers.worker.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+          ports:
+            - containerPort: 9980
+              protocol: TCP
+              name: metrics
+          resources:
+            {{- toYaml .Values.workerTestcontainers.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.workerTestcontainers.worker.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+              mountPropagation: Bidirectional
+            {{- if .Values.workerTestcontainers.fuse.enabled }}
+            - mountPath: /dev/fuse
+              name: dev-fuse
+            {{- end }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+        - name: runner
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.runnerTestcontainers" "image" .Values.images.runnerTestcontainers.image) | quote }}
+          imagePullPolicy: {{ .Values.images.runnerTestcontainers.pullPolicy }}
+          command:
+            - sh
+            - -ceu
+            - |
+              for i in $(seq 1 120); do
+                if [ -S /var/run/docker.sock ] && [ -w /var/run/docker.sock ]; then
+                  if ! command -v docker >/dev/null 2>&1 || docker info >/dev/null 2>&1; then
+                    exec /bb/bb_runner /config/runner-testcontainers.jsonnet
+                  fi
+                fi
+                sleep 1
+              done
+              echo "timed out waiting for usable /var/run/docker.sock" >&2
+              exit 1
+          env:
+            {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-runner") | nindent 12 }}
+            {{- /* DOCKER_HOST / TESTCONTAINERS_HOST_OVERRIDE / TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE
+                   are injected per-action via workerTestcontainers.config.environmentVariables —
+                   bb_runner does not propagate its own container env into spawned actions. The
+                   ones below only set the runner process's own env, which is useful for
+                   `kubectl exec`-based debugging but not for tests. */ -}}
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            {{- range $name, $value := .Values.workerTestcontainers.runner.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.workerTestcontainers.runner.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.workerTestcontainers.runner.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+              mountPropagation: HostToContainer
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+            - mountPath: /bb
+              name: empty
+              readOnly: true
+            - mountPath: /var/run
+              name: docker-sock
+            {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+        - name: dind
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.dind" "repository" .Values.images.dind.repository "tag" .Values.images.dind.tag "digest" .Values.images.dind.digest) }}
+          imagePullPolicy: {{ .Values.images.dind.pullPolicy }}
+          args:
+            - --host=unix:///var/run/docker.sock
+            - --storage-driver={{ .Values.workerTestcontainers.dind.storageDriver }}
+            {{- range .Values.workerTestcontainers.dind.registryMirrors }}
+            - --registry-mirror={{ . }}
+            {{- end }}
+            {{- range .Values.workerTestcontainers.dind.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            # Force the daemon onto the unix socket only; DOCKER_TLS_CERTDIR="" disables
+            # the auto-generated TLS on tcp://0.0.0.0:2376 that dind defaults to.
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+            {{- range $name, $value := .Values.workerTestcontainers.dind.env }}
+            - name: {{ $name }}
+              value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    set -eu
+                    # Wait for dockerd to be ready, then loosen socket perms so
+                    # the (non-root) runner container can talk to it through the
+                    # shared /var/run mount. The runner waits for the writable
+                    # socket before registering its own listener.
+                    ready=false
+                    for i in $(seq 1 120); do
+                      if [ -S /var/run/docker.sock ] && docker info >/dev/null 2>&1; then
+                        chmod 0666 /var/run/docker.sock
+                        ready=true
+                        break
+                      fi
+                      sleep 1
+                    done
+                    if [ "$ready" != true ]; then
+                      echo "timed out waiting for dockerd readiness" >&2
+                      exit 1
+                    fi
+                    # Pre-pull any operator-configured images so the first
+                    # action isn't blocked on registry fetches.
+                    {{- range .Values.workerTestcontainers.preloadImages }}
+                    docker pull {{ . | quote }} || true
+                    {{- end }}
+          readinessProbe:
+            exec:
+              command:
+                - docker
+                - info
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.workerTestcontainers.dind.resources | nindent 12 }}
+          securityContext:
+            # DinD needs full privileges to manage cgroups, netns, and overlay mounts.
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - mountPath: /var/run
+              name: docker-sock
+            - mountPath: /var/lib/docker
+              name: dind-storage
+      dnsPolicy: ClusterFirst
+      initContainers:
+        - name: bb-runner-installer
+          image: {{ include "buildbarn.image" (dict "root" . "name" "images.runnerInstaller" "repository" .Values.images.runnerInstaller.repository "tag" .Values.images.runnerInstaller.tag "digest" .Values.images.runnerInstaller.digest) }}
+          imagePullPolicy: {{ .Values.images.runnerInstaller.pullPolicy }}
+          resources:
+            {{- toYaml .Values.workerTestcontainers.initResources | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /bb/
+              name: empty
+        - name: volume-init
+          image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.busybox" "image" .Values.images.busybox.image) | quote }}
+          imagePullPolicy: {{ .Values.images.busybox.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - mkdir -pm 0777 /worker/build && mkdir -pm 0700 /worker/cache && mkdir -pm 0777 /storage-worker-cas/persistent_state && chmod 0777 /worker
+          resources:
+            {{- toYaml .Values.workerTestcontainers.initResources | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /worker
+              name: worker
+            - mountPath: /storage-worker-cas
+              name: storage-worker-cas
+      {{- with .Values.workerTestcontainers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.workerTestcontainers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: worker
+          emptyDir: {}
+        {{- if .Values.workerTestcontainers.fuse.enabled }}
+        - name: dev-fuse
+          hostPath:
+            path: {{ .Values.workerTestcontainers.fuse.hostPath.path | quote }}
+            type: {{ .Values.workerTestcontainers.fuse.hostPath.type }}
+        {{- end }}
+        - name: empty
+          emptyDir: {}
+        - name: docker-sock
+          emptyDir: {}
+        - name: dind-storage
+          emptyDir: {}
+        {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        - name: configs
+          configMap:
+            name: {{ include "buildbarn.workerConfigName" . }}
+            items:
+              - key: common.libsonnet
+                path: common.libsonnet
+              - key: worker-common.libsonnet
+                path: worker-common.libsonnet
+              - key: runner-testcontainers.jsonnet
+                path: runner-testcontainers.jsonnet
+              - key: worker-testcontainers.jsonnet
+                path: worker-testcontainers.jsonnet
+        - name: storage-worker-cas
+          hostPath:
+            path: {{ .Values.workerTestcontainers.storageWorkerCas.hostPath.path | quote }}
+            type: {{ .Values.workerTestcontainers.storageWorkerCas.hostPath.type }}
+{{- end }}

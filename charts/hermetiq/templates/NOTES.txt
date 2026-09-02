@@ -1,0 +1,65 @@
+{{- $ns := include "hermetiq-core.namespace" . -}}
+{{- $keyConfigured := eq (include "hermetiq-core.licenseKeySecretEnabled" .) "true" -}}
+{{- $provider := include "hermetiq-core.routingProvider" . -}}
+Hermetiq {{ .Chart.Version }} installed in namespace {{ $ns }}.
+
+{{ if ne $provider "none" -}}
+EXTERNAL ENDPOINTS — via {{ $provider }}
+  Dashboard:  https://{{ include "hermetiq-core.dashboardHost" . }}
+{{- if .Values.gateway.routes.grafanaEnabled }}
+  Grafana:    https://{{ include "hermetiq-core.grafanaHost" . }}
+{{- end }}
+  API web:    https://{{ include "hermetiq-core.apiHost" . }}{{ .Values.gateway.routes.apiWebPathPrefix }}
+  MCP:        https://{{ include "hermetiq-core.mcpHost" . }}{{ .Values.gateway.routes.mcpPathPrefix }}
+  API gRPC:   grpcs://{{ include "hermetiq-core.apiGrpcHost" . }}
+  BEP gRPC:   grpcs://{{ include "hermetiq-core.bepGrpcHost" . }}
+{{- if .Values.gateway.routes.bbcalGrpcEnabled }}
+  BBCal gRPC: grpcs://{{ include "hermetiq-core.bbcalGrpcHost" . }}
+{{- end }}
+{{- else -}}
+EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
+{{- end }}
+
+{{ if .Values.license.airGapped -}}
+LICENSING — air-gapped (offline license file) mode.
+The pods verify {{ .Values.license.key.existingSecretKey }} and {{ .Values.license.licenseFileSecretKey }}
+from Secret "{{ include "hermetiq-core.licenseSecretName" . }}" locally; no network calls are made.
+Renew by replacing that Secret with a freshly checked-out license file — pods
+hot-reload it (~1 minute), no restart needed.
+{{- else if $keyConfigured -}}
+LICENSING — license key mode.
+The pods validate the key from Secret "{{ include "hermetiq-core.licenseSecretName" . }}"
+directly against Keygen and cache the signed response for offline grace.
+{{- else if .Values.license.trial.enabled -}}
+LICENSING — no license key configured; trial mode.
+A 30-day trial will be auto-issued for this cluster on first startup, using
+license.contactEmail ({{ .Values.license.contactEmail }}). The issued trial key is stored by
+the app in the "{{ include "hermetiq-core.licenseStateSecretName" . }}" Secret:
+
+  kubectl -n {{ $ns }} get secret {{ include "hermetiq-core.licenseStateSecretName" . }}
+
+To convert this trial to a paid license, contact support@hermetiq.com — the
+existing trial license is upgraded in place (same key) and pods pick it up
+automatically on the next scheduled validation (normally within 4 hours; up to
+24 hours after the install is already GATED); no cluster changes are needed.
+Installing a key Secret (license.key.value / license.key.existingSecret) is
+only needed for licenses issued directly, without a trial, and for air-gapped
+installs.
+{{- else -}}
+LICENSING — no license key configured and trials are disabled
+(license.trial.enabled=false). Pods will go unready once the unlicensed
+tolerance lapses. Install a key via license.key.value or
+license.key.existingSecret.
+{{- end }}
+
+Check license status at any time (works even while pods are unready):
+
+  kubectl -n {{ $ns }} port-forward deploy/{{ include "hermetiq-core.apiName" . }} 8008
+  curl localhost:8008/api/v1/license/status
+
+When a license lapses past its grace window, {{ include "hermetiq-core.apiName" . }} and
+{{ include "hermetiq-core.publisherName" . }} pods report 0/N READY (failing readiness check:
+"license") and restarted pods CrashLoopBackOff until a valid key is installed;
+`kubectl describe pod` and the pod logs name the expiry, grace end, and fix
+steps. Note `helm upgrade --wait` blocks while pods are unready. Subscribers
+and the dashboard keep running either way.

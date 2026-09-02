@@ -1,0 +1,87 @@
+{{- if and .Values.keda.enabled .Values.workerTestcontainers.enabled }}
+{{- $platformLabel := dict "properties" .Values.workerTestcontainers.config.platformProperties | toJson | replace "\\" "\\\\" | replace "\"" "\\\"" -}}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-testcontainers
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "worker") | nindent 4 }}
+    hermetiq.com/worker-pool: testcontainers
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker-testcontainers
+  pollingInterval: {{ .Values.keda.workerTestcontainers.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.workerTestcontainers.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.workerTestcontainers.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.workerTestcontainers.maxReplicaCount }}
+  fallback:
+    failureThreshold: {{ .Values.keda.workerTestcontainers.fallback.failureThreshold }}
+    replicas: {{ .Values.keda.workerTestcontainers.fallback.replicas }}
+  advanced:
+    restoreToOriginalReplicaCount: true
+    horizontalPodAutoscalerConfig:
+      name: worker-testcontainers-keda
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+            - type: Percent
+              value: 50
+              periodSeconds: 60
+          selectPolicy: Min
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          policies:
+            - type: Percent
+              value: 50
+              periodSeconds: 60
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+          selectPolicy: Min
+  triggers:
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.keda.prometheusServerAddress | quote }}
+        metricName: {{ .Values.keda.workerTestcontainers.metricName }}
+        threshold: {{ .Values.keda.workerTestcontainers.threshold | quote }}
+        # tasks_scheduled_total increments when a task enters the queued
+        # stage, while tasks_executing_duration_seconds_count increments
+        # after execution finishes. The difference is currently queued or
+        # executing work for this platform/size class.
+        query: |
+          avg_over_time((
+            clamp_min(
+              (
+                sum(
+                  buildbarn_builder_in_memory_build_queue_tasks_scheduled_total{
+                    hermetiq_project_id="{{ .Values.project.id }}",
+                    instance_name_prefix="",
+                    platform="{{ $platformLabel }}",
+                    size_class="0"
+                  }
+                ) or vector(0)
+              )
+              -
+              (
+                sum(
+                  buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_count{
+                    hermetiq_project_id="{{ .Values.project.id }}",
+                    instance_name_prefix="",
+                    platform="{{ $platformLabel }}",
+                    size_class="0"
+                  }
+                ) or vector(0)
+              ),
+              0
+            )
+          )[5m:30s])
+{{- end }}

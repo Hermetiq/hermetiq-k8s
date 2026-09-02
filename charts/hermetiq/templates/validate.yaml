@@ -1,0 +1,155 @@
+{{- $provider := include "hermetiq-core.routingProvider" . -}}
+{{- $validRoutingProviders := list "gateway" "gateway-httproute-only" "contour" "ingress" "none" -}}
+{{- $requestedRoutingProvider := default "" .Values.routing.provider -}}
+{{- if and $requestedRoutingProvider (not (has $requestedRoutingProvider $validRoutingProviders)) -}}
+{{- fail "routing.provider must be one of: gateway, gateway-httproute-only, contour, ingress, none" -}}
+{{- end -}}
+{{- if not (has $provider $validRoutingProviders) -}}
+{{- fail "routing.provider must be one of: gateway, gateway-httproute-only, contour, ingress, none" -}}
+{{- end -}}
+{{- if and (ne $provider "none") (not .Values.routing.provider) .Values.gateway.enabled .Values.contour.enabled -}}
+{{- fail "gateway.enabled and contour.enabled cannot both be true without routing.provider; choose gateway, gateway-httproute-only, contour, ingress, or none" -}}
+{{- end -}}
+{{- if and (ne $provider "none") .Values.tls.certificate.enabled .Values.tls.secretName -}}
+{{- fail "tls.certificate.enabled cannot be true when tls.secretName points at an existing Secret" -}}
+{{- end -}}
+{{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" -}}
+  {{- if and (eq $provider "contour") (not .Values.contour.certManager.clusterIssuer) -}}
+  {{- fail "contour.certManager.clusterIssuer is required when cert-manager creates per-route TLS Secrets" -}}
+  {{- end -}}
+  {{- if and (eq $provider "ingress") (not .Values.ingress.certManager.clusterIssuer) -}}
+  {{- fail "ingress.certManager.clusterIssuer is required when cert-manager creates per-route TLS Secrets" -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (ne $provider "none") .Values.tls.certificate.enabled (not .Values.tls.certificate.issuerRef.name) -}}
+{{- fail "tls.certificate.issuerRef.name is required when tls.certificate.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data -}}
+{{- fail "dashboard.quickstartConfig.existingConfigMap and dashboard.quickstartConfig.data are mutually exclusive" -}}
+{{- end -}}
+{{- if and (or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data) (not .Values.dashboard.quickstartConfig.configMapKey) -}}
+{{- fail "dashboard.quickstartConfig.configMapKey is required when quickstart customization is configured" -}}
+{{- end -}}
+{{- if not .Values.nats.streamConfig.configMapKey -}}
+{{- fail "nats.streamConfig.configMapKey is required" -}}
+{{- end -}}
+{{- if not .Values.cacheTtl.configMapKey -}}
+{{- fail "cacheTtl.configMapKey is required" -}}
+{{- end -}}
+{{- if and .Values.publisher.jwks.enabled (trim .Values.publisher.authProxy.staticForwardedUser) -}}
+{{- fail "publisher.authProxy.staticForwardedUser requires publisher.jwks.enabled=false" -}}
+{{- end -}}
+{{- if not (has (default "" .Values.app.grpcAuthUserProvider) (list "jwks" "stytch")) -}}
+{{- fail "app.grpcAuthUserProvider must be one of: jwks, stytch" -}}
+{{- end -}}
+{{- $apiEnv := default (dict) .Values.api.env -}}
+{{- $publisherEnv := default (dict) .Values.publisher.env -}}
+{{- if hasKey $apiEnv "GRPC_AUTH_USER_PROVIDER" -}}
+{{- fail "api.env must not set GRPC_AUTH_USER_PROVIDER; use app.grpcAuthUserProvider so the chart renders one unambiguous provider" -}}
+{{- end -}}
+{{- if hasKey $publisherEnv "GRPC_AUTH_USER_PROVIDER" -}}
+{{- fail "publisher.env must not set GRPC_AUTH_USER_PROVIDER; use app.grpcAuthUserProvider so the chart renders one unambiguous provider" -}}
+{{- end -}}
+{{/* The core requires exactly one JWKS source, an issuer, and an audience for
+     the jwks provider. A component uses either its chart-managed jwt/jwks
+     block, or (when that block is disabled) a complete set of literal/templated
+     values in its extra-env map. Only those map entries are accepted as an
+     override because they are the custom environment the chart can inspect and
+     prove it will render. */}}
+{{- if eq (default "" .Values.app.grpcAuthUserProvider) "jwks" -}}
+  {{- $requiredAuthKeys := list "GRPC_AUTH_JWKS_URL" "GRPC_AUTH_JWKS_FILE" "GRPC_AUTH_JWKS_INLINE" "GRPC_AUTH_ISSUER" "GRPC_AUTH_AUDIENCE" -}}
+  {{- $apiHasCustomAuth := false -}}
+  {{- $publisherHasCustomAuth := false -}}
+  {{- range $requiredAuthKeys -}}
+    {{- if hasKey $apiEnv . -}}{{- $apiHasCustomAuth = true -}}{{- end -}}
+    {{- if hasKey $publisherEnv . -}}{{- $publisherHasCustomAuth = true -}}{{- end -}}
+  {{- end -}}
+
+  {{- if .Values.api.jwt.enabled -}}
+    {{- if $apiHasCustomAuth -}}
+    {{- fail "api.jwt.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in api.env; configure JWKS through api.jwt or set api.jwt.enabled=false" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.apiJwtIssuer" .) -}}
+    {{- fail "api.jwt.issuer or oidc.issuerUrl is required when api.jwt.enabled=true (GRPC_AUTH_ISSUER is mandatory for the jwks provider; an unset issuer used to mean no issuer check)" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.apiJwtJwksUrl" .) -}}
+    {{- fail "api.jwt.jwksUrl or oidc.issuerUrl is required when api.jwt.enabled=true (the jwks provider needs exactly one JWKS source)" -}}
+    {{- end -}}
+    {{- if and (not .Values.api.jwt.audience) (ne (include "hermetiq-core.apiJwtAudienceFromOauth2Secret" .) "true") -}}
+    {{- fail "api.jwt.audience is required when api.jwt.enabled=true and dashboard.oauth2Proxy.enabled=false (GRPC_AUTH_AUDIENCE would list only the MCP resource URL, so every gRPC API token would be rejected)" -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $apiJwksURL := include "hermetiq-core.customEnvValue" (dict "root" . "env" $apiEnv "name" "GRPC_AUTH_JWKS_URL") -}}
+    {{- $apiJwksFile := include "hermetiq-core.customEnvValue" (dict "root" . "env" $apiEnv "name" "GRPC_AUTH_JWKS_FILE") -}}
+    {{- $apiJwksInline := include "hermetiq-core.customEnvValue" (dict "root" . "env" $apiEnv "name" "GRPC_AUTH_JWKS_INLINE") -}}
+    {{- if ne (len (compact (list $apiJwksURL $apiJwksFile $apiJwksInline))) 1 -}}
+    {{- fail "api.jwt.enabled=false with app.grpcAuthUserProvider=jwks requires api.env to set exactly one non-empty GRPC_AUTH_JWKS_URL, GRPC_AUTH_JWKS_FILE, or GRPC_AUTH_JWKS_INLINE" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.customEnvValue" (dict "root" . "env" $apiEnv "name" "GRPC_AUTH_ISSUER")) -}}
+    {{- fail "api.jwt.enabled=false with app.grpcAuthUserProvider=jwks requires a non-empty GRPC_AUTH_ISSUER in api.env" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.customEnvValue" (dict "root" . "env" $apiEnv "name" "GRPC_AUTH_AUDIENCE")) -}}
+    {{- fail "api.jwt.enabled=false with app.grpcAuthUserProvider=jwks requires a non-empty GRPC_AUTH_AUDIENCE in api.env" -}}
+    {{- end -}}
+  {{- end -}}
+
+  {{- if .Values.publisher.jwks.enabled -}}
+    {{- if $publisherHasCustomAuth -}}
+    {{- fail "publisher.jwks.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in publisher.env; configure JWKS through publisher.jwks or set publisher.jwks.enabled=false" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.publisherJwksIssuer" .) -}}
+    {{- fail "publisher.jwks.issuer or oidc.issuerUrl is required when publisher.jwks.enabled=true (GRPC_AUTH_ISSUER is mandatory for the jwks provider; an unset issuer used to mean no issuer check)" -}}
+    {{- end -}}
+    {{- if not .Values.publisher.jwks.audience -}}
+    {{- fail "publisher.jwks.audience is required when publisher.jwks.enabled=true (GRPC_AUTH_AUDIENCE is mandatory for the jwks provider; an unset audience used to mean any audience was accepted)" -}}
+    {{- end -}}
+    {{- if and (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) (not (trim .Values.publisher.jwks.json)) -}}
+    {{- fail "publisher.jwks.json or publisher.jwks.existingSecret is required when publisher.jwks.enabled=true and no publisher.jwks.url or oidc JWKS URL resolves" -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $publisherJwksURL := include "hermetiq-core.customEnvValue" (dict "root" . "env" $publisherEnv "name" "GRPC_AUTH_JWKS_URL") -}}
+    {{- $publisherJwksFile := include "hermetiq-core.customEnvValue" (dict "root" . "env" $publisherEnv "name" "GRPC_AUTH_JWKS_FILE") -}}
+    {{- $publisherJwksInline := include "hermetiq-core.customEnvValue" (dict "root" . "env" $publisherEnv "name" "GRPC_AUTH_JWKS_INLINE") -}}
+    {{- if ne (len (compact (list $publisherJwksURL $publisherJwksFile $publisherJwksInline))) 1 -}}
+    {{- fail "publisher.jwks.enabled=false with app.grpcAuthUserProvider=jwks requires publisher.env to set exactly one non-empty GRPC_AUTH_JWKS_URL, GRPC_AUTH_JWKS_FILE, or GRPC_AUTH_JWKS_INLINE" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.customEnvValue" (dict "root" . "env" $publisherEnv "name" "GRPC_AUTH_ISSUER")) -}}
+    {{- fail "publisher.jwks.enabled=false with app.grpcAuthUserProvider=jwks requires a non-empty GRPC_AUTH_ISSUER in publisher.env" -}}
+    {{- end -}}
+    {{- if not (include "hermetiq-core.customEnvValue" (dict "root" . "env" $publisherEnv "name" "GRPC_AUTH_AUDIENCE")) -}}
+    {{- fail "publisher.jwks.enabled=false with app.grpcAuthUserProvider=jwks requires a non-empty GRPC_AUTH_AUDIENCE in publisher.env" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $contactEmail := trim (default "" .Values.license.contactEmail) -}}
+{{- if not $contactEmail -}}
+{{- fail "license.contactEmail is required (every installation needs a human contact; pods refuse to start without it)" -}}
+{{- end -}}
+{{- if not (regexMatch "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" $contactEmail) -}}
+{{- fail (printf "license.contactEmail %q must be a syntactically valid email address" $contactEmail) -}}
+{{- end -}}
+{{- if .Values.license.airGapped -}}
+{{- if not .Values.license.key.existingSecret -}}
+{{- fail "license.airGapped=true requires a license key Secret via license.key.existingSecret carrying BOTH the license key and the license file; an inline license.key.value cannot carry the license file" -}}
+{{- end -}}
+{{- if .Values.license.trial.enabled -}}
+{{- fail "license.trial.enabled must be false when license.airGapped=true (trials are online-only)" -}}
+{{- end -}}
+{{- end -}}
+{{- $licenseKeySecretKey := default "" .Values.license.key.existingSecretKey -}}
+{{- if not $licenseKeySecretKey -}}
+{{- fail "license.key.existingSecretKey is required (an empty value would point LICENSE_KEY_FILE at the /config/license/ directory instead of a file)" -}}
+{{- end -}}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" $licenseKeySecretKey) -}}
+{{- fail (printf "license.key.existingSecretKey %q must be a valid Kubernetes Secret data key (alphanumerics, '.', '_', '-'; must start with an alphanumeric)" $licenseKeySecretKey) -}}
+{{- end -}}
+{{- $licenseFileSecretKey := default "" .Values.license.licenseFileSecretKey -}}
+{{- if not $licenseFileSecretKey -}}
+{{- fail "license.licenseFileSecretKey is required (an empty value would point LICENSE_LIC_FILE at the /config/license/ directory instead of a file)" -}}
+{{- end -}}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" $licenseFileSecretKey) -}}
+{{- fail (printf "license.licenseFileSecretKey %q must be a valid Kubernetes Secret data key (alphanumerics, '.', '_', '-'; must start with an alphanumeric)" $licenseFileSecretKey) -}}
+{{- end -}}
+{{- if and .Values.license.fingerprintOverride (not (regexMatch "^[a-f0-9]{64}$" .Values.license.fingerprintOverride)) -}}
+{{- fail "license.fingerprintOverride must be 64 lowercase sha256 hex characters" -}}
+{{- end -}}

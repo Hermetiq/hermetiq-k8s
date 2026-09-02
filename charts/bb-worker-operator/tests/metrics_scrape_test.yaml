@@ -1,0 +1,67 @@
+suite: operator metrics scrape auth
+templates:
+  - templates/servicemonitor.yaml
+  - templates/vmservicescrape.yaml
+tests:
+  # metrics.secure=true (the default) runs controller-runtime's metrics
+  # authn/authz filter with anonymous access disabled, so a scrape with no
+  # credentials gets 401 on every attempt.
+  - it: sends the ServiceAccount token on the ServiceMonitor when metrics are secure
+    template: templates/servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.endpoints[0].scheme
+          value: https
+      - equal:
+          path: spec.endpoints[0].bearerTokenFile
+          value: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+  - it: sends the ServiceAccount token on the VMServiceScrape when metrics are secure
+    template: templates/vmservicescrape.yaml
+    set:
+      metrics.vmServiceScrape.enabled: true
+    asserts:
+      - equal:
+          path: spec.endpoints[0].scheme
+          value: https
+      - equal:
+          path: spec.endpoints[0].bearerTokenFile
+          value: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+  - it: omits credentials when metrics are not secure
+    template: templates/servicemonitor.yaml
+    set:
+      metrics.secure: false
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.endpoints[0].scheme
+          value: http
+      - notExists:
+          path: spec.endpoints[0].bearerTokenFile
+
+  - it: prefers an explicit authorization block over the token file
+    template: templates/servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.authorization.credentials.name: scrape-secret
+      metrics.serviceMonitor.authorization.credentials.key: token
+    asserts:
+      - equal:
+          path: spec.endpoints[0].authorization.credentials.name
+          value: scrape-secret
+      - notExists:
+          path: spec.endpoints[0].bearerTokenFile
+
+  - it: allows opting out of credentials entirely
+    template: templates/servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.bearerTokenFile: ""
+    asserts:
+      - notExists:
+          path: spec.endpoints[0].bearerTokenFile
+      - notExists:
+          path: spec.endpoints[0].authorization

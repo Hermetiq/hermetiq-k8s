@@ -1,0 +1,20 @@
+{{- if .Values.victoriaMetrics.dragonflyPodScrape.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: {{ .Values.victoriaMetrics.dragonflyPodScrape.name }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "dragonfly") | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "hermetiq-core.namespace" . }}
+  podMetricsEndpoints:
+    - port: {{ .Values.victoriaMetrics.dragonflyPodScrape.port }}
+      path: {{ .Values.victoriaMetrics.dragonflyPodScrape.path }}
+  selector:
+    matchLabels:
+      {{- include "hermetiq-core.tplvalues.render" (dict "value" .Values.victoriaMetrics.dragonflyPodScrape.selectorLabels "context" .) | nindent 6 }}
+{{- end }}

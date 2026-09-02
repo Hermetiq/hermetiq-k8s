@@ -1,0 +1,106 @@
+suite: gateway backend traffic policy circuit breakers
+templates:
+  - templates/gateway-routes.yaml
+set:
+  routing.provider: gateway
+  gateway.name: hermetiq-gateway
+tests:
+  # Envoy Gateway defaults every circuit-breaker field to 1024 PER CLUSTER. On an
+  # RBE frontend that silently rejects build traffic with
+  # "UNAVAILABLE ... reset reason: overflow" once maxPendingRequests fills, so the
+  # frontend route ships with raised values.
+  - it: raises the frontend circuit breaker by default
+    documentSelector:
+      path: metadata.name
+      value: frontend-bb-cloud-grpc-timeouts
+    asserts:
+      - equal:
+          path: spec.circuitBreaker.maxPendingRequests
+          value: 8192
+      - equal:
+          path: spec.circuitBreaker.maxParallelRequests
+          value: 8192
+      - equal:
+          path: spec.circuitBreaker.maxConnections
+          value: 2048
+      - equal:
+          path: spec.circuitBreaker.maxParallelRetries
+          value: 1024
+      # null must be omitted, not rendered as an explicit null the CRD rejects.
+      - notExists:
+          path: spec.circuitBreaker.maxRequestsPerConnection
+      # The timeouts this policy already carried must survive.
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "0s"
+      - equal:
+          path: spec.timeout.http.connectionIdleTimeout
+          value: "1h"
+
+  - it: omits the circuit breaker entirely when disabled, leaving Envoy defaults
+    set:
+      gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: frontend-bb-cloud-grpc-timeouts
+    asserts:
+      - notExists:
+          path: spec.circuitBreaker
+      - exists:
+          path: spec.timeout.http
+
+  - it: omits individual fields left null
+    set:
+      gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker.maxConnections: null
+      gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker.maxParallelRetries: null
+    documentSelector:
+      path: metadata.name
+      value: frontend-bb-cloud-grpc-timeouts
+    asserts:
+      - notExists:
+          path: spec.circuitBreaker.maxConnections
+      - notExists:
+          path: spec.circuitBreaker.maxParallelRetries
+      - equal:
+          path: spec.circuitBreaker.maxPendingRequests
+          value: 8192
+
+  - it: honors explicit overrides
+    set:
+      gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker.maxPendingRequests: 32768
+      gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker.maxRequestsPerConnection: 1000
+    documentSelector:
+      path: metadata.name
+      value: frontend-bb-cloud-grpc-timeouts
+    asserts:
+      - equal:
+          path: spec.circuitBreaker.maxPendingRequests
+          value: 32768
+      - equal:
+          path: spec.circuitBreaker.maxRequestsPerConnection
+          value: 1000
+
+  # The lower-volume routes keep Envoy's defaults so this change alters only the
+  # route that was actually overflowing.
+  - it: leaves the BES route on Envoy defaults
+    set:
+      portal.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: bb-portal-bes-grpc-timeouts
+    asserts:
+      - notExists:
+          path: spec.circuitBreaker
+
+  - it: can raise the BES route when asked
+    set:
+      portal.enabled: true
+      gateway.grpcRoutes.bes.backendTrafficPolicy.circuitBreaker.enabled: true
+      gateway.grpcRoutes.bes.backendTrafficPolicy.circuitBreaker.maxPendingRequests: 4096
+    documentSelector:
+      path: metadata.name
+      value: bb-portal-bes-grpc-timeouts
+    asserts:
+      - equal:
+          path: spec.circuitBreaker.maxPendingRequests
+          value: 4096

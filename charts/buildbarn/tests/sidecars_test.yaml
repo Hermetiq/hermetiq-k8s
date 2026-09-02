@@ -1,0 +1,375 @@
+suite: frontend grpc-cache-proxy sidecar and browser sidecar hook
+templates:
+  - templates/deployment-frontend.yaml
+  - templates/deployment-browser.yaml
+  - templates/services.yaml
+tests:
+  - it: does not render the grpc-cache-proxy sidecar by default
+    template: templates/deployment-frontend.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: frontend
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+
+  - it: keeps the frontend-grpc targetPort on the frontend container by default
+    template: templates/services.yaml
+    documentSelector:
+      path: metadata.name
+      value: frontend-grpc
+    asserts:
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 8980
+
+  - it: renders the grpc-cache-proxy sidecar with its cache-event wiring
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://nats.nats-system.svc:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: dev_cache
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: grpc-cache-proxy
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy:v0.6.0
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: frontend
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: NATS_URL
+            value: nats://nats.nats-system.svc:4222
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_EVENT_SUBJECT_PREFIX
+            value: dev_cache
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PROXY_PORT
+            value: "8980"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRPC_PORT
+            value: "50081"
+
+  - it: mounts the Stytch secret only when the sidecar enforces auth
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: https://login.example.com
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: stytch-secret
+
+  - it: omits the Stytch secret in pass-through mode so a missing Secret cannot block startup
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.enforceAuth: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].envFrom
+
+  - it: sizes the sidecar message limit to at least the frontend's own limit
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      # Lower than config.maximumMessageSizeBytes: the sidecar must not become
+      # the bottleneck, or Buildbarn responses fail with ResourceExhausted.
+      frontend.grpcCacheProxy.maxMessageSizeBytes: 1048576
+      config.maximumMessageSizeBytes: 16777216
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MESSAGE_SIZE_BYTES
+            value: "16777216"
+
+  - it: honours a sidecar message limit above the frontend's
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.maxMessageSizeBytes: 67108864
+      config.maximumMessageSizeBytes: 10485760
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MESSAGE_SIZE_BYTES
+            value: "67108864"
+
+  - it: runs as a pass-through proxy with cache events disabled when natsUrl is empty
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: grpc-cache-proxy
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: NATS_URL
+            value: ""
+      # Without a NATS endpoint the event-shard settings are meaningless.
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_EVENT_SUBJECT_PREFIX
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_EVENT_NUM_SHARDS
+          any: true
+
+  - it: gives the sidecar gRPC health probes
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.grpc.port
+          value: 50081
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.grpc.port
+          value: 50081
+
+  - it: omits the sidecar probes when disabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.probes.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe
+
+  - it: passes extra sidecar tuning env through
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.env:
+        SHUTDOWN_DRAIN_DELAY: 5s
+        CACHE_EVENT_BATCH_SIZE: "250"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SHUTDOWN_DRAIN_DELAY
+            value: 5s
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_EVENT_BATCH_SIZE
+            value: "250"
+
+  - it: derives the sidecar OTEL endpoint from hosts.otel when tracing is disabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      hosts.otel: otel-collector.obs.svc.cluster.local
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://otel-collector.obs.svc.cluster.local:4317
+
+  - it: derives the sidecar OTEL endpoint from tracing.endpoint
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      tracing.enabled: true
+      tracing.nodeLocal.enabled: false
+      tracing.endpoint: otel-collector.obs.svc.cluster.local:4317
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://otel-collector.obs.svc.cluster.local:4317
+
+  # tracing.endpoint must not leak through when tracing is disabled — values.yaml
+  # and the chart README both document hosts.otel as the tracing-off fallback.
+  - it: ignores tracing.endpoint when tracing is disabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      tracing.enabled: false
+      tracing.endpoint: stale-collector.obs.svc.cluster.local:4317
+      hosts.otel: otel-collector.obs.svc.cluster.local
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://otel-collector.obs.svc.cluster.local:4317
+
+  # The Buildbarn containers get TLS to the same collector via common.libsonnet,
+  # so the sidecar must not be left on a plaintext scheme against a TLS port.
+  - it: uses https for the sidecar OTEL endpoint when tracing TLS is enabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      tracing.enabled: true
+      tracing.tls.enabled: true
+      tracing.nodeLocal.enabled: false
+      tracing.endpoint: otel-collector.obs.svc.cluster.local:443
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://otel-collector.obs.svc.cluster.local:443
+
+  - it: uses https for the node-local sidecar OTEL endpoint when tracing TLS is enabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      tracing.enabled: true
+      tracing.tls.enabled: true
+      tracing.nodeLocal.enabled: true
+      tracing.nodeLocal.port: 4317
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: https://$(K8S_LOCAL_NODE_IP):4317
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: K8S_LOCAL_NODE_IP
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.hostIP
+
+  # Previously rendered the malformed "http://:4317".
+  - it: fails the render when hosts.otel is empty and nothing else supplies an endpoint
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      hosts.otel: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: hosts.otel is required when frontend.grpcCacheProxy is enabled and Buildbarn tracing is not providing an endpoint; set hosts.otel or frontend.grpcCacheProxy.otel.endpoint
+
+  - it: switches the frontend-grpc Service targetPort to the sidecar port
+    template: templates/services.yaml
+    set:
+      # The opt-in direct Service must not change the externally routed
+      # frontend-grpc Service.
+      frontend.internalService.enabled: true
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+    documentSelector:
+      path: metadata.name
+      value: frontend-grpc
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 8980
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 50081
+
+  - it: appends browser extraContainers after the browser container
+    template: templates/deployment-browser.yaml
+    set:
+      browser.extraContainers:
+        - name: http-stytch-proxy
+          image: example.test/http-stytch-proxy:dev
+          ports:
+            - name: proxy
+              containerPort: 9191
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: browser
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: http-stytch-proxy
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: example.test/http-stytch-proxy:dev
+
+  - it: routes the browser Service through the target-port override
+    template: templates/services.yaml
+    set:
+      browser.service.targetPortOverride: 9191
+    documentSelector:
+      path: metadata.name
+      value: browser
+    asserts:
+      - equal:
+          path: spec.ports[0].name
+          value: proxy
+      - equal:
+          path: spec.ports[0].port
+          value: 9191
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 9191
+
+  - it: keeps the browser Service on 7984 by default
+    template: templates/services.yaml
+    documentSelector:
+      path: metadata.name
+      value: browser
+    asserts:
+      - equal:
+          path: spec.ports[0].name
+          value: http
+      - equal:
+          path: spec.ports[0].port
+          value: 7984
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 7984

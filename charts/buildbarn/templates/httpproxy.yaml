@@ -1,0 +1,155 @@
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- if and .Values.httpProxy.enabled (eq $provider "contour") }}
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.httpProxy.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: frontend-grpc
+          port: 8980
+          protocol: h2c
+      timeoutPolicy:
+        {{- include "buildbarn.httpProxyTimeoutPolicy" . | nindent 8 }}
+  virtualhost:
+    fqdn: {{ include "buildbarn.frontendGrpcHost" . }}
+    tls:
+      {{- if .Values.httpProxy.clientValidation.enabled }}
+      clientValidation:
+        caSecret: {{ required "httpProxy.clientValidation.caSecret is required when clientValidation.enabled is true" .Values.httpProxy.clientValidation.caSecret }}
+        optionalClientCertificate: {{ .Values.httpProxy.clientValidation.optionalClientCertificate }}
+        forwardClientCertificate:
+          {{- toYaml .Values.httpProxy.clientValidation.forwardClientCertificate | nindent 10 }}
+      {{- end }}
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.httpProxy.enabled .Values.remoteAsset.enabled .Values.ingress.remoteAssetGrpc.enabled (eq $provider "contour") }}
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.ingress.remoteAssetGrpc.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: remote-asset-grpc
+          port: {{ .Values.remoteAsset.port }}
+          protocol: h2c
+      timeoutPolicy:
+        {{- include "buildbarn.httpProxyTimeoutPolicy" . | nindent 8 }}
+  virtualhost:
+    fqdn: {{ include "buildbarn.remoteAssetHost" . }}
+    tls:
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.browser.enabled (eq $provider "contour") }}
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.ingress.browser.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: browser
+          port: {{ include "buildbarn.browserServicePort" . }}
+  virtualhost:
+    fqdn: {{ include "buildbarn.browserHost" . }}
+    corsPolicy:
+      allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
+      allowOrigin:
+        {{- include "buildbarn.browserCorsAllowOrigins" . | nindent 8 }}
+      allowMethods:
+        {{- toYaml .Values.gateway.cors.allowMethods | nindent 8 }}
+      allowHeaders:
+        {{- toYaml .Values.gateway.cors.allowHeaders | nindent 8 }}
+      exposeHeaders:
+        {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 8 }}
+      maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+    tls:
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.rbeWeb.enabled (eq $provider "contour") }}
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.ingress.rbeWeb.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: scheduler
+          port: 7982
+  virtualhost:
+    fqdn: {{ include "buildbarn.rbeWebHost" . }}
+    tls:
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.portal.enabled .Values.ingress.portal.enabled (eq $provider "contour") }}
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.ingress.portal.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: bb-portal
+          port: 8081
+      timeoutPolicy:
+        {{- include "buildbarn.httpProxyTimeoutPolicy" . | nindent 8 }}
+  virtualhost:
+    fqdn: {{ include "buildbarn.portalHost" . }}
+    tls:
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+{{- if and .Values.portal.enabled .Values.ingress.besGrpc.enabled (eq $provider "contour") }}
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: {{ .Values.ingress.besGrpc.name }}
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+spec:
+  routes:
+    - conditions:
+        - prefix: /
+      services:
+        - name: bb-portal
+          port: 8082
+          protocol: h2c
+      timeoutPolicy:
+        {{- include "buildbarn.httpProxyTimeoutPolicy" . | nindent 8 }}
+  virtualhost:
+    fqdn: {{ include "buildbarn.besHost" . }}
+    tls:
+      secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
