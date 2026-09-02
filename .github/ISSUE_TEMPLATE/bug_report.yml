@@ -1,0 +1,117 @@
+name: Chart bug report
+description: Report reproducible incorrect behavior in a Hermetiq Kubernetes chart
+title: "[bug] "
+labels:
+  - bug
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping us improve the Hermetiq charts. Use **Installation help** if you are unsure whether the behavior is a chart defect.
+
+        Do not include passwords, tokens, license keys, private certificates, unredacted Kubernetes Secrets, or customer-identifying data.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Select the chart or repository area where the problem occurs.
+      options:
+        - hermetiq chart
+        - buildbarn chart
+        - bb-worker-operator chart
+        - custom values or examples
+        - documentation or release tooling
+    validations:
+      required: true
+
+  - type: input
+    id: chart-version
+    attributes:
+      label: Chart version
+      description: Use the packaged chart version, commit SHA, or `not applicable`.
+      placeholder: "hermetiq 0.9.0"
+    validations:
+      required: true
+
+  - type: input
+    id: helm-version
+    attributes:
+      label: Helm version
+      description: Paste the output of `helm version --short`.
+      placeholder: "v3.19.0+g..."
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes-environment
+    attributes:
+      label: Kubernetes environment
+      description: Include the distribution/provider and server version.
+      placeholder: "GKE 1.33.2, EKS 1.32, kind 1.34, ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation-source
+    attributes:
+      label: Installation source
+      options:
+        - OCI chart from ghcr.io/hermetiq
+        - Local chart checkout
+        - GitOps controller
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest sequence of commands or GitOps steps that reproduces the problem.
+      placeholder: |
+        1. Run `helm upgrade --install ...`
+        2. Wait for ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: changed-values
+    attributes:
+      label: Redacted non-default values
+      description: Paste only values that differ from the chart defaults. Replace sensitive values with `<redacted>`.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant diagnostic output
+      description: Include relevant `helm status`, `helm template`, `kubectl describe`, events, or container logs as text.
+      render: shell
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive-data check
+      options:
+        - label: I have removed secrets, credentials, license material, private certificates, and customer-identifying data.
+          required: true
