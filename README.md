@@ -7,10 +7,11 @@ This repository is the source for Hermetiq's Kubernetes deployment artifacts:
 - example `RbeWorker` pools and Bazel integrations
 - operational and architecture runbooks
 
-Everything in this repository is licensed under Apache-2.0. The Hermetiq
-application that the `hermetiq` chart deploys is commercial software
-distributed under the Hermetiq Software License Agreement; see
-[License](#license).
+The Helm charts, starter values, examples, and operational runbooks in this
+repository are licensed under Apache-2.0. The Hermetiq application container
+images deployed by the charts are commercial software distributed under the
+[Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md);
+see [License](#license).
 
 Customer installations should use the versioned OCI charts published at
 `oci://ghcr.io/hermetiq/`. The chart sources under [`charts/`](charts/) are for
