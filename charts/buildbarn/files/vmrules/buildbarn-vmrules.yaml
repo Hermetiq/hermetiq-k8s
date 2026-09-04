@@ -22,13 +22,13 @@ spec:
         - record: backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m
           expr: sum(irate(buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket[1m])) by (backend_type, hermetiq_project_id, kubernetes_service, le, operation, storage_type)
         - record: kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds
-          expr: min(time() - buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_replica, kubernetes_shard, storage_type)
+          expr: min(time() - buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds{kubernetes_service="storage"}) by (hermetiq_project_id, kubernetes_replica, kubernetes_shard, namespace, storage_type)
         - record: kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
-          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_replica, storage_type)
+          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_replica, namespace, storage_type)
         - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max
-          expr: max(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, storage_type)
+          expr: max(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, namespace, storage_type)
         - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
-          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, storage_type)
+          expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (hermetiq_project_id, kubernetes_shard, namespace, storage_type)
         - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m
           expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_count[1m])) by (hermetiq_project_id, storage_type, outcome)
         - record: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m
@@ -184,13 +184,13 @@ spec:
         - alert: BuildbarnCacheRetentionLow
           expr: |
             kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min < 86400
-              and on (hermetiq_project_id)
-            min by (hermetiq_project_id) (
+              and on (hermetiq_project_id, namespace)
+            min by (hermetiq_project_id, namespace) (
               time() - process_start_time_seconds{kubernetes_service="storage"}
             ) > 86400
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: 'Buildbarn {{ $labels.storage_type }} shard {{ $labels.kubernetes_shard }} retains data for under 24h'
-            description: 'The youngest block evicted from the {{ $labels.storage_type }} store on shard {{ $labels.kubernetes_shard }} was inserted less than 24h ago — the store cycles too fast for its workload; grow the blocks volume and the key-location map together.'
+            summary: 'Buildbarn {{ $labels.namespace }}/{{ $labels.storage_type }} shard {{ $labels.kubernetes_shard }} retains data for under 24h'
+            description: 'The youngest block evicted from the {{ $labels.storage_type }} store on shard {{ $labels.kubernetes_shard }} in namespace {{ $labels.namespace }} was inserted less than 24h ago — the store cycles too fast for its workload; grow the blocks volume and the key-location map together.'
