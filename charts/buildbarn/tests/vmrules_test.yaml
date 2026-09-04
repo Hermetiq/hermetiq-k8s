@@ -2,6 +2,15 @@ suite: buildbarn vmrules
 templates:
   - templates/vmrules.yaml
 tests:
+  - it: excludes worker-local caches from storage retention metrics
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-recording-rules
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[6].expr
+          pattern: 'last_removed_old_block_insertion_time_seconds\{kubernetes_service="storage"\}'
+
   - it: gates the low-retention alert on storage process age
     documentSelector:
       path: metadata.name
