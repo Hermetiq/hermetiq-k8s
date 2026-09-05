@@ -7,7 +7,9 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
 spec:
+  {{- if not (and .Values.keda.enabled .Values.keda.frontend.enabled) }}
   replicas: {{ .Values.frontend.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app: frontend

@@ -89,7 +89,8 @@ storage:
   #   maxUnavailable: 1
 
 frontend:
-  replicas: 2 # may need more depending on # of concurrent builds
+  # Static count when frontend autoscaling below is disabled.
+  replicas: 2
   # JWT auth on the frontend gRPC server is permissive for reads: CAS and
   # Action Cache reads remain open, while AC writes, CAS uploads, and Execute
   # are gated below with requireCanWriteToCache.
@@ -133,7 +134,8 @@ frontend:
   # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
   nodeSelector: null
   tolerations: null
-  # Optional PDB. Enable only when frontend.replicas is at least 2.
+  # Optional PDB. Enable only when frontend.replicas (or the autoscaling floor)
+  # is at least 2.
   # podDisruptionBudget:
   #   enabled: true
   #   maxUnavailable: 1
@@ -318,6 +320,19 @@ keda:
   enabled: true
   # keda needs access to scheduler metrics in VM
   prometheusServerAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  # Keep frontend capacity aligned with incoming gRPC concurrency. The bundled
+  # frontend VMPodScrape supplies the raw counters and project/service labels.
+  frontend:
+    enabled: true
+    minReplicaCount: 2
+    maxReplicaCount: 20
+    threshold: "100"
+    cpu:
+      enabled: true
+      targetUtilization: "70"
+    memory:
+      enabled: true
+      targetUtilization: "80"
   # The nested worker* settings below apply only to legacy chart-managed worker
   # Deployments. Operator-managed RbeWorker autoscaling is declared on each CR.
   workerUbuntu2204:

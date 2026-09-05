@@ -1,0 +1,87 @@
+{{- if and .Values.keda.enabled .Values.keda.frontend.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: frontend
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  pollingInterval: {{ .Values.keda.frontend.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.frontend.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.frontend.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.frontend.maxReplicaCount }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      name: frontend-keda
+      behavior:
+        # Frontend saturation rejects client RPCs, so add capacity quickly.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 30
+            - type: Pods
+              value: 4
+              periodSeconds: 30
+          selectPolicy: Max
+        # Keep recently-added capacity through brief gaps between build waves.
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 60
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+          selectPolicy: Min
+  triggers:
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.keda.prometheusServerAddress | quote }}
+        threshold: {{ .Values.keda.frontend.threshold | quote }}
+        # Total open frontend RPCs. With AverageValue, the HPA targets roughly
+        # one replica per `threshold` in-flight requests. Query raw counters so
+        # autoscaling does not depend on the optional chart-managed VMRule.
+        query: |
+          clamp_min(
+            (
+              sum(
+                grpc_server_started_total{
+                  hermetiq_project_id="{{ .Values.project.id }}",
+                  kubernetes_service="frontend"
+                }
+              ) or vector(0)
+            )
+            -
+            (
+              sum(
+                grpc_server_handled_total{
+                  hermetiq_project_id="{{ .Values.project.id }}",
+                  kubernetes_service="frontend"
+                }
+              ) or vector(0)
+            ),
+            0
+          )
+    {{- if .Values.keda.frontend.cpu.enabled }}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.keda.frontend.cpu.targetUtilization | quote }}
+    {{- end }}
+    {{- if .Values.keda.frontend.memory.enabled }}
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.keda.frontend.memory.targetUtilization | quote }}
+    {{- end }}
+{{- end }}
