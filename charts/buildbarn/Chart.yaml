@@ -5,13 +5,13 @@ type: application
 home: https://www.hermetiq.com
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.0
+version: 0.9.1
 appVersion: "20260814T085338Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
-      description: "Initial release of Hermetiq Buildbarn chart"
+      description: "Add optional KEDA autoscaling for the Buildbarn frontend based on gRPC concurrency, CPU, and memory"
 keywords:
   - buildbarn
   - remote-execution

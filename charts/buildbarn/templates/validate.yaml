@@ -38,6 +38,23 @@
 {{- if and (eq .Values.frontend.executeAuthorizer.mode "custom") (not .Values.frontend.executeAuthorizer.custom) -}}
 {{- fail "frontend.executeAuthorizer.custom is required when frontend.executeAuthorizer.mode=custom" -}}
 {{- end -}}
+{{- if and .Values.keda.enabled .Values.keda.frontend.enabled -}}
+{{- if lt (int .Values.keda.frontend.minReplicaCount) 1 -}}
+{{- fail "keda.frontend.minReplicaCount must be at least 1 because frontend metrics cannot reactivate a deployment scaled to zero" -}}
+{{- end -}}
+{{- if lt (int .Values.keda.frontend.maxReplicaCount) (int .Values.keda.frontend.minReplicaCount) -}}
+{{- fail "keda.frontend.maxReplicaCount must be greater than or equal to keda.frontend.minReplicaCount" -}}
+{{- end -}}
+{{- if not .Values.keda.prometheusServerAddress -}}
+{{- fail "keda.prometheusServerAddress is required when frontend autoscaling is enabled" -}}
+{{- end -}}
+{{- range $resource := list "cpu" "memory" -}}
+{{- $trigger := index $.Values.keda.frontend $resource -}}
+{{- if and $trigger.enabled (lt (int $trigger.targetUtilization) 1) -}}
+{{- fail (printf "keda.frontend.%s.targetUtilization must be greater than zero when the trigger is enabled" $resource) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{/* --- Storage backend, sizing, raw block-device, and ISCC/FSAC validation --- */}}
 {{- $bd := .Values.storage.persistence.blockDevice -}}
 {{- if not (has $bd.deviceAccess (list "group" "chownInit")) -}}

@@ -32,6 +32,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Frontend Authentication And Writes](#frontend-authentication-and-writes)
 - [JWKS ConfigMap Management](#jwks-configmap-management)
 - [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
+- [Frontend Autoscaling](#frontend-autoscaling)
 - [Remote Asset API](#remote-asset-api)
 - [bb-portal](#bb-portal)
 - [Worker And Runner](#worker-and-runner)
@@ -61,6 +62,7 @@ Core resources:
 - `buildbarn-worker-config` ConfigMap for worker and runner Jsonnet, available to operator-managed or legacy chart-managed workers.
 - `browser` Deployment and Service.
 - `frontend` Deployment plus `frontend-grpc` Service.
+- Optional KEDA `ScaledObject` for the frontend Deployment.
 - `scheduler-ubuntu22-04` Deployment and `scheduler` Service.
 - `storage` StatefulSet and headless `storage` Service.
 - Optional `bb-portal` Deployment and Service when `portal.enabled=true` (see [bb-portal](#bb-portal)).
@@ -88,7 +90,7 @@ chart-managed fleets for tests/actions that need Docker (see
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.0 \
+  --version 0.10.0 \
   --values buildbarn-values.yaml
 ```
 
@@ -105,8 +107,8 @@ Set `createNamespace: true` if Helm should create that namespace, or override
 Inspect the packaged documentation and defaults before creating overrides:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.0
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.0
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
 ```
 
 Contributors can render the checked-out chart locally:
@@ -176,7 +178,7 @@ too deep for the chart values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.0 \
+  --version 0.10.0 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
   --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
@@ -1013,6 +1015,60 @@ vmRules:
   enabled: false
 ```
 
+## Frontend Autoscaling
+
+The chart can let KEDA scale the frontend from its total number of open gRPC
+calls, CPU utilization, and memory utilization. The HPA evaluates all enabled
+signals and uses the highest replica recommendation, so resource saturation can
+add capacity even when gRPC concurrency is below its target.
+
+The Prometheus query subtracts completed calls from started calls across all
+frontend pods, and `AverageValue` turns the threshold into a per-replica
+concurrency target. It queries the raw counters, so this trigger does not depend
+on `vmRules.enabled`.
+
+```yaml
+keda:
+  enabled: true
+  prometheusServerAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  frontend:
+    enabled: true
+    minReplicaCount: 2
+    maxReplicaCount: 20
+    threshold: "100"
+    cpu:
+      enabled: true
+      targetUtilization: "70"
+    memory:
+      enabled: true
+      targetUtilization: "80"
+```
+
+The query expects `grpc_server_started_total` and
+`grpc_server_handled_total` samples labeled with
+`kubernetes_service="frontend"` and the configured `project.id`. The bundled
+`frontend-vmpodscrape` adds those labels when `vmPodScrapes.enabled=true`; when
+using another scraper, preserve equivalent labels.
+
+The CPU and memory triggers use Kubernetes Metrics Server and calculate
+utilization against the pod's resource requests. By default they cover the
+whole pod, including the optional `grpc-cache-proxy` sidecar. Keep CPU and
+memory requests on every container, and set either trigger's `enabled` value to
+false when Metrics Server is unavailable or that resource should not drive
+scaling. KEDA does not support its `fallback` feature on a ScaledObject that
+uses CPU or memory triggers, so this frontend scaler relies on its nonzero
+replica floor instead.
+
+Keep `minReplicaCount` at least 1 because this is a pull-based signal emitted by
+the target pods: after scaling to zero, no frontend remains to observe incoming
+requests. Two is the recommended availability floor. The chart rejects zero.
+
+While autoscaling is enabled, the frontend Deployment omits `spec.replicas` so
+Helm does not race the HPA. `frontend.replicas` takes effect again when either
+`keda.enabled` or `keda.frontend.enabled` is false. Scale-up is deliberately
+fast; scale-down retains recent capacity for five minutes and then removes at
+most 25% or one pod per minute, whichever is smaller.
+
 ## Remote Asset API
 
 The Remote Asset API lets Bazel ask Buildbarn to fetch external assets, such as
@@ -1599,7 +1655,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.0 \
+  --version 0.10.0 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
