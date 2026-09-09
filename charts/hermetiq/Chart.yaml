@@ -14,7 +14,7 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
     - kind: added
-      description: Initial release of Hermetiq chart
+      description: "Allow storage MCP tools to read namespaced Pod placement without granting cluster-scoped node access"
 keywords:
   - hermetiq
   - MCP
