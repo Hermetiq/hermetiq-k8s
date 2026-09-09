@@ -209,14 +209,14 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|---:|
 | Hermetiq |       `0.9.0` | `0.9.0` |
-| Buildbarn |       `0.9.0` | `20260908T142448Z` |
+| Buildbarn |       `0.9.1` | `20260908T142448Z` |
 | BB Worker Operator |       `0.3.1` | `v0.3.1` |
 
 The commands below define these versions once and reuse them:
 
 ```bash
 HERMETIQ_CHART_VERSION=0.9.0
-BUILDBARN_CHART_VERSION=0.9.0
+BUILDBARN_CHART_VERSION=0.9.1
 BB_WORKER_OPERATOR_CHART_VERSION=0.3.1
 ```
 
