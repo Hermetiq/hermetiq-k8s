@@ -3,9 +3,10 @@ name: buildbarn
 description: Buildbarn remote cache, CAS, and RBE deployment
 type: application
 home: https://www.hermetiq.com
+icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.0
+version: 0.9.1
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
@@ -21,3 +22,5 @@ keywords:
   - remote cache
 maintainers:
   - name: Hermetiq
+    email: support@hermetiq.com
+    url: https://www.hermetiq.com
