@@ -2,8 +2,9 @@
 # Weekly buildbarn upstream image poller (Phase 5, slice 4).
 #
 # Checks the ghcr.io/buildbarn/* images referenced by charts/buildbarn/values.yaml
-# for newer upstream tags and, if any moved, opens a PR bumping them (+ a patch
-# Chart.yaml version bump). It NEVER auto-merges — a human reviews. Runs on a
+# for newer upstream tags and, if any moved, opens a maintenance PR that updates
+# artifacthub.io/changes but leaves the chart version alone. It NEVER
+# auto-merges — a human reviews. Runs on a
 # weekly Buildkite Scheduled Build (gated `if: build.source == "schedule"`).
 #
 # Runs in google/cloud-sdk:slim with WIF as bk-on-prem-helm; installs crane + yq.
@@ -69,11 +70,18 @@ if [ "${#changed[@]}" -eq 0 ]; then
   exit 0
 fi
 
-# Patch-bump the chart version so the PR is releasable as-is.
+# Add this maintenance change to the release notes without claiming a release
+# version. The release manager bumps the chart and README pins in a release PR.
 ver="$(yq '.version' "${CHART}")"
-newver="$(echo "${ver}" | awk -F. '{printf "%s.%s.%d", $1, $2, $3 + 1}')"
-yq -i ".version = \"${newver}\"" "${CHART}"
-echo "+++ bumping buildbarn chart ${ver} → ${newver}"
+notes="$(yq -r '.annotations."artifacthub.io/changes"' "${CHART}")"
+for change in "${changed[@]}"; do
+  notes="${notes%$'\n'}
+- kind: changed
+  description: \"Update ${change}\""
+done
+ARTIFACTHUB_CHANGES="${notes}" yq -i \
+  '.annotations."artifacthub.io/changes" = strenv(ARTIFACTHUB_CHANGES)' "${CHART}"
+echo "+++ keeping buildbarn chart at ${ver}; updating artifacthub.io/changes"
 
 # --- open a PR via the GitHub App --------------------------------------------
 echo "+++ :github: mint app token + open PR"
@@ -99,7 +107,7 @@ git config user.email "ci@hermetiq.dev"
 git config user.name "hermetiq-ci"
 git checkout -b "${branch}"
 git add "${VALUES}" "${CHART}"
-git commit -m "chore(buildbarn): bump upstream images → chart ${newver}"
+git commit -m "chore(buildbarn): bump upstream images"
 git push "https://x-access-token:${token}@github.com/${REPO}.git" "HEAD:${branch}"
 
 {
@@ -107,12 +115,12 @@ git push "https://x-access-token:${token}@github.com/${REPO}.git" "HEAD:${branch
   echo
   for c in "${changed[@]}"; do echo "- ${c}"; done
   echo
-  echo "Chart ${ver} → ${newver}. Review and add an artifacthub.io/changes entry before merging."
+  echo "Chart version remains ${ver}; artifacthub.io/changes was updated for this maintenance PR."
 } >/tmp/pr-body.txt
 
 curl -fsSL -X POST -H "Authorization: Bearer ${token}" -H "Accept: application/vnd.github+json" \
   "https://api.github.com/repos/${REPO}/pulls" \
-  -d "$(jq -n --arg t "buildbarn: upstream image bump → ${newver}" --arg h "${branch}" --rawfile b /tmp/pr-body.txt \
+  -d "$(jq -n --arg t "buildbarn: upstream image bump" --arg h "${branch}" --rawfile b /tmp/pr-body.txt \
     '{title: $t, head: $h, base: "main", body: $b}')"
 
 echo "+++ :white_check_mark: opened PR from ${branch}"
