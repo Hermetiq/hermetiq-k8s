@@ -84,3 +84,48 @@ tests:
       - notExists:
           path: rules[?(@.resources[0] == "rbeworkers")]
         documentIndex: 0
+  - it: grants namespaced Pod reads so storage tools can resolve node placement
+    # Disk metrics are keyed by node, and a Pod carries its own placement in
+    # spec.nodeName / status.hostIP. Reading Pods in the Buildbarn namespace is
+    # therefore sufficient, and no cluster-scoped `nodes` grant is needed — which
+    # matters because cluster-scoped node read is not a reasonable ask of a
+    # self-hosted operator.
+    asserts:
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - equal:
+          path: rules[6].apiGroups[0]
+          value: ""
+        documentIndex: 0
+      - equal:
+          path: rules[6].resources[0]
+          value: pods
+        documentIndex: 0
+      - contains:
+          path: rules[6].verbs
+          content: get
+        documentIndex: 0
+      - contains:
+          path: rules[6].verbs
+          content: list
+        documentIndex: 0
+      # Read-only: a storage diagnostic must never be able to mutate a Pod.
+      - notContains:
+          path: rules[6].verbs
+          content: delete
+        documentIndex: 0
+      - notContains:
+          path: rules[6].verbs
+          content: create
+        documentIndex: 0
+  - it: omits the Pod rule when the operator declines it
+    set:
+      rbac.rules.pods: false
+    asserts:
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - notExists:
+          path: rules[6]
+        documentIndex: 0
