@@ -220,9 +220,12 @@ BUILDBARN_CHART_VERSION=0.9.0
 BB_WORKER_OPERATOR_CHART_VERSION=0.3.1
 ```
 
-Release changes belong in each chart's `Chart.yaml` metadata and the
-corresponding GitHub release. This guide documents the supported current state,
-not a cumulative release history.
+Maintenance PRs leave the chart `version` and pinned README versions unchanged,
+and describe their user-visible change in the chart's
+`artifacthub.io/changes` annotation. A release PR bumps the chart version and
+updates the supported bundle plus every literal `--version` reference in that
+chart's README. The release tag must match the merged chart version. This guide
+documents the supported current state, not a cumulative release history.
 
 ## Architecture
 

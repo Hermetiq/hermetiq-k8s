@@ -1,9 +1,8 @@
 # hermetiq-k8s — Buildkite pipeline (Phase 5).
 #
 # Uploaded by the `hermetiq-k8s` Buildkite pipeline's `buildkite-agent pipeline
-# upload` bootstrap step. For now this covers the signed OCI publish on release
-# tags; PR validation (helm lint/template/kubeconform/helm-unittest) and the
-# cloud-native → chart auto-bump are added here in later Phase-5 slices.
+# upload` bootstrap step. It validates chart PRs and publishes signed OCI charts
+# from release tags.
 #
 # Publish: on a `hermetiq-vX.Y.Z` / `buildbarn-vX.Y.Z` tag, publish-chart.sh
 # (running in google/cloud-sdk:slim with WIF creds for bk-on-prem-helm) verifies
@@ -27,7 +26,9 @@ agents:
 
 steps:
   # PR validation (non-tag builds): per-chart lint + template (ci-values) +
-  # kubeconform + metadata gates + helm-unittest. No GCP/secrets needed.
+  # kubeconform + maintenance/release metadata gates + helm-unittest. Ordinary
+  # chart PRs update artifacthub.io/changes without bumping the version. A
+  # version bump signals a release PR and must also update README version pins.
   - group: ":helm: chart validation"
     if: build.tag == null
     steps:

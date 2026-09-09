@@ -4,8 +4,8 @@
 #   helm lint --strict
 #   helm template (with the chart's ci-values fixture)
 #   kubeconform on the rendered manifests (core kinds; CRDs skipped for now)
-#   metadata gates: artifacthub.io/changes present; version bumped if the chart changed
-#   helm-unittest (if charts/<chart>/tests/ exists — none authored yet)
+#   metadata gates: maintenance change notes; release version + README synchronization
+#   helm-unittest (when charts/<chart>/tests/ exists)
 #
 # Runs inside debian:bookworm-slim (docker plugin); installs helm + kubeconform.
 # No GCP/secrets needed — pure chart validation. (A prebuilt toolchain image
@@ -63,30 +63,7 @@ else
 fi
 
 echo "+++ :memo: metadata gates"
-if ! grep -q 'artifacthub.io/changes' "${DIR}/Chart.yaml"; then
-  echo "^^^ +++"
-  echo ":x: ${DIR}/Chart.yaml is missing the artifacthub.io/changes annotation" >&2
-  exit 1
-fi
-# Version-bump gate (best-effort: only when we can diff against the PR base): if
-# any chart file changed, Chart.yaml version must have been bumped too.
-base="${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-}"
-# Best-effort refresh of the base ref. The container has no git creds, so this
-# may fail — GIT_TERMINAL_PROMPT=0 (above) makes it fail fast instead of hanging.
-# Either way, fall back to whatever the agent already fetched during checkout.
-if [ -n "${base}" ]; then
-  git fetch -q --no-tags origin "${base}" 2>/dev/null || true
-fi
-mb="$(git merge-base "origin/${base}" HEAD 2>/dev/null || true)"
-if [ -n "${mb}" ] && ! git diff --quiet "${mb}" HEAD -- "${DIR}"; then
-  if git diff "${mb}" HEAD -- "${DIR}/Chart.yaml" | grep -qE '^\+version:'; then
-    echo ":white_check_mark: ${CHART} changed and Chart.yaml version was bumped"
-  else
-    echo "^^^ +++"
-    echo ":x: ${DIR} changed but Chart.yaml version was not bumped" >&2
-    exit 1
-  fi
-fi
+bash .buildkite/scripts/chart-metadata-checks.sh "${CHART}"
 
 echo "+++ :test_tube: helm-unittest"
 if [ -d "${DIR}/tests" ]; then
