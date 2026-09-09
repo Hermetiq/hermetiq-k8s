@@ -6,12 +6,14 @@ home: https://www.hermetiq.com
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.0
-appVersion: "20260814T085338Z"
+appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
       description: "Add optional KEDA autoscaling for the Buildbarn frontend based on gRPC concurrency, CPU, and memory"
+    - kind: changed
+      description: "Update the built-in Buildbarn images to their latest upstream releases"
 keywords:
   - buildbarn
   - remote-execution

@@ -38,9 +38,9 @@ spec:
     rolloutOnChange: true
   images:
     runner: docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70
-    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260814T085403Z-13313e6
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
     volumeInit: busybox:1.31.1-uclibc
-    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
   pod:
     nodeSelector:
       kubernetes.io/arch: amd64
