@@ -836,6 +836,12 @@ rbac:
     # grpc-api worker-pool cost and behavior reporting. The existing
     # RoleBinding scopes this grant to the Hermetiq release namespace.
     rbeWorkers: true
+    # Read-only Pods, for the storage MCP tools' node placement. Disk metrics
+    # are keyed by node, and a Pod's spec.nodeName / status.hostIP is the only
+    # thing needed to reach them — so this stays a namespaced Pod read rather
+    # than a cluster-scoped `nodes` grant. Disabling it leaves storage health
+    # reporting device saturation as unavailable rather than failing.
+    pods: true
     # ClusterRole+ClusterRoleBinding granting `get` on the kube-system
     # Namespace OBJECT only (resourceNames: [kube-system]) — its UID is the
     # stable cluster fingerprint for license identity. It cannot list

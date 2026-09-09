@@ -63,6 +63,31 @@ tests:
       - failedTemplate:
           errorPattern: "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled"
 
+  - it: rejects frontend autoscaling to zero because its metric is pull-based
+    set:
+      keda.frontend.enabled: true
+      keda.frontend.minReplicaCount: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "keda.frontend.minReplicaCount must be at least 1"
+
+  - it: rejects a frontend autoscaling maximum below its minimum
+    set:
+      keda.frontend.enabled: true
+      keda.frontend.minReplicaCount: 4
+      keda.frontend.maxReplicaCount: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "keda.frontend.maxReplicaCount must be greater than or equal to keda.frontend.minReplicaCount"
+
+  - it: rejects a non-positive frontend resource utilization target
+    set:
+      keda.frontend.enabled: true
+      keda.frontend.cpu.targetUtilization: "0"
+    asserts:
+      - failedTemplate:
+          errorPattern: "keda.frontend.cpu.targetUtilization must be greater than zero"
+
   - it: rejects block geometry above bb-storage's 100-block limit
     set:
       storage.persistence.cas.currentBlocks: 200

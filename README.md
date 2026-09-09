@@ -207,10 +207,10 @@ and operations:
 The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
-|---|---:|---:|
-| Hermetiq | `0.9.0` | `0.9.0` |
-| Buildbarn | `0.9.0` | `20260814T085338Z` |
-| BB Worker Operator | `0.3.1` | `v0.3.1` |
+|---|--------------:|---:|
+| Hermetiq |       `0.9.0` | `0.9.0` |
+| Buildbarn |       `0.9.0` | `20260814T085338Z` |
+| BB Worker Operator |       `0.3.1` | `v0.3.1` |
 
 The commands below define these versions once and reuse them:
 
@@ -512,7 +512,8 @@ helm upgrade --install --namespace hermetiq dragonfly \
 
 #### KEDA
 
-KEDA scales operator-managed Buildbarn workers:
+KEDA scales operator-managed Buildbarn workers and, when enabled in the
+Buildbarn values, its frontend Deployment:
 
 ```bash
 helm repo add kedacore https://kedacore.github.io/charts

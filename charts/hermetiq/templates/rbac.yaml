@@ -1,5 +1,5 @@
 {{- if .Values.rbac.enabled }}
-{{- $rbacRulesEnabled := or .Values.rbac.rules.certManager .Values.rbac.rules.secrets .Values.rbac.rules.leases .Values.rbac.rules.deployments .Values.rbac.rules.configMaps .Values.rbac.rules.rbeWorkers }}
+{{- $rbacRulesEnabled := or .Values.rbac.rules.certManager .Values.rbac.rules.secrets .Values.rbac.rules.leases .Values.rbac.rules.deployments .Values.rbac.rules.configMaps .Values.rbac.rules.rbeWorkers .Values.rbac.rules.pods }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -76,6 +76,23 @@ rules:
       - bb.hermetiq.com
     resources:
       - rbeworkers
+    verbs:
+      - get
+      - list
+  {{- end }}
+  {{- if .Values.rbac.rules.pods }}
+  # Pod placement for the storage MCP tools. A Buildbarn store's write latency
+  # is a property of the disk under it, and those metrics are keyed by node —
+  # so answering "is this store's device saturated" needs to know which node
+  # each storage Pod landed on. A Pod carries that itself: spec.nodeName and
+  # status.hostIP. Reading Pods in the Buildbarn namespace is therefore enough,
+  # and no cluster-scoped `nodes` grant is required — deliberately, because
+  # cluster-scoped node read is not a reasonable ask of a self-hosted operator.
+  # The RoleBinding below limits this rule to the release namespace.
+  - apiGroups:
+      - ""
+    resources:
+      - pods
     verbs:
       - get
       - list

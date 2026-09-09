@@ -1,0 +1,116 @@
+suite: frontend autoscaling
+templates:
+  - templates/deployment-frontend.yaml
+  - templates/scaledobject-frontend.yaml
+tests:
+  - it: keeps a static frontend replica count by default
+    template: templates/deployment-frontend.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: does not render a frontend ScaledObject by default
+    template: templates/scaledobject-frontend.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders gRPC concurrency, CPU, and memory triggers
+    template: templates/scaledobject-frontend.yaml
+    set:
+      project.id: "42"
+      keda.frontend.enabled: true
+      keda.frontend.minReplicaCount: 3
+      keda.frontend.maxReplicaCount: 12
+      keda.frontend.threshold: "75"
+      keda.frontend.cpu.targetUtilization: "65"
+      keda.frontend.memory.targetUtilization: "76"
+    asserts:
+      - isKind:
+          of: ScaledObject
+      - equal:
+          path: metadata.name
+          value: frontend
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: frontend
+      - equal:
+          path: spec.scaleTargetRef
+          value:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: frontend
+      - equal:
+          path: spec.minReplicaCount
+          value: 3
+      - equal:
+          path: spec.maxReplicaCount
+          value: 12
+      - equal:
+          path: spec.triggers[0].type
+          value: prometheus
+      - equal:
+          path: spec.triggers[0].metricType
+          value: AverageValue
+      - equal:
+          path: spec.triggers[0].metadata.threshold
+          value: "75"
+      - lengthEqual:
+          path: spec.triggers
+          count: 3
+      - matchRegex:
+          path: spec.triggers[0].metadata.query
+          pattern: '(?s)grpc_server_started_total\{.*hermetiq_project_id="42"'
+      - matchRegex:
+          path: spec.triggers[0].metadata.query
+          pattern: '(?s)grpc_server_handled_total\{.*kubernetes_service="frontend"'
+      - equal:
+          path: spec.triggers[1]
+          value:
+            type: cpu
+            metricType: Utilization
+            metadata:
+              value: "65"
+      - equal:
+          path: spec.triggers[2]
+          value:
+            type: memory
+            metricType: Utilization
+            metadata:
+              value: "76"
+      - notExists:
+          path: spec.fallback
+
+  - it: allows the CPU trigger to be disabled independently
+    template: templates/scaledobject-frontend.yaml
+    set:
+      keda.frontend.enabled: true
+      keda.frontend.cpu.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.triggers
+          count: 2
+      - equal:
+          path: spec.triggers[1].type
+          value: memory
+
+  - it: lets KEDA own the frontend replica field when enabled
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.replicas: 7
+      keda.frontend.enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas
+
+  - it: retains static replicas when the global KEDA switch is off
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.replicas: 7
+      keda.enabled: false
+      keda.frontend.enabled: true
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 7

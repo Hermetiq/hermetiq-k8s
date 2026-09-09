@@ -67,9 +67,25 @@ bash .buildkite/scripts/chart-metadata-checks.sh "${CHART}"
 
 echo "+++ :test_tube: helm-unittest"
 if [ -d "${DIR}/tests" ]; then
-  # Pin the version (see HELM_UNITTEST_VERSION above); no `|| true` — a failed
-  # install should fail the step, not silently skip and then error on `unittest`.
-  helm plugin install https://github.com/helm-unittest/helm-unittest --version "v${HELM_UNITTEST_VERSION}" >/dev/null
+  # The install hook downloads a ~24 MiB release asset from GitHub and can fail
+  # on a truncated response. Retry into a fresh plugin directory so a partial
+  # first install cannot poison the next attempt.
+  plugin_installed=false
+  for attempt in 1 2 3; do
+    HELM_PLUGINS="$(mktemp -d)"
+    export HELM_PLUGINS
+    if helm plugin install https://github.com/helm-unittest/helm-unittest \
+      --version "v${HELM_UNITTEST_VERSION}" >/dev/null; then
+      plugin_installed=true
+      break
+    fi
+    echo ":warning: helm-unittest install attempt ${attempt}/3 failed" >&2
+  done
+  if [ "${plugin_installed}" != true ]; then
+    echo "^^^ +++"
+    echo ":x: failed to install helm-unittest after 3 attempts" >&2
+    exit 1
+  fi
   helm unittest "${DIR}"
 else
   echo "(no ${DIR}/tests — skipping; add suites under ${DIR}/tests/ to enable)"

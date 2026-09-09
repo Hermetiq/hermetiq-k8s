@@ -1568,6 +1568,28 @@ workerTestcontainersSysbox:
 keda:
   enabled: true
   prometheusServerAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+  # Optional frontend autoscaling on the total number of in-flight gRPC calls.
+  # The query uses metrics from frontend-vmpodscrape (or an equivalent external
+  # scrape) and does not depend on vmRules.enabled. Keep at least one replica:
+  # with no frontend pod there is no pull-based metric that can reactivate it.
+  frontend:
+    enabled: false
+    pollingInterval: 15
+    cooldownPeriod: 300
+    minReplicaCount: 2
+    maxReplicaCount: 20
+    # Average target number of open frontend gRPC calls per replica.
+    threshold: "100"
+    # CPU and memory use Kubernetes Metrics Server and the aggregate requests
+    # of every container in the pod (including grpc-cache-proxy when enabled).
+    # KEDA does not support ScaledObject fallback with either resource trigger,
+    # so the nonzero minReplicaCount above is the failure-safe floor.
+    cpu:
+      enabled: true
+      targetUtilization: "70"
+    memory:
+      enabled: true
+      targetUtilization: "80"
   workerUbuntu2204:
     pollingInterval: 30
     cooldownPeriod: 900
