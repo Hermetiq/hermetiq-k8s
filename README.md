@@ -220,12 +220,14 @@ BUILDBARN_CHART_VERSION=0.9.0
 BB_WORKER_OPERATOR_CHART_VERSION=0.3.1
 ```
 
-Maintenance PRs leave the chart `version` and pinned README versions unchanged,
-and describe their user-visible change in the chart's
-`artifacthub.io/changes` annotation. A release PR bumps the chart version and
-updates the supported bundle plus every literal `--version` reference in that
-chart's README. The release tag must match the merged chart version. This guide
-documents the supported current state, not a cumulative release history.
+After a release, a next-version PR bumps the chart's `version` while the README
+pins stay on the OCI package customers can actually pull. Maintenance PRs leave
+both version sets unchanged and describe their user-visible change in the
+chart's `artifacthub.io/changes` annotation. The release tag must match the
+merged chart version. After publishing succeeds, a release docs PR updates the
+supported bundle plus every literal `--version` reference in that chart's
+README. This guide documents the supported current state, not a cumulative
+release history.
 
 ## Architecture
 
