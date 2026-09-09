@@ -43,6 +43,7 @@
 <!-- Required for releasable chart changes; mark items N/A for docs or repository-only changes. -->
 
 - [ ] A maintenance chart PR leaves `version` unchanged and updates `artifacthub.io/changes`, or this is N/A.
-- [ ] A release PR bumps `version` according to SemVer and updates every pinned version in the root and chart READMEs, or this is N/A.
+- [ ] A next-version PR bumps `Chart.yaml` according to SemVer but leaves README pins on the published version, or this is N/A.
+- [ ] After OCI publication, the release docs PR updates every pinned version in the root and chart READMEs, or this is N/A.
 - [ ] `appVersion` is updated when the deployed application version changes, or this is N/A.
 - [ ] Dependency metadata and lock files are updated together, or this is N/A.
