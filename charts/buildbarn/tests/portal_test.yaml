@@ -35,7 +35,7 @@ tests:
           count: 1
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/buildbarn/bb-portal:20260812T063819Z-57cd49d
+          value: ghcr.io/buildbarn/bb-portal:20260909T161237Z-ec0ca42
       - equal:
           path: spec.template.spec.containers[0].ports
           value:

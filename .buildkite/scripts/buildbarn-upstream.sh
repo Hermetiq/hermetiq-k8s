@@ -27,6 +27,7 @@ images=(
   "images.remoteAsset.tag|ghcr.io/buildbarn/bb-remote-asset"
   "images.worker.tag|ghcr.io/buildbarn/bb-worker"
   "images.runnerInstaller.tag|ghcr.io/buildbarn/bb-runner-installer"
+  "images.portal.tag|ghcr.io/buildbarn/bb-portal"
   "frontend.jwks.sync.image.tag|ghcr.io/buildbarn/sync-jwks-to-configmap"
 )
 

@@ -107,32 +107,32 @@ config:
 images:
   storage:
     repository: ghcr.io/buildbarn/bb-storage
-    tag: 20260814T085338Z-fffe73b
+    tag: 20260908T142448Z-db62041
     digest: ""
     pullPolicy: IfNotPresent
   scheduler:
     repository: ghcr.io/buildbarn/bb-scheduler
-    tag: 20260814T085403Z-13313e6
+    tag: 20260908T142432Z-77f7642
     digest: ""
     pullPolicy: IfNotPresent
   browser:
     repository: ghcr.io/buildbarn/bb-browser
-    tag: 20260415t065533z-ee35c54
+    tag: 20260903T094142Z-6d856c8
     digest: ""
     pullPolicy: IfNotPresent
   remoteAsset:
     repository: ghcr.io/buildbarn/bb-remote-asset
-    tag: 20260817T230958Z-b6e412b
+    tag: 20260819T151432Z-a873d96
     digest: ""
     pullPolicy: IfNotPresent
   worker:
     repository: ghcr.io/buildbarn/bb-worker
-    tag: 20260814T085403Z-13313e6
+    tag: 20260908T142432Z-77f7642
     digest: ""
     pullPolicy: IfNotPresent
   runnerInstaller:
     repository: ghcr.io/buildbarn/bb-runner-installer
-    tag: 20260814T085403Z-13313e6
+    tag: 20260908T142432Z-77f7642
     digest: ""
     pullPolicy: IfNotPresent
   runnerUbuntu2204:
@@ -175,7 +175,7 @@ images:
   # serves the embedded web UI, the gRPC-Web APIs, and the BES gRPC endpoint.
   portal:
     repository: ghcr.io/buildbarn/bb-portal
-    tag: 20260812T063819Z-57cd49d
+    tag: 20260909T161237Z-ec0ca42
     digest: ""
     pullPolicy: IfNotPresent
 
@@ -668,7 +668,7 @@ frontend:
         ttlSecondsAfterFinished: null
       image:
         repository: ghcr.io/buildbarn/sync-jwks-to-configmap
-        tag: "20260417T091355Z-5ebb263"
+        tag: "20260908T142448Z-db62041"
         digest: ""
         pullPolicy: IfNotPresent
       resources:

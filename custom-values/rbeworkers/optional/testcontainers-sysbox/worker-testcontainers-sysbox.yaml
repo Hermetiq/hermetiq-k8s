@@ -46,7 +46,7 @@ spec:
       runtimeClassName: sysbox-runc
       hostUsers: false
   images:
-    worker: ghcr.io/buildbarn/bb-worker:20260814T085403Z-13313e6
+    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
     # Must include Docker Engine/CLI and start dockerd before execing bb_runner.
     runner: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/buildbarn-sysbox-runner:0.1.0
     volumeInit: busybox:1.31.1-uclibc
