@@ -88,6 +88,16 @@ spec:
       emptyDir:
         sizeLimit: 64Gi
   worker:
+    # The pod's own namespace, so a config can read it with
+    # std.extVar('POD_NAMESPACE') instead of writing a namespace into an
+    # address. The operator appends this to the SERVICE_NAME, NODE_NAME and
+    # POD_NAME it always sets. Note this is *this* pod's namespace: an address
+    # pointing at a service in another namespace needs its own variable.
+    env:
+      - name: POD_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
     imagePullPolicy: IfNotPresent
     resources:
       requests:
