@@ -728,6 +728,12 @@ frontend:
     currentBlocks: 24
     newBlocks: 3
     spareBlocks: 3
+    # Objects read out of a block device are checksummed end to end on every
+    # read by default; this caches that verdict so a cache hit does not pay for
+    # a full re-digest. Sized like the storage tier's.
+    dataIntegrityValidationCache:
+      cacheSize: 100000
+      cacheDuration: 14400s
     volume:
       emptyDir: {}
       hostPath:

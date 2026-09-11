@@ -68,35 +68,28 @@ local common = import 'common.libsonnet';
   global: common.global,
 
   contentAddressableStorage: {
-    {{- if .Values.frontend.readCache.enabled }}
+    {{- /* The read cache nests INSIDE the existence cache when both are on.
+         ReadCachingBlobAccess overrides only Get and GetFromComposite and
+         embeds the slow backend for everything else, so FindMissingBlobs —
+         the most frequent CAS call a Bazel client makes, before every upload —
+         still crosses to the shards. existenceCaching has to sit above it to
+         keep those local.  */}}
+    {{- $readCache := .Values.frontend.readCache.enabled }}
+    {{- $existenceCache := .Values.frontend.contentAddressableStorage.existenceCaching.enabled }}
+    {{- if and $readCache $existenceCache }}
     backend: {
-      readCaching: {
-        slow: common.blobstore.contentAddressableStorage,
-        fast: {
-          'local': {
-            keyLocationMapInMemory: {
-              entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
-            },
-            keyLocationMapMaximumGetAttempts: 16,
-            keyLocationMapMaximumPutAttempts: 64,
-            oldBlocks: {{ .Values.frontend.readCache.oldBlocks }},
-            currentBlocks: {{ .Values.frontend.readCache.currentBlocks }},
-            newBlocks: {{ .Values.frontend.readCache.newBlocks }},
-            blocksOnBlockDevice: {
-              source: {
-                file: {
-                  path: '{{ .Values.frontend.readCache.mountPath }}/blocks',
-                  sizeBytes: {{ .Values.frontend.readCache.blocksSizeGi }} * 1024 * 1024 * 1024,
-                },
-              },
-              spareBlocks: {{ .Values.frontend.readCache.spareBlocks }},
-            },
-          },
+      existenceCaching: {
+        existenceCache: {
+          cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
+          cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
+          cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
         },
-        replicator: { deduplicating: { 'local': {} } },
+        backend: {{ include "buildbarn.frontendReadCachingBackend" . | indent 8 | trim }},
       },
     },
-    {{- else if .Values.frontend.contentAddressableStorage.existenceCaching.enabled }}
+    {{- else if $readCache }}
+    backend: {{ include "buildbarn.frontendReadCachingBackend" . | indent 4 | trim }},
+    {{- else if $existenceCache }}
     backend: {
       existenceCaching: {
         backend: common.blobstore.contentAddressableStorage,
