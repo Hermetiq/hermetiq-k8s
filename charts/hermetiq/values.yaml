@@ -832,9 +832,12 @@ rbac:
     # the installed-component inventory get_buildbarn_status reports).
     deployments: true
     configMaps: true
-    # Read-only discovery of namespaced bb.hermetiq.com RbeWorker objects for
-    # grpc-api worker-pool cost and behavior reporting. The existing
-    # RoleBinding scopes this grant to the Hermetiq release namespace.
+    # Read-only discovery of namespaced bb.hermetiq.com RbeWorker objects: the
+    # worker-pool configuration behind list_rbe_workers and get_rbe_worker (the
+    # platform each pool advertises, its per-worker concurrency, its image
+    # identity), plus grpc-api cost reporting. The existing RoleBinding scopes
+    # this grant to the Hermetiq release namespace. Disabling it leaves those
+    # tools reporting not_permitted rather than failing.
     rbeWorkers: true
     # Read-only Pods, for the storage MCP tools' node placement. Disk metrics
     # are keyed by node, and a Pod's spec.nodeName / status.hostIP is the only

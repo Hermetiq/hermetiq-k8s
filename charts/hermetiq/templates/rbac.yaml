@@ -70,7 +70,14 @@ rules:
       - list
   {{- end }}
   {{- if .Values.rbac.rules.rbeWorkers }}
-  # Namespaced worker-pool discovery for grpc-api cost and behavior reporting.
+  # Worker-pool configuration for the list_rbe_workers and get_rbe_worker MCP
+  # tools, and for grpc-api cost reporting. list_worker_pools reports the
+  # Deployment a pool produced; an RbeWorker reports what the pool is configured
+  # to do — the platform it advertises to the scheduler, its per-worker
+  # concurrency and size class, and whether its container-image property is tied
+  # to the image that actually runs actions. None of that is in the Deployment.
+  # Disabling this leaves those two tools reporting not_permitted and says so;
+  # nothing else degrades.
   # The RoleBinding below limits this ClusterRole rule to the release namespace.
   - apiGroups:
       - bb.hermetiq.com
