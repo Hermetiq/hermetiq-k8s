@@ -1,0 +1,86 @@
+# The pod half of security.grpcMtls. A rendered config that points at
+# /etc/buildbarn/mtls with no volume behind it is not a misconfiguration the
+# operator sees at install time — it is a crash loop after rollout, on every
+# component at once. So the invariant under test is coverage: every workload
+# that dials or serves an in-cluster hop gets the Secret, and none of them
+# gets it when the feature is off.
+suite: buildbarn in-cluster mTLS pod plumbing
+values:
+  - ../ci-values/ci.yaml
+templates:
+  - templates/statefulset-storage.yaml
+  - templates/deployment-frontend.yaml
+  - templates/deployment-scheduler.yaml
+  - templates/deployment-browser.yaml
+  - templates/deployment-asset.yaml
+  - templates/deployment-portal.yaml
+  - templates/deployment-worker-ubuntu22-04.yaml
+set:
+  remoteAsset.enabled: true
+  portal.enabled: true
+  browser.enabled: true
+  workerUbuntu2204.enabled: true
+tests:
+  - it: mounts nothing by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: buildbarn-mtls
+          any: true
+
+  - it: gives every Buildbarn workload the key pair when enabled
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: buildbarn-mtls
+            secret:
+              secretName: buildbarn-mtls
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: buildbarn-mtls
+            readOnly: true
+            mountPath: /etc/buildbarn/mtls
+
+  - it: honours a custom secret and mount path
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: /certs/ca.crt
+      security.grpcMtls.secretName: my-mesh-cert
+      security.grpcMtls.mountPath: /certs
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: buildbarn-mtls
+            secret:
+              secretName: my-mesh-cert
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: buildbarn-mtls
+            readOnly: true
+            mountPath: /certs
+
+  # The runner is reached over unix:///worker/runner. TLS does not apply to a
+  # UNIX socket, so the certificate has no business in that container.
+  - it: leaves the runner container out
+    template: templates/deployment-worker-ubuntu22-04.yaml
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: runner
+      - notContains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: buildbarn-mtls
+            readOnly: true
+            mountPath: /etc/buildbarn/mtls

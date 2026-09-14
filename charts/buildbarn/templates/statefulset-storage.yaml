@@ -120,6 +120,9 @@ spec:
               mountPath: /etc/mtls-client-cert
             {{- end }}
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            {{- if .Values.security.grpcMtls.enabled }}
+            {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
+            {{- end }}
             - mountPath: /config/
               name: configs
               readOnly: true
@@ -139,6 +142,9 @@ spec:
             secretName: {{ required "secrets.mtlsClientCert is required when storage.mtlsClientCert.enabled is true" .Values.secrets.mtlsClientCert }}
         {{- end }}
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        {{- if .Values.security.grpcMtls.enabled }}
+        {{- include "buildbarn.mtlsVolume" . | nindent 8 }}
+        {{- end }}
         - name: configs
           configMap:
             name: {{ include "buildbarn.configName" . }}

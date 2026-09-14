@@ -17,6 +17,14 @@ annotations:
       description: "Update the built-in Buildbarn images to their latest upstream releases"
     - kind: fixed
       description: "Nest the frontend read cache inside the existence cache, so FindMissingBlobs stays local instead of crossing to the storage shards when frontend.readCache.enabled is true"
+    - kind: added
+      description: "Add scheduler.actionRouter with a demultiplexing mode, so a catch-all worker pool can serve actions whose platform matches no other pool"
+    - kind: added
+      description: "Add security.grpcMtls: mutual TLS on the in-cluster gRPC hops (storage :8981, scheduler :8982/:8983/:8984), rendering the client key pair, the server key pair and the tlsClientCertificate authentication policy at both ends of every hop"
+    - kind: added
+      description: "Add per-server authenticationPolicy values for the scheduler's four ports and the storage gRPC port, with allow, deny, mtls and custom modes"
+    - kind: added
+      description: "Document workerUbuntu2204.config.sizeClass and its testcontainers equivalents for ISCC multi-size-class pools"
 keywords:
   - buildbarn
   - remote-execution

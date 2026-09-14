@@ -20,6 +20,27 @@
     "hosts": { "type": "object" },
     "bbcal": { "type": "object" },
     "tracing": { "type": "object" },
+    "security": {
+      "type": "object",
+      "properties": {
+        "grpcMtls": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secretName": { "type": "string" },
+            "mountPath": { "type": "string" },
+            "certificatePath": { "type": "string" },
+            "privateKeyPath": { "type": "string" },
+            "refreshInterval": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?s)$" },
+            "certificateAuthorities": { "type": "string" },
+            "certificateAuthoritiesFile": { "type": "string" },
+            "validationExpression": { "type": "string", "minLength": 1 },
+            "metadataExtractionExpression": { "type": "string", "minLength": 1 },
+            "cipherSuites": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
     "routing": {
       "type": "object",
       "properties": {
@@ -39,6 +60,17 @@
           "properties": {
             "enabled": { "type": "boolean" }
           }
+        },
+        "grpcServers": {
+          "type": "object",
+          "properties": { "authenticationPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["", "allow", "deny", "mtls", "custom"] },
+            "denyMessage": { "type": "string" },
+            "custom": { "type": "string" }
+          }
+        } }
         }
       }
     },
@@ -53,7 +85,62 @@
         }
       }
     },
-    "scheduler": { "type": "object" },
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "actionRouter": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["simple", "demultiplexing", "custom"] },
+            "custom": { "type": "string" }
+          }
+        },
+        "clientGrpcServers": {
+          "type": "object",
+          "properties": { "authenticationPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["", "allow", "deny", "mtls", "custom"] },
+            "denyMessage": { "type": "string" },
+            "custom": { "type": "string" }
+          }
+        } }
+        },
+        "workerGrpcServers": {
+          "type": "object",
+          "properties": { "authenticationPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["", "allow", "deny", "mtls", "custom"] },
+            "denyMessage": { "type": "string" },
+            "custom": { "type": "string" }
+          }
+        } }
+        },
+        "buildQueueStateGrpcServers": {
+          "type": "object",
+          "properties": { "authenticationPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["", "allow", "deny", "mtls", "custom"] },
+            "denyMessage": { "type": "string" },
+            "custom": { "type": "string" }
+          }
+        } }
+        },
+        "adminHttpServers": {
+          "type": "object",
+          "properties": { "authenticationPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["", "allow", "deny", "custom"] },
+            "denyMessage": { "type": "string" },
+            "custom": { "type": "string" }
+          }
+        } }
+        }
+      }
+    },
     "browser": { "type": "object" },
     "remoteAsset": { "type": "object" },
     "portal": { "type": "object" },

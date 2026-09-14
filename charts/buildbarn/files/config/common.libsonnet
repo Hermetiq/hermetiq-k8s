@@ -1,5 +1,16 @@
 {{- $namespace := include "buildbarn.namespace" . }}
 {{- $are := .Values.config.actionCache.actionResultExpiring }}
+{{- if .Values.security.grpcMtls.enabled }}
+// Dialling half of the in-cluster mTLS hop to storage, shared by every shard
+// client below. The listening half is storage.jsonnet's grpcServers `tls` plus
+// its tlsClientCertificate authentication policy — a client key pair alone
+// encrypts nothing the server is willing to accept, and a server `tls` alone
+// checks nobody.
+local storageClientTls = {
+  {{ include "buildbarn.mtlsClientTls" . | indent 2 | trim }}
+};
+
+{{- end }}
 // Only return ActionResult messages for which all output files are still present
 // in the Content Addressable Storage (CAS). Bazel requires this decorator, and it
 // is what keeps an Action Cache hit from ever pointing at evicted CAS blobs.
@@ -10,7 +21,7 @@ local completenessCheckedActionCache = {
         shards: {
 {{- range $i, $_ := until (int .Values.storage.replicas) }}
           "{{ $i }}": {
-            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' } } },
+            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
             weight: 1,
           },
 {{- end }}
@@ -28,7 +39,7 @@ local completenessCheckedActionCache = {
         shards: {
 {{- range $i, $_ := until (int .Values.storage.replicas) }}
           "{{ $i }}": {
-            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' } } },
+            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
             weight: 1,
           },
 {{- end }}
@@ -72,7 +83,7 @@ local completenessCheckedActionCache = {
       shards: {
 {{- range $i, $_ := until (int .Values.storage.replicas) }}
         "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' } } },
+          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
           weight: 1,
         },
 {{- end }}
@@ -86,7 +97,7 @@ local completenessCheckedActionCache = {
       shards: {
 {{- range $i, $_ := until (int .Values.storage.replicas) }}
         "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' } } },
+          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
           weight: 1,
         },
 {{- end }}

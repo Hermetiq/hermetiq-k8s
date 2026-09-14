@@ -80,6 +80,9 @@ spec:
                 - ALL
           volumeMounts:
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            {{- if .Values.security.grpcMtls.enabled }}
+            {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
+            {{- end }}
             - mountPath: /config/
               name: configs
               readOnly: true
@@ -90,6 +93,9 @@ spec:
       {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.portal) | nindent 6 }}
       volumes:
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        {{- if .Values.security.grpcMtls.enabled }}
+        {{- include "buildbarn.mtlsVolume" . | nindent 8 }}
+        {{- end }}
         - name: configs
           configMap:
             name: {{ include "buildbarn.configName" . }}
