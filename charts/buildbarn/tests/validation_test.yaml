@@ -269,3 +269,63 @@ tests:
       storage.keyLocationMapSizing.averageObjectSizeBytes.cas: 65536
     asserts:
       - notFailedTemplate: {}
+
+  - it: rejects mTLS with no certificate authority
+    set:
+      security.grpcMtls.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "needs the CA that signed both ends"
+
+  - it: rejects both certificate authority forms at once
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: pem
+      security.grpcMtls.certificateAuthoritiesFile: /etc/ca.crt
+    asserts:
+      - failedTemplate:
+          errorPattern: "not both"
+
+  - it: rejects a relative certificateAuthoritiesFile
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: ca.crt
+    asserts:
+      - failedTemplate:
+          errorPattern: "resolves a relative path against the config directory"
+
+  - it: rejects mode=mtls without the grpcMtls block
+    set:
+      scheduler.workerGrpcServers.authenticationPolicy.mode: mtls
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires security.grpcMtls.enabled=true"
+
+  # An override is spliced in verbatim with no tpl, so mTLS would configure one
+  # end of the hop and not the other.
+  - it: rejects mTLS alongside an override of a file that carries a hop
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: pem
+      configOverrides:
+        common.libsonnet: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: "spliced in verbatim without templating"
+
+  - it: rejects mTLS alongside a worker-common override
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: pem
+      workerConfigOverrides:
+        worker-common.libsonnet: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: "dials the scheduler and storage"
+
+  # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
+  # enforced by values.schema.json, which rejects the release before any
+  # template runs, so they cannot be asserted with failedTemplate — helm reports
+  # a chart-level error rather than a template one. validate.yaml keeps the same
+  # checks as a backstop for `--skip-schema-validation`; the enum lists
+  # themselves live in values.schema.json.

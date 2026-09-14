@@ -112,7 +112,14 @@ local common = import 'common.libsonnet';
       },
       browserUrl: common.browserUrl,
       maximumMessageSizeBytes: common.maximumMessageSizeBytes,
+      {{- if .Values.security.grpcMtls.enabled }}
+      scheduler: {
+        address: 'scheduler:8983',
+        {{ include "buildbarn.mtlsClientTls" . | indent 8 | trim }}
+      },
+      {{- else }}
       scheduler: { address: 'scheduler:8983' },
+      {{- end }}
     } + filePoolConfig + {
       global: common.global {
         setUmask: { umask: 0 },

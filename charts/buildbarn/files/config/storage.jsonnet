@@ -318,8 +318,9 @@ local common = import 'common.libsonnet';
 
   grpcServers: [{
     listenAddresses: [':8981'],
-    authenticationPolicy: {
-      allow: {},
-    },
+    {{- if .Values.security.grpcMtls.enabled }}
+    {{ include "buildbarn.mtlsServerTls" . | indent 4 | trim }}
+    {{- end }}
+    {{ include "buildbarn.authenticationPolicy" (dict "root" $ "config" .Values.storage.grpcServers.authenticationPolicy "path" "storage.grpcServers.authenticationPolicy") | indent 4 | trim }}
   }],
 }

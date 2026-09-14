@@ -1,3 +1,32 @@
+{{/* Scheduler action router. The scheduler REJECTS an unsorted platform with
+     InvalidArgument rather than sorting it (platform.NewKey), so a misordered
+     list here is not a style problem — it stops the scheduler starting. Fail
+     the install instead, where the message can say which list and what order. */}}
+{{- $router := $.Values.scheduler.actionRouter -}}
+{{- if not (has $router.mode (list "simple" "demultiplexing" "custom")) -}}
+{{- fail (printf "scheduler.actionRouter.mode is %q; must be one of: simple, demultiplexing, custom" $router.mode) -}}
+{{- end -}}
+{{- if eq $router.mode "demultiplexing" -}}
+{{- if not $router.catchAll.platform.properties -}}
+{{- fail "scheduler.actionRouter.mode=demultiplexing needs scheduler.actionRouter.catchAll.platform.properties: unmatched actions are rewritten onto that platform, and an empty one is the {} queue that a pool advertising no properties serves — almost never what is meant. Use mode=custom if you really want it." -}}
+{{- end -}}
+{{- range $i, $b := $router.backends -}}
+{{- $keys := list -}}
+{{- range $b.platform.properties -}}
+{{- $keys = append $keys (printf "%s\x00%s" .name .value) -}}
+{{- end -}}
+{{- if ne (join "\n" $keys) (join "\n" (sortAlpha $keys)) -}}
+{{- fail (printf "scheduler.actionRouter.backends[%d].platform.properties are not sorted by name then value; the scheduler rejects an unsorted platform and will not start" $i) -}}
+{{- end -}}
+{{- end -}}
+{{- $catch := list -}}
+{{- range $router.catchAll.platform.properties -}}
+{{- $catch = append $catch (printf "%s\x00%s" .name .value) -}}
+{{- end -}}
+{{- if ne (join "\n" $catch) (join "\n" (sortAlpha $catch)) -}}
+{{- fail "scheduler.actionRouter.catchAll.platform.properties are not sorted by name then value; the scheduler rejects an unsorted platform and will not start" -}}
+{{- end -}}
+{{- end -}}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- $validRoutingProviders := list "contour" "gateway" "gateway-httproute-only" "ingress" "none" -}}
 {{- $requestedRoutingProvider := default "" .Values.routing.provider -}}
@@ -215,4 +244,57 @@
 {{- end -}}
 {{- if and .Values.browser.oauth2Proxy.enabled .Values.browser.service.targetPortOverride -}}
 {{- fail "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled — both claim the browser Service port" -}}
+{{- end -}}
+{{/* In-cluster mutual TLS. Every failure here is one that only shows up as a
+     crash-looping pod or a cluster that has silently stopped talking to
+     itself, so the install is the right place to catch it. */}}
+{{- $mtls := $.Values.security.grpcMtls -}}
+{{- $policies := dict
+      "storage.grpcServers" $.Values.storage.grpcServers.authenticationPolicy
+      "scheduler.clientGrpcServers" $.Values.scheduler.clientGrpcServers.authenticationPolicy
+      "scheduler.workerGrpcServers" $.Values.scheduler.workerGrpcServers.authenticationPolicy
+      "scheduler.buildQueueStateGrpcServers" $.Values.scheduler.buildQueueStateGrpcServers.authenticationPolicy -}}
+{{- range $path, $policy := $policies -}}
+{{- if not (has $policy.mode (list "" "allow" "deny" "mtls" "custom")) -}}
+{{- fail (printf "%s.authenticationPolicy.mode is %q; must be one of: allow, deny, mtls, custom, or \"\" to follow security.grpcMtls" $path $policy.mode) -}}
+{{- end -}}
+{{- if and (eq $policy.mode "mtls") (not $mtls.enabled) -}}
+{{- fail (printf "%s.authenticationPolicy.mode=mtls requires security.grpcMtls.enabled=true: the client CA, and the key pair the callers present, both come from that block" $path) -}}
+{{- end -}}
+{{- end -}}
+{{- $adminMode := $.Values.scheduler.adminHttpServers.authenticationPolicy.mode -}}
+{{- if not (has $adminMode (list "" "allow" "deny" "custom")) -}}
+{{- fail (printf "scheduler.adminHttpServers.authenticationPolicy.mode is %q; must be one of: allow, deny, custom. It is an HTTP server, and http.server.AuthenticationPolicy has no tlsClientCertificate arm — mutual TLS is not available on this port at all" $adminMode) -}}
+{{- end -}}
+{{- if $mtls.enabled -}}
+{{- if and $mtls.certificateAuthorities $mtls.certificateAuthoritiesFile -}}
+{{- fail "security.grpcMtls: set certificateAuthorities or certificateAuthoritiesFile, not both" -}}
+{{- end -}}
+{{- if not (or $mtls.certificateAuthorities $mtls.certificateAuthoritiesFile) -}}
+{{- fail "security.grpcMtls.enabled=true needs the CA that signed both ends: set certificateAuthorities (the PEM) or certificateAuthoritiesFile (an absolute path). An empty CA is not an open policy — bb-storage refuses to start with \"Failed to parse client certificate authorities\"" -}}
+{{- end -}}
+{{- if and $mtls.certificateAuthoritiesFile (not (hasPrefix "/" $mtls.certificateAuthoritiesFile)) -}}
+{{- fail (printf "security.grpcMtls.certificateAuthoritiesFile is %q; it is read with jsonnet importstr, which resolves a relative path against the config directory, so it must be absolute" $mtls.certificateAuthoritiesFile) -}}
+{{- end -}}
+{{- if not $mtls.validationExpression -}}
+{{- fail "security.grpcMtls.validationExpression is required: x509.ClientCertificateVerifierConfiguration takes no default and bb-storage fails to start with \"No JMESPath expression configuration provided\". Use \"`true`\" to accept every CA-signed certificate" -}}
+{{- end -}}
+{{- if not $mtls.metadataExtractionExpression -}}
+{{- fail "security.grpcMtls.metadataExtractionExpression is required for the same reason as validationExpression. Use \"`{}`\" to extract nothing" -}}
+{{- end -}}
+{{/* An overridden file is spliced in verbatim, with no tpl and therefore none
+     of the tls blocks rendered below. Overriding one END of a hop while the
+     other end starts demanding a client certificate is how a cluster stops
+     talking to itself on upgrade, so name the file rather than let it fail at
+     runtime. */}}
+{{- range $name, $_ := $.Values.configOverrides -}}
+{{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet") -}}
+{{- fail (printf "configOverrides[%q] replaces a file that carries one half of an in-cluster mTLS hop, and an override is spliced in verbatim without templating — security.grpcMtls would configure the other half only, leaving that hop broken. Add the tls block to your override and remove this file from the check, or turn security.grpcMtls off" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- range $name, $_ := $.Values.workerConfigOverrides -}}
+{{- if eq $name "worker-common.libsonnet" -}}
+{{- fail "workerConfigOverrides[\"worker-common.libsonnet\"] replaces the file that dials the scheduler and storage, and an override is spliced in verbatim without templating, so security.grpcMtls cannot reach it. Add the tls blocks to your override, or turn security.grpcMtls off" -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}

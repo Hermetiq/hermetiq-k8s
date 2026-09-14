@@ -51,7 +51,13 @@ The chart defaults follow Buildbarn's intended shape:
 
 For the CAS, too few old blocks makes the store behave more like FIFO. Too many old blocks wastes space on duplicate refreshed data. In practice, the current group should usually be two to three times larger than the old group.
 
-For AC, ISCC, and FSAC, keep `newBlocks: 1`. These stores update existing entries, and bb-storage only guarantees reliable updates for mutable stores when there is one new block. If you configure more, bb-storage refuses to start.
+For AC, ISCC, and FSAC, `newBlocks` must be **exactly 1**. It is an equality check, so `0` is rejected as surely as `5`:
+
+```text
+The number of "new" blocks must be set to 1 for this storage type, as objects cannot be updated reliably otherwise
+```
+
+The reason is worth knowing, because the failure it prevents is silent rather than loud. These stores replace entries, and the key-location map only overwrites a record when the new location compares as *newer* — the same block at a higher offset, or a later block. With one new block, allocation is append-only, so every rewrite wins. With more than one, Buildbarn deliberately scatters writes across the newest blocks — the behaviour the CAS wants, and the reason CAS runs `newBlocks: 3` — and a rewrite can land in a lower-indexed block than the entry it replaces. The write then succeeds without changing anything, and the store keeps serving the stale value with no error anywhere. bb-storage refuses the configuration at startup rather than let that happen.
 
 Example CAS geometry:
 
@@ -123,11 +129,51 @@ Rendezvous hashing keeps resharding proportional:
 - removing a shard loses only that shard's share
 - renumbering shards reshuffles everything
 
-Scale by changing `storage.replicas`; do not reorder shard keys in an override. There is no mirroring in the chart's default topology. Losing one shard loses about `1/N` of the cache, which is acceptable for cache-only deployments because the data is rebuildable.
+Scale by changing `storage.replicas`; do not reorder shard keys in an override. There is no mirroring in the chart's default topology.
+
+**A shard removed and a shard down are not the same event.** Removing a shard — scaling `storage.replicas` down — loses about `1/N` of the cache, which is acceptable for a cache-only deployment because the data is rebuildable. A shard that is merely *unavailable* is worse than proportional, and the asymmetry is in the code:
+
+- `Get` and `Put` route one digest to one shard, so they degrade proportionally: roughly `1/N` of requests fail while the rest are served.
+- `FindMissing` fans out to every shard that owns one of the digests, in an `errgroup` with a shared cancellable context, and returns the **first** error. One unreachable shard fails the whole call.
+
+Bazel calls `FindMissingBlobs` before every upload batch, so an unavailable shard does not cost you `1/N` of your uploads — it stops them. Reads and executions continue at `(N-1)/N`; writes stop. Plan storage disruption budgets and node drains around that, and do not reason about a `PodDisruptionBudget` as if the loss were proportional.
 
 The frontend adds one important safety layer for the Action Cache. Bazel treats an Action Cache hit as permission to skip execution, but the referenced output blobs may have been evicted from the CAS. The frontend therefore checks that the CAS still has every referenced output before returning an AC hit. If the output tree is larger than the chart's completeness-check ceiling, currently 256 MiB, the result is treated as a miss.
 
 The sizing consequence is simple: CAS retention should comfortably exceed AC retention. If the CAS evicts outputs before the AC evicts the ActionResult, the completeness check fails and the AC hit stops helping.
+
+### The Frontend Read-Through Cache
+
+`frontend.readCache.enabled` puts a `readCaching` backend in front of the shard ring: a `local` block store on the frontend pod's own disk, with the sharded backend as the slow tier and a deduplicating replicator that collapses concurrent misses for the same blob into one copy.
+
+Three properties decide how you size it.
+
+**Writes are never cached.** Only `Get` and `GetFromComposite` consult the fast tier. Every `Put` goes straight to the shards, so the cache does nothing for upload-heavy workloads and its capacity is sized against the *read* working set.
+
+**It does not replace the existence cache.** `ReadCachingBlobAccess` embeds the slow backend for everything it does not override, so `FindMissingBlobs` still crosses to the shards — and that is the most frequent CAS call a Bazel client makes, before every upload. The chart therefore nests `readCaching` *inside* `existenceCaching` when both are on. Leave `frontend.contentAddressableStorage.existenceCaching.enabled` alone when you turn the read cache on; they are not alternatives.
+
+**The fast tier's block size is a correctness setting.** It derives the same way as any other block store:
+
+```text
+block size = blocksSizeGi / (spareBlocks + oldBlocks + currentBlocks + newBlocks)
+```
+
+A blob larger than one block cannot be stored in the cache at all, and the failure does not stay inside the cache. The fast `Put` fails with `InvalidArgument`, the replicator wraps it as `Replication failed`, and that error rides back on the buffer the client is already reading — so an undersized cache turns a miss on a large blob into a **failed build**, not a slow read. There is no way to route large blobs around it; the `size_distinguishing` backend that once did this was removed from Buildbarn.
+
+Size the block above the largest blob the frontend actually moves, measured from its own histogram:
+
+```text
+histogram_quantile(1.0, sum by (le) (rate(buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket[7d])))
+```
+
+The chart defaults give `250 / (3 + 8 + 24 + 3) = 6.5 GiB` per block, which clears any realistic Bazel output. Shrink `blocksSizeGi` and the block shrinks with it.
+
+Two more settings that are easy to copy wrongly from the storage tier:
+
+- `keyLocationMapInMemoryEntries` is resident memory on the **frontend** pod at 64 bytes per entry — the chart default of 20971520 is about 1.3 GiB — and it should be sized against what fits in *this* cache (2 to 10 times the object count), not copied from the storage tier's value.
+- `dataIntegrityValidationCache` is on by default here for a reason: a file-backed fast tier re-checksums every object on every read without it, which is exactly the cost the cache exists to avoid.
+
+A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 
 ## Worked Example: One Local-NVMe Shard
 
@@ -163,3 +209,15 @@ That is about 3.1 GiB before Go garbage collector headroom, gRPC buffers, and th
 **5. Verify with production traffic.** After a few days, worst-case retention should stay above your target and the KLM dropped-put alert should remain quiet. If either signal is wrong, resize the blocks and the map together.
 
 Do this arithmetic before the first install when you can. Changing block counts, block size, or map placement later is a cache flush, as described in [buildbarn-storage-operations.md](buildbarn-storage-operations.md).
+
+## Checked Automatically
+
+Two of the limits above fail at startup rather than degrade, so the BB Config Editor assistant reports them as advisories on an edit instead of waiting to be asked. The rule identifiers, for cross-referencing an advisory back to this document:
+
+| Rule | What it catches | Section |
+| --- | --- | --- |
+| `mutable_store_new_blocks` | `newBlocks` other than 1 on the Action Cache, ISCC or FSAC | [Choosing Block Ratios](#choosing-block-ratios) |
+| `too_many_blocks` | `spareBlocks + oldBlocks + currentBlocks + newBlocks` above 100 in one local backend | [Blocks: Allocation, Eviction, and Maximum Blob Size](#blocks-allocation-eviction-and-maximum-blob-size) |
+
+The division of labour is deliberate: the assistant owns the structural rules, which are checkable and verified against bb-storage source; this document owns the sizing arithmetic, worked examples and runbooks, which are what a generated rule list cannot give you. A test in the assistant's repository asserts that every rule identifier appears here, so a new rule cannot ship without a place to read about it.
+

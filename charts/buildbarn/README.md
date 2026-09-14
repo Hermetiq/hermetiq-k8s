@@ -23,6 +23,11 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Envoy Gateway policies](#envoy-gateway-policies)
   - [Tuning the downstream leg for high-RTT Bazel clients](#tuning-the-downstream-leg-for-high-rtt-bazel-clients)
   - [TLS certificates](#tls-certificates)
+- [In-Cluster Mutual TLS](#in-cluster-mutual-tls)
+  - [The certificate](#the-certificate)
+  - [Staged rollout](#staged-rollout)
+  - [Operator-managed workers](#operator-managed-workers)
+  - [Overrides](#overrides)
 - [Storage](#storage)
   - [Raw block-device storage](#raw-block-device-storage)
   - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
@@ -30,6 +35,8 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Browser SSO](#browser-sso)
   - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
 - [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+  - [Reads are open by design](#reads-are-open-by-design)
+  - [CAS read efficiency](#cas-read-efficiency)
 - [JWKS ConfigMap Management](#jwks-configmap-management)
 - [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
 - [Frontend Autoscaling](#frontend-autoscaling)
@@ -43,6 +50,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Routing](#routing)
   - [Node Pool Prerequisites](#node-pool-prerequisites)
   - [Operational notes](#operational-notes)
+- [Action Routing And Catch-All Workers](#action-routing-and-catch-all-workers)
 - [Security And Availability Hardening](#security-and-availability-hardening)
   - [Restricting direct storage access](#restricting-direct-storage-access)
 - [Scheduling](#scheduling)
@@ -378,6 +386,132 @@ a `ClusterIssuer` that exists in your cluster, set `tls.secretName` to reuse a
 wildcard Secret you already manage, or set `certificate.enabled: false`. If the
 referenced issuer does not exist, the Certificate stays pending and the routes
 serve no usable TLS.
+
+## In-Cluster Mutual TLS
+
+The TLS above terminates at the edge: it protects Bazel's connection to the
+frontend. Inside the cluster the Buildbarn services talk to each other in
+plaintext by default. `security.grpcMtls` closes that.
+
+```yaml
+security:
+  grpcMtls:
+    enabled: true
+    secretName: buildbarn-mtls
+    certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    validationExpression: "contains(dnsNames, 'scheduler')"
+```
+
+Mutual TLS is four settings in two different protobuf messages, and the chart
+renders all four because it generates both ends of every in-cluster hop:
+
+| Half | Where it lands | What it does |
+| --- | --- | --- |
+| `tls.clientKeyPair` | every gRPC client the chart renders | the certificate the caller presents |
+| `tls.serverCertificateAuthorities` | the same clients | what the caller trusts |
+| `tls.serverKeyPair` | storage `:8981`, scheduler `:8982` `:8983` `:8984` | the certificate the listener presents |
+| `authenticationPolicy.tlsClientCertificate` | the same listeners | what actually *verifies* the caller |
+
+The last row is the one that is easy to miss. `tls.ServerConfiguration` has
+only `serverKeyPair` and `cipherSuites` — there is no client-CA field anywhere
+in it — so a server given `tls` alone does **one-way** TLS: the connection is
+encrypted and the caller is never checked. The check is a separate
+authentication policy, and this block renders it.
+
+The hops covered:
+
+| Port | Listener | Callers |
+| --- | --- | --- |
+| `:8981` | storage | frontend, scheduler, workers, browser, remote asset, bb-portal |
+| `:8982` | scheduler | frontend |
+| `:8983` | scheduler | workers |
+| `:8984` | scheduler | bb-portal |
+
+The frontend's own `:8980` is deliberately excluded: it faces Bazel, not
+another Buildbarn service, and it is normally terminated at the gateway with
+its callers authenticated by `frontend.jwks`. The scheduler's admin port
+`:7982` is excluded because it is HTTP, and `http.server.AuthenticationPolicy`
+has no `tlsClientCertificate` arm at all — mutual TLS is not available there
+however this block is configured. The runner is reached over
+`unix:///worker/runner`, where there is no network to protect.
+
+### The certificate
+
+One Secret serves every pod, as both server and client. cert-manager writes
+`tls.crt`, `tls.key` and `ca.crt` into one Secret, which is why
+`certificateAuthoritiesFile` can point back into the same mount. Its SANs must
+cover every in-cluster name the chart dials, or the peer rejects it by name
+rather than by CA:
+
+- `storage-<i>.storage.<namespace>` for `i` in `0..storage.replicas-1`
+- `scheduler`
+
+`refreshInterval` (default `20000s`) is what makes rotation work. Only the
+`files` key-pair arm re-reads from disk, and only when that interval is set;
+without it the process reads the pair once at startup and a rotated
+certificate does nothing until the pod restarts.
+
+`validationExpression` is a JMESPath over the peer's subject alt names —
+the context is `{dnsNames, emailAddresses, uris}`. It defaults to `` `true` ``,
+which admits **every** holder of a CA-signed certificate, so any workload
+issued a certificate by the same CA can impersonate any Buildbarn service.
+Narrow it once your SANs are settled. A failure returns `UNAUTHENTICATED`, not
+`PERMISSION_DENIED`: this is authentication, and authorization stays in the
+authorizer fields.
+
+### Staged rollout
+
+Turning the block on flips every listener to requiring a client certificate at
+once. To roll out gradually, name a mode explicitly on the port you are not
+ready to close — it still terminates TLS, it just does not demand a client
+certificate yet:
+
+```yaml
+scheduler:
+  workerGrpcServers:
+    authenticationPolicy:
+      mode: allow # until every worker pool presents a certificate
+```
+
+`mode` accepts `allow`, `deny`, `mtls` and `custom` on the four gRPC ports
+(`storage.grpcServers`, `scheduler.clientGrpcServers`,
+`scheduler.workerGrpcServers`, `scheduler.buildQueueStateGrpcServers`), and
+`allow`, `deny`, `custom` on `scheduler.adminHttpServers`. The default `""`
+follows `security.grpcMtls`: `mtls` when it is enabled, `allow` when it is not.
+`deny` takes a message string, not an empty message — `grpc.AuthenticationPolicy.deny`
+is a `string`, unlike the authorizer `deny` used elsewhere in these files.
+
+### Operator-managed workers
+
+`RbeWorker` pods consume the chart's `buildbarn-worker-config` ConfigMap, so
+they pick up the client half automatically — but the chart does not own their
+pod spec, so the Secret is not mounted for them. Add it on each `RbeWorker`:
+
+```yaml
+spec:
+  extraVolumes:
+    - name: buildbarn-mtls
+      secret:
+        secretName: buildbarn-mtls
+  extraVolumeMounts:
+    - name: buildbarn-mtls
+      readOnly: true
+      mountPath: /etc/buildbarn/mtls
+```
+
+Without it those workers start, fail to present a certificate, and are refused
+by the scheduler and storage.
+
+### Overrides
+
+A `configOverrides` entry is spliced in verbatim with no templating, so a
+forked file carries none of the blocks above. Overriding one end of a hop while
+the other end starts demanding a client certificate is how a cluster stops
+talking to itself on upgrade, so the chart refuses the combination for
+`common.libsonnet`, `storage.jsonnet`, `frontend.jsonnet`, `portal.jsonnet` and
+`workerConfigOverrides["worker-common.libsonnet"]` rather than letting it fail
+at runtime. Add the `tls` blocks to your override, or leave `security.grpcMtls`
+off.
 
 ## Storage
 
@@ -885,9 +1019,33 @@ calls should require a valid JWT. Keep `allow` only for clusters where another
 proxy layer is intentionally handling trust, or where open writes/execution are
 acceptable.
 
-The frontend also keeps CAS reads efficient by default:
+### Reads are open by design
 
-- CAS `existenceCaching` is enabled when `frontend.readCache.enabled` is false.
+With `frontend.jwks.enabled`, the frontend renders its authentication policy as
+`any: { policies: [ { jwt: ... }, { allow: {} } ] }`. An `any` policy admits a
+caller that satisfies **any** member, so that second arm means an
+unauthenticated caller is still admitted — the JWT arm is what attaches
+`canWriteToCache` metadata to callers that do present one.
+
+That is deliberate, and it is why authentication and authorization are separate
+here. Admission is open; **writes** are gated downstream by the authorizers
+above, where `mode: requireCanWriteToCache` reads the metadata the JWT arm
+attached. The result is an open read cache with authenticated writes, which is
+what most deployments want.
+
+If you want reads closed too, remove the fallback by requiring the JWT arm
+alone — that is a `configOverrides["frontend.jsonnet"]` today, and it forks the
+file. Before doing it, check every caller: the browser, bb-portal and any
+CI that reads without a token all lose access at the same moment.
+
+### CAS read efficiency
+
+- CAS `existenceCaching` is on by default, and **composes with** the read cache
+  rather than being replaced by it. With `frontend.readCache.enabled` the
+  template nests `readCaching` inside `existenceCaching`: `ReadCachingBlobAccess`
+  overrides only `Get` and `GetFromComposite`, so `FindMissingBlobs` would
+  otherwise still cross to the shards on every upload. You do not choose between
+  them.
 - `supportedCompressors: ['ZSTD']` is advertised.
 - Action Cache `GetActionResult` and `UpdateActionResult` can add digest trace attributes through `frontend.tracingAttributes.actionCacheDigests.enabled`.
 
@@ -1533,6 +1691,60 @@ kubectl -n hermetiq exec -it deploy/worker-testcontainers-sysbox -c runner -- do
 - Ryuk (the Testcontainers reaper) is left enabled by default. If you pre-pull
   the Ryuk image, include the tag that matches your Testcontainers client
   versions.
+
+## Action Routing And Catch-All Workers
+
+Platform matching has no fallback. The scheduler's queue key is
+`{instanceNamePrefix, the marshalled platform}` compared by exact string
+equality, so an action whose platform matches no worker pool does not degrade
+to some default pool — it fails with `No matching worker pool`, or waits
+forever. `scheduler.actionRouter` is how you serve it instead.
+
+```yaml
+scheduler:
+  actionRouter:
+    mode: demultiplexing
+    backends:
+      - instanceNamePrefix: ""
+        platform:
+          properties:
+            - name: container-image
+              value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+    catchAll:
+      platform:
+        properties:
+          - name: container-image
+            value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+          - name: pool
+            value: fallback
+```
+
+`mode` is `simple` (the default, and today's behaviour), `demultiplexing`, or
+`custom` — where `actionRouter.custom` splices raw jsonnet, the same escape
+hatch the frontend authorizers use.
+
+`demultiplexing` needs both halves. Every platform you want to keep routing
+normally must be listed under `backends`; anything not listed falls to
+`catchAll`, whose `platformKeyExtractor` is `static`, meaning the leftovers are
+**rewritten** onto the catch-all platform. A default route that kept the
+`action` extractor would re-match by the same exact equality and change
+nothing, which is why the chart renders `static` and requires
+`catchAll.platform.properties` to be non-empty.
+
+Two costs before you enable it:
+
+- **Unmatched platforms stop failing loudly.** A typo in `exec_properties` that
+  used to fail fast now runs on the catch-all pool, possibly producing wrong
+  results that cache.
+- **The catch-all shares no cache with the pool it imitates.** `RouteAction`
+  returns the action unchanged, so the Action Cache key keeps the *client's*
+  platform. Two clients whose platforms differ only in the typo get separate
+  cache entries.
+
+Platform properties must be sorted by name, then value: `platform.NewKey`
+rejects an unsorted platform with `InvalidArgument` rather than sorting it, so
+a misordered list stops the scheduler starting. The chart fails the install
+first, naming the list and the required order.
 
 ## Security And Availability Hardening
 
