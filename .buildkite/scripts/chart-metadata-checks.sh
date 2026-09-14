@@ -128,6 +128,93 @@ verify_readme_versions() {
   done <<<"${readme_refs}"
 }
 
+# Whether this PR changed anything about ${CHART} that a user of the published
+# package could observe.
+#
+# The path test this replaced asked whether any FILE under charts/<name>/
+# changed, which is a much broader question: README.md, docs/, LICENSE,
+# ci-values/ and tests/ all live under there, and so do comments. A commit
+# changing zero non-comment lines was still made to invent an Artifact Hub
+# release note for itself, and a note nobody can act on is worse than none —
+# it trains readers to skim the changelog.
+#
+# Three things reach a user, each checked on its own terms:
+#
+#   1. the rendered manifests, compared with the SAME inputs on both sides, so
+#      that editing ci-values/ is not mistaken for editing the chart;
+#   2. values.schema.json, which gates what a user may set — a tightened enum
+#      rejects values that used to install while rendering identically;
+#   3. values.yaml defaults, compared ignoring comments, because ci-values can
+#      mask a changed default from the render comparison.
+#
+# Fails toward requiring notes: if anything cannot be determined — no helm, the
+# chart is new, either render fails — the answer is "release-worthy".
+render_chart() {
+  local dir="$1" out="$2"
+  local values=()
+  # HEAD's ci-values on BOTH sides. Using each side's own would report a
+  # ci-values edit as a chart change: the same category error as the path test.
+  [ -f "${DIR}/ci-values/ci.yaml" ] && values=(-f "${DIR}/ci-values/ci.yaml")
+  # --include-crds, or a CRD change renders as nothing: helm omits crds/ by
+  # default, and bb-worker-operator ships its CRD there.
+  #
+  # ${values[@]+"${values[@]}"} rather than "${values[@]}": under `set -u`,
+  # bash 3.2 treats an empty array expansion as an unbound variable and kills
+  # the script. CI runs bash 5 where it is harmless, so the plain form works
+  # there and fails only when someone runs this on a Mac — the worst place for
+  # a check to behave differently.
+  helm template "${CHART}" "${dir}" ${values[@]+"${values[@]}"} --include-crds >"${out}" 2>/dev/null
+}
+
+# values.yaml with full-line comments and blank lines removed. Trailing comments
+# are deliberately kept: a `#` inside a quoted value is not a comment, and
+# over-reporting is the safe direction.
+values_without_comments() {
+  git show "${1}:${DIR}/values.yaml" 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' || true
+}
+
+# Callers check "nothing under the chart was touched" first, so reaching here
+# means some file changed and the question is whether it can be observed.
+chart_is_release_worthy() {
+  local base_ref="$1"
+
+  if ! command -v helm >/dev/null 2>&1; then
+    echo "  helm not on PATH; cannot compare rendered output"
+    return 0
+  fi
+
+  if ! git diff --quiet "${base_ref}" HEAD -- "${DIR}/values.schema.json"; then
+    echo "  values.schema.json changed: a schema edit changes what installs, not what renders"
+    return 0
+  fi
+
+  if [ "$(values_without_comments "${base_ref}")" != "$(values_without_comments HEAD)" ]; then
+    echo "  values.yaml defaults changed"
+    return 0
+  fi
+
+  local base_tree base_out head_out
+  base_tree="$(mktemp -d)"
+  base_out="$(mktemp)"
+  head_out="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '${base_tree}' '${base_out}' '${head_out}'" RETURN
+
+  if ! git archive "${base_ref}" "${DIR}" 2>/dev/null | tar -x -C "${base_tree}" 2>/dev/null; then
+    echo "  ${CHART} does not exist at the PR base"
+    return 0
+  fi
+  if ! render_chart "${base_tree}/${DIR}" "${base_out}" || ! render_chart "${DIR}" "${head_out}"; then
+    echo "  could not render both sides; treating ${CHART} as changed"
+    return 0
+  fi
+  if cmp -s "${base_out}" "${head_out}"; then
+    return 1
+  fi
+  echo "  rendered output differs from the PR base"
+  return 0
+}
+
 [[ -f "${CHART_FILE}" ]] || fail "missing ${CHART_FILE}"
 
 current_version="$(read_chart_version "${CHART_FILE}")"
@@ -160,6 +247,10 @@ merge_base="$(git merge-base "origin/${base}" HEAD 2>/dev/null || true)"
 
 if git diff --quiet "${merge_base}" HEAD -- "${DIR}"; then
   echo ":white_check_mark: ${CHART} did not change in this PR"
+  exit 0
+fi
+if ! chart_is_release_worthy "${merge_base}"; then
+  echo ":white_check_mark: ${CHART} changed, but renders identically to the PR base; no change notes needed"
   exit 0
 fi
 
