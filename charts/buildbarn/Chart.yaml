@@ -15,6 +15,8 @@ annotations:
       description: "Add optional KEDA autoscaling for the Buildbarn frontend based on gRPC concurrency, CPU, and memory"
     - kind: changed
       description: "Update the built-in Buildbarn images to their latest upstream releases"
+    - kind: fixed
+      description: "Nest the frontend read cache inside the existence cache, so FindMissingBlobs stays local instead of crossing to the storage shards when frontend.readCache.enabled is true"
 keywords:
   - buildbarn
   - remote-execution

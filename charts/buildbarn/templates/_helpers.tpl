@@ -711,3 +711,51 @@ securityContext:
     {{- include "buildbarn.storage.volumeDevices" . | nindent 4 }}
   {{- end }}
 {{- end -}}
+
+{{/*
+buildbarn.frontendReadCachingBackend renders the frontend's read-through CAS
+cache as a jsonnet object.
+
+Defined once and included at two indents — with and without the existence
+cache wrapping it — because splicing the two conditionals together inline
+produced valid but ragged jsonnet, and these files are read and edited by hand
+in the config editor.
+*/}}
+{{- define "buildbarn.frontendReadCachingBackend" -}}
+{
+  readCaching: {
+    slow: common.blobstore.contentAddressableStorage,
+    fast: {
+      'local': {
+        keyLocationMapInMemory: {
+          entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
+        },
+        keyLocationMapMaximumGetAttempts: 16,
+        keyLocationMapMaximumPutAttempts: 64,
+        oldBlocks: {{ .Values.frontend.readCache.oldBlocks }},
+        currentBlocks: {{ .Values.frontend.readCache.currentBlocks }},
+        newBlocks: {{ .Values.frontend.readCache.newBlocks }},
+        blocksOnBlockDevice: {
+          source: {
+            file: {
+              path: '{{ .Values.frontend.readCache.mountPath }}/blocks',
+              sizeBytes: {{ .Values.frontend.readCache.blocksSizeGi }} * 1024 * 1024 * 1024,
+            },
+          },
+          spareBlocks: {{ .Values.frontend.readCache.spareBlocks }},
+          // Objects read out of a block device are checksummed end to end on
+          // every read by default. This caches the verdict, so a cache hit
+          // does not pay for a full re-digest — the cost the cache exists to
+          // avoid.
+          dataIntegrityValidationCache: {
+            cacheSize: {{ int64 .Values.frontend.readCache.dataIntegrityValidationCache.cacheSize }},
+            cacheDuration: {{ .Values.frontend.readCache.dataIntegrityValidationCache.cacheDuration | quote }},
+            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+          },
+        },
+      },
+    },
+    replicator: { deduplicating: { 'local': {} } },
+  },
+}
+{{- end }}
