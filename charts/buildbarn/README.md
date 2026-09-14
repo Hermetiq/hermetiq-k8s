@@ -98,7 +98,7 @@ chart-managed fleets for tests/actions that need Docker (see
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --values buildbarn-values.yaml
 ```
 
@@ -115,8 +115,8 @@ Set `createNamespace: true` if Helm should create that namespace, or override
 Inspect the packaged documentation and defaults before creating overrides:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.1
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.1
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.2
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.2
 ```
 
 Contributors can render the checked-out chart locally:
@@ -186,7 +186,7 @@ too deep for the chart values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
   --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
@@ -1867,7 +1867,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
