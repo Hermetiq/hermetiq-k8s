@@ -17,6 +17,8 @@ annotations:
       description: "Allow storage MCP tools to read namespaced Pod placement without granting cluster-scoped node access"
     - kind: changed
       description: "Document what rbac.rules.rbeWorkers grants and what it costs to turn off: the list_rbe_workers and get_rbe_worker tools report not_permitted rather than failing, and nothing else degrades"
+    - kind: fixed
+      description: "Resync the bundled PromQL queries with the ones the bep-nats binary ships: the chart was pinning an older schedulerCompletedByCode that dropped the result label, and because the ConfigMap overlays the binary's defaults that stale query won even on an updated image"
 keywords:
   - hermetiq
   - MCP
