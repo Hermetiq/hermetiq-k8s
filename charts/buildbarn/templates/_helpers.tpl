@@ -721,6 +721,50 @@ cache wrapping it — because splicing the two conditionals together inline
 produced valid but ragged jsonnet, and these files are read and edited by hand
 in the config editor.
 */}}
+{{/*
+The half of a scheduler actionRouter body that is the same whichever
+platformKeyExtractor precedes it: how actions are grouped for fairness, and how
+their initial size class and timeouts are decided. Factored out because
+`demultiplexing` repeats a router body per backend plus once more for the
+catch-all, and three copies of the size-class analyzer would drift.
+*/}}
+{{- define "buildbarn.schedulerRouterTail" -}}
+invocationKeyExtractors: [
+  { correlatedInvocationsId: {} },
+  { toolInvocationId: {} },
+],
+initialSizeClassAnalyzer: {
+  defaultExecutionTimeout: {{ .Values.scheduler.defaultExecutionTimeout | quote }},
+  maximumExecutionTimeout: {{ .Values.scheduler.maximumExecutionTimeout | quote }},
+  {{- if .Values.scheduler.sizeClassAnalysis.enabled }}
+  feedbackDriven: {
+    failureCacheDuration: {{ .Values.scheduler.sizeClassAnalysis.failureCacheDuration | quote }},
+    historySize: {{ .Values.scheduler.sizeClassAnalysis.historySize }},
+    pageRank: {
+      acceptableExecutionTimeIncreaseExponent: {{ .Values.scheduler.sizeClassAnalysis.pageRank.acceptableExecutionTimeIncreaseExponent }},
+      smallerSizeClassExecutionTimeoutMultiplier: {{ .Values.scheduler.sizeClassAnalysis.pageRank.smallerSizeClassExecutionTimeoutMultiplier }},
+      minimumExecutionTimeout: {{ .Values.scheduler.sizeClassAnalysis.pageRank.minimumExecutionTimeout | quote }},
+      maximumConvergenceError: {{ .Values.scheduler.sizeClassAnalysis.pageRank.maximumConvergenceError }},
+    },
+  },
+  {{- end }}
+},
+{{- end -}}
+
+{{/*
+REv2 platform properties, in the order the scheduler demands. platform.NewKey
+REJECTS an unsorted platform with InvalidArgument rather than sorting it, so a
+misordered list stops the scheduler starting; validate.yaml fails the install
+first, and this renders what it validated.
+*/}}
+{{- define "buildbarn.platformProperties" -}}
+properties: [
+  {{- range . }}
+  { name: {{ .name | quote }}, value: {{ .value | quote }} },
+  {{- end }}
+],
+{{- end -}}
+
 {{- define "buildbarn.frontendReadCachingBackend" -}}
 {
   readCaching: {
@@ -759,3 +803,184 @@ in the config editor.
   },
 }
 {{- end }}
+
+{{/*
+In-cluster mutual TLS (security.grpcMtls). Four settings in two protobuf
+messages, rendered from one switch — see the values.yaml block for why.
+
+Every helper here emits jsonnet with no leading indentation and no trailing
+newline, so call sites use `{{ include "..." $ | indent N | trim }}` and stay
+readable in the rendered file.
+*/}}
+
+{{/* The jsonnet expression yielding the CA PEM: an inline string or an importstr. */}}
+{{- define "buildbarn.mtlsCaExpression" -}}
+{{- $m := .Values.security.grpcMtls -}}
+{{- if $m.certificateAuthoritiesFile -}}
+importstr {{ $m.certificateAuthoritiesFile | quote }}
+{{- else -}}
+{{ $m.certificateAuthorities | toJson }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+`tls` for a gRPC CLIENT — the dialling half. Absent when mTLS is off: there is
+no enable flag on tls.ClientConfiguration, the presence of the block IS the
+switch.
+*/}}
+{{- define "buildbarn.mtlsClientTls" -}}
+{{- $m := .Values.security.grpcMtls -}}
+{{- if $m.enabled -}}
+tls: {
+  clientKeyPair: {
+    files: {
+      certificatePath: '{{ $m.mountPath }}/{{ $m.certificatePath }}',
+      privateKeyPath: '{{ $m.mountPath }}/{{ $m.privateKeyPath }}',
+      refreshInterval: {{ $m.refreshInterval | quote }},
+    },
+  },
+  serverCertificateAuthorities: {{ include "buildbarn.mtlsCaExpression" . }},
+  {{- with $m.cipherSuites }}
+  cipherSuites: {{ toJson . }},
+  {{- end }}
+},
+{{- end -}}
+{{- end -}}
+
+{{/*
+`tls` for a gRPC SERVER — the listening half. This alone is ONE-WAY TLS:
+tls.ServerConfiguration carries only serverKeyPair and cipherSuites, so nothing
+here checks the caller. The check is the authenticationPolicy below.
+*/}}
+{{- define "buildbarn.mtlsServerTls" -}}
+{{- $m := .Values.security.grpcMtls -}}
+{{- if $m.enabled -}}
+tls: {
+  serverKeyPair: {
+    files: {
+      certificatePath: '{{ $m.mountPath }}/{{ $m.certificatePath }}',
+      privateKeyPath: '{{ $m.mountPath }}/{{ $m.privateKeyPath }}',
+      refreshInterval: {{ $m.refreshInterval | quote }},
+    },
+  },
+  {{- with $m.cipherSuites }}
+  cipherSuites: {{ toJson . }},
+  {{- end }}
+},
+{{- end -}}
+{{- end -}}
+
+{{/*
+The whole `authenticationPolicy: { ... },` field for one gRPC server entry —
+field name included, so the common `allow` case stays on one line and a
+mutual-TLS policy can span several without the call site caring which.
+
+`compact` picks the one-line `{ allow: {} }` spelling. It exists purely so
+this helper reproduces each file's EXISTING formatting: adopting it must not
+rewrite a ConfigMap, because that would roll every pod on upgrade — and for
+the worker ConfigMap, every operator-managed pool with rolloutOnChange.
+Takes (dict "root" $ "config" <the value block> "path" "<values path, for errors>").
+
+mode "" follows security.grpcMtls: tlsClientCertificate when it is enabled,
+allow when it is not. Naming a mode explicitly overrides that, which is how a
+staged rollout keeps one port open while certificates reach its callers.
+
+`deny` is a STRING in grpc.proto (the message returned), not an empty message —
+unlike the authorizer `deny` used elsewhere in these files.
+*/}}
+{{- define "buildbarn.authenticationPolicy" -}}
+{{- $root := .root -}}
+{{- $cfg := .config -}}
+{{- $path := .path -}}
+{{- $compact := .compact -}}
+{{- $m := $root.Values.security.grpcMtls -}}
+{{- $mode := $cfg.mode -}}
+{{- if not $mode -}}
+{{- $mode = ternary "mtls" "allow" $m.enabled -}}
+{{- end -}}
+{{- if eq $mode "allow" -}}
+{{- if $compact -}}
+authenticationPolicy: { allow: {} },
+{{- else -}}
+authenticationPolicy: {
+  allow: {},
+},
+{{- end -}}
+{{- else if eq $mode "deny" -}}
+{{- if $compact -}}
+authenticationPolicy: { deny: {{ $cfg.denyMessage | default "This endpoint is closed by chart configuration" | quote }} },
+{{- else -}}
+authenticationPolicy: {
+  deny: {{ $cfg.denyMessage | default "This endpoint is closed by chart configuration" | quote }},
+},
+{{- end -}}
+{{- else if eq $mode "mtls" -}}
+{{- if not $m.enabled -}}
+{{- fail (printf "%s.mode=mtls requires security.grpcMtls.enabled=true" $path) -}}
+{{- end -}}
+authenticationPolicy: {
+  tlsClientCertificate: {
+    clientCertificateAuthorities: {{ include "buildbarn.mtlsCaExpression" $root }},
+    validationJmespathExpression: { expression: {{ $m.validationExpression | quote }} },
+    metadataExtractionJmespathExpression: { expression: {{ $m.metadataExtractionExpression | quote }} },
+  },
+},
+{{- else if eq $mode "custom" -}}
+authenticationPolicy: {
+{{ required (printf "%s.custom is required when mode=custom" $path) $cfg.custom | indent 2 }}
+},
+{{- else -}}
+{{- fail (printf "%s.mode must be one of allow, deny, mtls, custom (or \"\" to follow security.grpcMtls)" $path) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+HTTP variant. http.server.AuthenticationPolicy has no tlsClientCertificate arm
+at all, so an admin HTTP port cannot do mutual TLS however the mesh is
+configured; mode "" stays `allow` there even when grpcMtls is on.
+*/}}
+{{- define "buildbarn.httpAuthenticationPolicy" -}}
+{{- $cfg := .config -}}
+{{- $path := .path -}}
+{{- $compact := .compact -}}
+{{- $mode := $cfg.mode | default "allow" -}}
+{{- if eq $mode "allow" -}}
+{{- if $compact -}}
+authenticationPolicy: { allow: {} },
+{{- else -}}
+authenticationPolicy: {
+  allow: {},
+},
+{{- end -}}
+{{- else if eq $mode "deny" -}}
+{{- if $compact -}}
+authenticationPolicy: { deny: {{ $cfg.denyMessage | default "This endpoint is closed by chart configuration" | quote }} },
+{{- else -}}
+authenticationPolicy: {
+  deny: {{ $cfg.denyMessage | default "This endpoint is closed by chart configuration" | quote }},
+},
+{{- end -}}
+{{- else if eq $mode "custom" -}}
+authenticationPolicy: {
+{{ required (printf "%s.custom is required when mode=custom" $path) $cfg.custom | indent 2 }}
+},
+{{- else -}}
+{{- fail (printf "%s.mode must be one of allow, deny, custom — http.server.AuthenticationPolicy has no tlsClientCertificate arm" $path) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "buildbarn.mtlsVolumeMount" -}}
+{{- if .Values.security.grpcMtls.enabled }}
+- name: buildbarn-mtls
+  readOnly: true
+  mountPath: {{ .Values.security.grpcMtls.mountPath | quote }}
+{{- end }}
+{{- end -}}
+
+{{- define "buildbarn.mtlsVolume" -}}
+{{- if .Values.security.grpcMtls.enabled }}
+- name: buildbarn-mtls
+  secret:
+    secretName: {{ required "security.grpcMtls.secretName is required when security.grpcMtls.enabled is true" .Values.security.grpcMtls.secretName | quote }}
+{{- end }}
+{{- end -}}

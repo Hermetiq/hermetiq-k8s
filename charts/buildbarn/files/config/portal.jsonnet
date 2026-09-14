@@ -60,6 +60,9 @@ local common = import 'common.libsonnet';
   schedulerServiceConfiguration: {
     buildQueueStateClient: {
       address: 'scheduler:8984',
+      {{- if .Values.security.grpcMtls.enabled }}
+      {{ include "buildbarn.mtlsClientTls" . | indent 6 | trim }}
+      {{- end }}
     },
     killOperationsAuthorizer: {
       allow: {},

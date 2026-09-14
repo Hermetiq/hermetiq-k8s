@@ -256,3 +256,185 @@ tests:
       - matchRegex:
           path: data["common.libsonnet"]
           pattern: "minimumTimestamp:"
+
+  - it: defaults to a simple action router, unchanged
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'actionRouter: \{\s*simple: \{'
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'demultiplexing'
+
+  # A catch-all needs BOTH halves: a defaultActionRouter to receive the
+  # leftovers AND a static platformKeyExtractor to rewrite them onto a platform
+  # a pool actually advertises. A default route that keeps the `action`
+  # extractor matches them exactly as before and still finds no worker, which
+  # is the shape a first attempt usually takes.
+  - it: renders a catch-all with both halves when demultiplexing
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      scheduler.actionRouter.mode: demultiplexing
+      scheduler.actionRouter.backends:
+        - instanceNamePrefix: ""
+          platform:
+            properties:
+              - name: container-image
+                value: docker://example/ubuntu
+      scheduler.actionRouter.catchAll.platform.properties:
+        - name: container-image
+          value: docker://example/ubuntu
+        - name: pool
+          value: fallback
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'demultiplexing: \{'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'defaultActionRouter: \{'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'static: \{'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: '\{ name: "pool", value: "fallback" \}'
+      # The analyzer still reaches every router body, including the catch-all's.
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'maximumExecutionTimeout: "7200s"'
+
+  - it: splices raw jsonnet for mode custom
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: |
+        remote: { endpoint: { address: 'router:8080' } },
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "remote: \\{ endpoint:"
+
+  # The point of the default: adopting the mTLS block must not rewrite a byte of
+  # anyone's ConfigMap, because that rolls every pod on upgrade — and for the
+  # worker ConfigMap, every operator-managed pool with rolloutOnChange.
+  - it: leaves every in-cluster hop in plaintext by default
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "serverKeyPair"
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "serverKeyPair"
+      - notMatchRegex:
+          path: data["common.libsonnet"]
+          pattern: "storageClientTls"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: 'authenticationPolicy: \{\n      allow: \{\},\n    \},'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "authenticationPolicy: \\{ allow: \\{\\} \\},"
+
+  # mTLS is four settings in two messages. A test that only checks the server
+  # key pair would pass on a config that encrypts nothing the peer verifies.
+  - it: renders both halves of every in-cluster hop when grpcMtls is on
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n"
+      security.grpcMtls.validationExpression: "contains(dnsNames, 'scheduler')"
+    asserts:
+      # Listening half: the key pair, on every port a Buildbarn service dials.
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "serverKeyPair"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "certificatePath: '/etc/buildbarn/mtls/tls.crt'"
+      # Verifying half: tls alone would be one-way TLS, which checks nobody.
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "tlsClientCertificate: \\{"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "contains\\(dnsNames, 'scheduler'\\)"
+      # All four scheduler ports, so a new one cannot be added unprotected.
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?s)8982.*serverKeyPair.*tlsClientCertificate"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?s)8983.*serverKeyPair.*tlsClientCertificate"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?s)8984.*serverKeyPair.*tlsClientCertificate"
+      # Dialling half: one shared local, applied to every storage shard client.
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "local storageClientTls = \\{"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "clientKeyPair"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "\\} \\+ storageClientTls \\} \\},"
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "(?s)address: 'scheduler:8982',.*clientKeyPair"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "(?s)address: 'scheduler:8984',.*clientKeyPair"
+      # The admin port is HTTP; it has no tlsClientCertificate arm to render.
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?s)7982.*authenticationPolicy: \\{ allow: \\{\\} \\},"
+
+  - it: dials the scheduler over mTLS from the worker config too
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-worker-config
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - matchRegex:
+          path: data["worker-common.libsonnet"]
+          pattern: "(?s)address: 'scheduler:8983',.*clientKeyPair"
+      # importstr, not an inlined PEM: read once at process start from the same
+      # Secret that carries the key pair.
+      - matchRegex:
+          path: data["worker-common.libsonnet"]
+          pattern: 'serverCertificateAuthorities: importstr "/etc/buildbarn/mtls/ca.crt"'
+
+  - it: keeps a named mode over the grpcMtls default, for a staged rollout
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n"
+      scheduler.workerGrpcServers.authenticationPolicy.mode: allow
+      storage.grpcServers.authenticationPolicy.mode: deny
+      storage.grpcServers.authenticationPolicy.denyMessage: storage is draining
+    asserts:
+      # Still terminates TLS; just does not demand a client certificate yet.
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?s)8983.*serverKeyPair.*authenticationPolicy: \\{ allow: \\{\\} \\},"
+      # grpc.AuthenticationPolicy.deny is a STRING, unlike the authorizer deny.
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: 'deny: "storage is draining",'

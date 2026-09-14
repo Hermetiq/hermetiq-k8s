@@ -88,6 +88,9 @@ spec:
             - mountPath: /storage-worker-cas
               name: storage-worker-cas
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
+            {{- if .Values.security.grpcMtls.enabled }}
+            {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
+            {{- end }}
         - name: runner
           image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.runnerTestcontainers" "image" .Values.images.runnerTestcontainers.image) | quote }}
           imagePullPolicy: {{ .Values.images.runnerTestcontainers.pullPolicy }}
@@ -265,6 +268,9 @@ spec:
         - name: dind-storage
           emptyDir: {}
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
+        {{- if .Values.security.grpcMtls.enabled }}
+        {{- include "buildbarn.mtlsVolume" . | nindent 8 }}
+        {{- end }}
         - name: configs
           configMap:
             name: {{ include "buildbarn.workerConfigName" . }}

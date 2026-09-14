@@ -53,6 +53,9 @@ local common = import 'common.libsonnet';
     '': {
       endpoint: {
         address: 'scheduler:8982',
+        {{- if .Values.security.grpcMtls.enabled }}
+        {{ include "buildbarn.mtlsClientTls" . | indent 8 | trim }}
+        {{- end }}
         addMetadataJmespathExpression: {
           expression: |||
             {

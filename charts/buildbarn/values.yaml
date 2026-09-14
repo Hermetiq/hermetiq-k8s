@@ -199,6 +199,75 @@ hosts:
 bbcal:
   address: bep-nats-pub.hermetiq.svc.cluster.local:50091
 
+security:
+  # Mutual TLS on the gRPC hops BETWEEN Buildbarn services inside the cluster.
+  #
+  # mTLS is four settings, not one, and they live in two different protobuf
+  # messages. The dialling side needs `tls.clientKeyPair`; the listening side
+  # needs `tls.serverKeyPair`; and because tls.ServerConfiguration has only
+  # serverKeyPair and cipherSuites — there is no client-CA field anywhere in it
+  # — the listening side needs a SEPARATE `authenticationPolicy:
+  # { tlsClientCertificate: ... }` to check who is calling. A server given
+  # `tls` alone does one-way TLS: encrypted, caller never verified.
+  #
+  # This block renders all four, at both ends of every in-cluster hop the chart
+  # generates, from one switch:
+  #   storage   :8981  <- frontend, scheduler, workers, browser, asset, portal
+  #   scheduler :8982  <- frontend
+  #   scheduler :8983  <- workers
+  #   scheduler :8984  <- portal
+  # It does NOT touch the frontend's own :8980, which faces Bazel rather than
+  # another Buildbarn service; that endpoint is normally terminated at the
+  # gateway (see certificate/tls above) and its callers are authenticated by
+  # frontend.jwks.
+  grpcMtls:
+    enabled: false
+    # Key pair every Buildbarn pod presents, as both server and client.
+    # cert-manager's Certificate writes tls.crt / tls.key / ca.crt into one
+    # Secret, which is why the same mount serves all three paths below.
+    #
+    # The certificate must carry a SAN for every in-cluster name the chart
+    # dials, or the peer rejects it by name rather than by CA:
+    #   storage-<i>.storage.<namespace>   for i in 0..storage.replicas-1
+    #   scheduler
+    # A dnsNames list covering those, plus `scheduler.<namespace>.svc` style
+    # aliases if you dial them elsewhere, is enough.
+    secretName: buildbarn-mtls
+    mountPath: /etc/buildbarn/mtls
+    certificatePath: tls.crt
+    privateKeyPath: tls.key
+    # Only the `files` key-pair arm re-reads from disk, and only if this is set.
+    # Without it the process reads the pair once at startup and a rotated
+    # certificate does nothing until the pod restarts.
+    refreshInterval: 20000s
+    # PEM for the CA that signed both ends. Set exactly one of:
+    #   certificateAuthorities      the PEM itself, rendered into the ConfigMap.
+    #                               A CA certificate is public, so this is safe,
+    #                               and it keeps the config evaluable offline.
+    #   certificateAuthoritiesFile  an absolute path read with jsonnet importstr
+    #                               at process start, e.g.
+    #                               /etc/buildbarn/mtls/ca.crt from the Secret
+    #                               above. Read once; rotating the CA needs a
+    #                               restart.
+    certificateAuthorities: ""
+    certificateAuthoritiesFile: ""
+    # JMESPath over the peer's subject alt names — the context is
+    # {dnsNames, emailAddresses, uris}. This is what turns a valid certificate
+    # into an IDENTITY: the default admits every holder of a CA-signed
+    # certificate, so any workload issued a cert by the same CA can impersonate
+    # any Buildbarn service. Narrow it once your SANs are settled, e.g.
+    #   "contains(dnsNames, 'scheduler')"
+    # A failure here returns UNAUTHENTICATED, not PERMISSION_DENIED: this is
+    # authentication, and authorization stays in the authorizer fields.
+    validationExpression: "`true`"
+    # JMESPath producing a buildbarn.auth.AuthenticationMetadata from the same
+    # context. "`{}`" extracts nothing, which is what you want unless an
+    # authorizer downstream reads these attributes.
+    metadataExtractionExpression: "`{}`"
+    # Restricts the TLS 1.2 cipher suites on both halves. Empty keeps the Go
+    # defaults, which is the right answer unless a policy says otherwise.
+    cipherSuites: []
+
 tracing:
   # Enables shared Buildbarn OTel tracing for storage, frontend, scheduler,
   # browser, workers, runners, and the optional remote asset service.
@@ -259,6 +328,16 @@ storage:
   replicas: 3
   # Set to true/false to override serviceAccount.automountServiceAccountToken.
   automountServiceAccountToken: null
+  # Authentication on the storage gRPC port (:8981). Same modes and the same
+  # "" default as the scheduler's ports above — see scheduler.clientGrpcServers.
+  # Every Buildbarn component dials this port, so closing it is the single
+  # largest step in securing the mesh, and the one most likely to strand a
+  # component that has not been given a certificate yet.
+  grpcServers:
+    authenticationPolicy:
+      mode: ""
+      denyMessage: ""
+      custom: ""
   # Mounts secrets.mtlsClientCert into the storage pod. Use together with
   # tracing.enabled + tracing.tls.clientCertificate.enabled for mTLS tracing.
   mtlsClientCert:
@@ -688,8 +767,15 @@ frontend:
       requireCanWriteToCacheExpression: 'authenticationMetadata.private.canWriteToCache == `true`'
   contentAddressableStorage:
     # Server-side cache of FindMissingBlobs results, so repeated overlapping
-    # lookups from one client do not each hit the storage shards. Ignored when
-    # frontend.readCache.enabled=true (that path replaces this decorator).
+    # lookups from one client do not each hit the storage shards.
+    #
+    # It composes WITH frontend.readCache rather than being replaced by it: when
+    # both are on the template nests readCaching INSIDE existenceCaching.
+    # ReadCachingBlobAccess overrides only Get and GetFromComposite and embeds
+    # the slow backend for everything else, so FindMissingBlobs — the call a
+    # Bazel client makes before every upload — would still cross to the shards.
+    # existenceCaching has to sit above it to keep those local. Turning the read
+    # cache on is not a reason to turn this off.
     #
     # DURABILITY COUPLING: this cache remembers that a blob was PRESENT. For up
     # to cacheDuration after a blob actually disappears, the frontend keeps
@@ -859,6 +945,77 @@ scheduler:
   replicas: 1
   # Set to true/false to override serviceAccount.automountServiceAccountToken.
   automountServiceAccountToken: null
+  # Authentication on each of the scheduler's four listening ports.
+  #
+  # mode: allow | deny | mtls | custom, or "" to follow security.grpcMtls —
+  # tlsClientCertificate when it is enabled, allow when it is not. Naming a
+  # mode explicitly is how a staged rollout keeps one port open while
+  # certificates reach its callers: turn on security.grpcMtls, then set
+  # workerGrpcServers.authenticationPolicy.mode=allow until every worker pool
+  # presents one.
+  #
+  # These ports carry no user identity — a worker dialling the scheduler has no
+  # token to present — so a service certificate is the only credential
+  # available here. That is what mtls mode is for, and it is why the
+  # "internal ports must stay open" rule of a JWT rollout does not apply.
+  #
+  # deny takes a MESSAGE string (grpc.AuthenticationPolicy.deny is a string,
+  # unlike the authorizer deny used elsewhere); custom splices raw jsonnet.
+  clientGrpcServers:
+    authenticationPolicy:
+      mode: ""
+      denyMessage: ""
+      custom: ""
+  workerGrpcServers:
+    authenticationPolicy:
+      mode: ""
+      denyMessage: ""
+      custom: ""
+  buildQueueStateGrpcServers:
+    authenticationPolicy:
+      mode: ""
+      denyMessage: ""
+      custom: ""
+  # The admin port is HTTP, not gRPC. http.server.AuthenticationPolicy has no
+  # tlsClientCertificate arm at all, so this one cannot do mutual TLS however
+  # security.grpcMtls is configured: allow | deny | custom only.
+  adminHttpServers:
+    authenticationPolicy:
+      mode: allow
+      denyMessage: ""
+      custom: ""
+  # How the scheduler decides which queue an action joins.
+  #
+  #   simple          (default) route on the platform the client requested.
+  #   demultiplexing  serve `backends` explicitly and send everything else to
+  #                   `catchAll` — a fallback pool for actions whose platform
+  #                   matches no worker. Platform matching is exact string
+  #                   equality with no fallback of its own, so this is the only
+  #                   way to serve an unmatched action rather than failing it.
+  #   custom          splice raw jsonnet from actionRouter.custom.
+  #
+  # Two costs before enabling demultiplexing. Every platform you want to keep
+  # FAILING must be listed in `backends`, or a typo'd exec_properties key stops
+  # erroring and silently runs in the catch-all pool instead. And the action
+  # cache keeps the platform the CLIENT asked for, so the catch-all shares no
+  # cached results between the platforms it absorbs.
+  actionRouter:
+    mode: simple
+    # Platforms served explicitly. Properties MUST be sorted by name then value
+    # — the scheduler rejects an unsorted platform rather than sorting it, and
+    # validate.yaml fails the install before it can.
+    backends: []
+    #   - instanceNamePrefix: ""
+    #     platform:
+    #       properties:
+    #         - name: container-image
+    #           value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+    # The platform unmatched actions are rewritten onto. A worker pool must
+    # advertise exactly this, or the catch-all queues work nothing serves.
+    catchAll:
+      platform:
+        properties: []
+    custom: ""
   defaultExecutionTimeout: 1800s
   maximumExecutionTimeout: 7200s
   platformQueueWithNoWorkersTimeout: 900s
@@ -1151,6 +1308,23 @@ workerUbuntu2204:
       enabled: false
       bloomFilterBitsPerPath: 14
       bloomFilterMaximumSizeBytes: 65536
+    # sizeClass: <n>   — NOT set by default, and deliberately absent rather
+    # than pinned to 0. This whole `config` block is passed to the worker
+    # jsonnet with toJson, so any key you add here reaches it; adding
+    # `sizeClass: 0` as a default would rewrite the worker ConfigMap for every
+    # existing deployment and roll every worker pool for no behaviour change.
+    #
+    # It is bb_worker RunnerConfiguration.size_class, the key the Initial Size
+    # Class Cache routes on when one platform is served by several pools of
+    # different capacity. The worker jsonnet omits it unless it is present and
+    # non-zero, so setting it is purely additive.
+    #
+    # Set it only alongside scheduler.sizeClassAnalysis.enabled and a
+    # scheduler.predeclaredPlatformQueues entry whose platform matches this
+    # pool's platformProperties and whose sizeClasses list contains the value.
+    # docs/iscc-size-classes.md walks the same setup through the
+    # bb-worker-operator (spec.config.generated.sizeClass on an RbeWorker);
+    # this is the chart-managed equivalent.
     concurrency: 11
     platformProperties:
       - name: container-image
@@ -1291,6 +1465,23 @@ workerTestcontainers:
       enabled: false
       bloomFilterBitsPerPath: 14
       bloomFilterMaximumSizeBytes: 65536
+    # sizeClass: <n>   — NOT set by default, and deliberately absent rather
+    # than pinned to 0. This whole `config` block is passed to the worker
+    # jsonnet with toJson, so any key you add here reaches it; adding
+    # `sizeClass: 0` as a default would rewrite the worker ConfigMap for every
+    # existing deployment and roll every worker pool for no behaviour change.
+    #
+    # It is bb_worker RunnerConfiguration.size_class, the key the Initial Size
+    # Class Cache routes on when one platform is served by several pools of
+    # different capacity. The worker jsonnet omits it unless it is present and
+    # non-zero, so setting it is purely additive.
+    #
+    # Set it only alongside scheduler.sizeClassAnalysis.enabled and a
+    # scheduler.predeclaredPlatformQueues entry whose platform matches this
+    # pool's platformProperties and whose sizeClasses list contains the value.
+    # docs/iscc-size-classes.md walks the same setup through the
+    # bb-worker-operator (spec.config.generated.sizeClass on an RbeWorker);
+    # this is the chart-managed equivalent.
     # Conservative starting point: each concurrent action can spawn multiple
     # test containers (Postgres, Redis, Kafka, ...). Raise after measuring
     # pod memory usage under a representative test load.
@@ -1474,6 +1665,23 @@ workerTestcontainersSysbox:
       enabled: false
       bloomFilterBitsPerPath: 14
       bloomFilterMaximumSizeBytes: 65536
+    # sizeClass: <n>   — NOT set by default, and deliberately absent rather
+    # than pinned to 0. This whole `config` block is passed to the worker
+    # jsonnet with toJson, so any key you add here reaches it; adding
+    # `sizeClass: 0` as a default would rewrite the worker ConfigMap for every
+    # existing deployment and roll every worker pool for no behaviour change.
+    #
+    # It is bb_worker RunnerConfiguration.size_class, the key the Initial Size
+    # Class Cache routes on when one platform is served by several pools of
+    # different capacity. The worker jsonnet omits it unless it is present and
+    # non-zero, so setting it is purely additive.
+    #
+    # Set it only alongside scheduler.sizeClassAnalysis.enabled and a
+    # scheduler.predeclaredPlatformQueues entry whose platform matches this
+    # pool's platformProperties and whose sizeClasses list contains the value.
+    # docs/iscc-size-classes.md walks the same setup through the
+    # bb-worker-operator (spec.config.generated.sizeClass on an RbeWorker);
+    # this is the chart-managed equivalent.
     concurrency: 2
     platformProperties:
       - name: pool
