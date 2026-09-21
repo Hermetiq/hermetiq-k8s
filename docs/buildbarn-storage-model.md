@@ -184,10 +184,10 @@ frontend:
     blocksSizeGi: 30
     volume:
       emptyDir:
-        sizeLimit: 50Gi
+        sizeLimit: 40Gi
   resources:
     requests:
-      ephemeral-storage: 50Gi   # what sizeLimit allows, not what blocksSizeGi uses
+      ephemeral-storage: 40Gi   # what sizeLimit allows, not what blocksSizeGi uses
 ```
 
 Two things follow from setting it. The scheduler stops co-locating replicas that cannot both fit, which is the spreading `preferred` anti-affinity does not guarantee. And node-level ephemeral-storage eviction ranks pods by usage relative to their request, so a pod with no request ranks worst — the read cache is the last pod you want evicted under disk pressure. Note also that nothing validates `blocksSizeGi` against the bounding volume here the way `storage.persistence` is checked, so keeping `blocksSizeGi` below `sizeLimit` is on you.
