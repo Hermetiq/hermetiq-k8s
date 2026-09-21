@@ -805,14 +805,33 @@ frontend:
     # `executeAuthorizer: { ... }`.
     custom: ""
     requireCanWriteToCacheExpression: 'authenticationMetadata.private.canWriteToCache == `true`'
+  # A per-replica read-through cache in front of the shard ring. Volatile and
+  # non-authoritative: every Put still goes to the shards, only Get is served
+  # locally, and each replica warms its own. See the README's "Frontend Read
+  # Cache" section before changing any number here -- block size is a
+  # correctness setting, not a tuning one.
   readCache:
     enabled: false
     mountPath: /storage-frontend-cas
+    # 64 bytes of frontend heap each. This default is sized for a STORAGE pod
+    # (1.3 GiB) and is almost never right here. It must scale with blocksSizeGi:
+    #   live capacity    = blocksSizeGi * (old+current+new) / (old+current+new+spare)
+    #   objects that fit = live capacity / mean size of a blob entering the cache
+    #   entries          = 2 to 10 * objects that fit
+    # Raise blocksSizeGi without raising this and the map fills before the disk
+    # does -- blobs on disk the index can no longer reach, visible as
+    # buildbarn_blobstore_hashing_key_location_map_*_too_many_* going nonzero.
     keyLocationMapInMemoryEntries: 20971520
+    # Total bytes across ALL blocks below, so block size is
+    # blocksSizeGi / (old+current+new+spare). A blob larger than one block fails
+    # the build rather than just missing the cache. Must also stay below whatever
+    # bounds the volume (volume.emptyDir.sizeLimit); nothing validates that here.
     blocksSizeGi: 250
     oldBlocks: 8
     currentBlocks: 24
     newBlocks: 3
+    # Spare blocks hold no data, so they add no capacity -- but they still divide
+    # blocksSizeGi, so they shrink the block size too.
     spareBlocks: 3
     # Objects read out of a block device are checksummed end to end on every
     # read by default; this caches that verdict so a cache hit does not pay for
@@ -820,6 +839,21 @@ frontend:
     dataIntegrityValidationCache:
       cacheSize: 100000
       cacheDuration: 14400s
+    # emptyDir draws from the node's allocatable ephemeral-storage (the kubelet
+    # root filesystem). Which disk that is comes from the node pool: a GKE pool
+    # created with --ephemeral-storage-local-ssd puts the kubelet root on a
+    # local-SSD RAID, so the cache gets NVMe with no opt-in here. Raw
+    # --local-nvme-ssd-block devices do NOT back emptyDir.
+    #
+    # emptyDir.sizeLimit is NOT a scheduling input -- kube-scheduler reads only
+    # resources.requests.ephemeral-storage, and frontend.podAntiAffinity is only
+    # "preferred", so replicas can share a node. Set
+    # frontend.resources.requests.ephemeral-storage to match sizeLimit whenever
+    # this is enabled, or the first symptom of overcommit is eviction rather than
+    # a Pending pod.
+    #
+    # hostPath survives a pod restart on the same node but escapes sizeLimit
+    # entirely, leaving the node's eviction thresholds as the only ceiling.
     volume:
       emptyDir: {}
       hostPath:
