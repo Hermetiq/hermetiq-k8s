@@ -17,7 +17,7 @@ spec:
         PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       platformProperties:
         - name: container-image
-          value: docker://gcr.io/envoy-ci/envoy-build@sha256:1714d9c81bd61b493f24ae796b74db685f34cebdff6c3bb27c0cac6c683df66a
+          value: docker://gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43
         - name: dockerAddCapabilities
           value: SYS_PTRACE,NET_RAW,NET_ADMIN
         - name: dockerNetwork
@@ -40,7 +40,7 @@ spec:
         maximumFilePoolSizeBytes: 25769803776 # 24 GiB
     rolloutOnChange: true
   images:
-    runner: gcr.io/envoy-ci/envoy-build@sha256:1714d9c81bd61b493f24ae796b74db685f34cebdff6c3bb27c0cac6c683df66a
+    runner: gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43
     runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
     volumeInit: busybox:1.31.1-uclibc
     worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
