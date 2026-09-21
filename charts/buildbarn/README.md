@@ -37,6 +37,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Frontend Authentication And Writes](#frontend-authentication-and-writes)
   - [Reads are open by design](#reads-are-open-by-design)
   - [CAS read efficiency](#cas-read-efficiency)
+- [Frontend Read Cache](#frontend-read-cache)
 - [JWKS ConfigMap Management](#jwks-configmap-management)
 - [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
 - [Frontend Autoscaling](#frontend-autoscaling)
@@ -1048,6 +1049,123 @@ CI that reads without a token all lose access at the same moment.
   them.
 - `supportedCompressors: ['ZSTD']` is advertised.
 - Action Cache `GetActionResult` and `UpdateActionResult` can add digest trace attributes through `frontend.tracingAttributes.actionCacheDigests.enabled`.
+- Sizing the read cache itself is below, under [Frontend Read Cache](#frontend-read-cache).
+
+## Frontend Read Cache
+
+`frontend.readCache.enabled` gives each frontend replica a `local` block store in
+front of the shard ring, so a repeated `Get` is served from the pod's own disk
+instead of crossing to storage. The cache is volatile and per-replica: it holds no
+authoritative copy, every `Put` still goes straight to the shards, and each replica
+warms its own copy. Losing it costs latency, never data.
+
+The reasoning behind every number below — why the block size is a correctness
+setting rather than a tuning one, and what an undersized key-location map looks
+like — is in
+[storage model and sizing](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md).
+Read it before changing `blocksSizeGi`. What follows is the operational checklist.
+
+### Where the volume lives
+
+`volume.emptyDir` is the default and draws from the node's allocatable
+`ephemeral-storage`, which is the kubelet root filesystem. Which disk that is comes
+from the node pool, not from the chart:
+
+| node pool | `emptyDir` lands on |
+|---|---|
+| plain boot disk | the boot disk, shared with container images, writable layers and logs |
+| GKE `--ephemeral-storage-local-ssd count=N` | a RAID-0 of the local SSDs — no opt-in needed from the workload |
+| GKE `--local-nvme-ssd-block count=N` | **not** the local SSDs; those are raw devices for the storage tier's `backend: blockDevice` |
+
+`volume.hostPath` is the alternative when you want the cache to survive a pod
+restart on the same node. It escapes `sizeLimit` entirely, so the node's own
+eviction thresholds become the only ceiling.
+
+### Always set an ephemeral-storage request
+
+`emptyDir.sizeLimit` is **not** a scheduling input. `kube-scheduler` reads only
+`resources.requests.ephemeral-storage`, and `frontend.podAntiAffinity` renders
+`preferredDuringScheduling` — so without a request, replicas can be co-located on a
+node with no room and the first symptom is kubelet evicting them, not a Pending pod.
+
+```yaml
+frontend:
+  replicas: 2
+  readCache:
+    enabled: true
+    blocksSizeGi: 30
+    keyLocationMapInMemoryEntries: 4194304
+    volume:
+      emptyDir:
+        sizeLimit: 40Gi
+  resources:
+    requests:
+      cpu: "1"
+      memory: 5Gi
+      # Match volume.emptyDir.sizeLimit: what the pod is allowed to consume,
+      # not what blocksSizeGi actually uses. Without this the scheduler cannot
+      # see the cache at all, and node-level eviction ranks a pod with no
+      # ephemeral-storage request worst of all.
+      ephemeral-storage: 40Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+  nodeSelector:
+    node-type: ssd16
+```
+
+Nothing validates `blocksSizeGi` against the bounding volume for the read cache the
+way `storage.persistence` sizes are checked, so keep `blocksSizeGi` below
+`sizeLimit` yourself.
+
+### Sizing the key-location map
+
+`keyLocationMapInMemoryEntries` and `blocksSizeGi` are separate values that nothing
+relates to each other, and raising the disk alone silently caps the cache — the map
+fills before the blocks do, and inserts start failing while the disk still has room.
+The chart default of `20971520` entries is 1.3 GiB of frontend heap, sized for a
+storage pod; it is almost never the right value here.
+
+```text
+live capacity    = blocksSizeGi * (old + current + new) / (old + current + new + spare)
+objects that fit = live capacity / mean size of a blob that enters the cache
+entries          = 2 to 10 * objects that fit        (64 bytes each, frontend heap)
+```
+
+Spare blocks hold no data, so they do not add capacity — but they still divide the
+block size, shrinking both numbers at once. With the defaults' `8 + 24 + 3 + 3`
+layout and `blocksSizeGi: 30`, live capacity is `30 * 35/38 = 27.6 GiB`; at a 20 KB
+mean that is ~1.4M objects, so `4194304` entries (256 MiB) sits at about 3x.
+
+### Verifying it
+
+After the first real build, three things confirm the sizing:
+
+```text
+buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
+buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+```
+
+Any sustained nonzero rate means the map is too small for the live object count —
+go up a power of two. The probe budgets that produce it are rendered into the
+config as `keyLocationMapMaximumGetAttempts: 16` and
+`keyLocationMapMaximumPutAttempts: 64`.
+
+Then confirm the block clears your largest blob, scoping the histogram by **both**
+`pod` and `backend_type`. Every worker runs its own `readCaching` local CAS, so an
+unscoped query reports the worker's blobs rather than the frontend's:
+
+```text
+histogram_quantile(1.0, sum by (le) (rate(
+  buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket{
+    pod=~"frontend.*", backend_type="read_caching"
+  }[7d])))
+```
+
+Use `sum by (le)`, not `max by (le)` — a max across heterogeneous series is not a
+distribution. The `backend_type` label names each decorator in the stack, so the
+whole chain is observable and you can check you are reading the intended one:
+`deadline_enforcing, existence_caching, read_caching, local_block_device, sharding, grpc`.
 
 ## JWKS ConfigMap Management
 

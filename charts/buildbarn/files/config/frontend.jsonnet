@@ -76,7 +76,15 @@ local common = import 'common.libsonnet';
          embeds the slow backend for everything else, so FindMissingBlobs —
          the most frequent CAS call a Bazel client makes, before every upload —
          still crosses to the shards. existenceCaching has to sit above it to
-         keep those local.  */}}
+         keep those local.
+
+         The fast tier itself is rendered by buildbarn.frontendReadCachingBackend
+         in _helpers.tpl. Its sizing is coupled in two directions that nothing
+         validates: blocksSizeGi divided by the block counts must exceed the
+         largest blob the frontend moves (a bigger blob fails the build, it does
+         not just miss), and keyLocationMapInMemoryEntries must scale with
+         blocksSizeGi or the map caps the cache below its disk. See the README's
+         "Frontend Read Cache" section.  */}}
     {{- $readCache := .Values.frontend.readCache.enabled }}
     {{- $existenceCache := .Values.frontend.contentAddressableStorage.existenceCaching.enabled }}
     {{- if and $readCache $existenceCache }}

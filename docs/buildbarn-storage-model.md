@@ -146,7 +146,7 @@ The sizing consequence is simple: CAS retention should comfortably exceed AC ret
 
 `frontend.readCache.enabled` puts a `readCaching` backend in front of the shard ring: a `local` block store on the frontend pod's own disk, with the sharded backend as the slow tier and a deduplicating replicator that collapses concurrent misses for the same blob into one copy.
 
-Three properties decide how you size it.
+Four properties decide how you size it.
 
 **Writes are never cached.** Only `Get` and `GetFromComposite` consult the fast tier. Every `Put` goes straight to the shards, so the cache does nothing for upload-heavy workloads and its capacity is sized against the *read* working set.
 
@@ -160,17 +160,49 @@ block size = blocksSizeGi / (spareBlocks + oldBlocks + currentBlocks + newBlocks
 
 A blob larger than one block cannot be stored in the cache at all, and the failure does not stay inside the cache. The fast `Put` fails with `InvalidArgument`, the replicator wraps it as `Replication failed`, and that error rides back on the buffer the client is already reading — so an undersized cache turns a miss on a large blob into a **failed build**, not a slow read. There is no way to route large blobs around it; the `size_distinguishing` backend that once did this was removed from Buildbarn.
 
-Size the block above the largest blob the frontend actually moves, measured from its own histogram:
+Size the block above the largest blob the frontend actually moves, measured from its own histogram — and scope the query, because every worker runs its own `readCaching` local CAS and an unscoped query reports the worker's blobs, not the frontend's:
 
 ```text
-histogram_quantile(1.0, sum by (le) (rate(buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket[7d])))
+histogram_quantile(1.0, sum by (le) (rate(
+  buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket{
+    pod=~"frontend.*", backend_type="read_caching"
+  }[7d])))
 ```
+
+Both filters matter, and so does `sum by (le)` rather than `max by (le)` — a max across heterogeneous series is not a distribution. The `backend_type` label names each decorator in the stack, so the chain is directly observable and you can confirm you are reading the right one: `deadline_enforcing, existence_caching, read_caching, local_block_device, sharding, grpc`.
 
 The chart defaults give `250 / (3 + 8 + 24 + 3) = 6.5 GiB` per block, which clears any realistic Bazel output. Shrink `blocksSizeGi` and the block shrinks with it.
 
+**The fast tier is node ephemeral storage, and the scheduler does not know it exists.** `volume.emptyDir` is the default, and an `emptyDir` draws from the node's allocatable `ephemeral-storage`, which is the kubelet root filesystem. Where that physically lands is a property of the node pool, not of the workload: on a GKE pool created with `--ephemeral-storage-local-ssd count=N` the kubelet root is a RAID-0 of the local SSDs, so the cache gets NVMe with no opt-in from the chart at all. A pool whose local SSDs are attached raw (`--local-nvme-ssd-block`) does **not** back `emptyDir`; those devices exist for the storage tier's `backend: blockDevice`.
+
+The trap is that `emptyDir.sizeLimit` is not a scheduling input. `kube-scheduler` reads only `resources.requests.ephemeral-storage`, so with no request the frontend is placed on any node that satisfies CPU and memory and the cache's disk claim stays invisible until kubelet evicts the pod — for exceeding `sizeLimit`, or for crossing the node's eviction threshold. `frontend.podAntiAffinity` renders `preferredDuringScheduling`, so replicas may share a node and the real claim is `replicas x sizeLimit` against one kubelet root. Set the request to match the limit whenever the read cache is on:
+
+```yaml
+frontend:
+  readCache:
+    enabled: true
+    blocksSizeGi: 30
+    volume:
+      emptyDir:
+        sizeLimit: 40Gi
+  resources:
+    requests:
+      ephemeral-storage: 40Gi   # what sizeLimit allows, not what blocksSizeGi uses
+```
+
+Two things follow from setting it. The scheduler stops co-locating replicas that cannot both fit, which is the spreading `preferred` anti-affinity does not guarantee. And node-level ephemeral-storage eviction ranks pods by usage relative to their request, so a pod with no request ranks worst — the read cache is the last pod you want evicted under disk pressure. Note also that nothing validates `blocksSizeGi` against the bounding volume here the way `storage.persistence` is checked, so keeping `blocksSizeGi` below `sizeLimit` is on you.
+
 Two more settings that are easy to copy wrongly from the storage tier:
 
-- `keyLocationMapInMemoryEntries` is resident memory on the **frontend** pod at 64 bytes per entry — the chart default of 20971520 is about 1.3 GiB — and it should be sized against what fits in *this* cache (2 to 10 times the object count), not copied from the storage tier's value.
+- `keyLocationMapInMemoryEntries` is resident memory on the **frontend** pod at 64 bytes per entry — the chart default of 20971520 is about 1.3 GiB — and it should be sized against what fits in *this* cache, not copied from the storage tier's value. [Do not grow disk without growing the map](#what-an-undersized-map-looks-like) applies here exactly as it does to a shard, and the read cache makes it unusually easy to violate, because `blocksSizeGi` and the map are separate values that nothing relates to each other:
+
+  ```text
+  live capacity    = blocksSizeGi * (old + current + new) / (old + current + new + spare)
+  objects that fit = live capacity / mean size of a blob that enters the cache
+  entries          = 2 to 10 * objects that fit
+  ```
+
+  Spare blocks hold no data, so they do not count toward capacity — but they still divide the block size, so they shrink both numbers at once. And the mean size of a blob that *enters* the cache is not the mean size of a blob that is *requested*: the first is what the replicator actually copied, and it is the one this formula wants. Raise `blocksSizeGi` without raising `entries` and the map fills before the disk does, which is the `TooManyAttempts` failure above — blobs on disk that the index can no longer reach.
 - `dataIntegrityValidationCache` is on by default here for a reason: a file-backed fast tier re-checksums every object on every read without it, which is exactly the cost the cache exists to avoid.
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
