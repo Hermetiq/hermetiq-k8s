@@ -19,6 +19,10 @@ annotations:
       description: "Document what rbac.rules.rbeWorkers grants and what it costs to turn off: the list_rbe_workers and get_rbe_worker tools report not_permitted rather than failing, and nothing else degrades"
     - kind: fixed
       description: "Resync the bundled PromQL queries with the ones the bep-nats binary ships: the chart was pinning an older schedulerCompletedByCode that dropped the result label, and because the ConfigMap overlays the binary's defaults that stale query won even on an updated image"
+    - kind: added
+      description: "Add api.mcpExposeUserIdentities (default false) to control whether the MCP server exposes developer names and emails; it sets MCP_EXPOSE_USER_IDENTITIES on the api Deployment, and an explicit api.env.MCP_EXPOSE_USER_IDENTITIES overrides it without a duplicate entry"
+    - kind: fixed
+      description: "Stop enabling MCP on the publisher Deployment: it set MCP_ENABLED=true plus MCP resource and proto-intel settings, starting an MCP server that no Service port or route reaches, since MCP is served only by the api Deployment"
 keywords:
   - hermetiq
   - MCP
