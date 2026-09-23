@@ -5,13 +5,15 @@ type: application
 home: https://www.hermetiq.com
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.1
-appVersion: "v0.3.1"
+version: 0.3.2
+appVersion: "v0.3.2"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: Initial release
+    - kind: changed
+      description: Updated the default operator image to v0.3.2, built with Go 1.27.1 and Kubernetes v0.37 dependencies.
+    - kind: changed
+      description: Refreshed the RbeWorker CRD with the Kubernetes 1.37 Pod and volume schemas.
 keywords:
   - buildbarn
   - bazel
