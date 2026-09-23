@@ -22,11 +22,11 @@ supported full-stack deployment order.
 
 ```bash
 helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.1 | kubectl apply --server-side -f -
+  --version 0.3.2 | kubectl apply --server-side -f -
 
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.1 \
+  --version 0.3.2 \
   --values bb-worker-operator-values.yaml
 ```
 
@@ -71,6 +71,11 @@ For upgrades, manage CRD changes as an explicit step. Helm installs CRDs from
 `crds/`, but it does not upgrade or delete them during `helm upgrade`. Apply
 updated CRDs intentionally before applying any `RbeWorker` custom resources that
 depend on the new schema.
+
+Release 0.3.2 refreshes the embedded Kubernetes Pod and volume schemas in the
+`RbeWorker` CRD for the operator's Kubernetes v0.37 dependencies. Apply the
+0.3.2 CRD before upgrading the operator image, using the `helm show crds`
+command in [Install](#install).
 
 Do not move the CRD into `templates/` just to make it appear in default
 `helm template` output. Keeping CRDs in `crds/` preserves Helm's install-order
