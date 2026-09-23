@@ -124,7 +124,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
-          value: "https://mcp.ci.hermetiq.test,https://api.ci.hermetiq.test"
+          value: "https://mcp.ci.hermetiq.test,https://mcp.ci.hermetiq.test/mcp,https://api.ci.hermetiq.test"
         template: templates/deployment-api.yaml
       - notExists:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE_CLIENT_ID")]
@@ -144,12 +144,40 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
-          value: "https://mcp.ci.hermetiq.test,$(GRPC_AUTH_AUDIENCE_CLIENT_ID)"
+          value: "https://mcp.ci.hermetiq.test,https://mcp.ci.hermetiq.test/mcp,$(GRPC_AUTH_AUDIENCE_CLIENT_ID)"
         template: templates/deployment-api.yaml
       - equal:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE_CLIENT_ID")].valueFrom.secretKeyRef.key
           value: OAUTH2_PROXY_CLIENT_ID
         template: templates/deployment-api.yaml
+
+  # The MCP server serves the origin and <origin>/mcp as separate protected
+  # resources; the /mcp one is joined without a double slash, and a pinned
+  # origin reaches the server verbatim.
+  - it: accepts both MCP resources for a trailing-slash origin
+    set:
+      api.jwt.enabled: true
+      api.jwt.audience: https://api.ci.hermetiq.test
+      api.mcpResourceUrl: https://mcp.ci.hermetiq.test/
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: "https://mcp.ci.hermetiq.test/,https://mcp.ci.hermetiq.test/mcp,https://api.ci.hermetiq.test"
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_RESOURCE_METADATA_URL")].value
+          value: https://mcp.ci.hermetiq.test/
+        template: templates/deployment-api.yaml
+
+  # mcpResourceUrl is the origin the server derives /mcp from; with /mcp in it
+  # the server advertises .../mcp/mcp and a challenge URL it does not serve.
+  - it: rejects an mcpResourceUrl with an endpoint path
+    template: templates/validate.yaml
+    set:
+      api.mcpResourceUrl: https://mcp.ci.hermetiq.test/mcp
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.mcpResourceUrl must be the MCP origin"
 
   - it: derives the api core JWKS source and issuer from the OIDC provider
     set:

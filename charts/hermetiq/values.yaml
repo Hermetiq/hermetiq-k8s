@@ -22,22 +22,22 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.0"
+    apiTag: "v0.9.2"
     apiDigest: ""
-    pubTag: "v0.9.0"
+    pubTag: "v0.9.2"
     pubDigest: ""
-    subTag: "v0.9.0"
+    subTag: "v0.9.2"
     subDigest: ""
-    bootstrapTag: "v0.9.0"
+    bootstrapTag: "v0.9.2"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.0"
+    tag: "v0.9.2"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.0"
+    tag: "v0.9.2"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
@@ -960,6 +960,10 @@ api:
     audience: ""
     groupsClaim: hermetiq/roles
     nameClaim: name
+  # MCP origin, advertised as the root protected resource. Leave empty to
+  # derive https://<hosts.mcp>. Do not include /mcp: the server derives the
+  # <origin>/mcp resource itself and the chart accepts tokens for both. Point
+  # MCP clients and the IdP API identifier at https://<hosts.mcp>/mcp.
   mcpResourceUrl: ""
   # Authorization server advertised in the MCP protected-resource metadata
   # (authorization_servers). Leave empty to derive it from the OIDC issuer

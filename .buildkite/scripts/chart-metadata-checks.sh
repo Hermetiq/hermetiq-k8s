@@ -99,7 +99,9 @@ verify_readme_versions() {
   fi
 
   bundle_version="$(awk -F'|' -v expected="${BUNDLE_LABEL}" '
-    NF >= 4 {
+    /^## Supported chart bundle[[:space:]]*$/ { in_bundle = 1; next }
+    in_bundle && /^##[[:space:]]/ { exit }
+    in_bundle && NF >= 4 {
       label = $2
       gsub(/^[[:space:]]+/, "", label)
       gsub(/[[:space:]]+$/, "", label)

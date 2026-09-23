@@ -11,6 +11,8 @@ appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Update the optional grpc-cache-proxy sidecar image to v0.9.2"
     - kind: added
       description: "Add optional KEDA autoscaling for the Buildbarn frontend based on gRPC concurrency, CPU, and memory"
     - kind: changed

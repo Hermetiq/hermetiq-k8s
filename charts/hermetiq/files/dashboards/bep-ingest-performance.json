@@ -69,7 +69,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (project) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", subject=~\"bep_[^.]+[.](build_tool|progress_v2)\", status=\"success\"}[$__rate_interval]))",
+              "expr": "sum by (project) (rate(hermetiq_publish_total{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", subject=~\"[^.]+[.](build_tool|progress_v2)\", status=\"success\"}[$__rate_interval]))",
               "legendFormat": "published {{project}}",
               "range": true,
               "refId": "A"
@@ -80,7 +80,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (project) (rate(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval]))",
+              "expr": "sum by (project) (rate(hermetiq_events_total{project=~\"${project_regex:raw}\", event_type=~\"${event_type_regex:raw}\", event_type!=\"bbcal\"}[$__rate_interval]))",
               "legendFormat": "decoded {{project}}",
               "range": true,
               "refId": "B"
@@ -88,7 +88,7 @@
           ],
           "title": "BEP Publish vs Decode Rate",
           "type": "timeseries",
-          "description": "Compares only build-tool/progress messages accepted by JetStream with subscriber-decoded Bazel events. Decoded events intentionally exclude stream-control envelopes, so this is not a direct database write-rate comparison. Treat only sustained separation accompanied by Durable Pending / Ack-Pending growth as subscriber backlog."
+          "description": "Compares only build-tool/progress messages accepted by JetStream with subscriber-decoded Bazel events; BBCAL and cache-pipeline traffic are excluded. Decoded events intentionally exclude stream-control envelopes, so this is not a direct database write-rate comparison. Treat only sustained separation accompanied by Durable Pending / Ack-Pending growth as subscriber backlog."
         },
         {
           "datasource": {
@@ -253,7 +253,7 @@
       ],
       "title": "Overview",
       "type": "row",
-      "description": "Top-level BEP ingest health across the selected filters: JetStream acceptance, subscriber processing, queue/process latency, and broad error rates."
+      "description": "Top-level BEP ingest health across the selected filters: JetStream acceptance, subscriber processing, queue/process latency, and broad error rates. Latency percentiles require observations: quiet windows can be blank while throughput is zero. Error and retry series may not exist until the first event, so an empty error panel alone does not prove telemetry is healthy."
     },
     {
       "collapsed": true,
@@ -360,7 +360,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{project}} {{subject}}",
               "range": true,
               "refId": "B"
@@ -368,7 +368,7 @@
           ],
           "title": "Publish Duration Percentiles",
           "type": "timeseries",
-          "description": "Duration of a single JetStream publish attempt, excluding retry loops. p95 uses a 5m window for stable tails; p50 uses the dashboard rate interval for responsiveness."
+          "description": "Duration of a single JetStream publish attempt, excluding retry loops. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -418,7 +418,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_request_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_request_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "request p50 {{project}} {{subject}}",
               "range": true,
               "refId": "B"
@@ -426,7 +426,7 @@
           ],
           "title": "Publish Request Percentiles",
           "type": "timeseries",
-          "description": "End-to-end logical publish request duration, including retry time and duplicate-in-progress retry loops. This is broader than Publish Duration and closer to publish-side client delay."
+          "description": "End-to-end logical publish request duration, including retry time and duplicate-in-progress retry loops. This is broader than Publish Duration and closer to publish-side client delay. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -628,7 +628,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_async_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (project, subject, le) (rate(hermetiq_publish_async_ack_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "settlement p50 {{project}} {{subject}}",
               "range": true,
               "refId": "B"
@@ -636,7 +636,7 @@
           ],
           "title": "JetStream Publish Settlement Percentiles",
           "type": "timeseries",
-          "description": "Time from async JetStream publish enqueue until the application observer records an ack, error, or local safety timeout. Settlement is observed independently of FIFO gRPC response ordering; compare with gRPC Response Percentiles to identify ordering/send delay. Error series can include an unknown outcome when the NATS client never settles a future. Historical samples before this instrumentation change included FIFO observation delay."
+          "description": "Time from async JetStream publish enqueue until the application observer records an ack, error, or local safety timeout. Settlement is observed independently of FIFO gRPC response ordering; compare with gRPC Response Percentiles to identify ordering/send delay. Error series can include an unknown outcome when the NATS client never settles a future. Historical samples before this instrumentation change included FIFO observation delay. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -1139,7 +1139,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (project, outcome, le) (rate(hermetiq_bep_invocation_start_direct_write_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (project, outcome, le) (rate(hermetiq_bep_invocation_start_direct_write_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{project}} {{outcome}}",
               "range": true,
               "refId": "A"
@@ -1169,7 +1169,7 @@
           ],
           "title": "Direct Invocation Start SQL Latency",
           "type": "timeseries",
-          "description": "Publisher-side latency of actual direct invocation-start SQL attempts. Saturated requests are excluded because they never enter the database; correlate latency errors with the outcome-rate panel to see JetStream fallbacks."
+          "description": "Publisher-side latency of actual direct invocation-start SQL attempts. Saturated requests are excluded because they never enter the database; correlate latency errors with the outcome-rate panel to see JetStream fallbacks. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         }
       ],
       "title": "Publisher",
@@ -1281,7 +1281,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_fetch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_fetch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -1289,7 +1289,7 @@
           ],
           "title": "Fetch Request Duration Percentiles",
           "type": "timeseries",
-          "description": "Duration of the JetStream Fetch call that creates an asynchronous MessageBatch. This does not include waiting for that batch's message channel to fill or expire; that delivery wait is included in Batch Drain and Dispatch Duration."
+          "description": "Duration of the JetStream Fetch call that creates an asynchronous MessageBatch. This does not include waiting for that batch's message channel to fill or expire; that delivery wait is included in Batch Drain and Dispatch Duration. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -1339,7 +1339,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -1347,7 +1347,7 @@
           ],
           "title": "Batch Drain and Dispatch Duration",
           "type": "timeseries",
-          "description": "On the pipelined path, time spent draining the asynchronous JetStream MessageBatch channel, parsing messages, and dispatching worker shards. It includes waiting until the pull fills or expires but excludes worker store/ACK time; a high value with low pod CPU can therefore mean delivery starvation rather than parser saturation."
+          "description": "On the pipelined path, time spent draining the asynchronous JetStream MessageBatch channel, parsing messages, and dispatching worker shards. It includes waiting until the pull fills or expires but excludes worker store/ACK time; a high value with low pod CPU can therefore mean delivery starvation rather than parser saturation. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -1397,7 +1397,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_messages_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_batch_messages_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -1405,7 +1405,7 @@
           ],
           "title": "Batch Size Percentiles",
           "type": "timeseries",
-          "description": "Distribution of message counts returned in each consumer batch. Low batch size during high load can indicate fetch limits, partition skew, or insufficient available messages."
+          "description": "Distribution of message counts returned in each consumer batch. Low batch size during high load can indicate fetch limits, partition skew, or insufficient available messages. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -1615,7 +1615,7 @@
           ],
           "title": "Lifecycle Queue Tail (15m)",
           "type": "timeseries",
-          "description": "Lifecycle-only first-delivery queue latency over a 15m rolling window. Redeliveries and unlabeled legacy samples are excluded so this stays focused on user-visible start freshness."
+          "description": "Lifecycle-only first-delivery queue latency over a 15m rolling window. Redeliveries and unlabeled legacy samples are excluded so this stays focused on user-visible start freshness. This panel is expected to be empty when INVOCATION_START_EVENT=build_tool routes lifecycle events through the build-tool stream; use Build-Tool / Progress Queue Tail and Direct Invocation Start panels in that mode."
         },
         {
           "datasource": {
@@ -1720,7 +1720,7 @@
           ],
           "title": "Lifecycle Start Wait Outcomes",
           "type": "timeseries",
-          "description": "Rate of build-tool/progress batches that waited for lifecycle-start visibility, grouped by outcome and message-count bucket. Spikes here explain invocation_start_time_unavailable retry pressure."
+          "description": "Rate of build-tool/progress batches that waited for lifecycle-start visibility, grouped by outcome and message-count bucket. Spikes here explain invocation_start_time_unavailable retry pressure. This metric is recorded only when an invocation start is unavailable; no series is expected if that wait path has not run."
         },
         {
           "datasource": {
@@ -1778,7 +1778,7 @@
           ],
           "title": "Lifecycle Start Wait Duration",
           "type": "timeseries",
-          "description": "Tail duration spent waiting for lifecycle-start visibility before retrying build-tool/progress events in memory."
+          "description": "Tail duration spent waiting for lifecycle-start visibility before retrying build-tool/progress events in memory. This metric is recorded only when an invocation start is unavailable; no series is expected if that wait path has not run."
         },
         {
           "datasource": {
@@ -1828,7 +1828,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, message_count_bucket, le) (rate(hermetiq_consumer_worker_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, message_count_bucket, le) (rate(hermetiq_consumer_worker_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\"}[5m])))",
               "legendFormat": "p50 {{consumer_type}} {{message_count_bucket}}",
               "range": true,
               "refId": "B"
@@ -1836,7 +1836,7 @@
           ],
           "title": "Worker Batch Duration",
           "type": "timeseries",
-          "description": "Duration to store and ACK one in-process worker shard, grouped by consumer type and batch-size bucket. Use this when queue latency rises without matching store-duration movement."
+          "description": "Duration to store and ACK one in-process worker shard, grouped by consumer type and batch-size bucket. Use this when queue latency rises without matching store-duration movement. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -2049,7 +2049,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_queue_residence_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_queue_residence_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -2057,7 +2057,7 @@
           ],
           "title": "Queue Residence Percentiles",
           "type": "timeseries",
-          "description": "Time a message waits in its worker queue between enqueue and dequeue. It must stay well below the durable's configured AckWait; residence approaching AckWait precedes lease expiry. Cross-check current NumAckPending first, then Current Redelivery Pressure for evidence of repeated deliveries."
+          "description": "Time a message waits in its worker queue between enqueue and dequeue. It must stay well below the durable's configured AckWait; residence approaching AckWait precedes lease expiry. Cross-check current NumAckPending first, then Current Redelivery Pressure for evidence of repeated deliveries. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -2716,7 +2716,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (path, event_type, le) (rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (path, event_type, le) (rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{path}} {{event_type}}",
               "range": true,
               "refId": "B"
@@ -2724,7 +2724,7 @@
           ],
           "title": "Store Duration Percentiles",
           "type": "timeseries",
-          "description": "Duration of event-store operations by write path and event type. Use with Store Operation Rate to separate frequent write paths from slow ones."
+          "description": "Duration of event-store operations by write path and event type. Use with Store Operation Rate to separate frequent write paths from slow ones. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -2832,7 +2832,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (event_type, le) (rate(hermetiq_bulk_flush_duration_seconds_bucket{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (event_type, le) (rate(hermetiq_bulk_flush_duration_seconds_bucket{event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{event_type}}",
               "range": true,
               "refId": "B"
@@ -2840,7 +2840,7 @@
           ],
           "title": "Bulk Flush Duration Percentiles",
           "type": "timeseries",
-          "description": "Duration of bulk SQL flushes by event type. Tail spikes here identify database batch commit/write latency, separate from per-event store duration."
+          "description": "Duration of bulk SQL flushes by event type. Tail spikes here identify database batch commit/write latency, separate from per-event store duration. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -2937,7 +2937,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (project, result, le) (rate(hermetiq_build_metrics_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (project, result, le) (rate(hermetiq_build_metrics_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{project}} {{result}}",
               "range": true,
               "refId": "B"
@@ -2945,7 +2945,7 @@
           ],
           "title": "BuildMetrics Duration",
           "type": "timeseries",
-          "description": "Duration of BuildMetrics persistence by project and result. Result labels show inserted, skipped, or error outcomes."
+          "description": "Duration of BuildMetrics persistence by project and result. Result labels show inserted, skipped, or error outcomes. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -3200,7 +3200,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "BES upload lag per project: attempt_finish_time (lifecycle InvocationAttemptFinished, emitted after the BES upload drains) minus finish_time (BuildFinished, the actual build end). Measures how long Bazel clients wait on BEP upload after the build completes.",
+          "description": "Currently unavailable: BES upload-lag recording is deferred in event_store.go and RecordBesUploadLag has no call sites. Empty data is expected until instrumentation is implemented. The intended metric is attempt_finish_time minus finish_time, measuring client upload drain after build completion.",
           "fieldConfig": {
             "defaults": {
               "unit": "s"
@@ -3250,7 +3250,7 @@
               "refId": "B"
             }
           ],
-          "title": "BES Upload Lag Percentiles",
+          "title": "BES Upload Lag Percentiles (Not Emitted)",
           "type": "timeseries"
         },
         {
@@ -3290,7 +3290,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[5m])))",
               "legendFormat": "p95 events {{consumer_type}}",
               "range": true,
               "refId": "A"
@@ -3301,7 +3301,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_events_bucket[5m])))",
               "legendFormat": "p50 events {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -3309,7 +3309,7 @@
           ],
           "title": "Coalesced Store Batch Size",
           "type": "timeseries",
-          "description": "Events per coalesced StoreEvents call — the SQL density the coalescer exists to create. Healthy is near the delivered pull size up to storeBatchMaxEvents; worker-shard-sized values mean no cross-worker coalescing is happening (check Batch Requests)."
+          "description": "Events per coalesced StoreEvents call — the SQL density the coalescer exists to create. Healthy is near the delivered pull size up to storeBatchMaxEvents; worker-shard-sized values mean no cross-worker coalescing is happening (check Batch Requests). All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -3348,7 +3348,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[5m])))",
               "legendFormat": "p95 requests {{consumer_type}}",
               "range": true,
               "refId": "A"
@@ -3359,7 +3359,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_requests_bucket[5m])))",
               "legendFormat": "p50 requests {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -3389,7 +3389,7 @@
           ],
           "title": "Coalesced Store Batch Requests",
           "type": "timeseries",
-          "description": "Complete worker requests combined per store call — p50 above 1 proves cross-worker coalescing. Flushes/s by reason shows whether the event cap or the age cap drives flushing; non-success covers panic and result_mismatch outcomes and should be flat zero."
+          "description": "Complete worker requests combined per store call — p50 above 1 proves cross-worker coalescing. Flushes/s by reason shows whether the event cap or the age cap drives flushing; non-success covers panic and result_mismatch outcomes and should be flat zero. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -3428,7 +3428,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[5m])))",
               "legendFormat": "p95 {{consumer_type}}",
               "range": true,
               "refId": "A"
@@ -3439,7 +3439,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_wait_duration_seconds_bucket[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -3447,7 +3447,7 @@
           ],
           "title": "Coalesced Store Batch Wait",
           "type": "timeseries",
-          "description": "Age of the oldest worker request when its store call begins, including time queued for a flush lane. Sustained growth means the lanes are saturated: raise storeBatchParallelism or lower storeBatchMaxEvents."
+          "description": "Age of the oldest worker request when its store call begins, including time queued for a flush lane. Sustained growth means the lanes are saturated: raise storeBatchParallelism or lower storeBatchMaxEvents. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         },
         {
           "datasource": {
@@ -3486,7 +3486,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[5m])))",
               "legendFormat": "p95 {{consumer_type}}",
               "range": true,
               "refId": "A"
@@ -3497,7 +3497,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (consumer_type, le) (rate(hermetiq_consumer_store_batch_duration_seconds_bucket[5m])))",
               "legendFormat": "p50 {{consumer_type}}",
               "range": true,
               "refId": "B"
@@ -3505,7 +3505,7 @@
           ],
           "title": "Coalesced Store Batch Duration",
           "type": "timeseries",
-          "description": "Duration of the coalesced StoreEvents call. Read together with Batch Size: duration scaling linearly with events means per-row cost dominates at this batch size and bigger batches buy nothing — prefer more lanes over a higher event cap."
+          "description": "Duration of the coalesced StoreEvents call. Read together with Batch Size: duration scaling linearly with events means per-row cost dominates at this batch size and bigger batches buy nothing — prefer more lanes over a higher event cap. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         }
       ],
       "title": "Store and Persistence",
@@ -3895,9 +3895,9 @@
               "refId": "A"
             }
           ],
-          "title": "Log Compression Outcomes",
+          "title": "Log Compression Outcomes (Legacy)",
           "type": "timeseries",
-          "description": "Log compression operation outcomes by trigger source and status. Sources include finish-triggered, ticker, or consumer paths where present."
+          "description": "Legacy metric: current bep-nats code no longer emits log-compression metrics, so this panel is only useful for historical deployments. Use Progress Chunk Writer Depth, Buffered Bytes, Flush Outcomes, and Flush Duration for the current blob-backed progress path."
         },
         {
           "datasource": {
@@ -3947,15 +3947,15 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (source, le) (rate(hermetiq_log_compress_duration_seconds_bucket{project=~\"${project_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (source, le) (rate(hermetiq_log_compress_duration_seconds_bucket{project=~\"${project_regex:raw}\", status=~\"${status_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{source}}",
               "range": true,
               "refId": "B"
             }
           ],
-          "title": "Log Compression Duration",
+          "title": "Log Compression Duration (Legacy)",
           "type": "timeseries",
-          "description": "Duration of completed log compression attempts by source. Queueing and noop outcomes may appear in the outcome count without duration samples."
+          "description": "Legacy metric: current bep-nats code no longer emits log-compression metrics, so this panel is only useful for historical deployments. Use Progress Chunk Writer Depth, Buffered Bytes, Flush Outcomes, and Flush Duration for the current blob-backed progress path."
         },
         {
           "datasource": {
@@ -4179,7 +4179,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (outcome, le) (rate(hermetiq_progress_chunk_flush_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (outcome, le) (rate(hermetiq_progress_chunk_flush_duration_seconds_bucket{project=~\"${project_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{outcome}}",
               "range": true,
               "refId": "B"
@@ -4187,7 +4187,7 @@
           ],
           "title": "Progress Chunk Flush Duration",
           "type": "timeseries",
-          "description": "Duration of asynchronous blob upload or fallback handling by outcome. Blob I/O is intentionally off the JetStream ACK path, so increasing duration matters when upload queue depth, buffered bytes, or spill/drop outcomes rise with it."
+          "description": "Duration of asynchronous blob upload or fallback handling by outcome. Blob I/O is intentionally off the JetStream ACK path, so increasing duration matters when upload queue depth, buffered bytes, or spill/drop outcomes rise with it. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry."
         }
       ],
       "title": "Background Work",
@@ -4241,7 +4241,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "hermetiq_db_partition_future_coverage_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 86400",
+              "expr": "min by (\"k8s.cluster.uid\", \"k8s.namespace.name\", database, parent_table) (hermetiq_db_partition_future_coverage_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}) / 86400",
               "legendFormat": "{{database}} {{parent_table}} coverage",
               "range": true,
               "refId": "A"
@@ -4252,7 +4252,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "hermetiq_db_partition_future_coverage_threshold_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 86400",
+              "expr": "max by (\"k8s.cluster.uid\", \"k8s.namespace.name\", database, parent_table) (hermetiq_db_partition_future_coverage_threshold_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}) / 86400",
               "legendFormat": "{{database}} {{parent_table}} threshold",
               "range": true,
               "refId": "B"
@@ -4260,7 +4260,7 @@
           ],
           "title": "DB Partition Future Coverage",
           "type": "timeseries",
-          "description": "Future partition coverage per table in days, computed from the latest child partition upper bound minus monitor time. The threshold series comes from `DB_PARTITION_MONITOR_MIN_FUTURE_COVERAGE`."
+          "description": "Future partition coverage per table in days, computed from the latest child partition upper bound minus monitor time. The threshold series comes from `DB_PARTITION_MONITOR_MIN_FUTURE_COVERAGE`. Replica observations are consolidated per cluster, namespace, database, and table: minimum coverage/future count and maximum threshold/overdue age/aged-out count preserve the least healthy reported value."
         },
         {
           "datasource": {
@@ -4299,7 +4299,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "hermetiq_db_partition_available_future_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}",
+              "expr": "min by (\"k8s.cluster.uid\", \"k8s.namespace.name\", database, parent_table) (hermetiq_db_partition_available_future_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"})",
               "legendFormat": "{{database}} {{parent_table}}",
               "range": true,
               "refId": "A"
@@ -4307,7 +4307,7 @@
           ],
           "title": "DB Partition Future Partitions",
           "type": "timeseries",
-          "description": "Count of child partitions whose lower bound is in the future, by database and parent table. Drops toward zero mean premake maintenance is falling behind."
+          "description": "Count of child partitions whose lower bound is in the future, by database and parent table. Drops toward zero mean premake maintenance is falling behind. Replica observations are consolidated per cluster, namespace, database, and table: minimum coverage/future count and maximum threshold/overdue age/aged-out count preserve the least healthy reported value."
         },
         {
           "datasource": {
@@ -4371,7 +4371,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "hermetiq_db_partition_aged_out_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}",
+              "expr": "max by (\"k8s.cluster.uid\", \"k8s.namespace.name\", database, parent_table) (hermetiq_db_partition_aged_out_partitions{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"})",
               "instant": false,
               "legendFormat": "{{database}} {{parent_table}}",
               "range": true,
@@ -4380,7 +4380,7 @@
           ],
           "title": "Aged-Out DB Partitions",
           "type": "stat",
-          "description": "Partitions older than retention plus grace that still exist, by database and parent table. Nonzero means partition cleanup failed or is delayed."
+          "description": "Partitions older than retention plus grace that still exist, by database and parent table. Nonzero means partition cleanup failed or is delayed. Replica observations are consolidated per cluster, namespace, database, and table: minimum coverage/future count and maximum threshold/overdue age/aged-out count preserve the least healthy reported value."
         },
         {
           "datasource": {
@@ -4419,7 +4419,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "hermetiq_db_partition_oldest_aged_out_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"} / 3600",
+              "expr": "max by (\"k8s.cluster.uid\", \"k8s.namespace.name\", database, parent_table) (hermetiq_db_partition_oldest_aged_out_seconds{database=~\"${database_regex:raw}\", parent_table=~\"${parent_table_regex:raw}\"}) / 3600",
               "legendFormat": "{{database}} {{parent_table}}",
               "range": true,
               "refId": "A"
@@ -4427,7 +4427,7 @@
           ],
           "title": "Oldest Aged-Out Partition Overdue",
           "type": "timeseries",
-          "description": "How long the oldest undeleted aged-out partition is overdue beyond retention plus grace, in hours. Zero means no aged-out partitions remain."
+          "description": "How long the oldest undeleted aged-out partition is overdue beyond retention plus grace, in hours. Zero means no aged-out partitions remain. Replica observations are consolidated per cluster, namespace, database, and table: minimum coverage/future count and maximum threshold/overdue age/aged-out count preserve the least healthy reported value."
         }
       ],
       "title": "DB Partition Health",
@@ -4498,9 +4498,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", delivery_bucket=\"1\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_bep_queue_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", delivery_bucket=\"1\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4508,7 +4508,7 @@
           ],
           "title": "Queue Latency Heatmap",
           "type": "heatmap",
-          "description": "Raw first-delivery queue-latency histogram buckets. Redeliveries and unlabeled legacy samples are excluded so this heatmap reflects healthy-path queue age."
+          "description": "Raw first-delivery queue-latency histogram buckets. Redeliveries and unlabeled legacy samples are excluded so this heatmap reflects healthy-path queue age. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter."
         },
         {
           "datasource": {
@@ -4564,9 +4564,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_bep_process_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_bep_process_latency_bucket{project=~\"${project_regex:raw}\", stream=~\"${stream_regex:raw}\", consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", event_type=~\"${event_type_regex:raw}\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4574,7 +4574,7 @@
           ],
           "title": "Process Latency Heatmap",
           "type": "heatmap",
-          "description": "Raw process-latency histogram buckets for selected streams and event types. Useful when p95 is unstable and you need to see where observations land."
+          "description": "Raw process-latency histogram buckets for selected streams and event types. Useful when p95 is unstable and you need to see where observations land. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter."
         },
         {
           "datasource": {
@@ -4630,9 +4630,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_publish_duration_seconds_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4640,7 +4640,7 @@
           ],
           "title": "Publish Duration Heatmap",
           "type": "heatmap",
-          "description": "Raw JetStream publish-duration histogram buckets for selected subjects and statuses. This shows single publish-attempt latency distribution."
+          "description": "Raw JetStream publish-duration histogram buckets for selected subjects and statuses. This shows single publish-attempt latency distribution. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter."
         },
         {
           "datasource": {
@@ -4696,9 +4696,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_consumer_batch_duration_seconds_bucket{consumer_type=~\"${consumer_type_regex:raw}\", consumer_type!=\"raw_archive\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4706,7 +4706,7 @@
           ],
           "title": "Consumer Batch Duration Heatmap",
           "type": "heatmap",
-          "description": "Raw consumer batch-duration histogram buckets. Use this to verify whether batch p95 comes from a broad tail or a small number of high-bucket samples."
+          "description": "Raw consumer batch-duration histogram buckets. Use this to verify whether batch p95 comes from a broad tail or a small number of high-bucket samples. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter."
         },
         {
           "datasource": {
@@ -4762,9 +4762,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_bep_store_duration_seconds_bucket{project=~\"${project_regex:raw}\", path=~\"${path_regex:raw}\", event_type=~\"${event_type_regex:raw}\", status=~\"${status_regex:raw}\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4772,14 +4772,14 @@
           ],
           "title": "Store Duration Heatmap",
           "type": "heatmap",
-          "description": "Raw event-store duration histogram buckets for selected write paths and event types. Useful for distinguishing DB write tail shape from quantile artifacts."
+          "description": "Raw event-store duration histogram buckets for selected write paths and event types. Useful for distinguishing DB write tail shape from quantile artifacts. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter."
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Distribution of outgoing NATS message sizes, recorded once per message before any retry. Use it with JetStream Publish Settlement Percentiles to test whether a heavy payload tail correlates with higher replication latency.",
+          "description": "Distribution of outgoing NATS message sizes, recorded once per message before any retry. Use it with JetStream Publish Settlement Percentiles to test whether a heavy payload tail correlates with higher replication latency. Query steps use the normal dashboard resolution so rate windows overlap. Zero-valued cumulative buckets are retained for histogram conversion; empty cells are hidden by the heatmap display filter.",
           "fieldConfig": {
             "defaults": {},
             "overrides": []
@@ -4829,9 +4829,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval])) by (le) > 0",
+              "expr": "sum(rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval])) by (le)",
               "format": "heatmap",
-              "intervalFactor": 10,
+              "intervalFactor": 1,
               "legendFormat": "{{le}}",
               "range": true,
               "refId": "A"
@@ -4845,7 +4845,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Payload size split by subject kind, so build_tool can be compared directly against progress on the same partition. Grouped by subject only so the comparison stays readable. p99/p95 use a 5m window for stable tails; p50 uses the dashboard rate interval.",
+          "description": "Payload size split by subject kind, so build_tool can be compared directly against progress on the same partition. Grouped by subject only so the comparison stays readable. All percentiles use the same 5m observation window. Gaps mean no observations in that window or unavailable telemetry.",
           "fieldConfig": {
             "defaults": {
               "unit": "bytes"
@@ -4900,7 +4900,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile(0.50, sum by (subject, le) (rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (subject, le) (rate(hermetiq_publish_payload_bytes_bucket{project=~\"${project_regex:raw}\", subject=~\"${subject_regex:raw}\"}[5m])))",
               "legendFormat": "p50 {{subject}}",
               "range": true,
               "refId": "C"
@@ -4930,7 +4930,7 @@
       {
         "current": {
           "text": "VictoriaMetrics",
-          "value": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          "value": "P4169E866C3094E38"
         },
         "includeAll": false,
         "label": "Data source",

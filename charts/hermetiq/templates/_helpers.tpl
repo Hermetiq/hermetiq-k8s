@@ -180,6 +180,14 @@ imagePullSecrets:
 {{- default (printf "https://%s" (include "hermetiq-core.mcpHost" .)) .Values.api.mcpResourceUrl -}}
 {{- end -}}
 
+{{/* The MCP endpoint URL clients connect to: the <origin>/mcp protected
+     resource the server advertises, and the identifier the IdP API should use.
+     Every client sends it identically, while a bare origin goes out with or
+     without a trailing slash depending on the client. */}}
+{{- define "hermetiq-core.mcpEndpointUrl" -}}
+{{- printf "%s/mcp" (trimSuffix "/" (include "hermetiq-core.mcpResourceUrl" .)) -}}
+{{- end -}}
+
 {{/* MCP authorization server advertised in the protected-resource metadata.
      Explicit api.mcpAuthorizationServer wins; otherwise derived from the OIDC
      issuer with any trailing slash stripped (the MCP server appends

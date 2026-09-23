@@ -10,7 +10,7 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
   Grafana:    https://{{ include "hermetiq-core.grafanaHost" . }}
 {{- end }}
   API web:    https://{{ include "hermetiq-core.apiHost" . }}{{ .Values.gateway.routes.apiWebPathPrefix }}
-  MCP:        https://{{ include "hermetiq-core.mcpHost" . }}{{ .Values.gateway.routes.mcpPathPrefix }}
+  MCP:        {{ include "hermetiq-core.mcpEndpointUrl" . }}
   API gRPC:   grpcs://{{ include "hermetiq-core.apiGrpcHost" . }}
   BEP gRPC:   grpcs://{{ include "hermetiq-core.bepGrpcHost" . }}
 {{- if .Values.gateway.routes.bbcalGrpcEnabled }}
