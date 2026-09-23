@@ -157,3 +157,8 @@
 {{- if and .Values.license.fingerprintOverride (not (regexMatch "^[a-f0-9]{64}$" .Values.license.fingerprintOverride)) -}}
 {{- fail "license.fingerprintOverride must be 64 lowercase sha256 hex characters" -}}
 {{- end -}}
+{{- with .Values.api.mcpResourceUrl -}}
+{{- if not (has (urlParse .).path (list "" "/")) -}}
+{{- fail (printf "api.mcpResourceUrl must be the MCP origin, e.g. https://mcp.example.com (got %q): the server derives the /mcp resource from it, so a path here produces .../mcp/mcp metadata. Leave it unset and point MCP clients and the IdP API identifier at https://<mcp host>/mcp" .) -}}
+{{- end -}}
+{{- end -}}

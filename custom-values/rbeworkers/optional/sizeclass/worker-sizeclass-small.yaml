@@ -24,7 +24,7 @@ spec:
       projectID: "0"
       metricName: worker_sizeclass_small_active_or_queued_tasks
       sizeClass: "1"
-      threshold: "4" # matches concurrency
+      threshold: "16" # matches concurrency
   config:
     generated:
       commonConfigMapName: buildbarn-worker-config
@@ -33,7 +33,7 @@ spec:
         - name: pool
           value: sizeclass
       sizeClass: 1
-      concurrency: 4
+      concurrency: 16
       inputDownloadConcurrency: 9
       outputUploadConcurrency: 11
       environmentVariables: {}

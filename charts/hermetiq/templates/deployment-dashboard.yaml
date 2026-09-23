@@ -175,7 +175,7 @@ spec:
             - name: REACT_APP_GOOGLE_FORM_ID
               value: "1FAIpQLScrlDAO1bwLiZpsXsGLcK5CJUXZsmqEHXiORJ_vLaAYc4s79g"
             - name: REACT_APP_HMQ_MCP_SERVER_URL
-              value: {{ printf "https://%s" (include "hermetiq-core.mcpHost" .) | quote }}
+              value: {{ include "hermetiq-core.mcpEndpointUrl" . | quote }}
             {{- if .Values.dashboard.oauth2Proxy.backendLogoutUrl }}
             - name: REACT_APP_OAUTH2_LOGOUT_REDIRECT_URL
               value: {{ .Values.dashboard.oauth2Proxy.backendLogoutUrl | quote }}

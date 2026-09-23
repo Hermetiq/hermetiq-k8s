@@ -184,6 +184,13 @@ spec:
               value: "true"
             - name: MCP_RESOURCE_METADATA_URL
               value: {{ include "hermetiq-core.mcpResourceUrl" . | quote }}
+            {{- if not (hasKey .Values.api.env "MCP_BUILD_DETAILS_URL") }}
+            # Base of the build links MCP tools and prompts return
+            # (<base>/<invocation id>): this install's dashboard, not the
+            # Hermetiq Cloud default baked into the binary.
+            - name: MCP_BUILD_DETAILS_URL
+              value: {{ printf "%s/build" (include "hermetiq-core.dashboardUrl" .) | quote }}
+            {{- end }}
             {{- with (include "hermetiq-core.mcpAuthorizationServer" .) }}
             # Authorization server advertised in the protected-resource metadata.
             # On-prem has no STYTCH_API_HOST fallback, so this must be set for
@@ -213,7 +220,7 @@ spec:
             - name: GRPC_AUTH_ISSUER
               value: {{ . | quote }}
             {{- end }}
-            {{- $audiences := list (include "hermetiq-core.mcpResourceUrl" .) }}
+            {{- $audiences := list (include "hermetiq-core.mcpResourceUrl" .) (include "hermetiq-core.mcpEndpointUrl" .) }}
             {{- if .Values.api.jwt.audience }}
             {{- $audiences = append $audiences .Values.api.jwt.audience }}
             {{- end }}
@@ -236,7 +243,8 @@ spec:
             # (RFC 8707, derived from mcpResourceUrl / hosts.mcp, with
             # trailing-slash differences normalized during verification), and
             # the gRPC API, whose audience is api.jwt.audience or the
-            # oauth2-proxy client ID above.
+            # oauth2-proxy client ID above. The MCP server serves two protected
+            # resources, the origin and <origin>/mcp, so both are listed.
             - name: GRPC_AUTH_AUDIENCE
               value: {{ join "," $audiences | quote }}
             {{- if .Values.api.jwt.groupsClaim }}

@@ -5,8 +5,8 @@ type: application
 home: https://www.hermetiq.com
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.0
-appVersion: "0.9.0"
+version: 0.9.1
+appVersion: "0.9.2"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
@@ -23,6 +23,10 @@ annotations:
       description: "Add api.mcpExposeUserIdentities (default false) to control whether the MCP server exposes developer names and emails; it sets MCP_EXPOSE_USER_IDENTITIES on the api Deployment, and an explicit api.env.MCP_EXPOSE_USER_IDENTITIES overrides it without a duplicate entry"
     - kind: fixed
       description: "Stop enabling MCP on the publisher Deployment: it set MCP_ENABLED=true plus MCP resource and proto-intel settings, starting an MCP server that no Service port or route reaches, since MCP is served only by the api Deployment"
+    - kind: fixed
+      description: "Accept MCP tokens issued for the <origin>/mcp resource as well as the origin, and reject an api.mcpResourceUrl that includes a path (with /mcp in it the server advertised .../mcp/mcp metadata and a 401 challenge URL it does not serve). The install notes, the dashboard Quickstart, and the Auth0 runbook now use https://mcp.<domain>/mcp, the one resource URL every MCP client sends identically"
+    - kind: fixed
+      description: "Point the build links MCP tools and prompts return at this install's dashboard (MCP_BUILD_DETAILS_URL defaults to <dashboard URL>/build) instead of Hermetiq Cloud's; an explicit api.env.MCP_BUILD_DETAILS_URL overrides it without a duplicate entry"
 keywords:
   - hermetiq
   - MCP

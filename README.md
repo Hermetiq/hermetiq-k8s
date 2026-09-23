@@ -52,137 +52,52 @@ configuration.
 
 ### Hermetiq chart
 
-Hermetiq turns Bazel's Build Event Protocol into answers: why this build was
-slow, what missed the cache, which test is flaky, what remote execution cost.
-This chart runs all of it in your cluster.
+Understand slow builds, cache misses, flaky tests, and remote execution costs
+with Bazel analytics running in your own cluster.
 
-- **From `helm install` to first insight in one sitting.** One release brings
-  up the gRPC and REST API, the dashboard, the BEP publisher, partitioned
-  subscribers, the MCP server, schema bootstrap, and maintenance CronJobs,
-  already wired together. The dashboard's Quickstart page then hands your
-  developers the exact Bazel flags, with the credential-helper step
-  customizable for your environment.
-- **Every remote action, not just every build.** Buildbarn workers stream each
-  completed action to Hermetiq through the Completed Action Logger, and
-  Hermetiq joins it to the invocation that requested it. You get per-action
-  queue, input-fetch, execution, and output-upload timing, worker and platform
-  attribution, and the command that ran, grouped and trended over time, so a
-  slow remote build points at the action, the worker pool, or the scheduler
-  queue that caused it instead of a wall-clock guess.
-- **Ingest that shrugs at your busiest CI hour.** Partitioned NATS JetStream
-  streams with one subscriber Deployment per partition spread the load while
-  keeping every build's events in order. A dead-letter queue quarantines
-  poison events instead of stalling the pipeline, the publisher can autoscale,
-  and anti-affinity plus PodDisruptionBudgets are on by default so a node
-  drain never drops a BEP stream mid-build. Raw BEP export to a bucket is one
-  flag away.
-- **A database that maintains itself.** Schema migrations run as a Helm hook
-  before workloads roll forward, so an upgrade never races its own schema.
-  `pg_partman` time partitioning prunes queries to the days they ask about and
-  drops aged data instantly, and CronJobs keep partitions and trend views
-  ahead of incoming data. Per-project progress-log storage can stream build
-  stdout and stderr to GCS or Azure Blob through GKE, AKS, or IRSA workload
-  identity, so the hottest table never balloons and log retention becomes a
-  bucket lifecycle rule.
-- **Set one issuer URL and every login just works.** `oidc.issuerUrl` drives
-  dashboard SSO, JWT validation on the API, and JWKS machine-to-machine auth
-  for Bazel uploads. Admins come from a group claim or an email allowlist, and
-  Grafana and Buildbarn Browser ride the same session, so people sign in once.
-- **Ask your build cluster questions in plain English.** The built-in MCP server
-  lets Claude and other assistants register themselves through OAuth Dynamic
-  Client Registration, then dig into build and invocation analytics, diagnose
-  Buildbarn health from PromQL, discover what is deployed through the
-  Kubernetes API, inspect proto intelligence, and price remote execution with
-  OpenCost.
-- **Try it before anyone talks to sales.** Provide a contact email and a
-  30-day trial is issued on first boot, fully functional from the first pod.
-  Paid keys drop into a Secret and are picked up in about two minutes with no
-  rollout, and fully air-gapped clusters verify an offline license file with
-  zero network calls.
-- **Speaks your ingress dialect.** Envoy Gateway with `GRPCRoute`, GKE Gateway
-  with `HTTPRoute`, Contour `HTTPProxy`, classic Ingress, or bring your own.
-  Stream timeouts come pre-tuned so BES uploads finish instead of failing in
-  the last second of an otherwise green build, with health-check policies,
-  CORS, and Envoy client-traffic tuning for teams half a world from the
-  cluster.
-- **Thirteen Grafana dashboards on day one.** BEP ingest, query and SQL
-  performance, NATS, JetStream, Dragonfly, and six Buildbarn dashboards ship
-  as ConfigMaps that the Grafana sidecar imports automatically, alongside
-  VMPodScrapes for NATS and Dragonfly and OTLP metrics export with optional
-  mTLS.
-- **Fails fast in `helm template`, not at 2 a.m.** Non-root containers with
-  read-only root filesystems, dropped capabilities, and seccomp by default.
-  Per-workload ServiceAccount token control and individually gated RBAC rules
-  give your security review something to say yes to. Externally managed
-  ConfigMaps carry rollout checksums for GitOps, and render-time validation
-  refuses inconsistent auth, routing, or licensing values with a message that
-  names the fix.
+- **Find the action behind a slow build.** Connect completed remote actions to
+  their invocations, with queue, input-fetch, execution, and upload timings
+  broken down by worker and platform.
+- **Investigate with AI.** The built-in MCP server lets assistants explore build
+  analytics, diagnose Buildbarn health, inspect Kubernetes deployments, and
+  analyze remote execution costs through OpenCost.
+- **Keep ingestion moving through CI peaks.** Partitioned NATS JetStream streams
+  distribute load while preserving each build's event order. Publisher
+  autoscaling and a dead-letter queue help handle spikes and isolate bad events.
+- **Automate routine data maintenance.** Helm hooks run schema migrations;
+  scheduled jobs maintain partitions, retention, and trend views. Optional
+  object storage keeps build logs out of the database.
+- **Connect your existing identity provider.** Shared OIDC configuration powers
+  dashboard SSO and authenticated Bazel uploads, with group-based admin access
+  and shared sessions for Grafana and Buildbarn Browser.
+- **Bring the analytics stack online together.** One Helm release wires the API,
+  dashboard, ingestion pipeline, and MCP server, with tailored Bazel setup
+  instructions and bundled Grafana dashboards. A 30-day trial is issued on first
+  boot when you provide a contact email.
 
 ### Buildbarn chart
 
-Buildbarn is the remote cache and remote execution engine behind Hermetiq.
-This chart turns a dozen Deployments and a pile of Jsonnet into one coherent
-release.
+Give Bazel a shared remote cache and execution backend, with storage and worker
+pools sized for your workloads.
 
-- **One `helm install`, a whole build cluster.** Frontend for the remote cache
-  and execution APIs, scheduler, sharded storage, Browser, and optional Remote
-  Asset API and bb-portal, all generated from one Jsonnet model so shard
-  addresses, authentication, tracing, and message limits never drift between
-  components. The Remote Asset API fetches external dependencies once for the
-  whole organization instead of once per laptop.
-- **Storage from budget PVCs to raw NVMe.** Sharded CAS and Action Cache on
-  persistent disks, local SSD through `emptyDir` or `hostPath`, or raw block
-  devices on Hyperdisk, TopoLVM, or LVM-striped local NVMe with the filesystem
-  cut out entirely. Optional ISCC and FSAC stores unlock size classes and
-  prefetching, and an opt-in sizing guard turns the infamous "lost inputs no
-  longer available remotely" mystery into a `helm template` error that shows
-  the arithmetic.
-- **Workers that show up when the queue does.** Declare a pool as an
-  `RbeWorker` and the operator renders the Deployment, ConfigMap, and KEDA
-  `ScaledObject`. Pools scale from zero the moment work queues, hold a cron
-  floor for the morning rush, route each action to the smallest size class
-  that can handle it, and prefetch inputs from the File System Access Cache
-  before the action starts.
-- **Tests that need Docker get Docker.** Opt-in Docker-in-Docker and Sysbox
-  worker fleets, selected with a single `pool` platform property, with image
-  preloading and registry mirrors, so Testcontainers suites run remotely
-  instead of being the one thing left on developer machines.
-- **Cache hits you can trust.** Every Action Cache hit is completeness-checked
-  against the CAS so Bazel never chases evicted outputs. Time-based
-  ActionResult expiry with jitter flushes out non-hermetic actions without a
-  stampede, a break-glass timestamp invalidates the whole Action Cache in one
-  values change, and a data-integrity validation cache keeps verification
-  cheap.
-- **Locked down without slowing down.** JWKS-verified JWTs gate writes and
-  remote execution with `requireCanWriteToCache` while CAS and Action Cache
-  reads stay open and fast. A bundled CronJob keeps the JWKS ConfigMap in step
-  with your IdP's key rotation, Browser SSO shares the Hermetiq session, and a
-  storage NetworkPolicy plus an internal-only frontend Service close the
-  in-cluster back doors.
-- **Tuned for real Bazel traffic, not hello-world.** Envoy Gateway, GKE
-  Gateway, Contour, or Ingress with stream timeouts sized for long ByteStream
-  transfers, an opt-in Envoy policy that lifts the per-connection buffers and
-  HTTP/2 windows that otherwise throttle CAS blobs behind watermark
-  backpressure, and cert-manager wildcard Certificates where the chart owns
-  TLS.
-- **Knows when the cache is quietly failing.** VMPodScrape targets stamped
-  with the Hermetiq project ID, recording rules for the storage SLIs, and
-  alerts that fire when a key-location map starts dropping writes or retention
-  falls short, the two failure modes that look perfectly healthy on a disk
-  graph. OTLP tracing runs through node-local agents with optional mTLS, and
-  six Buildbarn Grafana dashboards ship with the Hermetiq chart.
-- **Every escape hatch, every guardrail.** Replace any Jsonnet file wholesale
-  with overrides validated against the packaged filenames, add your own
-  objects with `extraObjects`, template pass-through values, pin digests,
-  rewrite registries for air-gapped clusters, and follow the documented recipe
-  for mirrored dual-ring storage. Strict render-time validation checks every
-  cross-value dependency before anything touches the cluster.
-- **Built to feed Hermetiq.** The Completed Action Logger streams every remote
-  action to Hermetiq for detailed remote-action analytics: queue, fetch,
-  execution, and upload timing for each action, joined to the invocation that
-  requested it. Worker and storage metrics carry the project label so
-  dashboards scope per team, and the experimental grpc-cache-proxy sidecar
-  reveals the cache hits Bazel never reports in the Build Event Protocol.
+- **Deploy a coordinated build backend.** One chart configures the frontend,
+  scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping
+  authentication, tracing, and service addresses aligned.
+- **Scale workers with demand.** With the worker operator and KEDA, declare
+  `RbeWorker` pools that scale from zero as work queues, keep scheduled minimum
+  capacity, and route actions by size class.
+- **Run Docker-dependent tests remotely.** Optional Docker-in-Docker and Sysbox
+  fleets support Testcontainers suites, with image preloading and registry
+  mirrors to reduce startup overhead.
+- **Choose storage for your workload.** Run sharded caches on persistent disks,
+  local SSDs, or raw NVMe. Optional sizing checks catch invalid storage
+  configurations before deployment.
+- **Catch cache problems early.** Cache-hit completeness checks verify that
+  outputs are available. Configurable expiry, storage health metrics, and
+  retention alerts help expose problems that disk-usage graphs miss.
+- **See execution in context.** The Completed Action Logger feeds remote-action
+  details into Hermetiq, while project-labeled worker and storage metrics let
+  teams track their own performance and cache health.
 
 ## Repository layout
 
@@ -201,33 +116,6 @@ and operations:
 - [Hermetiq chart reference](charts/hermetiq/README.md)
 - [Buildbarn chart reference](charts/buildbarn/README.md)
 - [BB Worker Operator reference](charts/bb-worker-operator/README.md)
-
-## Supported chart bundle
-
-The following versions form the first tested bundle in this repository:
-
-| Chart | Chart version | Application version |
-|---|--------------:|---:|
-| Hermetiq |       `0.9.0` | `0.9.0` |
-| Buildbarn |       `0.9.2` | `20260908T142448Z` |
-| BB Worker Operator |       `0.3.2` | `v0.3.2` |
-
-The commands below define these versions once and reuse them:
-
-```bash
-HERMETIQ_CHART_VERSION=0.9.0
-BUILDBARN_CHART_VERSION=0.9.2
-BB_WORKER_OPERATOR_CHART_VERSION=0.3.2
-```
-
-After a release, a next-version PR bumps the chart's `version` while the README
-pins stay on the OCI package customers can actually pull. Maintenance PRs leave
-both version sets unchanged and describe their user-visible change in the
-chart's `artifacthub.io/changes` annotation. The release tag must match the
-merged chart version. After publishing succeeds, a release docs PR updates the
-supported bundle plus every literal `--version` reference in that chart's
-README. This guide documents the supported current state, not a cumulative
-release history.
 
 ## Architecture
 
@@ -278,6 +166,33 @@ kubectl get storageclass
 This guide assumes familiarity with Kubernetes and your cloud provider. Apply
 your organization's networking, identity, backup, secret-management, and
 change-control policies to every example.
+
+## Supported chart bundle
+
+The following versions form the first tested bundle in this repository:
+
+| Chart | Chart version | Application version |
+|---|--------------:|--------------------:|
+| Hermetiq |       `0.9.1` |             `0.9.2` |
+| Buildbarn |       `0.9.2` |  `20260908T142448Z` |
+| BB Worker Operator |       `0.3.2` |            `v0.3.2` |
+
+The commands below define these versions once and reuse them:
+
+```bash
+HERMETIQ_CHART_VERSION=0.9.1
+BUILDBARN_CHART_VERSION=0.9.2
+BB_WORKER_OPERATOR_CHART_VERSION=0.3.2
+```
+
+After a release, a next-version PR bumps the chart's `version` while the README
+pins stay on the OCI package customers can actually pull. Maintenance PRs leave
+both version sets unchanged and describe their user-visible change in the
+chart's `artifacthub.io/changes` annotation. The release tag must match the
+merged chart version. After publishing succeeds, a release docs PR updates the
+supported bundle plus every literal `--version` reference in that chart's
+README. This guide documents the supported current state, not a cumulative
+release history.
 
 ## Installation
 

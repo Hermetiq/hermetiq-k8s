@@ -1,0 +1,56 @@
+suite: mcp endpoint url
+templates:
+  - templates/NOTES.txt
+  - templates/deployment-dashboard.yaml
+  - templates/deployment-api.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  # Clients and the IdP API identifier use <origin>/mcp: every client sends it
+  # identically, while a bare origin's trailing slash varies by client.
+  - it: prints the /mcp endpoint in the install notes
+    template: templates/NOTES.txt
+    asserts:
+      - matchRegexRaw:
+          pattern: "MCP: +https://mcp\\.ci\\.hermetiq\\.test/mcp\\n"
+
+  - it: gives the dashboard Quickstart the /mcp endpoint
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_MCP_SERVER_URL")].value
+          value: https://mcp.ci.hermetiq.test/mcp
+
+  - it: joins /mcp onto a pinned trailing-slash origin without a double slash
+    template: templates/NOTES.txt
+    set:
+      api.mcpResourceUrl: https://mcp.ci.hermetiq.test/
+    asserts:
+      - matchRegexRaw:
+          pattern: "MCP: +https://mcp\\.ci\\.hermetiq\\.test/mcp\\n"
+
+  # MCP responses link builds as <base>/<invocation id>; the binary defaults
+  # the base to Hermetiq Cloud's dashboard, which is wrong for an install.
+  - it: points MCP build links at this install's dashboard
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_BUILD_DETAILS_URL")].value
+          value: https://dashboard.ci.hermetiq.test/build
+
+  - it: lets an explicit api.env MCP_BUILD_DETAILS_URL override without a duplicate entry
+    template: templates/deployment-api.yaml
+    set:
+      api.env.MCP_BUILD_DETAILS_URL: https://builds.example.test/build
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content:
+            name: MCP_BUILD_DETAILS_URL
+            value: https://builds.example.test/build
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content:
+            name: MCP_BUILD_DETAILS_URL
+            value: https://dashboard.ci.hermetiq.test/build
