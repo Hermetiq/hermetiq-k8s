@@ -129,6 +129,10 @@ spec:
 {{- with .Values.publisher.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+            {{- if not (hasKey .Values.publisher.env "MCP_EXPOSE_USER_IDENTITIES") }}
+            - name: MCP_EXPOSE_USER_IDENTITIES
+              value: {{ .Values.api.mcpExposeUserIdentities | quote }}
+            {{- end }}
             - name: MCP_ENABLED
               value: "true"
             - name: MCP_RESOURCE_METADATA_URL

@@ -968,6 +968,9 @@ api:
   # than the JWT issuer.
   mcpAuthorizationServer: ""
   mcpAuthDisabled: false
+  # Expose developer identity metadata through MCP. Opaque identity fields are
+  # the default; opt in only when this installation should expose identities.
+  mcpExposeUserIdentities: false
   # Prefer replicas on different nodes without making scheduling fail when the
   # cluster has fewer eligible nodes than replicas.
   podAntiAffinity:

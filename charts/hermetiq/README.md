@@ -487,6 +487,13 @@ when the gRPC API needs a specific audience. Override the derived MCP defaults
 only when needed, via `api.mcpResourceUrl` (resource/audience) and
 `api.mcpAuthorizationServer` (advertised authorization server).
 
+MCP identity metadata is opaque by default. Set `api.mcpExposeUserIdentities: true`
+to expose developer identity metadata for an installation that requires it. This
+sets `MCP_EXPOSE_USER_IDENTITIES` on the API and publisher MCP servers. An explicit
+`api.env.MCP_EXPOSE_USER_IDENTITIES` or `publisher.env.MCP_EXPOSE_USER_IDENTITIES`
+value overrides that component's setting without creating a duplicate environment
+entry. This setting does not change project authorization.
+
 Admin access is granted when the token's groups claim (`api.jwt.groupsClaim`,
 default `hermetiq/roles`) contains `publisher.hermetiqAdminGroup` (default
 `hermetiq-admin`), or via `app.adminEmails`.
