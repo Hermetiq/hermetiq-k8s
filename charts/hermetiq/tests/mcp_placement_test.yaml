@@ -1,0 +1,66 @@
+suite: mcp placement
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  # MCP is served only by the api core; the publisher must not start an MCP
+  # server or carry MCP settings.
+  - it: does not enable MCP on the publisher
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_ENABLED")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_EXPOSE_USER_IDENTITIES")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_RESOURCE_METADATA_URL")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_PROTO_INTEL_TOOLS_ENABLED")]
+
+  - it: does not enable MCP on the publisher even when identities are exposed
+    template: templates/deployment-publisher.yaml
+    set:
+      api.mcpExposeUserIdentities: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_ENABLED")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "MCP_EXPOSE_USER_IDENTITIES")]
+
+  - it: serves MCP from the api with identities opaque by default
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_EXPOSE_USER_IDENTITIES")].value
+          value: "false"
+
+  - it: exposes identities on the api when opted in
+    template: templates/deployment-api.yaml
+    set:
+      api.mcpExposeUserIdentities: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_EXPOSE_USER_IDENTITIES")].value
+          value: "true"
+
+  - it: lets an explicit api.env value override without a duplicate entry
+    template: templates/deployment-api.yaml
+    set:
+      api.env.MCP_EXPOSE_USER_IDENTITIES: "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content:
+            name: MCP_EXPOSE_USER_IDENTITIES
+            value: "true"
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content:
+            name: MCP_EXPOSE_USER_IDENTITIES
+            value: "false"

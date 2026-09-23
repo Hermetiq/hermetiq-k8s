@@ -238,7 +238,7 @@ ISCC + FSAC 1M each    ~= 0.1 GiB
 
 That is about 3.1 GiB before Go garbage collector headroom, gRPC buffers, and the rest of the process. A `storage.resources.requests.memory` of at least 6 GiB is a safer starting point for this example.
 
-**5. Verify with production traffic.** After a few days, worst-case retention should stay above your target and the KLM dropped-put alert should remain quiet. If either signal is wrong, resize the blocks and the map together.
+**5. Verify with production traffic.** After a few days, check that blobs are not discarded before they are reused (for example, cache misses or `NOT_FOUND` errors for recently uploaded outputs, and AC hits failing completeness checks) and that the KLM dropped-put alert stays quiet. The eviction-age gauge (insertion age of the last removed block) is useful context, but it resets on restart and on its own proves neither that eviction happened nor that the cache is big enough. If either signal is wrong, resize the blocks and the map together.
 
 Do this arithmetic before the first install when you can. Changing block counts, block size, or map placement later is a cache flush, as described in [buildbarn-storage-operations.md](buildbarn-storage-operations.md).
 

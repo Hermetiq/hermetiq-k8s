@@ -129,12 +129,9 @@ spec:
 {{- with .Values.publisher.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
-            - name: MCP_ENABLED
-              value: "true"
-            - name: MCP_RESOURCE_METADATA_URL
-              value: {{ include "hermetiq-core.mcpResourceUrl" . | quote }}
-            - name: MCP_PROTO_INTEL_TOOLS_ENABLED
-              value: {{ .Values.app.mcpProtoIntelToolsEnabled | quote }}
+            {{- /* MCP is served only by the api Deployment (Service port
+            mcp-http). The publisher sets no MCP variables, so bep-nats keeps
+            MCP disabled, its default. */}}
             - name: ENFORCE_PUB_AUTHZ
               value: "false"
             - name: APP_MODE
