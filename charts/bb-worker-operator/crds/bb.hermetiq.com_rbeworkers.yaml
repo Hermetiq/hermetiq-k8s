@@ -12402,6 +12402,16 @@ spec:
                       FUSESpec configures the optional /dev/fuse mount used by virtual build
                       directory workers.
                     properties:
+                      cleanupOnTermination:
+                        default: true
+                        description: |-
+                          CleanupOnTermination controls a Kubernetes-native sidecar that remains
+                          alive until the worker and runner containers have stopped, then lazily
+                          unmounts <workerMountPath>/build. This prevents a dead FUSE mount from
+                          blocking kubelet cleanup of the worker emptyDir. It defaults to true when
+                          FUSE is configured and has no effect when FUSE is not configured. Requires
+                          Kubernetes 1.29 or newer, where native sidecars are enabled by default.
+                        type: boolean
                       mountPath:
                         default: /dev/fuse
                         type: string

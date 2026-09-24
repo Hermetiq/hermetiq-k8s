@@ -5,15 +5,13 @@ type: application
 home: https://www.hermetiq.com
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.2
-appVersion: "v0.3.2"
+version: 0.3.3
+appVersion: "v0.3.3"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: changed
-      description: Updated the default operator image to v0.3.2, built with Go 1.27.1 and Kubernetes v0.37 dependencies.
-    - kind: changed
-      description: Refreshed the RbeWorker CRD with the Kubernetes 1.37 Pod and volume schemas.
+    - kind: added
+      description: Added default-on native-sidecar cleanup for stale FUSE worker mounts during Pod termination.
 keywords:
   - buildbarn
   - bazel
