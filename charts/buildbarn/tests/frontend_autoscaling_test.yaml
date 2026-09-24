@@ -16,7 +16,7 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: renders gRPC concurrency, CPU, and memory triggers
+  - it: renders gRPC concurrency, CPU, and explicitly enabled memory triggers
     template: templates/scaledobject-frontend.yaml
     set:
       project.id: "42"
@@ -25,6 +25,7 @@ tests:
       keda.frontend.maxReplicaCount: 12
       keda.frontend.threshold: "75"
       keda.frontend.cpu.targetUtilization: "65"
+      keda.frontend.memory.enabled: true
       keda.frontend.memory.targetUtilization: "76"
     asserts:
       - isKind:
@@ -82,11 +83,27 @@ tests:
       - notExists:
           path: spec.fallback
 
+  - it: leaves memory scaling disabled by default
+    template: templates/scaledobject-frontend.yaml
+    set:
+      keda.frontend.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.triggers
+          count: 2
+      - equal:
+          path: spec.triggers[0].type
+          value: prometheus
+      - equal:
+          path: spec.triggers[1].type
+          value: cpu
+
   - it: allows the CPU trigger to be disabled independently
     template: templates/scaledobject-frontend.yaml
     set:
       keda.frontend.enabled: true
       keda.frontend.cpu.enabled: false
+      keda.frontend.memory.enabled: true
     asserts:
       - lengthEqual:
           path: spec.triggers

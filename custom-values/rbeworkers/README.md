@@ -41,6 +41,14 @@ the starter value `bep-nats-pub.hermetiq.svc.cluster.local:50091` matches
 tolerations, platform properties, runner images, and resource sizes to match
 your environment.
 
+FUSE-backed pools get `spec.storage.fuse.cleanupOnTermination: true` by default.
+The worker operator renders a Kubernetes-native sidecar that terminates after
+the worker and runner and lazily unmounts `/worker/build`, preventing dead FUSE
+mounts from blocking kubelet Pod cleanup. Pools without `spec.storage.fuse` get
+no cleanup sidecar; a FUSE pool can explicitly opt out with
+`cleanupOnTermination: false`. This requires bb-worker-operator v0.3.3 or newer
+and Kubernetes 1.29 or newer.
+
 ## Environment overlays
 
 For another environment, reference this directory from a Kustomize overlay and
