@@ -99,7 +99,7 @@ chart-managed fleets for tests/actions that need Docker (see
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --values buildbarn-values.yaml
 ```
 
@@ -116,8 +116,8 @@ Set `createNamespace: true` if Helm should create that namespace, or override
 Inspect the packaged documentation and defaults before creating overrides:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.3
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.3
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.4
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.4
 ```
 
 Contributors can render the checked-out chart locally:
@@ -187,7 +187,7 @@ too deep for the chart values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet \
   --set-file 'workerConfigOverrides.worker-ubuntu22-04\.jsonnet'=./my-worker.jsonnet
@@ -1273,7 +1273,8 @@ global: common.global {
 
 When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics
 `VMPodScrape` resources for Buildbarn pods and stamps samples with
-`hermetiq_project_id`.
+`hermetiq_project_id`. Operator-managed `RbeWorker` autoscaling still queries
+that label; keep it until the operator switches to `namespace`.
 
 When `vmRules.enabled` is true, the chart renders Buildbarn recording rules as
 VictoriaMetrics `VMRule` resources that aggregate by `namespace`, so dashboards
@@ -1323,9 +1324,9 @@ keda:
 
 The query expects `grpc_server_started_total` and
 `grpc_server_handled_total` samples labeled with
-`kubernetes_service="frontend"` and the configured `project.id`. The bundled
-`frontend-vmpodscrape` adds those labels when `vmPodScrapes.enabled=true`; when
-using another scraper, preserve equivalent labels.
+`kubernetes_service="frontend"` and the chart namespace. The bundled
+`frontend-vmpodscrape` selects pods in that namespace; when using another
+scraper, preserve equivalent labels.
 
 The CPU and memory triggers use Kubernetes Metrics Server and calculate
 utilization against the pod's resource requests. They cover the whole pod,
@@ -1992,7 +1993,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```

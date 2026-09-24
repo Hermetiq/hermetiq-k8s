@@ -46,7 +46,7 @@ configOverrides: {}
 workerConfigOverrides: {}
 
 project:
-  id: "0" # hermetiq project ID (from bootstrap DB job)
+  id: "0" # legacy scrape label for operator-managed worker autoscaling
 
 # Shared Buildbarn configuration knobs templated into files/config/*.
 config:
@@ -168,7 +168,7 @@ images:
   # Released public image; no imagePullSecret is required.
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
-    tag: v0.9.2
+    tag: v0.9.3
     digest: ""
     pullPolicy: IfNotPresent
   # bb-portal build-event dashboard (portal.enabled). One image: the Go binary

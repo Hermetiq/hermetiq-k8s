@@ -63,7 +63,7 @@ spec:
               (
                 sum(
                   buildbarn_builder_in_memory_build_queue_tasks_scheduled_total{
-                    hermetiq_project_id="{{ .Values.project.id }}",
+                    namespace="{{ include "buildbarn.namespace" . }}",
                     instance_name_prefix="",
                     platform="{{ $platformLabel }}",
                     size_class="0"
@@ -74,7 +74,7 @@ spec:
               (
                 sum(
                   buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_count{
-                    hermetiq_project_id="{{ .Values.project.id }}",
+                    namespace="{{ include "buildbarn.namespace" . }}",
                     instance_name_prefix="",
                     platform="{{ $platformLabel }}",
                     size_class="0"

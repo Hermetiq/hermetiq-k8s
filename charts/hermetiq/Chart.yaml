@@ -6,28 +6,20 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.1
-appVersion: "0.9.2"
+version: 0.9.2
+appVersion: "0.9.3"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: added
-      description: "Allow storage MCP tools to read namespaced Pod placement without granting cluster-scoped node access"
     - kind: changed
-      description: "Document what rbac.rules.rbeWorkers grants and what it costs to turn off: the list_rbe_workers and get_rbe_worker tools report not_permitted rather than failing, and nothing else degrades"
-    - kind: fixed
-      description: "Resync the bundled PromQL queries with the ones the bep-nats binary ships: the chart was pinning an older schedulerCompletedByCode that dropped the result label, and because the ConfigMap overlays the binary's defaults that stale query won even on an updated image"
+      description: "Use cloud-native v0.9.3 images for the API, publisher, subscribers, bootstrap jobs, auth proxy, and dashboard"
+    - kind: changed
+      description: "Filter the Buildbarn dashboards by a namespace variable instead of the hidden hermetiq_project_id variable, and scope their dependent dropdowns to the selected namespace. Requires Buildbarn chart 0.9.4 or later, whose recording rules aggregate by namespace"
     - kind: added
-      description: "Add api.mcpExposeUserIdentities (default false) to control whether the MCP server exposes developer names and emails; it sets MCP_EXPOSE_USER_IDENTITIES on the api Deployment, and an explicit api.env.MCP_EXPOSE_USER_IDENTITIES overrides it without a duplicate entry"
-    - kind: fixed
-      description: "Stop enabling MCP on the publisher Deployment: it set MCP_ENABLED=true plus MCP resource and proto-intel settings, starting an MCP server that no Service port or route reaches, since MCP is served only by the api Deployment"
-    - kind: fixed
-      description: "Accept MCP tokens issued for the <origin>/mcp resource as well as the origin, and reject an api.mcpResourceUrl that includes a path (with /mcp in it the server advertised .../mcp/mcp metadata and a 401 challenge URL it does not serve). The install notes, the dashboard Quickstart, and the Auth0 runbook now use https://mcp.<domain>/mcp, the one resource URL every MCP client sends identically"
-    - kind: fixed
-      description: "Point the build links MCP tools and prompts return at this install's dashboard (MCP_BUILD_DETAILS_URL defaults to <dashboard URL>/build) instead of Hermetiq Cloud's; an explicit api.env.MCP_BUILD_DETAILS_URL overrides it without a duplicate entry"
+      description: "Add victoriaMetrics.projectLabel (default namespace), rendered as METRICS_PROJECT_LABEL. With victoriaMetrics.projectLabelEnabled, the MCP infrastructure tools scope queries to the project's Buildbarn namespace, or to the project ID for any other label"
 keywords:
   - hermetiq
   - MCP
@@ -39,4 +31,3 @@ maintainers:
   - name: Hermetiq
     email: support@hermetiq.com
     url: https://www.hermetiq.com
-

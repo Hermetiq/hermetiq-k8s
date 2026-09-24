@@ -1,6 +1,6 @@
 # Hermetiq Helm Chart
 
-This README is the operator reference packaged with the Hermetiq `0.9.1`
+This README is the operator reference packaged with the Hermetiq `0.9.2`
 chart. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
 full-stack deployment order and external dependency installation.
@@ -84,7 +84,7 @@ Customer installations should use the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --values hermetiq-values.yaml
 ```
 
@@ -95,8 +95,8 @@ rendering but put sensitive data into Helm release state.
 Inspect the exact packaged defaults and schema before creating overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.1
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.1
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
 ```
 
 ## Required external inputs
