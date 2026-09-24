@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_replica}}",
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_replica}}",
@@ -334,7 +334,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
@@ -433,7 +433,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
@@ -545,7 +545,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
@@ -644,7 +644,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
@@ -756,7 +756,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -767,7 +767,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyAttempts",
@@ -866,7 +866,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -877,7 +877,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyAttempts",
@@ -960,7 +960,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"} > 0",
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{namespace=\"$namespace\",storage_type=\"ac\"} > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1043,7 +1043,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"} > 0",
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cas\"} > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1155,7 +1155,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "IgnoredInvalid",
@@ -1166,7 +1166,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -1177,7 +1177,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{storage_type=\"ac\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyIterations",
@@ -1276,7 +1276,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "IgnoredInvalid",
@@ -1287,7 +1287,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -1298,7 +1298,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyIterations",
@@ -1381,7 +1381,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"} > 0",
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{namespace=\"$namespace\",storage_type=\"ac\"} > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1464,7 +1464,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"} > 0",
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cas\"} > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1484,17 +1484,16 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "__HERMETIQ_PROJECT_ID__",
-          "value": "__HERMETIQ_PROJECT_ID__"
+          "text": "__HERMETIQ_NAMESPACE__",
+          "value": "__HERMETIQ_NAMESPACE__"
         },
-        "definition": "label_values(hermetiq_project_id)",
-        "hide": 2,
-        "label": "Project ID",
-        "name": "hermetiq_project_id",
+        "definition": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
+        "label": "Namespace",
+        "name": "namespace",
         "options": [],
         "query": {
-          "qryType": 1,
-          "query": "label_values(hermetiq_project_id)",
+          "qryType": 5,
+          "query": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,

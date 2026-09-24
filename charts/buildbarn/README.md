@@ -1276,7 +1276,8 @@ When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics
 `hermetiq_project_id`.
 
 When `vmRules.enabled` is true, the chart renders Buildbarn recording rules as
-VictoriaMetrics `VMRule` resources. The VMRule namespace defaults to the chart
+VictoriaMetrics `VMRule` resources that aggregate by `namespace`, so dashboards
+and the Hermetiq API can scope metrics per Buildbarn instance. The VMRule namespace defaults to the chart
 namespace; set `vmRules.namespaceOverride` if your VictoriaMetrics operator only
 watches a dedicated observability namespace. Use `vmRules.labels` when your
 `VMAgent` selects rules by label.

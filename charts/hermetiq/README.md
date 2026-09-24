@@ -921,9 +921,12 @@ are not registered; the remaining MCP tools are unaffected.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and
 reachable. `victoriaMetrics.projectLabelEnabled` controls whether the packaged
-PromQL selectors include `hermetiq_project_id`. Keep it `false` for a
-self-managed, single-tenant Buildbarn that does not emit that label; enable it
-for Hermetiq-managed Buildbarn metrics that are scoped by project.
+PromQL selectors are scoped to the project, and `victoriaMetrics.projectLabel`
+(default `namespace`) names the label. With `namespace`, queries match the
+project's Buildbarn namespace setting, which must name the namespace Buildbarn
+runs in; the Buildbarn chart's recording rules keep that label. Keep it `false`
+for a self-managed, single-tenant Buildbarn whose metrics do not follow those
+rules.
 
 ### Cost integration
 

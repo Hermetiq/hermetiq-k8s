@@ -259,13 +259,18 @@ victoriaMetrics:
   # When true, baseUrl must point at a VictoriaMetrics vmselect Prometheus
   # read endpoint.
   metricsEnabled: false
-  # Whether Buildbarn metrics carry the hermetiq_project_id label. Defaults to
-  # false for self-managed Buildbarn, whose metrics typically don't have that
-  # label: the infra tools then omit it from every PromQL selector and may run
-  # without project context (single-tenant mode). Set true for Hermetiq-managed
-  # Buildbarn, which emits the label and uses it to scope queries per project.
+  # Whether the infra tools scope every PromQL selector to the project with
+  # projectLabel. Defaults to false for self-managed Buildbarn, whose metrics
+  # may not follow the packaged recording rules: the tools then omit the
+  # matcher and may run without project context (single-tenant mode). Set true
+  # for the Buildbarn chart, whose recording rules keep the namespace label.
   # Surfaced as the METRICS_PROJECT_LABEL_ENABLED env var on the API container.
   projectLabelEnabled: false
+  # Label that scopes queries when projectLabelEnabled is true. "namespace"
+  # matches the project's Buildbarn namespace setting; any other label (for
+  # example hermetiq_project_id) matches the project ID.
+  # Surfaced as the METRICS_PROJECT_LABEL env var on the API container.
+  projectLabel: namespace
   # VictoriaMetrics vmselect Prometheus read endpoint. The app default
   # (http://vmselect-vm.obs.svc.cluster.local:8481/select/0/prometheus) only
   # works for stacks installed as `vm` in the `obs` namespace; override to
