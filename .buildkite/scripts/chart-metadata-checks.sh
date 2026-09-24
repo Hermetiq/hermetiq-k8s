@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Enforce the chart contribution and release workflow.
 #
-# Next-version PR:
-#   - increases Chart.yaml version after a release
+# Chart change PR:
+#   - may increase Chart.yaml to a higher version in the same PR as chart work
 #   - leaves README pins on the version that is actually published
-#
-# Maintenance PR:
-#   - leaves Chart.yaml and README versions unchanged
-#   - changes artifacthub.io/changes so the eventual release notes accumulate
+#   - updates artifacthub.io/changes so release notes accumulate
 #
 # Post-release docs PR:
 #   - moves the README pins to the Chart.yaml version after OCI publication
@@ -281,26 +278,14 @@ if [[ "${released_version}" != "${base_released_version}" ]]; then
   exit 0
 fi
 
-# A Chart.yaml-only version bump establishes the next development version while
-# README pins deliberately stay on the package customers can currently pull.
+# A PR may establish the next chart version while making the chart changes for
+# that release. README pins deliberately stay on the package customers can
+# currently pull until the post-release documentation step.
 if [[ "${current_version}" != "${base_version}" ]]; then
   if ! stable_version_is_greater "${current_version}" "${base_version}"; then
-    fail "next-version PR changes ${CHART} version ${base_version} -> ${current_version}; it must be a higher X.Y.Z version"
+    fail "${CHART} version changes ${base_version} -> ${current_version}; it must be a higher X.Y.Z version"
   fi
-  other_chart_files="$(git diff --name-only "${merge_base}" HEAD -- "${DIR}" | grep -vxF "${CHART_FILE}" || true)"
-  if [[ -n "${other_chart_files}" ]]; then
-    fail "${CHART} version bumps belong in a dedicated next-version PR; this PR also changes ${other_chart_files//$'\n'/, }"
-  fi
-  other_chart_yaml_changes="$(
-    git diff --unified=0 "${merge_base}" HEAD -- "${CHART_FILE}" \
-      | grep -E '^[+-]' \
-      | grep -vE '^(---|\+\+\+|[-+]version:[[:space:]])' \
-      || true
-  )"
-  if [[ -n "${other_chart_yaml_changes}" ]]; then
-    fail "${CHART} next-version PR must change only the top-level version in ${CHART_FILE}"
-  fi
-  echo ":white_check_mark: ${CHART} next-version PR bumps ${base_version} -> ${current_version}; README stays on published ${released_version}"
+  echo ":white_check_mark: ${CHART} PR bumps ${base_version} -> ${current_version}; chart changes are allowed and README stays on published ${released_version}"
   exit 0
 fi
 
