@@ -3,6 +3,7 @@ name: hermetiq
 description: Hermetiq gRPC API, MCP server, publisher, subscriber, dashboard, and DB maintenance jobs
 type: application
 home: https://www.hermetiq.com
+icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.1
@@ -36,3 +37,6 @@ keywords:
   - build engineer AI agent
 maintainers:
   - name: Hermetiq
+    email: support@hermetiq.com
+    url: https://www.hermetiq.com
+
