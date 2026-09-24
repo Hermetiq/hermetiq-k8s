@@ -1830,13 +1830,16 @@ keda:
     threshold: "100"
     # CPU and memory use Kubernetes Metrics Server and the aggregate requests
     # of every container in the pod (including grpc-cache-proxy when enabled).
+    # Keep memory scaling opt-in: a disk-backed frontend read cache contributes
+    # active filesystem pages to the reported working set, so cache warming can
+    # otherwise cause replicas to scale up even when request load is low.
     # KEDA does not support ScaledObject fallback with either resource trigger,
     # so the nonzero minReplicaCount above is the failure-safe floor.
     cpu:
       enabled: true
       targetUtilization: "70"
     memory:
-      enabled: true
+      enabled: false
       targetUtilization: "80"
   workerUbuntu2204:
     pollingInterval: 30

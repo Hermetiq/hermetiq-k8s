@@ -330,8 +330,11 @@ keda:
     cpu:
       enabled: true
       targetUtilization: "70"
+    # The frontend read-through cache's active filesystem pages count toward
+    # Metrics Server memory. Scaling on that value creates another cold cache,
+    # which warms and can trigger another replica independently of request load.
     memory:
-      enabled: true
+      enabled: false
       targetUtilization: "80"
   # The nested worker* settings below apply only to legacy chart-managed worker
   # Deployments. Operator-managed RbeWorker autoscaling is declared on each CR.

@@ -1316,7 +1316,7 @@ keda:
       enabled: true
       targetUtilization: "70"
     memory:
-      enabled: true
+      enabled: false
       targetUtilization: "80"
 ```
 
@@ -1327,13 +1327,19 @@ The query expects `grpc_server_started_total` and
 using another scraper, preserve equivalent labels.
 
 The CPU and memory triggers use Kubernetes Metrics Server and calculate
-utilization against the pod's resource requests. By default they cover the
-whole pod, including the optional `grpc-cache-proxy` sidecar. Keep CPU and
-memory requests on every container, and set either trigger's `enabled` value to
-false when Metrics Server is unavailable or that resource should not drive
-scaling. KEDA does not support its `fallback` feature on a ScaledObject that
-uses CPU or memory triggers, so this frontend scaler relies on its nonzero
-replica floor instead.
+utilization against the pod's resource requests. They cover the whole pod,
+including the optional `grpc-cache-proxy` sidecar. Memory scaling is disabled by
+default because `frontend.readCache` uses a disk-backed file whose active
+filesystem pages contribute to the reported container working set. Scaling on
+that value can create a feedback loop: KEDA adds a replica, its private cache
+warms, and the added cache memory eventually asks for another replica even when
+request load is low. Leave memory scaling disabled when the read cache is
+enabled; for a frontend without the read cache, it remains available as an
+explicit opt-in. Keep CPU and memory requests on every container, and disable
+either resource trigger when Metrics Server is unavailable or that resource
+should not drive scaling. KEDA does not support its `fallback` feature on a
+ScaledObject that uses CPU or memory triggers, so this frontend scaler relies on
+its nonzero replica floor instead.
 
 Keep `minReplicaCount` at least 1 because this is a pull-based signal emitted by
 the target pods: after scaling to zero, no frontend remains to observe incoming

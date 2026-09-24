@@ -6,27 +6,15 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.2
+version: 0.9.3
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
       description: "Update the optional grpc-cache-proxy sidecar image to v0.9.2"
-    - kind: added
-      description: "Add optional KEDA autoscaling for the Buildbarn frontend based on gRPC concurrency, CPU, and memory"
-    - kind: changed
-      description: "Update the built-in Buildbarn images to their latest upstream releases"
     - kind: fixed
-      description: "Nest the frontend read cache inside the existence cache, so FindMissingBlobs stays local instead of crossing to the storage shards when frontend.readCache.enabled is true"
-    - kind: added
-      description: "Add scheduler.actionRouter with a demultiplexing mode, so a catch-all worker pool can serve actions whose platform matches no other pool"
-    - kind: added
-      description: "Add security.grpcMtls: mutual TLS on the in-cluster gRPC hops (storage :8981, scheduler :8982/:8983/:8984), rendering the client key pair, the server key pair and the tlsClientCertificate authentication policy at both ends of every hop"
-    - kind: added
-      description: "Add per-server authenticationPolicy values for the scheduler's four ports and the storage gRPC port, with allow, deny, mtls and custom modes"
-    - kind: added
-      description: "Document workerUbuntu2204.config.sizeClass and its testcontainers equivalents for ISCC multi-size-class pools"
+      description: "Disable frontend memory autoscaling by default so disk-backed read-cache pages do not cause load-independent replica growth"
 keywords:
   - buildbarn
   - remote-execution
