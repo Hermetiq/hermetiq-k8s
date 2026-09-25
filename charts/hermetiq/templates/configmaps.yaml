@@ -72,7 +72,7 @@ metadata:
     grafana_dashboard: "1"
 data:
   {{ base $path }}: |-
-    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.namespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
+    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.buildbarnNamespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
 {{- end }}
 {{- range $path, $_ := .Files.Glob "files/dashboards/buildbarn/*.json" }}
 ---
@@ -86,7 +86,7 @@ metadata:
     grafana_dashboard: "1"
 data:
   {{ base $path }}: |-
-    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.namespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
+    {{- $root.Files.Get $path | replace "__HERMETIQ_PROJECT_ID__" ($root.Values.bootstrap.projectId) | replace "__HERMETIQ_NAMESPACE__" (include "hermetiq-core.buildbarnNamespace" $root) | replace "__HERMETIQ_METRICS_DATASOURCE_UID__" $root.Values.victoriaMetrics.metricsDatasourceUid | replace "__HERMETIQ_LOGS_DATASOURCE_UID__" $root.Values.victoriaMetrics.logsDatasourceUid | nindent 4 }}
 {{- end }}
 {{/* Both the dashboard sidecar and the standalone Grafana oauth2-proxy read this
      ConfigMap through a non-optional envFrom, so render it whenever either one

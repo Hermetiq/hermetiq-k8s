@@ -74,7 +74,7 @@ spec:
                 --bootstrap-project-id={{ .Values.bootstrap.projectId | quote }} \
                 {{- end }}
                 --bootstrap-project-name={{ .Values.bootstrap.projectName | quote }} \
-                --bootstrap-project-namespace={{ default .Release.Namespace .Values.bootstrap.projectNamespace | quote }} \
+                --bootstrap-project-namespace={{ include "hermetiq-core.buildbarnNamespace" . | quote }} \
                 {{- if .Values.bootstrap.namespaceBrowserUrl }}
                 --bootstrap-namespace-browser-url={{ .Values.bootstrap.namespaceBrowserUrl | quote }} \
                 {{- end }}
