@@ -22,11 +22,11 @@ supported full-stack deployment order.
 
 ```bash
 helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.3 | kubectl apply --server-side -f -
+  --version 0.3.4 | kubectl apply --server-side -f -
 
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.3 \
+  --version 0.3.4 \
   --values bb-worker-operator-values.yaml
 ```
 

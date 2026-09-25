@@ -1,12 +1,15 @@
 # RBE worker manifests
 
 This directory is a Kustomize base for the standard Ubuntu, Codex, and Envoy
-worker pools. Apply it directly when the starter service addresses and project
-ID are correct:
+worker pools. Apply it directly when the starter service addresses are correct:
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize custom-values/rbeworkers
 ```
+
+These manifests rely on the operator version that generates namespace-filtered
+queue-depth queries. The chart pinned to v0.3.3 still requires `projectID` for
+generated queries, so upgrade the operator before applying these manifests.
 
 ## Pools
 
@@ -73,9 +76,6 @@ patches:
         path: /spec/autoscaling/prometheus/serverAddress
         value: http://vmselect-vm.observability.svc.cluster.local:8481/select/0/prometheus
       - op: replace
-        path: /spec/autoscaling/prometheus/projectID
-        value: example-project
-      - op: replace
         path: /spec/config/generated/completedActionLoggerAddress
         value: bep-nats-pub.example.svc.cluster.local:50091
   - target:
@@ -116,5 +116,5 @@ components:
 ```
 
 The overlay's namespace and `RbeWorker` patch apply to component resources too,
-so the optional workers receive the same environment-specific addresses and
-project ID as the standard bundle.
+so the optional workers receive the same environment-specific addresses as the
+standard bundle. Generated queue-depth queries filter by each worker's namespace.

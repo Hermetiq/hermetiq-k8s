@@ -175,14 +175,14 @@ The following versions form the first tested bundle in this repository:
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.2` |             `0.9.2` |
 | Buildbarn |       `0.9.4` |  `20260908T142448Z` |
-| BB Worker Operator |       `0.3.3` |            `v0.3.3` |
+| BB Worker Operator |       `0.3.4` |            `v0.3.4` |
 
 The commands below define these versions once and reuse them:
 
 ```bash
 HERMETIQ_CHART_VERSION=0.9.2
 BUILDBARN_CHART_VERSION=0.9.4
-BB_WORKER_OPERATOR_CHART_VERSION=0.3.3
+BB_WORKER_OPERATOR_CHART_VERSION=0.3.4
 ```
 
 The release PR updates the chart versions and README pins together. Tag the
@@ -495,7 +495,7 @@ helm upgrade --install --namespace hermetiq buildbarn \
 The release renders `buildbarn-worker-config`, which is consumed by the example
 `RbeWorker` pools. Apply workers only after Buildbarn is ready. The standard
 Ubuntu 22.04, Ubuntu 24.04, Codex, and Envoy pools form the default Kustomize
-base:
+base. These manifests require the namespace-filtering operator v0.3.4+:
 
 ```bash
 kubectl apply -n hermetiq -k my-custom-values/rbeworkers
@@ -504,7 +504,7 @@ kubectl apply -n hermetiq -k my-custom-values/rbeworkers
 The example manifests assume the `hermetiq` namespace and the starter service
 addresses. Use the
 [RBE worker overlay instructions](custom-values/rbeworkers/README.md) to set the
-namespace, Prometheus address, Hermetiq project ID, node scheduling, and
+namespace, Prometheus address, node scheduling, and
 completed-action logger for another environment. That README also describes
 each pool.
 

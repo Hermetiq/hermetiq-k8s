@@ -1271,10 +1271,7 @@ global: common.global {
 }
 ```
 
-When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics
-`VMPodScrape` resources for Buildbarn pods and stamps samples with
-`hermetiq_project_id`. Operator-managed `RbeWorker` autoscaling still queries
-that label; keep it until the operator switches to `namespace`.
+When `vmPodScrapes.enabled` is true, the chart renders VictoriaMetrics `VMPodScrape` resources for Buildbarn pods.
 
 When `vmRules.enabled` is true, the chart renders Buildbarn recording rules as
 VictoriaMetrics `VMRule` resources that aggregate by `namespace`, so dashboards
