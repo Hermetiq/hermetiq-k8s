@@ -1,10 +1,6 @@
 # By default this chart renders all namespaced resources into hermetiq.
 namespaceOverride: hermetiq
 
-project:
-  # Keep this aligned with hermetiq-values.yaml bootstrap.projectId.
-  id: "0"
-
 # Advanced Jsonnet overrides for deep Buildbarn config changes. Keys must match
 # filenames under the chart's files/config or files/worker-config directories.
 # Prefer --set-file so large Jsonnet remains outside this values file.

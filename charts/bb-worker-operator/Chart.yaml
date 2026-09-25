@@ -12,7 +12,9 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Scope generated RbeWorker KEDA queue-depth queries to the worker's namespace instead of hermetiq_project_id; projectID is no longer supported."
+      description: "Breaking: generated RbeWorker KEDA queue-depth queries filter on the worker's namespace instead of hermetiq_project_id"
+    - kind: removed
+      description: "Breaking: remove spec.autoscaling.prometheus.projectID from the RbeWorker CRD. Delete it from existing RbeWorker manifests; kubectl rejects the unknown field"
 keywords:
   - buildbarn
   - bazel

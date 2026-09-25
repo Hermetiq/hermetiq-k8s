@@ -19,7 +19,6 @@ hosts:
 
 # IMPORTANT: Make sure you configure your Postgres partition management settings correctly for your environment / scale.
 bootstrap:
-  # Keep this aligned with buildbarn-values.yaml project.id.
   projectId: "0"
   # Provide a short, but descriptive name for the initial project to create during initial database setup
   projectName: build-analytics

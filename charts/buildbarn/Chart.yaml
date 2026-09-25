@@ -14,7 +14,9 @@ annotations:
     - kind: changed
       description: "Use cloud-native v0.9.3 grpc-cache-proxy by default"
     - kind: changed
-      description: "Aggregate Buildbarn recording rules and filter chart-managed KEDA queries by namespace. Raw samples still carry hermetiq_project_id for operator-managed worker autoscaling until its queries migrate"
+      description: "Aggregate Buildbarn recording rules and filter chart-managed KEDA queries by namespace"
+    - kind: removed
+      description: "Breaking: VMPodScrapes no longer stamp hermetiq_project_id, and project.id is removed. Upgrade bb-worker-operator to 0.3.4 first. Set the Hermetiq chart's victoriaMetrics.projectLabel to namespace; hermetiq_project_id matches no Buildbarn series"
 keywords:
   - buildbarn
   - remote-execution

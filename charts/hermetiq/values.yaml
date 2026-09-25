@@ -267,8 +267,8 @@ victoriaMetrics:
   # Surfaced as the METRICS_PROJECT_LABEL_ENABLED env var on the API container.
   projectLabelEnabled: false
   # Label that scopes queries when projectLabelEnabled is true. "namespace"
-  # matches the project's Buildbarn namespace setting; any other label (for
-  # example hermetiq_project_id) matches the project ID.
+  # matches the project's Buildbarn namespace setting; any other label matches
+  # the project ID. Buildbarn chart metrics carry no hermetiq_project_id label.
   # Surfaced as the METRICS_PROJECT_LABEL env var on the API container.
   projectLabel: namespace
   # VictoriaMetrics vmselect Prometheus read endpoint. The app default

@@ -24,9 +24,6 @@ spec:
     - port: metrics
       path: /metrics
       interval: {{ $root.Values.vmPodScrapes.interval }}
-      metricRelabelConfigs:
-        - targetLabel: hermetiq_project_id
-          replacement: {{ $root.Values.project.id | quote }}
       {{- if eq $scrape.app "storage" }}
       # The packaged VMRules and the bb-storage dashboards aggregate the
       # blob-map eviction-age series by kubernetes_shard and

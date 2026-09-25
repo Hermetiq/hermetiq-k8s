@@ -45,9 +45,6 @@ configOverrides: {}
 # Same pattern for files in charts/buildbarn/files/worker-config/.
 workerConfigOverrides: {}
 
-project:
-  id: "0" # legacy scrape label for operator-managed worker autoscaling
-
 # Shared Buildbarn configuration knobs templated into files/config/*.
 config:
   # Maximum gRPC message size in bytes, applied across all Buildbarn components

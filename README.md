@@ -631,6 +631,11 @@ When a new chart version is released:
    cache.
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
+   After upgrading to operator 0.3.4, remove
+   `spec.autoscaling.prometheus.projectID` from every existing `RbeWorker`.
+   Buildbarn 0.9.4 no longer labels its metrics with `hermetiq_project_id`, so
+   drop `project.id` from Buildbarn values and leave the Hermetiq chart's
+   `victoriaMetrics.projectLabel` at `namespace`.
 5. Reuse the same custom values files and verify every rollout before continuing.
 
 Example defaults comparison:

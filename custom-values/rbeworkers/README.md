@@ -7,9 +7,9 @@ worker pools. Apply it directly when the starter service addresses are correct:
 kubectl apply --namespace hermetiq --kustomize custom-values/rbeworkers
 ```
 
-These manifests rely on the operator version that generates namespace-filtered
-queue-depth queries. The chart pinned to v0.3.3 still requires `projectID` for
-generated queries, so upgrade the operator before applying these manifests.
+These manifests require operator 0.3.4 or later, which filters queue-depth
+queries by the worker's namespace. Existing `RbeWorker` manifests and overlays
+must drop `spec.autoscaling.prometheus.projectID` after the upgrade.
 
 ## Pools
 

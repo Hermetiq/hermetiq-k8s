@@ -33,16 +33,8 @@ tests:
       - notExists:
           path: spec.podMetricsEndpoints[0].relabelConfigs
 
-  - it: still stamps hermetiq_project_id on every scrape
-    documentSelector:
-      path: metadata.name
-      value: storage-vmpodscrape
-    set:
-      project.id: "7"
+  # Queries filter on namespace, which every scrape already carries.
+  - it: does not stamp hermetiq_project_id on any scrape
     asserts:
-      - equal:
-          path: spec.podMetricsEndpoints[0].metricRelabelConfigs[0].targetLabel
-          value: hermetiq_project_id
-      - equal:
-          path: spec.podMetricsEndpoints[0].metricRelabelConfigs[0].replacement
-          value: "7"
+      - notExists:
+          path: spec.podMetricsEndpoints[0].metricRelabelConfigs

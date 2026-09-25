@@ -19,7 +19,6 @@ tests:
   - it: renders gRPC concurrency, CPU, and explicitly enabled memory triggers
     template: templates/scaledobject-frontend.yaml
     set:
-      project.id: "42"
       namespaceOverride: test-buildbarn
       keda.frontend.enabled: true
       keda.frontend.minReplicaCount: 3
