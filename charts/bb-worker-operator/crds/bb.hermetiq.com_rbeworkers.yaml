@@ -397,8 +397,6 @@ spec:
                         type: string
                       metricName:
                         type: string
-                      projectID:
-                        type: string
                       query:
                         type: string
                       queryResolution:
