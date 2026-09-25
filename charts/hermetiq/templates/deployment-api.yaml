@@ -323,6 +323,8 @@ spec:
               value: {{ .Values.victoriaMetrics.metricsEnabled | default false | quote }}
             - name: METRICS_PROJECT_LABEL_ENABLED
               value: {{ .Values.victoriaMetrics.projectLabelEnabled | default false | quote }}
+            - name: METRICS_PROJECT_LABEL
+              value: {{ .Values.victoriaMetrics.projectLabel | default "namespace" | quote }}
             {{- with .Values.victoriaMetrics.baseUrl }}
             - name: VM_BASE_URL
               value: {{ . | quote }}

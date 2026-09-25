@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -321,7 +321,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ngrpc_code_instance_name_prefix_platform_result_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ngrpc_code_instance_name_prefix_platform_result_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}} {{result}} {{grpc_code}}",
@@ -420,7 +420,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_removed:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_removed:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -532,7 +532,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:sum{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:sum{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -631,7 +631,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:sum{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:sum{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -730,7 +730,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:sum{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+          "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:sum{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -826,7 +826,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
+          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued_duration_seconds_bucket:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -909,7 +909,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
+          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_duration_seconds_bucket:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -992,7 +992,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
+          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed_duration_seconds_bucket:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1088,7 +1088,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_retries_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
+          "expr": "sum(instance_name_prefix_le_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing_retries_bucket:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1108,17 +1108,16 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "__HERMETIQ_PROJECT_ID__",
-          "value": "__HERMETIQ_PROJECT_ID__"
+          "text": "__HERMETIQ_NAMESPACE__",
+          "value": "__HERMETIQ_NAMESPACE__"
         },
-        "definition": "label_values(hermetiq_project_id)",
-        "hide": 2,
-        "label": "Project ID",
-        "name": "hermetiq_project_id",
+        "definition": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
+        "label": "Namespace",
+        "name": "namespace",
         "options": [],
         "query": {
-          "qryType": 1,
-          "query": "label_values(hermetiq_project_id)",
+          "qryType": 5,
+          "query": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1134,7 +1133,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m, instance_name_prefix)",
+        "definition": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\"}, instance_name_prefix)",
         "includeAll": true,
         "label": "Instance name",
         "multi": true,
@@ -1142,7 +1141,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m, instance_name_prefix)",
+          "query": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\"}, instance_name_prefix)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

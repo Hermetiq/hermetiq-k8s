@@ -1,6 +1,6 @@
 # Hermetiq Helm Chart
 
-This README is the operator reference packaged with the Hermetiq `0.9.1`
+This README is the operator reference packaged with the Hermetiq `0.9.2`
 chart. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
 full-stack deployment order and external dependency installation.
@@ -84,7 +84,7 @@ Customer installations should use the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --values hermetiq-values.yaml
 ```
 
@@ -95,8 +95,8 @@ rendering but put sensitive data into Helm release state.
 Inspect the exact packaged defaults and schema before creating overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.1
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.1
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
 ```
 
 ## Required external inputs
@@ -230,7 +230,7 @@ to `require`.
 
 The schema bootstrap Job is a Helm hook by default. It runs on both install and upgrade so schema migrations are applied before workloads roll forward. Keep `postgres.password.existingSecret` set in hook mode, because pre-install hooks run before normal chart-managed Secrets are created. Successful hook Jobs are kept by default for log inspection and are deleted before the next install or upgrade hook creates a fresh Job. If you want the chart to create the Postgres Secret from `postgres.password.value`, set `bootstrap.hook.enabled=false`.
 
-When `bootstrap.projectName` is set, the bootstrap job creates the default project and managed Buildbarn namespace entry. Set `bootstrap.projectId` to pin the default project ID; leave it empty to let dbadmin generate a UUID. `bootstrap.projectNamespace` defaults to the Helm release namespace, which fits installs where Buildbarn is deployed alongside Hermetiq; set it explicitly when Buildbarn lives in a different namespace. Provide `bootstrap.namespaceBrowserUrl` and `bootstrap.namespaceDashboardUrl` with the user-facing Buildbarn Browser and dashboard URLs to store on that managed namespace.
+When `bootstrap.projectName` is set, the bootstrap job creates the default project and managed Buildbarn namespace entry. Set `bootstrap.projectId` to pin the default project ID; leave it empty to let dbadmin generate a UUID. `bootstrap.projectNamespace` defaults to the Helm release namespace, which fits installs where Buildbarn is deployed alongside Hermetiq; set it explicitly when Buildbarn lives in a different namespace. The bundled Grafana dashboards use this same namespace for their initial Buildbarn metrics filter. Provide `bootstrap.namespaceBrowserUrl` and `bootstrap.namespaceDashboardUrl` with the user-facing Buildbarn Browser and dashboard URLs to store on that managed namespace.
 
 ### Partition policy and maintenance
 
@@ -921,9 +921,12 @@ are not registered; the remaining MCP tools are unaffected.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and
 reachable. `victoriaMetrics.projectLabelEnabled` controls whether the packaged
-PromQL selectors include `hermetiq_project_id`. Keep it `false` for a
-self-managed, single-tenant Buildbarn that does not emit that label; enable it
-for Hermetiq-managed Buildbarn metrics that are scoped by project.
+PromQL selectors are scoped to the project, and `victoriaMetrics.projectLabel`
+(default `namespace`) names the label. With `namespace`, queries match the
+project's Buildbarn namespace setting, which must name the namespace Buildbarn
+runs in; the Buildbarn chart's recording rules keep that label. Keep it `false`
+for a self-managed, single-tenant Buildbarn whose metrics do not follow those
+rules.
 
 ### Cost integration
 

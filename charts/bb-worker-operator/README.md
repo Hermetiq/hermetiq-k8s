@@ -22,11 +22,11 @@ supported full-stack deployment order.
 
 ```bash
 helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.3 | kubectl apply --server-side -f -
+  --version 0.3.4 | kubectl apply --server-side -f -
 
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.3 \
+  --version 0.3.4 \
   --values bb-worker-operator-values.yaml
 ```
 
@@ -77,6 +77,12 @@ Release 0.3.3 refreshes the embedded Kubernetes Pod and volume schemas in the
 0.3.3 CRD before upgrading the operator image, using the `helm show crds`
 command in [Install](#install).
 
+Release 0.3.4 removes `spec.autoscaling.prometheus.projectID`. Generated
+queries now filter on the `RbeWorker`'s own namespace, so the worker must live
+in the same namespace as the Buildbarn scheduler it scales on. After applying
+the 0.3.4 CRD, delete `projectID` from every `RbeWorker` manifest and Kustomize
+patch; `kubectl apply` rejects it as an unknown field.
+
 Do not move the CRD into `templates/` just to make it appear in default
 `helm template` output. Keeping CRDs in `crds/` preserves Helm's install-order
 semantics and avoids mixing cluster-scoped API lifecycle with the controller's
@@ -104,7 +110,6 @@ spec:
     cooldownPeriodSeconds: 300
     prometheus:
       serverAddress: http://victoriametrics:8428
-      projectID: "0" # the Hermetiq project ID
       instanceNamePrefix: remote-execution
     cron:
       - name: weekday-morning-floor

@@ -14,7 +14,6 @@
     "serviceAccount": { "type": "object" },
     "configOverrides": { "type": "object" },
     "workerConfigOverrides": { "type": "object" },
-    "project": { "type": "object" },
     "images": { "type": "object" },
     "secrets": { "type": "object" },
     "hosts": { "type": "object" },

@@ -173,26 +173,23 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.1` |             `0.9.2` |
-| Buildbarn |       `0.9.3` |  `20260908T142448Z` |
-| BB Worker Operator |       `0.3.3` |            `v0.3.3` |
+| Hermetiq |       `0.9.2` |             `0.9.2` |
+| Buildbarn |       `0.9.4` |  `20260908T142448Z` |
+| BB Worker Operator |       `0.3.4` |            `v0.3.4` |
 
 The commands below define these versions once and reuse them:
 
 ```bash
-HERMETIQ_CHART_VERSION=0.9.1
-BUILDBARN_CHART_VERSION=0.9.3
-BB_WORKER_OPERATOR_CHART_VERSION=0.3.3
+HERMETIQ_CHART_VERSION=0.9.2
+BUILDBARN_CHART_VERSION=0.9.4
+BB_WORKER_OPERATOR_CHART_VERSION=0.3.4
 ```
 
-After a release, a next-version PR bumps the chart's `version` while the README
-pins stay on the OCI package customers can actually pull. Maintenance PRs leave
+The release PR updates the chart versions and README pins together. Tag the
+merged commit to publish the matching OCI packages. Maintenance PRs leave
 both version sets unchanged and describe their user-visible change in the
-chart's `artifacthub.io/changes` annotation. The release tag must match the
-merged chart version. After publishing succeeds, a release docs PR updates the
-supported bundle plus every literal `--version` reference in that chart's
-README. This guide documents the supported current state, not a cumulative
-release history.
+chart's `artifacthub.io/changes` annotation. This guide documents the
+supported current state, not a cumulative release history.
 
 ## Installation
 
@@ -498,7 +495,7 @@ helm upgrade --install --namespace hermetiq buildbarn \
 The release renders `buildbarn-worker-config`, which is consumed by the example
 `RbeWorker` pools. Apply workers only after Buildbarn is ready. The standard
 Ubuntu 22.04, Ubuntu 24.04, Codex, and Envoy pools form the default Kustomize
-base:
+base. These manifests require the namespace-filtering operator v0.3.4+:
 
 ```bash
 kubectl apply -n hermetiq -k my-custom-values/rbeworkers
@@ -507,7 +504,7 @@ kubectl apply -n hermetiq -k my-custom-values/rbeworkers
 The example manifests assume the `hermetiq` namespace and the starter service
 addresses. Use the
 [RBE worker overlay instructions](custom-values/rbeworkers/README.md) to set the
-namespace, Prometheus address, Hermetiq project ID, node scheduling, and
+namespace, Prometheus address, node scheduling, and
 completed-action logger for another environment. That README also describes
 each pool.
 
@@ -634,6 +631,11 @@ When a new chart version is released:
    cache.
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
+   After upgrading to operator 0.3.4, remove
+   `spec.autoscaling.prometheus.projectID` from every existing `RbeWorker`.
+   Buildbarn 0.9.4 no longer labels its metrics with `hermetiq_project_id`, so
+   drop `project.id` from Buildbarn values and leave the Hermetiq chart's
+   `victoriaMetrics.projectLabel` at `namespace`.
 5. Reuse the same custom values files and verify every rollout before continuing.
 
 Example defaults comparison:

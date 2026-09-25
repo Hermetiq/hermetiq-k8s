@@ -6,15 +6,17 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.3
+version: 0.9.4
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Update the optional grpc-cache-proxy sidecar image to v0.9.2"
-    - kind: fixed
-      description: "Disable frontend memory autoscaling by default so disk-backed read-cache pages do not cause load-independent replica growth"
+      description: "Use cloud-native v0.9.3 grpc-cache-proxy by default"
+    - kind: changed
+      description: "Aggregate Buildbarn recording rules and filter chart-managed KEDA queries by namespace"
+    - kind: removed
+      description: "Breaking: VMPodScrapes no longer stamp hermetiq_project_id, and project.id is removed. Upgrade bb-worker-operator to 0.3.4 first. Set the Hermetiq chart's victoriaMetrics.projectLabel to namespace; hermetiq_project_id matches no Buildbarn series"
 keywords:
   - buildbarn
   - remote-execution

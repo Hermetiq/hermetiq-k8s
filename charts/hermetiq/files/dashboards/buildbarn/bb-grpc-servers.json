@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_in_flight:sum{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_in_flight:sum{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_service}}.{{grpc_method}}",
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_in_flight:sum{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_in_flight:sum{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_service}}",
@@ -334,7 +334,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
+          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_service}}.{{grpc_method}}",
@@ -433,7 +433,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_code=~\"$grpc_code\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_code)",
+          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\",grpc_code=~\"$grpc_code\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_code)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_code}}",
@@ -532,7 +532,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
+          "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_service}}",
@@ -644,7 +644,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_sent:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_sent:irate1m{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_service}}.{{grpc_method}}",
@@ -743,7 +743,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_sent:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_sent:irate1m{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_service}}",
@@ -855,7 +855,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_received:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_received:irate1m{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_service}}.{{grpc_method}}",
@@ -954,7 +954,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_received:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service:grpc_server_msg_received:irate1m{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (kubernetes_service)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_service}}",
@@ -1050,7 +1050,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(grpc_method_grpc_service_kubernetes_service_le:grpc_server_handling_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (le) > 0",
+          "expr": "sum(grpc_method_grpc_service_kubernetes_service_le:grpc_server_handling_seconds_bucket:irate1m{namespace=\"$namespace\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1070,17 +1070,16 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "__HERMETIQ_PROJECT_ID__",
-          "value": "__HERMETIQ_PROJECT_ID__"
+          "text": "__HERMETIQ_NAMESPACE__",
+          "value": "__HERMETIQ_NAMESPACE__"
         },
-        "definition": "label_values(hermetiq_project_id)",
-        "hide": 2,
-        "label": "Project ID",
-        "name": "hermetiq_project_id",
+        "definition": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
+        "label": "Namespace",
+        "name": "namespace",
         "options": [],
         "query": {
-          "qryType": 1,
-          "query": "label_values(hermetiq_project_id)",
+          "qryType": 5,
+          "query": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1098,7 +1097,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_service)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_service)",
         "includeAll": true,
         "label": "gRPC service name",
         "multi": true,
@@ -1106,7 +1105,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_service)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_service)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -1125,7 +1124,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_method)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_method)",
         "includeAll": true,
         "label": "gRPC method name",
         "multi": true,
@@ -1133,7 +1132,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_method)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_method)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -1154,7 +1153,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_code)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_code)",
         "includeAll": true,
         "label": "gRPC status code",
         "multi": true,
@@ -1162,7 +1161,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_code)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_code)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -1179,7 +1178,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, kubernetes_service)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
         "includeAll": true,
         "label": "Kubernetes service name",
         "multi": true,
@@ -1187,7 +1186,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, kubernetes_service)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

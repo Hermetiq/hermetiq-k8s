@@ -61,7 +61,6 @@ spec:
       replicas: 1
     prometheus:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
-      projectID: "0"
       metricName: worker_drake_active_or_queued_tasks
       threshold: "11" # matches concurrency
   runner:

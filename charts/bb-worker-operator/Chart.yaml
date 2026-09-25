@@ -6,13 +6,15 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.3
-appVersion: "v0.3.3"
+version: 0.3.4
+appVersion: "v0.3.4"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: Added default-on native-sidecar cleanup for stale FUSE worker mounts during Pod termination.
+    - kind: changed
+      description: "Breaking: generated RbeWorker KEDA queue-depth queries filter on the worker's namespace instead of hermetiq_project_id"
+    - kind: removed
+      description: "Breaking: remove spec.autoscaling.prometheus.projectID from the RbeWorker CRD. Delete it from existing RbeWorker manifests; kubectl rejects the unknown field"
 keywords:
   - buildbarn
   - bazel

@@ -161,7 +161,7 @@
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
               "editorMode": "code",
-              "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
+              "expr": "sum(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\",grpc_code=~\"$grpc_code\",grpc_method=~\"$grpc_method\",grpc_service=~\"$grpc_service\",kubernetes_service=~\"$kubernetes_service\"}) by (grpc_service, grpc_method)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{grpc_service}}.{{grpc_method}}",
@@ -275,7 +275,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (operation)",
+              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (operation)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{operation}}",
@@ -374,7 +374,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (operation)",
+              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (operation)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{operation}}",
@@ -457,7 +457,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -540,7 +540,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -624,7 +624,7 @@
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
               "editorMode": "code",
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -708,7 +708,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -791,7 +791,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -874,7 +874,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
@@ -1399,7 +1399,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -1498,7 +1498,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -1597,7 +1597,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ngrpc_code_instance_name_prefix_platform_result_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ngrpc_code_instance_name_prefix_platform_result_size_class:buildbarn_builder_in_memory_build_queue_tasks_completed:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}} {{result}} {{grpc_code}}",
@@ -1696,7 +1696,7 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_removed:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
+              "expr": "label_replace(label_replace(label_replace(label_replace(label_replace(\ninstance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_removed:irate1m{namespace=\"$namespace\",instance_name_prefix=~\"$instance_name_prefix\"}\n,\"platform\",\"$1=$3$4\",\"platform\",'{\"properties\":\\\\[{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)]}')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')\n,\"platform\",\"$1 $2=$4$5\",\"platform\",'(.*),{\"name\":\"([^\"]*)\"(,\"value\":\"([^\"]*)\")?}(.*)')",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance_name_prefix}} [{{platform}}] {{size_class}}",
@@ -1814,7 +1814,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "kubernetes_service:buildbarn_builder_build_executor_operations:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",kubernetes_service=~\"$worker_service\"}",
+          "expr": "kubernetes_service:buildbarn_builder_build_executor_operations:irate1m{namespace=\"$namespace\",kubernetes_service=~\"$worker_service\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_service}}",
@@ -1899,7 +1899,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_virtual_execution_duration_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
+          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_virtual_execution_duration_bucket:irate1m{namespace=\"$namespace\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1984,7 +1984,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_posix_user_time_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
+          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_posix_user_time_bucket:irate1m{namespace=\"$namespace\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -2069,7 +2069,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_posix_system_time_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
+          "expr": "sum(kubernetes_service_le:buildbarn_builder_build_executor_posix_system_time_bucket:irate1m{namespace=\"$namespace\",kubernetes_service=~\"$worker_service\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -2532,26 +2532,6 @@
   "templating": {
     "list": [
       {
-        "allowCustomValue": false,
-        "current": {
-          "text": "__HERMETIQ_PROJECT_ID__",
-          "value": "__HERMETIQ_PROJECT_ID__"
-        },
-        "definition": "label_values(hermetiq_project_id)",
-        "hide": 2,
-        "label": "Project ID",
-        "name": "hermetiq_project_id",
-        "options": [],
-        "query": {
-          "qryType": 1,
-          "query": "label_values(hermetiq_project_id)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
-        },
-        "refresh": 1,
-        "regex": "",
-        "type": "query"
-      },
-      {
         "current": {
           "text": "__HERMETIQ_NAMESPACE__",
           "value": "__HERMETIQ_NAMESPACE__"
@@ -2573,7 +2553,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_service)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_service)",
         "includeAll": true,
         "label": "gRPC service",
         "multi": true,
@@ -2581,7 +2561,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_service)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_service)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2600,7 +2580,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_method)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_method)",
         "includeAll": true,
         "label": "gRPC method",
         "multi": true,
@@ -2608,7 +2588,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_method)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_method)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2627,7 +2607,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_code)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_code)",
         "includeAll": true,
         "label": "gRPC status code",
         "multi": true,
@@ -2635,7 +2615,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, grpc_code)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, grpc_code)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2654,7 +2634,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, kubernetes_service)",
+        "definition": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
         "includeAll": true,
         "label": "K8s service",
         "multi": true,
@@ -2662,7 +2642,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, kubernetes_service)",
+          "query": "label_values(grpc_code_grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2679,7 +2659,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m, instance_name_prefix)",
+        "definition": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\"}, instance_name_prefix)",
         "includeAll": true,
         "label": "Instance",
         "multi": true,
@@ -2687,7 +2667,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m, instance_name_prefix)",
+          "query": "label_values(instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m{namespace=\"$namespace\"}, instance_name_prefix)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2704,14 +2684,14 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}, backend_type)",
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}, backend_type)",
         "includeAll": false,
         "label": "AC backend",
         "name": "ac_backend_type",
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}, backend_type)",
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}, backend_type)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2728,14 +2708,14 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}, backend_type)",
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
         "includeAll": false,
         "label": "CAS backend",
         "name": "cas_backend_type",
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}, backend_type)",
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -2752,7 +2732,7 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(kubernetes_service:buildbarn_builder_build_executor_operations:irate1m, kubernetes_service)",
+        "definition": "label_values(kubernetes_service:buildbarn_builder_build_executor_operations:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
         "includeAll": true,
         "label": "Worker",
         "multi": true,
@@ -2760,7 +2740,7 @@
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(kubernetes_service:buildbarn_builder_build_executor_operations:irate1m, kubernetes_service)",
+          "query": "label_values(kubernetes_service:buildbarn_builder_build_executor_operations:irate1m{namespace=\"$namespace\"}, kubernetes_service)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

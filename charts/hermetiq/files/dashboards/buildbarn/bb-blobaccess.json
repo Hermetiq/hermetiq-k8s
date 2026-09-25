@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (operation)",
+          "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (operation)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{operation}}",
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (operation)",
+          "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (operation)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{operation}}",
@@ -334,7 +334,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_grpc_code_kubernetes_service_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (grpc_code)",
+          "expr": "sum(backend_type_grpc_code_kubernetes_service_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_count:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (grpc_code)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_code}}",
@@ -433,7 +433,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_grpc_code_kubernetes_service_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_count:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (grpc_code)",
+          "expr": "sum(backend_type_grpc_code_kubernetes_service_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_count:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (grpc_code)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{grpc_code}}",
@@ -529,7 +529,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -612,7 +612,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -709,7 +709,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -793,7 +793,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -890,7 +890,7 @@
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "editorMode": "code",
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"FindMissing\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"FindMissing\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -974,7 +974,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"FindMissing\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"FindMissing\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1070,7 +1070,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Get\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1153,7 +1153,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1249,7 +1249,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",operation=\"Put\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1332,7 +1332,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1428,7 +1428,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_storage_type:buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_storage_type:buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$ac_backend_type\",storage_type=\"ac\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1511,7 +1511,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "sum(backend_type_kubernetes_service_le_storage_type:buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (le) > 0",
+          "expr": "sum(backend_type_kubernetes_service_le_storage_type:buildbarn_blobstore_blob_access_operations_find_missing_batch_size_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (le) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
@@ -1531,17 +1531,16 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "__HERMETIQ_PROJECT_ID__",
-          "value": "__HERMETIQ_PROJECT_ID__"
+          "text": "__HERMETIQ_NAMESPACE__",
+          "value": "__HERMETIQ_NAMESPACE__"
         },
-        "definition": "label_values(hermetiq_project_id)",
-        "hide": 2,
-        "label": "Project ID",
-        "name": "hermetiq_project_id",
+        "definition": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
+        "label": "Namespace",
+        "name": "namespace",
         "options": [],
         "query": {
-          "qryType": 1,
-          "query": "label_values(hermetiq_project_id)",
+          "qryType": 5,
+          "query": "label_values(grpc_method_grpc_service_kubernetes_service:grpc_server_handled:irate1m, namespace)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1557,14 +1556,14 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}, backend_type)",
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}, backend_type)",
         "includeAll": false,
         "label": "Action Cache backend type",
         "name": "ac_backend_type",
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"ac\"}, backend_type)",
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}, backend_type)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -1581,14 +1580,14 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}, backend_type)",
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
         "includeAll": false,
         "label": "Content Addressable Storage backend type",
         "name": "cas_backend_type",
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{hermetiq_project_id=\"$hermetiq_project_id\",storage_type=\"cas\"}, backend_type)",
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

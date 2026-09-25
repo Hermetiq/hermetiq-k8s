@@ -29,6 +29,27 @@ tests:
           path: spec.template.spec.volumes[?(@.name == "cache-ttl-config")].configMap.items[0].path
           value: cache_ttl.json
 
+  - it: scopes metrics by namespace only when the project label is enabled
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "METRICS_PROJECT_LABEL_ENABLED")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "METRICS_PROJECT_LABEL")].value
+          value: "namespace"
+
+  - it: renders a custom metrics project label
+    set:
+      victoriaMetrics.projectLabelEnabled: true
+      victoriaMetrics.projectLabel: hermetiq_project_id
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "METRICS_PROJECT_LABEL_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "METRICS_PROJECT_LABEL")].value
+          value: "hermetiq_project_id"
+
   - it: disables on-prem optional feature flags by default
     asserts:
       - equal:

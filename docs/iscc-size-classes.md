@@ -91,7 +91,6 @@ spec:
     maxReplicas: 10
     prometheus:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
-      projectID: "0"
       sizeClass: "1" # the large pool sets sizeClass: "2"
       threshold: "4"
   # images is required by the CRD. Copy images.runner, images.worker, pod,

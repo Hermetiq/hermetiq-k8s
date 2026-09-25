@@ -2,6 +2,10 @@
 {{- default .Release.Namespace .Values.namespaceOverride -}}
 {{- end -}}
 
+{{- define "hermetiq-core.buildbarnNamespace" -}}
+{{- default .Release.Namespace .Values.bootstrap.projectNamespace -}}
+{{- end -}}
+
 {{- define "hermetiq-core.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

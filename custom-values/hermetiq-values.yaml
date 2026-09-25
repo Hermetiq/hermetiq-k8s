@@ -19,7 +19,6 @@ hosts:
 
 # IMPORTANT: Make sure you configure your Postgres partition management settings correctly for your environment / scale.
 bootstrap:
-  # Keep this aligned with buildbarn-values.yaml project.id.
   projectId: "0"
   # Provide a short, but descriptive name for the initial project to create during initial database setup
   projectName: build-analytics
@@ -110,8 +109,8 @@ victoriaMetrics:
   # Enables the MCP server's Buildbarn infra-health tools.
   metricsEnabled: true
   baseUrl: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
-  # Self-managed Buildbarn metrics usually do not include hermetiq_project_id.
-  # Set true only when your Buildbarn metrics are labeled per Hermetiq project.
+  # Set true to scope metrics to each project's Buildbarn namespace (requires
+  # the Buildbarn chart's recording rules and the project namespace setting).
   projectLabelEnabled: false
 
 gcpWorkloadIdentity:
