@@ -171,7 +171,6 @@ Verify the basics before starting:
 ```bash
 helm version
 kubectl version
-kubectl auth can-i '*' '*' -n hermetiq
 kubectl get gatewayclass
 kubectl get storageclass
 ```

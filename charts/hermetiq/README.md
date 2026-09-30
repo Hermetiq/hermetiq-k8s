@@ -871,7 +871,7 @@ Review every rule under `rbac.rules`:
   grace
 - keep `deployments`, `configMaps`, and `rbeWorkers` only when the API should
   discover Buildbarn workloads and worker pools
-- keep `leases` only for subscriber lease coordination
+- keep `leases` only for subscriber leader election (only needed for BEP forwarding)
 - keep `secrets` and `certManager` only for the application features that read
   those resources
 
