@@ -1,3 +1,5 @@
+# Starter overrides. Full chart defaults:
+# helm show values oci://ghcr.io/dragonflydb/dragonfly/helm/dragonfly --version v1.38.0
 command:
   - /bin/sh
   - -ec
@@ -9,7 +11,6 @@ extraArgs:
   - --dbnum=4
   - --logtostdout=true
   - --proactor_threads=4 # more threads requires more memory
-fullnameOverride: dragonfly
 passwordFromSecret:
   enable: true
   existingSecret:
@@ -20,8 +21,6 @@ resources:
     memory: 2000Mi
   requests:
     memory: 2000Mi
-storage:
-  enabled: false
 podSecurityContext:
   fsGroup: 2000
 securityContext:

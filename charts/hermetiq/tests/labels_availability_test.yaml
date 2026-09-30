@@ -107,6 +107,12 @@ tests:
           path: metadata.name
           value: grpc-api
       - equal:
+          path: spec.unhealthyPodEvictionPolicy
+          value: AlwaysAllow
+        documentSelector:
+          path: metadata.name
+          value: grpc-api
+      - equal:
           path: spec.selector.matchLabels.app
           value: grpc-api
         documentSelector:

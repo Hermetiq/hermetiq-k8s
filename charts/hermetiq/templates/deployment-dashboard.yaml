@@ -23,6 +23,12 @@ spec:
         {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
         {{- end }}
         kubectl.kubernetes.io/default-container: {{ include "hermetiq-core.dashboardName" . }}
+        {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
+        checksum/quickstart-config: {{ dict "name" (default (include "hermetiq-core.dashboardQuickstartConfigName" .) .Values.dashboard.quickstartConfig.existingConfigMap) "key" .Values.dashboard.quickstartConfig.configMapKey "data" .Values.dashboard.quickstartConfig.data | toJson | sha256sum }}
+        {{- end }}
+        {{- if .Values.dashboard.secretEnv }}
+        checksum/dashboard-secret-env: {{ .Values.dashboard.secretEnv | toJson | sha256sum }}
+        {{- end }}
         {{- if .Values.dashboard.oauth2Proxy.enabled }}
         hermetiq.com/oauth2-proxy-config-checksum: {{ include "hermetiq-core.oauth2ProxyConfigChecksum" . }}
         {{- if not .Values.dashboard.oauth2Proxy.client.existingSecret }}
@@ -161,7 +167,7 @@ spec:
             - name: REACT_APP_ON_PREM
               value: "true"
             - name: REACT_APP_HMQ_METRICS_DASHBOARD_URL
-              value: {{ .Values.victoriaMetrics.dashboardUrl | quote }}
+              value: {{ include "hermetiq-core.victoriaMetricsDashboardUrl" . | quote }}
             - name: REACT_APP_API_URL
               value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
             - name: REACT_APP_GRPC_WEB_URL

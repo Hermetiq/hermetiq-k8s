@@ -1,10 +1,12 @@
 # RBE worker manifests
 
 This directory is a Kustomize base for the standard Ubuntu, Codex, and Envoy
-worker pools. Apply it directly when the starter service addresses are correct:
+worker pools. After copying `custom-values/` to `my-custom-values/` and
+installing Buildbarn, edit the copied manifests for your environment. Apply
+them after the Buildbarn release and `buildbarn-worker-config` are ready:
 
 ```bash
-kubectl apply --namespace hermetiq --kustomize custom-values/rbeworkers
+kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
 ```
 
 These manifests require operator 0.3.4 or later, which filters queue-depth
@@ -36,8 +38,7 @@ Optional components under `optional/`:
   first.
 
 Every manifest references the `buildbarn-worker-config` ConfigMap rendered by
-the Buildbarn chart, so apply them after the Buildbarn release is ready. Pools
-that should emit completed-action events must point
+the Buildbarn chart. Pools that should emit completed-action events must point
 `spec.config.generated.completedActionLoggerAddress` at the Hermetiq publisher;
 the starter value `bep-nats-pub.hermetiq.svc.cluster.local:50091` matches
 `bbcal.address` in `custom-values/buildbarn-values.yaml`. Adjust node labels,

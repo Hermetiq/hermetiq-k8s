@@ -8,6 +8,7 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "storage") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.storage.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -24,6 +25,7 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "frontend") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.frontend.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -40,6 +42,7 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.scheduler.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -57,6 +60,7 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "browser") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.browser.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -73,6 +77,7 @@ metadata:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.remoteAsset.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:

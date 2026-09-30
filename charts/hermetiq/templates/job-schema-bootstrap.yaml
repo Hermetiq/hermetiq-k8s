@@ -75,11 +75,11 @@ spec:
                 {{- end }}
                 --bootstrap-project-name={{ .Values.bootstrap.projectName | quote }} \
                 --bootstrap-project-namespace={{ include "hermetiq-core.buildbarnNamespace" . | quote }} \
-                {{- if .Values.bootstrap.namespaceBrowserUrl }}
-                --bootstrap-namespace-browser-url={{ .Values.bootstrap.namespaceBrowserUrl | quote }} \
+                {{- with (include "hermetiq-core.namespaceBrowserUrl" .) }}
+                --bootstrap-namespace-browser-url={{ . | quote }} \
                 {{- end }}
-                {{- if .Values.bootstrap.namespaceDashboardUrl }}
-                --bootstrap-namespace-dashboard-url={{ .Values.bootstrap.namespaceDashboardUrl | quote }} \
+                {{- with (include "hermetiq-core.namespaceDashboardUrl" .) }}
+                --bootstrap-namespace-dashboard-url={{ . | quote }} \
                 {{- end }}
               {{- end }}
                 2>&1) || status=$?

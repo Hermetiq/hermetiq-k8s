@@ -313,16 +313,6 @@ tests:
       - failedTemplate:
           errorPattern: "spliced in verbatim without templating"
 
-  - it: rejects mTLS alongside a worker-common override
-    set:
-      security.grpcMtls.enabled: true
-      security.grpcMtls.certificateAuthorities: pem
-      workerConfigOverrides:
-        worker-common.libsonnet: "{}"
-    asserts:
-      - failedTemplate:
-          errorPattern: "dials the scheduler and storage"
-
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

@@ -6,20 +6,28 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.2
-appVersion: "0.9.3"
+version: 0.9.3
+appVersion: "0.9.4"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Use cloud-native v0.9.3 images for the API, publisher, subscribers, bootstrap jobs, auth proxy, and dashboard"
-    - kind: changed
-      description: "Filter the Buildbarn dashboards by a namespace variable instead of the hidden hermetiq_project_id variable, and scope their dependent dropdowns to the selected namespace. Requires Buildbarn chart 0.9.4 or later, whose recording rules aggregate by namespace"
     - kind: added
-      description: "Add victoriaMetrics.projectLabel (default namespace), rendered as METRICS_PROJECT_LABEL. With victoriaMetrics.projectLabelEnabled, the MCP infrastructure tools scope queries to the project's Buildbarn namespace, or to the project ID for any other label"
+      description: "Default to namespace RBAC; require a stable license fingerprint override"
+    - kind: changed
+      description: "Derive Browser and Grafana URLs from hosts.domainBase"
+    - kind: fixed
+      description: "Disable unused cert-manager and Secret permissions by default"
+    - kind: changed
+      description: "Update the OAuth2 proxy image"
+    - kind: fixed
+      description: "Set APP_ENV=on-prem on subscriber pods"
+    - kind: added
+      description: "Roll pods when managed ConfigMaps or Secrets change"
+    - kind: changed
+      description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
 keywords:
   - hermetiq
   - MCP

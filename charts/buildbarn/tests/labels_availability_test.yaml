@@ -4,7 +4,6 @@ values:
 templates:
   - templates/deployment-frontend.yaml
   - templates/statefulset-storage.yaml
-  - templates/deployment-worker-ubuntu22-04.yaml
   - templates/pdb.yaml
 tests:
   - it: gives frontend stable labels and preferred pod anti-affinity
@@ -81,30 +80,18 @@ tests:
       - notExists:
           path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution
 
-  - it: labels worker pods with their component and pool
-    template: templates/deployment-worker-ubuntu22-04.yaml
-    set:
-      workerUbuntu2204.enabled: true
-    asserts:
-      - equal:
-          path: metadata.labels["app.kubernetes.io/component"]
-          value: worker
-      - equal:
-          path: metadata.labels["hermetiq.com/worker-pool"]
-          value: ubuntu22-04
-      - equal:
-          path: spec.template.metadata.labels["app.kubernetes.io/component"]
-          value: worker
-      - equal:
-          path: spec.template.metadata.labels["hermetiq.com/worker-pool"]
-          value: ubuntu22-04
-
   - it: enables storage and frontend disruption budgets by default
     template: templates/pdb.yaml
     asserts:
       - equal:
           path: spec.maxUnavailable
           value: 1
+        documentSelector:
+          path: metadata.name
+          value: storage
+      - equal:
+          path: spec.unhealthyPodEvictionPolicy
+          value: AlwaysAllow
         documentSelector:
           path: metadata.name
           value: storage

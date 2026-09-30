@@ -1,8 +1,11 @@
 {{- if .Values.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
   name: {{ include "bb-worker-operator.managerClusterRoleName" . }}
+  {{- if eq .Values.rbac.mode "namespace" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  {{- end }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
 rules:
@@ -76,7 +79,24 @@ rules:
       - patch
       - update
       - watch
-{{- if eq .Values.rbac.managerBindingMode "cluster" }}
+{{- if eq .Values.rbac.mode "namespace" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-manager-namespace" (include "bb-worker-operator.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "bb-worker-operator.managerClusterRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bb-worker-operator.serviceAccountName" . }}
+    namespace: {{ include "bb-worker-operator.namespace" . }}
+{{- else if eq .Values.rbac.managerBindingMode "cluster" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -168,7 +188,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "bb-worker-operator.serviceAccountName" . }}
     namespace: {{ include "bb-worker-operator.namespace" . }}
-{{- if and .Values.metrics.secure .Values.metrics.authProxy.create }}
+{{- if and (eq .Values.rbac.mode "cluster") .Values.metrics.enabled .Values.metrics.secure .Values.metrics.authProxy.create }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -205,7 +225,7 @@ subjects:
     name: {{ include "bb-worker-operator.serviceAccountName" . }}
     namespace: {{ include "bb-worker-operator.namespace" . }}
 {{- end }}
-{{- if .Values.rbac.metricsReader.create }}
+{{- if and (eq .Values.rbac.mode "cluster") .Values.metrics.enabled .Values.metrics.secure .Values.rbac.metricsReader.create }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -222,9 +242,12 @@ rules:
 {{- if .Values.rbac.rbeWorkerRoles.create }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
   name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-admin
+  {{- if eq .Values.rbac.mode "namespace" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  {{- end }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
 rules:
@@ -256,9 +279,12 @@ rules:
       - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
   name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-editor
+  {{- if eq .Values.rbac.mode "namespace" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  {{- end }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
 rules:
@@ -282,9 +308,12 @@ rules:
       - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
   name: {{ include "bb-worker-operator.rbeWorkerRolePrefix" . }}-viewer
+  {{- if eq .Values.rbac.mode "namespace" }}
+  namespace: {{ include "bb-worker-operator.namespace" . }}
+  {{- end }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
 rules:

@@ -33,7 +33,10 @@ storage:
       enabled: true
 ```
 
-FSAC is currently consumed by the chart's worker Jsonnet prefetching path when a chart-managed worker has `<worker>.config.prefetching.enabled: true` and `virtualBuildDirectory.enabled: true`. The generated `RbeWorker` CRD path exposes size classes and Docker modes, but not a direct prefetching field today, so the examples here focus on the ISCC scheduler path.
+`RbeWorker` pools can use FSAC for input prefetching. Configure
+`spec.config.generated.prefetching` and a virtual build directory on the pool;
+the worker operator reads the FSAC store from the Buildbarn chart's shared
+`common.libsonnet`.
 
 ## 2. Enable Scheduler Analysis
 

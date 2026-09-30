@@ -7,9 +7,9 @@ createNamespace: false
 # default) watches all namespaces, which is what rbac.managerBindingMode=cluster
 # grants.
 #
-# Required when rbac.managerBindingMode=namespace, and must equal the release
-# namespace: a namespaced RoleBinding authorizes only that namespace, so an
-# unscoped manager (or one pointed elsewhere) is Forbidden on every list/watch.
+# Required for legacy rbac.managerBindingMode=namespace. With
+# rbac.mode=namespace the chart sets the effective watch to its release
+# namespace automatically; any explicit watchNamespace must match it.
 #
 # Requires an operator image that accepts --watch-namespace. Older images exit
 # with "flag provided but not defined", so change this together with image.tag.
@@ -55,11 +55,19 @@ serviceAccount:
 
 rbac:
   create: true
+  # namespace creates only Roles/RoleBindings and automatically scopes the
+  # manager watch to the release namespace. Disable secure metrics or the
+  # metrics endpoint in this mode; Kubernetes TokenReview needs cluster RBAC.
+  # cluster preserves the existing multi-namespace behavior.
+  mode: cluster
   # How the manager ClusterRole is bound to the operator ServiceAccount.
+  # Legacy setting for cluster mode; use mode=namespace for a fully namespaced
+  # install. managerBindingMode=namespace still creates a ClusterRole.
   # - cluster: ClusterRoleBinding grants worker management across namespaces.
   # - namespace: RoleBinding grants the same ClusterRole only in the operator namespace.
   managerBindingMode: cluster
-  # Create unbound ClusterRoles that cluster admins can bind to humans or CI.
+  # Create unbound RbeWorker admin/editor/viewer roles for humans or CI.
+  # They are ClusterRoles in cluster mode and Roles in namespace mode.
   rbeWorkerRoles:
     create: true
   metricsReader:

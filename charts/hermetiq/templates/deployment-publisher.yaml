@@ -36,6 +36,21 @@ spec:
         kubectl.kubernetes.io/default-container: bep-nats
         hermetiq.com/runtime-config-checksum: {{ include "hermetiq-core.natsStreamConfigChecksum" . }}
         hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
+        {{- if not .Values.postgres.password.existingSecret }}
+        checksum/postgres-secret: {{ dict "key" .Values.postgres.password.existingSecretKey "value" .Values.postgres.password.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if not .Values.redis.password.existingSecret }}
+        checksum/redis-secret: {{ dict "key" .Values.redis.password.existingSecretKey "value" .Values.redis.password.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if and .Values.slack.botToken.value (not .Values.slack.botToken.existingSecret) }}
+        checksum/slack-secret: {{ dict "key" .Values.slack.botToken.existingSecretKey "value" .Values.slack.botToken.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if and .Values.license.key.value (not .Values.license.key.existingSecret) }}
+        checksum/license-secret: {{ dict "key" .Values.license.key.existingSecretKey "value" .Values.license.key.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) }}
+        checksum/publisher-jwks-secret: {{ .Values.publisher.jwks.json | sha256sum }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
       {{- include "hermetiq-core.automountServiceAccountToken" .Values.publisher | nindent 6 }}

@@ -402,22 +402,17 @@ tests:
           path: data["scheduler.jsonnet"]
           pattern: "(?s)7982.*authenticationPolicy: \\{ allow: \\{\\} \\},"
 
-  - it: dials the scheduler over mTLS from the worker config too
+  - it: publishes only the shared config used by operator-managed workers
     documentSelector:
       path: metadata.name
       value: buildbarn-worker-config
-    set:
-      security.grpcMtls.enabled: true
-      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
     asserts:
-      - matchRegex:
+      - isNotNull:
+          path: data["common.libsonnet"]
+      - notExists:
           path: data["worker-common.libsonnet"]
-          pattern: "(?s)address: 'scheduler:8983',.*clientKeyPair"
-      # importstr, not an inlined PEM: read once at process start from the same
-      # Secret that carries the key pair.
-      - matchRegex:
-          path: data["worker-common.libsonnet"]
-          pattern: 'serverCertificateAuthorities: importstr "/etc/buildbarn/mtls/ca.crt"'
+      - notExists:
+          path: data["worker-ubuntu22-04.jsonnet"]
 
   - it: keeps a named mode over the grpcMtls default, for a staged rollout
     documentSelector:

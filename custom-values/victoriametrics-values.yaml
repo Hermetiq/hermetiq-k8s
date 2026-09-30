@@ -1,12 +1,7 @@
+# Starter overrides. Full chart defaults:
+# helm show values vm/victoria-metrics-k8s-stack
 alertmanager:
   enabled: false
-  resources:
-    limits:
-      cpu: 100m
-      memory: 128Mi
-    requests:
-      memory: 64Mi
-  useManagedConfig: true
 coreDns:
   enabled: false
 defaultRules:
@@ -21,15 +16,8 @@ defaultRules:
 nameOverride: vmks
 fullnameOverride: vmks
 grafana:
-#  nodeSelector:
-#    node-type: core8
-#  tolerations:
-#    - effect: NoSchedule
-#      key: hermetiq/core8
-#      operator: Exists
   admin:
     existingSecret: grafana-admin
-  enabled: true
   fullnameOverride: vm-grafana
   # Grafana 13.x stores and exports dashboards in v2 schema, which the
   # file provisioner used by this chart can't load. Pin to 11.x LTS where
@@ -86,24 +74,13 @@ grafana:
       allow_sign_up: true
       auto_assign_org: true
       auto_assign_org_role: Admin
-  ingress:
-    enabled: false
   resources:
     limits:
       cpu: 700m
       memory: 512Mi
     requests:
       memory: 256Mi
-  service:
-    type: ClusterIP
 kube-state-metrics:
-  enabled: true
-#  nodeSelector:
-#    node-type: core8
-#  tolerations:
-#    - effect: NoSchedule
-#      key: hermetiq/core8
-#      operator: Exists
   metricLabelsAllowlist:
   - nodes=[*]
   resources:
@@ -117,8 +94,6 @@ kubeApiServer:
   enabled: false
 kubeControllerManager:
   enabled: false
-kubeDns:
-  enabled: false
 kubelet:
   vmScrape:
     spec:
@@ -127,36 +102,11 @@ kubelet:
         regex: pod_uid
 prometheus-node-exporter:
   enabled: false
-  extraArgs:
-  - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/pods/.+|run/containerd/.+)($|/)
-  - --collector.filesystem.fs-types-exclude=^(tmpfs|autofs|binfmt_misc|cgroup|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|sysfs|tracefs)$
-  resources:
-    limits:
-      cpu: 200m
-      memory: 128Mi
-    requests:
-      cpu: 100m
-      memory: 64Mi
-serviceMonitor:
-  enabled: true
 victoria-metrics-operator:
   operator:
     disable_prometheus_converter: true
-#  nodeSelector:
-#    node-type: core8
-#  tolerations:
-#    - effect: NoSchedule
-#      key: hermetiq/core8
-#      operator: Exists
 vmagent:
-  enabled: true
   spec:
-#    nodeSelector:
-#      node-type: core8
-#    tolerations:
-#      - effect: NoSchedule
-#        key: hermetiq/core8
-#        operator: Exists
     resources:
       limits:
         cpu: 500m
@@ -165,18 +115,9 @@ vmagent:
         cpu: 200m
         memory: 256Mi
 vmalert:
-  enabled: true
   spec:
-#    datasource:
-#      url: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
     extraArgs:
       notifier.blackhole: "true"
-#    nodeSelector:
-#      node-type: core8
-#    tolerations:
-#      - effect: NoSchedule
-#        key: hermetiq/core8
-#        operator: Exists
     resources:
       limits:
         cpu: 300m
@@ -190,12 +131,6 @@ vmcluster:
     vminsert:
       extraArgs:
         maxLabelsPerTimeseries: "100"
-#      nodeSelector:
-#        node-type: core8
-#      tolerations:
-#        - effect: NoSchedule
-#          key: hermetiq/core8
-#          operator: Exists
       resources:
         limits:
           cpu: "1"
@@ -204,13 +139,6 @@ vmcluster:
           cpu: 500m
           memory: 1Gi
     vmselect:
-      replicaCount: 2
-#      nodeSelector:
-#        node-type: core8
-#      tolerations:
-#        - effect: NoSchedule
-#          key: hermetiq/core8
-#          operator: Exists
       resources:
         limits:
           cpu: "2"
@@ -221,12 +149,6 @@ vmcluster:
     vmstorage:
       extraArgs:
         search.maxConcurrentRequests: "16"
-#      nodeSelector:
-#        node-type: core8
-#      tolerations:
-#        - effect: NoSchedule
-#          key: hermetiq/core8
-#          operator: Exists
       resources:
         limits:
           cpu: 5000m

@@ -20,6 +20,21 @@ supported full-stack deployment order.
 
 ## Install
 
+Start with the
+[operator starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/bb-worker-operator-values.yaml),
+copied to `my-custom-values/bb-worker-operator-values.yaml` as described in
+the [repository setup guide](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values).
+
+Inspect this release's packaged documentation and defaults before editing the
+operator values:
+
+```bash
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.4
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.4
+```
+
+Install the CRD and then the controller:
+
 ```bash
 helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
   --version 0.3.4 | kubectl apply --server-side -f -
@@ -27,8 +42,13 @@ helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
   --version 0.3.4 \
-  --values bb-worker-operator-values.yaml
+  --values my-custom-values/bb-worker-operator-values.yaml
 ```
+
+For a namespace-scoped install, have a cluster administrator apply the CRD
+from the first command, set `rbac.mode=namespace` and `metrics.secure=false`
+in the values file, and add `--skip-crds` to the Helm install command. See
+[RBAC Scope](#rbac-scope) for the remaining namespace-mode requirements.
 
 Keep the CRD and controller image on the same release. Leave `image.tag` empty
 so the image follows the chart's `appVersion`: the CRD is what accepts a field
@@ -50,6 +70,10 @@ kubectl -n hermetiq get rbeworkers
 the `buildbarn-worker-config` ConfigMap rendered by the Buildbarn chart. Once
 pools exist, each `RbeWorker` reports the Deployment, ConfigMap, and KEDA
 `ScaledObject` it manages in its status.
+
+When `podDisruptionBudget.enabled=true`, the chart sets
+`unhealthyPodEvictionPolicy: AlwaysAllow`. Node drains can evict an unready
+operator Pod even when its healthy Pod budget is exhausted.
 
 ## CRD Lifecycle
 
@@ -240,54 +264,56 @@ large difference means the smoothing window is hiding the backlog.
 
 ## RBAC Scope
 
-By default, the operator's manager `ClusterRole` is granted with a
-`ClusterRoleBinding`:
+By default, the operator watches all namespaces and uses a manager
+`ClusterRole` and `ClusterRoleBinding`:
 
 ```yaml
 rbac:
-  managerBindingMode: cluster
+  mode: cluster
 ```
 
-Use this mode when the operator should manage `RbeWorker` resources, generated
-Deployments, ConfigMaps, and KEDA `ScaledObject` resources across multiple
-namespaces.
-
-For a single-namespace install, bind the same manager `ClusterRole` with a
-namespaced `RoleBinding` and scope the manager's watch to match:
+For an install managed entirely within one namespace, use:
 
 ```yaml
 rbac:
-  managerBindingMode: namespace
-watchNamespace: <release namespace>
+  mode: namespace
+metrics:
+  secure: false
 ```
 
-Both halves are required. The `RoleBinding` only authorizes the release
-namespace, while an unscoped manager list/watches `RbeWorker`, `Deployment`, and
-`ConfigMap` cluster-scoped — it would start, get `Forbidden` on every watch, and
-reconcile nothing without failing loudly. The chart therefore requires
-`watchNamespace` in this mode, and requires it to equal the release namespace
-(honoring `namespaceOverride`): pointing it elsewhere has the same outcome.
+This renders a manager `Role`/`RoleBinding`, a leader-election
+`Role`/`RoleBinding`, and namespaced RbeWorker admin/editor/viewer Roles. It
+omits all ClusterRoles and ClusterRoleBindings. The manager automatically
+watches only the release namespace (honoring `namespaceOverride`); an explicit
+`watchNamespace` must match. Secure metrics uses the cluster-scoped
+`TokenReview` and `SubjectAccessReview` APIs, so namespace mode requires
+`metrics.secure=false` or disabling the metrics endpoint. To disable it, set
+`metrics.enabled=false` and `metrics.service.enabled=false`, plus any enabled
+scrape resources. With HTTP metrics, control access through your cluster's
+network policy or monitoring setup.
 
 `watchNamespace` renders as `--watch-namespace`, so it needs an operator image
 that accepts that flag; older images exit with
 `flag provided but not defined`. Change it together with `image.tag`.
 
-Leaving `watchNamespace` empty (the default) watches every namespace, which is
-what `managerBindingMode: cluster` grants. Setting it alongside
-`managerBindingMode: cluster` is allowed and narrows the watch without narrowing
-the grant — useful for limiting reconcile scope while keeping cluster RBAC.
+`rbac.managerBindingMode` is retained for existing installs in cluster mode.
+Its `namespace` option binds a **ClusterRole** within one namespace and still
+creates other cluster-scoped RBAC resources. Use `rbac.mode=namespace` when
+the installer cannot create ClusterRoles. In cluster mode, setting
+`watchNamespace` narrows the watch without narrowing the grant.
 
-The operator watches one namespace at a time. To manage `RbeWorker` resources in
-several namespaces, use `managerBindingMode: cluster` and leave `watchNamespace`
-empty.
+To manage `RbeWorker` resources across several namespaces, keep
+`rbac.mode=cluster`, `rbac.managerBindingMode=cluster`, and `watchNamespace`
+empty. The operator watches one namespace or all namespaces, not an arbitrary
+list of namespaces.
 
-If your cluster policy forbids a `ClusterRoleBinding` and you would rather bind
-permissions yourself, set `rbac.create: false` and supply `serviceAccount.name`;
-the chart then validates nothing about the watch scope.
+Switching an existing release to namespace mode removes its old ClusterRoles
+and ClusterRoleBindings, so that upgrade requires permission to delete them.
+The `RbeWorker` CRD also needs cluster-level installation; a platform team can
+install it separately before a namespace-scoped chart install.
 
-The secure metrics auth binding remains cluster-scoped when enabled because
-Kubernetes `TokenReview` and `SubjectAccessReview` are not namespace-scoped
-worker-management permissions.
+To manage all RBAC outside the chart, set `rbac.create=false` and supply
+`serviceAccount.name`.
 
 ## Observability
 
@@ -308,6 +334,16 @@ otel:
 `metrics.serviceMonitor.enabled` and `metrics.vmServiceScrape.enabled` are
 available for clusters that install the Prometheus Operator or VictoriaMetrics
 Operator CRDs.
+
+The chart does not create ConfigMaps or Secrets consumed by the controller.
+If `metrics.cert.existingSecret` or another externally supplied Secret changes,
+change a value under `podAnnotations` in the operator values file on the next
+Helm upgrade to restart the controller, for example:
+
+```yaml
+podAnnotations:
+  hermetiq.com/external-secret-revision: "2026-09-30-1"
+```
 
 With `metrics.secure=true`, the default, the metrics endpoint rejects
 unauthenticated scrapes with `401`. Both scrape objects therefore send the

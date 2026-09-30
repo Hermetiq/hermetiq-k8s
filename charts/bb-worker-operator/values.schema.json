@@ -89,6 +89,10 @@
     "rbac": {
       "type": "object",
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["cluster", "namespace"]
+        },
         "create": {
           "type": "boolean"
         },

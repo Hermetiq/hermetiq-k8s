@@ -180,6 +180,36 @@ imagePullSecrets:
 {{- printf "https://%s" (include "hermetiq-core.dashboardHost" .) -}}
 {{- end -}}
 
+{{- define "hermetiq-core.namespaceBrowserUrl" -}}
+{{- if .Values.bootstrap.namespaceBrowserUrl -}}
+{{- tpl .Values.bootstrap.namespaceBrowserUrl . -}}
+{{- else if .Values.hosts.domainBase -}}
+{{- printf "https://browser.%s" (tpl .Values.hosts.domainBase .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "hermetiq-core.grafanaDashboardUrl" -}}
+{{- if or .Values.hosts.grafana .Values.hosts.domainBase -}}
+{{- printf "https://%s/d/hermetiq-demo" (include "hermetiq-core.grafanaHost" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "hermetiq-core.namespaceDashboardUrl" -}}
+{{- if .Values.bootstrap.namespaceDashboardUrl -}}
+{{- tpl .Values.bootstrap.namespaceDashboardUrl . -}}
+{{- else -}}
+{{- include "hermetiq-core.grafanaDashboardUrl" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "hermetiq-core.victoriaMetricsDashboardUrl" -}}
+{{- if .Values.victoriaMetrics.dashboardUrl -}}
+{{- tpl .Values.victoriaMetrics.dashboardUrl . -}}
+{{- else -}}
+{{- include "hermetiq-core.grafanaDashboardUrl" . -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "hermetiq-core.mcpResourceUrl" -}}
 {{- default (printf "https://%s" (include "hermetiq-core.mcpHost" .)) .Values.api.mcpResourceUrl -}}
 {{- end -}}

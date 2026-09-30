@@ -41,8 +41,11 @@ images:
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
-    repository: quay.io/oauth2-proxy/oauth2-proxy
-    tag: v7.15.1
+    # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public
+    # registry so on-prem installs pull every chart image from one place and do
+    # not depend on quay.io. Re-mirror with `crane copy` when bumping the tag.
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/oauth2-proxy
+    tag: v7.15.4
     digest: ""
     pullPolicy: IfNotPresent
 
@@ -51,9 +54,11 @@ bootstrap:
   projectName: build-analytics
   # Defaults to the Helm release namespace. Override when Buildbarn is installed elsewhere.
   projectNamespace: ""
-  # User-facing Buildbarn Browser URL for the managed namespace.
+  # User-facing Buildbarn Browser URL for the managed namespace. Empty defaults
+  # to https://browser.<hosts.domainBase> when domainBase is set.
   namespaceBrowserUrl: ""
-  # User-facing metrics/dashboard URL for the managed namespace.
+  # User-facing overview dashboard URL. Empty defaults to
+  # https://<hosts.grafana or grafana.domainBase>/d/hermetiq-demo.
   namespaceDashboardUrl: ""
   retentionDays: 30
   premake: 30
@@ -177,8 +182,10 @@ license:
   airGapped: false
   # Key inside the Secret holding the air-gap license file.
   licenseFileSecretKey: license.lic
-  # Support escape hatch overriding the derived cluster fingerprint;
-  # 64-character lowercase sha256 hex. Leave empty in normal operation.
+  # Required with the default namespace RBAC mode: a stable 64-character
+  # lowercase hex installation fingerprint. Generate once (for example,
+  # openssl rand -hex 32) and preserve it across upgrades and reinstalls.
+  # Cluster RBAC mode can instead read the kube-system Namespace UID.
   fingerprintOverride: ""
   # Hermetiq SaaS endpoint used for TRIAL ISSUANCE only (first boot with no
   # key). Periodic license VALIDATION goes directly to https://api.keygen.sh
@@ -246,6 +253,8 @@ nats:
     rolloutChecksum: ""
 
 victoriaMetrics:
+  # Empty defaults to the chart-provisioned Grafana overview dashboard URL,
+  # derived from hosts.grafana or hosts.domainBase.
   dashboardUrl: ""
   # Grafana datasource UIDs substituted into the packaged dashboard JSON.
   # Override these when Grafana provisions the datasources under different UIDs.
@@ -826,11 +835,20 @@ gcpWorkloadIdentity:
 
 rbac:
   enabled: true
+  # namespace renders only Roles/RoleBindings and requires a stable
+  # license.fingerprintOverride. cluster enables the ClusterRole + namespaced
+  # RoleBinding setup and can read the kube-system Namespace UID.
+  mode: namespace
   clusterRoleName: cert-crud
   roleBindingName: cert-crud-binding
+  namespaceRoleName: runtime
+  namespaceRoleBindingName: runtime-binding
   rules:
-    certManager: true
-    secrets: true
+    # Runtime client-certificate management is separate from routing TLS.
+    # It needs cert-manager and Secret access in the certificate namespace;
+    # leave these off unless that application feature is configured.
+    certManager: false
+    secrets: false
     leases: true
     # Read-only Deployments and StatefulSets, for the Buildbarn MCP tools'
     # workload discovery (mounted ConfigMaps, worker pool container images, and
@@ -854,9 +872,9 @@ rbac:
     # Namespace OBJECT only (resourceNames: [kube-system]) — its UID is the
     # stable cluster fingerprint for license identity. It cannot list
     # namespaces and grants nothing INSIDE kube-system (Secrets, ConfigMaps,
-    # and Pods are separate resources with no grant here). Disabling this
-    # falls back to the weaker own-namespace UID fingerprint; licensing
-    # still works.
+    # and Pods are separate resources with no grant here). When disabled,
+    # supply license.fingerprintOverride unless a separate cluster grant
+    # permits reading a Namespace UID. Always omitted in rbac.mode=namespace.
     clusterFingerprint: true
     # Namespaced Role letting the app write the single hermetiq-license-state
     # Secret (auto-issued trial key, signed validation cache for offline

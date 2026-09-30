@@ -14,12 +14,10 @@ templates:
   - templates/deployment-browser.yaml
   - templates/deployment-asset.yaml
   - templates/deployment-portal.yaml
-  - templates/deployment-worker-ubuntu22-04.yaml
 set:
   remoteAsset.enabled: true
   portal.enabled: true
   browser.enabled: true
-  workerUbuntu2204.enabled: true
 tests:
   - it: mounts nothing by default
     asserts:
@@ -66,21 +64,3 @@ tests:
             name: buildbarn-mtls
             readOnly: true
             mountPath: /certs
-
-  # The runner is reached over unix:///worker/runner. TLS does not apply to a
-  # UNIX socket, so the certificate has no business in that container.
-  - it: leaves the runner container out
-    template: templates/deployment-worker-ubuntu22-04.yaml
-    set:
-      security.grpcMtls.enabled: true
-      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[1].name
-          value: runner
-      - notContains:
-          path: spec.template.spec.containers[1].volumeMounts
-          content:
-            name: buildbarn-mtls
-            readOnly: true
-            mountPath: /etc/buildbarn/mtls

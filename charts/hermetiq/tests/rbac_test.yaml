@@ -5,6 +5,10 @@ values:
   - ../ci-values/ci.yaml
 tests:
   - it: grants bep-nats access to discover Buildbarn config from deployments and ConfigMaps
+    set:
+      rbac.mode: cluster
+      rbac.rules.certManager: true
+      rbac.rules.secrets: true
     asserts:
       - isKind:
           of: ClusterRole
@@ -85,6 +89,10 @@ tests:
           path: rules[?(@.resources[0] == "rbeworkers")]
         documentIndex: 0
   - it: grants namespaced Pod reads so storage tools can resolve node placement
+    set:
+      rbac.mode: cluster
+      rbac.rules.certManager: true
+      rbac.rules.secrets: true
     # Disk metrics are keyed by node, and a Pod carries its own placement in
     # spec.nodeName / status.hostIP. Reading Pods in the Buildbarn namespace is
     # therefore sufficient, and no cluster-scoped `nodes` grant is needed — which
@@ -121,6 +129,9 @@ tests:
         documentIndex: 0
   - it: omits the Pod rule when the operator declines it
     set:
+      rbac.mode: cluster
+      rbac.rules.certManager: true
+      rbac.rules.secrets: true
       rbac.rules.pods: false
     asserts:
       - isKind:
@@ -129,3 +140,82 @@ tests:
       - notExists:
           path: rules[6]
         documentIndex: 0
+
+  - it: omits runtime certificate and broad Secret access by default
+    asserts:
+      - notExists:
+          path: rules[?(@.apiGroups[0] == "cert-manager.io")]
+        documentIndex: 0
+      - notExists:
+          path: rules[?(@.resources[0] == "secrets")]
+        documentIndex: 0
+
+  - it: limits optional client-certificate access to resources the API uses
+    set:
+      rbac.mode: cluster
+      rbac.rules.certManager: true
+      rbac.rules.secrets: true
+    asserts:
+      - equal:
+          path: rules[0].resources
+          value:
+            - certificates
+        documentIndex: 0
+      - equal:
+          path: rules[0].verbs
+          value:
+            - get
+            - list
+            - create
+            - update
+            - delete
+        documentIndex: 0
+      - equal:
+          path: rules[1].verbs
+          value:
+            - get
+        documentIndex: 0
+
+  - it: renders only namespaced RBAC by default
+    asserts:
+      - hasDocuments:
+          count: 4
+      - isKind:
+          of: Role
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+        documentIndex: 0
+      - isKind:
+          of: RoleBinding
+        documentIndex: 1
+      - equal:
+          path: roleRef.kind
+          value: Role
+        documentIndex: 1
+      - isKind:
+          of: Role
+        documentIndex: 2
+      - isKind:
+          of: RoleBinding
+        documentIndex: 3
+
+  - it: places namespace-mode grants in namespaceOverride
+    set:
+      namespaceOverride: tenant-ns
+      rbac.mode: namespace
+      license.fingerprintOverride: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: tenant-ns
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: tenant-ns
+        documentIndex: 1
+      - equal:
+          path: subjects[0].namespace
+          value: tenant-ns
+        documentIndex: 1

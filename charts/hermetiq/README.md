@@ -1,16 +1,22 @@
 # Hermetiq Helm Chart
 
-This README is the operator reference packaged with the Hermetiq `0.9.2`
-chart. Use the repository's
-[installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
-full-stack deployment order and external dependency installation.
+This README is the operator reference packaged with the Hermetiq `0.9.3`
+chart. It covers the services needed before installing Hermetiq and the chart
+installation itself. Use the repository's
+[installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for
+the full-stack deployment order and shared services used by the other charts.
 
 ## Contents
 
 - [Chart scope](#chart-scope)
-- [Install](#install)
+- [Install prerequisites](#install-prerequisites)
+  - [PostgreSQL](#postgresql)
+  - [NATS JetStream](#nats-jetstream)
+  - [DragonflyDB](#dragonflydb)
+  - [Shared services and routing](#shared-services-and-routing)
 - [Required external inputs](#required-external-inputs)
 - [Licensing and trials](#licensing-and-trials)
+  - [IMPORTANT: Set the license fingerprint before installing](#important-set-the-license-fingerprint-before-installing)
   - [Required contact and online trial](#required-contact-and-online-trial)
   - [Paid license keys](#paid-license-keys)
   - [Air-gapped licenses](#air-gapped-licenses)
@@ -53,6 +59,8 @@ full-stack deployment order and external dependency installation.
   - [Cost integration](#cost-integration)
   - [Cache-event analytics](#cache-event-analytics)
   - [Kubernetes workload discovery](#kubernetes-workload-discovery)
+- [Verify dependencies ready](#verify-dependencies-ready)
+- [Install](#install)
 - [Verification](#verification)
 - [Operations](#operations)
   - [Inspect Pods and logs](#inspect-pods-and-logs)
@@ -66,7 +74,7 @@ full-stack deployment order and external dependency installation.
 
 ## Chart scope
 
-This chart installs Hermetiq core application resources only:
+This chart installs Hermetiq core services and supporting resources, including:
 
 - API and BEP publisher Deployments
 - one subscriber Deployment per NATS stream partition
@@ -75,50 +83,197 @@ This chart installs Hermetiq core application resources only:
 - Services, HPA, ServiceAccount/RBAC, ConfigMaps, Secrets
 - optional Gateway API `GRPCRoute`/`HTTPRoute`, GKE HTTPRoute-only Gateway, Contour `HTTPProxy`, or classic `Ingress` resources
 
-It does not install Postgres, Redis/Dragonfly, NATS, VictoriaMetrics, OTEL Collector, or KEDA.
+It does not install Postgres, Redis/Dragonfly, NATS, VictoriaMetrics, OTEL Collector, or KEDA;
+these are very common services that most likely already exist in your organization's Kubernetes clusters.
 
-## Install
+## Install prerequisites
 
-Customer installations should use the pinned OCI release:
+Create the `hermetiq` namespace and provision PostgreSQL, NATS JetStream, and
+a Redis-compatible cache before installing this chart. The commands below use
+the `my-custom-values/` directory created in the repository's
+[prepare custom values](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values)
+step. Use your own namespace and file paths if they differ.
 
-```bash
-helm upgrade --install --namespace hermetiq hmq \
-  oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.2 \
-  --values hermetiq-values.yaml
+### PostgreSQL
+
+Provision PostgreSQL 16 or newer with a UTF-8 database owned by a dedicated
+Hermetiq user. Install the `pg_partman` extension on the server and make it
+available in the application database. The database owner needs to create and
+alter tables, indexes, functions, materialized views, and partitions. Require
+encrypted connections, allow traffic from the Hermetiq namespace, and plan
+backups, tested restores, and storage/I/O/WAL capacity for BEP ingest and
+retention. PostgreSQL is Hermetiq's system of record; NATS is an ingest buffer
+and DragonflyDB is a rebuildable cache.
+
+For a new database, run the equivalent of the following as a PostgreSQL
+administrator after `pg_partman` is installed on the server. Use the database
+and user names chosen in the starter values, and store the same password in
+the Kubernetes Secret below:
+
+```psql
+CREATE ROLE hermetiq_helm LOGIN PASSWORD '<db-password>';
+CREATE DATABASE hermetiq_helm OWNER hermetiq_helm ENCODING 'UTF8' TEMPLATE template0;
+\connect hermetiq_helm
+CREATE EXTENSION IF NOT EXISTS pg_partman;
 ```
 
-Use a customer-managed Secret for Postgres, Redis, OAuth2, Slack, license, and
-static JWKS material in production. Inline secret values are useful for local
-rendering but put sensitive data into Helm release state.
-
-Inspect the exact packaged defaults and schema before creating overrides:
+Create the password Secret referenced by the
+[starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml):
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.2
+kubectl -n hermetiq create secret generic postgres-db \
+  --from-literal=password='<db-password>'
 ```
+
+Set `postgres.host`, `postgres.database`, `postgres.user`, `postgres.sslMode`,
+and the password Secret reference for your database. Review the
+[bootstrap and partition policy](#postgresql-and-schema-management) before
+first install.
+
+### NATS JetStream
+
+Review the
+[NATS starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/nats-values.yaml),
+especially the storage class, volume size, and resource requests. The starter
+enables JetStream. Install NATS in the Hermetiq namespace:
+
+```bash
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+helm repo update
+helm upgrade --install --namespace hermetiq nats nats/nats \
+  --values my-custom-values/nats-values.yaml
+```
+
+Set `nats.url` to the reachable NATS service. Hermetiq creates its streams;
+see [NATS ingest and stream configuration](#nats-ingest-and-stream-configuration)
+for retention and partition settings.
+
+### DragonflyDB
+
+DragonflyDB is the Redis-compatible cache used by the starter values. Create
+its password Secret first:
+
+```bash
+kubectl -n hermetiq create secret generic dragonfly-auth \
+  --from-literal=password="$(openssl rand -base64 24)"
+```
+
+If the DragonflyDB operator is already installed, review and apply the
+[example instance](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/dragonflydb-operator-crd-instance.yaml):
+
+```bash
+kubectl explain dragonflies.dragonflydb.io
+kubectl -n hermetiq apply \
+  -f my-custom-values/dragonflydb-operator-crd-instance.yaml
+```
+
+Otherwise, install the standalone chart with the
+[starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/dragonflydb-values.yaml):
+
+```bash
+helm upgrade --install --namespace hermetiq dragonfly \
+  oci://ghcr.io/dragonflydb/dragonfly/helm/dragonfly \
+  --version v1.38.0 \
+  --values my-custom-values/dragonflydb-values.yaml
+```
+
+Set `redis.host` and the password Secret reference to match the chosen
+deployment.
+
+### Shared services and routing
+
+Follow the repository guide to [prepare routing, DNS, and TLS](https://github.com/Hermetiq/hermetiq-k8s#prepare-routing-dns-and-tls)
+and [provision shared services](https://github.com/Hermetiq/hermetiq-k8s#provision-shared-services):
+an OIDC identity provider, VictoriaMetrics and OpenTelemetry, and KEDA for
+worker autoscaling. Install the Gateway, Contour, or Ingress controller used by
+`routing.provider`. For chart-managed TLS with Ingress or Contour, install
+cert-manager and configure a matching issuer (`ClusterIssuer` by default).
+This applies to the shared `tls.certificate`, Contour per-route Certificates,
+and cert-manager's Ingress integration; see [Routing](#routing) for issuer
+values and TLS Secret alternatives.
 
 ## Required external inputs
 
-Provide a custom values file with:
+Start with the
+[Hermetiq starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml),
+copy them to `my-custom-values/hermetiq-values.yaml`, and work through **every
+top-level section in that file before installing**. Replace the example hosts,
+credentials, and sizing choices for your environment. Use this README to make
+each choice; the starter shows the main inputs, while the chart's
+[`values.yaml`](https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/values.yaml)
+documents advanced settings.
 
-- `license.contactEmail` (see [Licensing and trials](#licensing-and-trials))
-- `license.agreement.accepted: true` to confirm acceptance of the Hermetiq
-  Software License Agreement (see [License](#license))
-- `hosts.domainBase` or explicit hostnames (see [Hosts](#hosts))
-- the PostgreSQL endpoint, database, user, and password Secret under `postgres.*`
-- `gateway.name` when the active routing provider is `gateway` or `gateway-httproute-only`
-- the Redis/Dragonfly endpoint and password Secret under `redis.*`
-- `nats.url`
-- the OpenTelemetry endpoint under `otel.*`
-- `oidc.issuerUrl` plus `publisher.jwks.audience` for chart-managed JWKS
-- dashboard OAuth2 secret or values when `dashboard.oauth2Proxy.enabled=true`
-- `publisher.trustedCalCidrs` when Buildbarn sends completed actions to
-  `bep-nats-pub` (see [gRPC Authentication](#grpc-authentication)) — leaving it
-  empty disables CAL ingest
+| Starter values section | Review before installation |
+| --- | --- |
+| `license` | [Licensing and trials](#licensing-and-trials), especially the [IMPORTANT fingerprint procedure](#important-set-the-license-fingerprint-before-installing) |
+| `hosts` | [Hosts](#hosts) and DNS/TLS setup in [Routing](#routing) |
+| `bootstrap`, `postgres` | [PostgreSQL and schema management](#postgresql-and-schema-management), including initial partition sizing |
+| `routing`, `gateway` | [Routing](#routing) and the chosen controller's Gateway or Ingress |
+| `redis`, `nats`, `otel`, `victoriaMetrics` | [Install prerequisites](#install-prerequisites), [NATS ingest](#nats-ingest-and-stream-configuration), and [Integrations](#integrations-and-workload-discovery) |
+| `gcpWorkloadIdentity` | [Workload identity](#workload-identity); remove this example block outside GKE |
+| `app`, `api`, `publisher` | [NATS ingest](#nats-ingest-and-stream-configuration), [Authentication and SSO](#authentication-and-sso), and [Scheduling and availability](#scheduling-availability-and-hardening) |
+| `oidc`, `dashboard` | [Authentication and SSO](#authentication-and-sso) and [Dashboard configuration](#dashboard-configuration) |
+
+In particular, configure `publisher.trustedCalCidrs` if Buildbarn sends
+completed actions to `bep-nats-pub`; leaving it empty disables CAL ingest.
+Replace every placeholder (including `TODO` values), confirm the referenced
+Secrets and services exist, and complete [Verify dependencies ready](#verify-dependencies-ready)
+before running [Install](#install).
+
+Inspect the exact packaged defaults and README before creating advanced
+overrides:
+
+```bash
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.3
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.3
+```
 
 ## Licensing and trials
+
+### IMPORTANT: Set the license fingerprint before installing
+
+The chart defaults to `rbac.mode=namespace`. In this mode it cannot read the
+cluster's Namespace UID, so **`license.fingerprintOverride` is required even
+when you provide a paid license key**. The value must be exactly 64 lowercase
+hex characters. It identifies this installation for trial and license
+validation; changing it later changes the installation's license identity.
+
+Choose the value according to how you are installing:
+
+1. **New installation:** Generate a value once with `openssl rand -hex 32`.
+   Save that output in your deployment values and retain it for upgrades and
+   reinstalls. Do not run the command again for the same installation.
+2. **Existing installation with `license.fingerprintOverride` already set:**
+   Reuse the exact value. Do not replace it with a new random value.
+3. **Existing installation moving from cluster RBAC without an override:**
+   The default cluster RBAC mode derives its fingerprint by hashing the
+   `kube-system` Namespace UID. Compute the *same* value before switching to
+   namespace mode:
+
+   ```bash
+   namespace_uid="$(kubectl get namespace kube-system -o jsonpath='{.metadata.uid}')" &&
+     test -n "$namespace_uid" &&
+     printf '%s' "$namespace_uid" | openssl dgst -sha256 | awk '{print $NF}'
+   ```
+
+   Put the output in your values file. If your account cannot read the
+   `kube-system` Namespace object, ask a cluster administrator to run this
+   command. It reads only the Namespace object's UID. Do not use an empty or
+   failed command's output as the fingerprint.
+
+Replace the placeholder in your copy of
+[`custom-values/hermetiq-values.yaml`](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml):
+
+```yaml
+license:
+  fingerprintOverride: "<64-lowercase-hex-characters>"
+```
+
+Keep that value with the installation's durable configuration. Do not rotate
+it during a routine chart upgrade or reinstall. If you retain
+`rbac.mode=cluster` and its fingerprint grant, the chart can continue deriving
+the UID-based value without an override; choosing namespace mode requires the
+explicit value above.
 
 ### Required contact and online trial
 
@@ -137,10 +292,9 @@ online key validation need egress to `license.saasUrl` (default
 
 _Note: The binary rejects `build-team@example.com` on startup as that's just a placeholder in the chart, please supply a valid work email._
 
-Trial licenses are issued per cluster fingerprint. Deleting the release or
-namespace does not create a fresh trial for the same cluster. Validation is
-off the request path and cached so transient licensing-service outages do not
-interrupt requests.
+Trial licenses are tied to the [installation fingerprint](#important-set-the-license-fingerprint-before-installing).
+Validation is off the request path and cached so transient licensing-service
+outages do not interrupt requests.
 
 ### Paid license keys
 
@@ -172,11 +326,12 @@ refuses to render otherwise. No network calls are made in this mode.
 
 ### Licensing RBAC
 
-Two RBAC grants back licensing; both default to `true`:
+Two RBAC rule flags back licensing; both default to `true`, but the cluster
+fingerprint grant is rendered only when `rbac.mode=cluster` is selected:
 
 | Value | Grant | If disabled |
 | --- | --- | --- |
-| `rbac.rules.clusterFingerprint` | ClusterRole + ClusterRoleBinding with `get` on the `kube-system` Namespace **object** only (`resourceNames: [kube-system]`) — its metadata UID is the stable cluster fingerprint for license identity. It cannot list namespaces and reads nothing *inside* kube-system. | Falls back to the weaker own-namespace UID as the license identity; licensing still works. |
+| `rbac.rules.clusterFingerprint` | ClusterRole + ClusterRoleBinding with `get` on the `kube-system` Namespace **object** only (`resourceNames: [kube-system]`) — its metadata UID is the stable cluster fingerprint for license identity. It cannot list namespaces and reads nothing *inside* kube-system. Omitted in `rbac.mode=namespace`. | In cluster mode, use an override or a separately managed Namespace read grant. Namespace mode always requires `license.fingerprintOverride`. |
 | `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
 
 Both are exercised in-pod, so hardened installs must keep
@@ -230,7 +385,7 @@ to `require`.
 
 The schema bootstrap Job is a Helm hook by default. It runs on both install and upgrade so schema migrations are applied before workloads roll forward. Keep `postgres.password.existingSecret` set in hook mode, because pre-install hooks run before normal chart-managed Secrets are created. Successful hook Jobs are kept by default for log inspection and are deleted before the next install or upgrade hook creates a fresh Job. If you want the chart to create the Postgres Secret from `postgres.password.value`, set `bootstrap.hook.enabled=false`.
 
-When `bootstrap.projectName` is set, the bootstrap job creates the default project and managed Buildbarn namespace entry. Set `bootstrap.projectId` to pin the default project ID; leave it empty to let dbadmin generate a UUID. `bootstrap.projectNamespace` defaults to the Helm release namespace, which fits installs where Buildbarn is deployed alongside Hermetiq; set it explicitly when Buildbarn lives in a different namespace. The bundled Grafana dashboards use this same namespace for their initial Buildbarn metrics filter. Provide `bootstrap.namespaceBrowserUrl` and `bootstrap.namespaceDashboardUrl` with the user-facing Buildbarn Browser and dashboard URLs to store on that managed namespace.
+When `bootstrap.projectName` is set, the bootstrap job creates the default project and managed Buildbarn namespace entry. Set `bootstrap.projectId` to pin the default project ID; leave it empty to let dbadmin generate a UUID. `bootstrap.projectNamespace` defaults to the Helm release namespace, which fits installs where Buildbarn is deployed alongside Hermetiq; set it explicitly when Buildbarn lives in a different namespace. The bundled Grafana dashboards use this same namespace for their initial Buildbarn metrics filter. With `hosts.domainBase` set, the chart derives `bootstrap.namespaceBrowserUrl` as `https://browser.<domainBase>` and both `bootstrap.namespaceDashboardUrl` and `victoriaMetrics.dashboardUrl` as `https://grafana.<domainBase>/d/hermetiq-demo`. `hosts.grafana` overrides the derived Grafana host. Set these URLs explicitly only when your deployment uses different addresses.
 
 ### Partition policy and maintenance
 
@@ -256,7 +411,28 @@ partition is missing or maintenance is failing.
 
 ### Providers
 
-Set `routing.provider` to `gateway`, `gateway-httproute-only`, `contour`, or `ingress` to choose the external routing resources. Use `gateway-httproute-only` for GKE Gateway, which supports HTTPRoute but not GRPCRoute. Use `gateway` for Envoy Gateway and other controllers that support GRPCRoute. Gateway modes expect TLS on the referenced Gateway. Contour and Ingress modes can share one wildcard TLS Secret via `tls.secretName`, or render one wildcard cert-manager `Certificate` with `tls.certificate.enabled=true`. Set `tls.certificate.issuerRef.name` to an existing `ClusterIssuer` when enabling the Certificate; the chart refuses to render without it.
+Set `routing.provider` to `gateway`, `gateway-httproute-only`, `contour`, or
+`ingress` to choose the external routing resources. Use
+`gateway-httproute-only` for GKE Gateway, which supports HTTPRoute but not
+GRPCRoute. Use `gateway` for Envoy Gateway and other controllers that support
+GRPCRoute. Gateway modes expect TLS on the referenced Gateway.
+
+For Contour or Ingress, provide an existing wildcard TLS Secret through
+`tls.secretName`, or enable `tls.certificate.enabled` to render one shared
+cert-manager `Certificate`. The latter requires cert-manager installed in the
+cluster and `tls.certificate.issuerRef.name` set to an existing issuer (a
+`ClusterIssuer` with the default `issuerRef.kind`); the chart refuses to render
+without the issuer name.
+
+Without a shared Secret or Certificate, `contour.certManager.enabled=true`
+(the default) renders per-route `Certificate` resources; set
+`contour.certManager.clusterIssuer` to an existing `ClusterIssuer`. For Ingress,
+`ingress.certManager.enabled=true` adds cert-manager issuer annotations so its
+ingress-shim creates per-route Certificates; set
+`ingress.certManager.clusterIssuer` to an existing `ClusterIssuer`. This Ingress
+option is disabled by default. Both per-route modes require cert-manager in
+the cluster. If cert-manager is not used, provide the TLS Secrets referenced by
+the routes yourself.
 
 When `routing.provider=gateway`, `gateway.healthChecks.enabled=true` renders Envoy Gateway `BackendTrafficPolicy` resources that health-check gRPC routes with TCP and HTTP routes with unauthenticated readiness/metadata endpoints. When `routing.provider=gateway-httproute-only`, the GKE `HealthCheckPolicy` for the mixed API Service checks `GET /ready` on container port `8008`.
 
@@ -314,6 +490,9 @@ applies the oldest and marks the rest `Overridden=True`. Set
 leaving health checks enabled.
 
 ### Tuning the downstream leg for high-RTT clients
+
+When enabled, the policy advertises `h2` for gRPC and `http/1.1` for browser
+traffic through `spec.tls.alpnProtocols` on TLS listeners.
 
 `gateway.clientTrafficPolicy.enabled=true` renders an Envoy Gateway `ClientTrafficPolicy` (`routing.provider=gateway` only) covering the client → Envoy leg. It is disabled by default; enable it when clients are far from the cluster. Envoy Gateway's own defaults are conservative for build traffic — measured against v1.7.2 it programs a 32Ki per-connection buffer limit, a 64Ki HTTP/2 stream window, a 1Mi connection window, 100 concurrent streams, and a 1h idle timeout. The per-connection buffer limit matters most: at 32Ki, large BEP uploads and CAS blob transfer hit watermark backpressure almost immediately and every drain/refill cycle costs a full client round trip. The HTTP/2 windows are a second, independent cap, so raising only `bufferLimit` can still produce `413 request_payload_too_large`. Raising the idle timeout is what actually prevents connection churn, since Envoy's HTTP idle timeout is request-based and neither HTTP/2 PINGs nor TCP keepalives reset it.
 
@@ -760,13 +939,30 @@ Kubernetes API.
 
 Review every rule under `rbac.rules`:
 
-- keep `clusterFingerprint` and `licenseState` enabled for stable licensing,
-  trial persistence, and offline validation grace
+- keep `licenseState` enabled for trial persistence and offline validation
+  grace; `clusterFingerprint` applies only when cluster RBAC mode is selected
 - keep `deployments`, `configMaps`, and `rbeWorkers` only when the API should
   discover Buildbarn workloads and worker pools
 - keep `leases` only for subscriber lease coordination
 - keep `secrets` and `certManager` only for the application features that read
   those resources
+
+The chart defaults to `rbac.mode=namespace` and creates only Roles and
+RoleBindings. Follow the [IMPORTANT fingerprint procedure](#important-set-the-license-fingerprint-before-installing)
+before installing or changing RBAC modes. Set `rbac.mode=cluster` explicitly
+if the application should read the `kube-system` Namespace UID instead.
+Switching an existing
+release from cluster to namespace mode removes its old ClusterRoles and
+ClusterRoleBindings, so the upgrade still requires an installer allowed to
+delete those old resources.
+
+`rbac.rules.certManager` and `rbac.rules.secrets` default to `false`. They
+control the application's optional client-certificate management, not route
+TLS. If you enable them, set `api.env.DEFAULT_CERT_NAMESPACE` to the Hermetiq
+release namespace (the application otherwise defaults to `mtls-client-certs`)
+and `api.env.CLUSTER_ISSUER` to the configured client-certificate issuer. The
+chart's runtime RBAC grants access only in its release namespace; route
+Certificates created by Helm do not require these application grants.
 
 The default container security context runs as a non-root user, drops all
 capabilities, disables privilege escalation, uses a read-only root filesystem,
@@ -795,6 +991,9 @@ replicas when a PDB is enabled. Subscriber, dashboard, and Grafana proxy PDBs
 are disabled by default because those workloads commonly start with one
 replica; enable them only after choosing a replica count and disruption policy
 that permits node drains.
+Every rendered PDB sets `unhealthyPodEvictionPolicy: AlwaysAllow`, so a node
+drain can evict an unready Pod even when the healthy Pod budget is exhausted.
+Healthy Pods still follow `maxUnavailable`.
 
 ### Additional environment variables
 
@@ -878,6 +1077,10 @@ packaged default.
 For NATS, cache TTL, and PromQL ConfigMaps, set `rolloutChecksum` whenever the
 external content changes. Helm cannot read or hash external ConfigMap data, so
 the checksum is the signal that rolls consuming pods.
+
+The dashboard Quickstart ConfigMap uses a Pod checksum when its data comes
+from chart values. For `dashboard.quickstartConfig.existingConfigMap`, change a
+`commonAnnotations` value on the next Helm upgrade to roll the dashboard pod.
 
 ### Cache TTL configuration
 
@@ -970,6 +1173,67 @@ Disabling these grants leaves metrics queries available but removes the
 installed-component inventory and Buildbarn configuration context from MCP
 diagnostics. The API needs a mounted ServiceAccount token to use workload and
 `RbeWorker` discovery.
+
+## Verify dependencies ready
+
+Check these before installing Hermetiq. Use the namespace and service names
+from your own values when they differ from the starter examples.
+
+1. From a client with access to the application database, connect as the
+   Hermetiq user and confirm `pg_partman` is available. `psql` prompts for the
+   password; the result should show one `pg_partman` row with a populated
+   `installed_version` and `can_create=t`:
+
+   ```bash
+   psql 'host=<db-host> port=5432 dbname=<db-name> user=<db-user> sslmode=require' \
+     -c "SELECT name, installed_version FROM pg_available_extensions WHERE name = 'pg_partman'" \
+     -c "SELECT has_database_privilege(current_user, current_database(), 'CREATE') AS can_create"
+   ```
+
+2. Confirm the Secrets and Service endpoints referenced by the starter values
+   exist. Every listed endpoint should have at least one ready address:
+
+   ```bash
+   kubectl -n hermetiq get secret postgres-db dragonfly-auth oauth2-proxy-client
+   kubectl -n hermetiq get endpoints nats dragonfly otel-collector vmselect-vmks vminsert-vmks
+   kubectl -n hermetiq rollout status deployment/otel-collector --timeout=5m
+   ```
+
+3. Confirm the NATS server is ready and JetStream is enabled:
+
+   ```bash
+   kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
+   kubectl -n hermetiq exec -it \
+     "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
+       -o jsonpath='{.items[0].metadata.name}')" \
+     -- nats server check jetstream
+   ```
+
+4. Confirm the OIDC issuer's discovery document is reachable, its dashboard
+   callback URL and BEP audience are registered, and the configured routing
+   Gateway or Ingress controller has a ready address. For chart-managed
+   Ingress or Contour certificates, also confirm cert-manager and the matching
+   issuer are ready. KEDA is needed for the subsequent operator-managed
+   worker pools; verify its operator is ready before installing those pools.
+
+Before installing, complete the [starter values review](#required-external-inputs),
+including a real work address for `license.contactEmail`, the
+[fingerprint procedure](#important-set-the-license-fingerprint-before-installing),
+and partition sizing for the expected ingest volume.
+
+## Install
+
+Run this only after working through every top-level block in
+`my-custom-values/hermetiq-values.yaml` using the sections above, replacing
+all placeholders, and completing [Verify dependencies ready](#verify-dependencies-ready).
+Then install the pinned OCI release:
+
+```bash
+helm upgrade --install --namespace hermetiq hmq \
+  oci://ghcr.io/hermetiq/hermetiq \
+  --version 0.9.3 \
+  --values my-custom-values/hermetiq-values.yaml
+```
 
 ## Verification
 
@@ -1158,14 +1422,28 @@ long-lived image changes under `images.*` in values.
 ### Rotate Secrets
 
 Secrets injected as environment variables require a workload restart after
-their contents change.
+their contents change. Changes to chart-managed Secret values change the
+consuming Deployments' Pod checksums during `helm upgrade`. For a Secret
+managed outside the chart, update a value under `commonAnnotations` in the
+Hermetiq values file before upgrading, for example:
+
+```yaml
+commonAnnotations:
+  hermetiq.com/external-secret-revision: "2026-09-30-1"
+```
+
+Changing that value rolls the chart's Deployments. Do the same in the
+Buildbarn values file when Browser or another Buildbarn workload uses the
+rotated Secret. A Helm upgrade with unchanged values cannot detect external
+Secret content changes; for an immediate rotation, restart the affected
+Deployments directly.
 
 | Secret | Main consumers | Restart after rotation |
 |---|---|---|
 | `postgres-db` | API, publisher, subscribers, maintenance jobs | `grpc-api`, `bep-nats-pub`, and all `bep-nats-sub-*` Deployments |
 | `dragonfly-auth` | Dragonfly and Hermetiq core workloads | Dragonfly first, then all core Deployments |
 | `oauth2-proxy-client` | dashboard, Grafana proxy, API audience derivation, optional Buildbarn Browser | `web-ui`, `grafana-oauth2-proxy`, `grpc-api`, and the Buildbarn Browser proxy |
-| `hermetiq-license` | API and publisher | normally hot-reloaded; restart only when directed by support |
+| `hermetiq-license` | API and publisher | externally managed keys hot-reload; changing an inline Helm key rolls the Pods |
 
 Update a Secret without putting its value on disk:
 

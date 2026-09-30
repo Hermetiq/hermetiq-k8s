@@ -6,17 +6,17 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.4
+version: 0.9.5
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Use cloud-native v0.9.3 grpc-cache-proxy by default"
-    - kind: changed
-      description: "Aggregate Buildbarn recording rules and filter chart-managed KEDA queries by namespace"
     - kind: removed
-      description: "Breaking: VMPodScrapes no longer stamp hermetiq_project_id, and project.id is removed. Upgrade bb-worker-operator to 0.3.4 first. Set the Hermetiq chart's victoriaMetrics.projectLabel to namespace; hermetiq_project_id matches no Buildbarn series"
+      description: "Remove chart-managed workers; use RbeWorker pools"
+    - kind: added
+      description: "Roll pods when managed ConfigMaps or Secrets change"
+    - kind: changed
+      description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
 keywords:
   - buildbarn
   - remote-execution

@@ -220,17 +220,6 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- range $w := list "workerUbuntu2204" "workerTestcontainers" "workerTestcontainersSysbox" -}}
-{{- $wv := index $.Values $w -}}
-{{- if and $wv $wv.config.prefetching.enabled -}}
-{{- if not $.Values.storage.persistence.fsac.enabled -}}
-{{- fail (printf "%s.config.prefetching.enabled=true requires storage.persistence.fsac.enabled=true" $w) -}}
-{{- end -}}
-{{- if not $wv.config.virtualBuildDirectory.enabled -}}
-{{- fail (printf "%s.config.prefetching.enabled=true requires %s.config.virtualBuildDirectory.enabled=true" $w $w) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
 {{- if .Values.frontend.grpcCacheProxy.enabled -}}
 {{/* An empty natsUrl is legal: it runs the sidecar as a pure pass-through with
      cache-event capture disabled. The subject prefix only matters when events
@@ -290,11 +279,6 @@
 {{- range $name, $_ := $.Values.configOverrides -}}
 {{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet") -}}
 {{- fail (printf "configOverrides[%q] replaces a file that carries one half of an in-cluster mTLS hop, and an override is spliced in verbatim without templating — security.grpcMtls would configure the other half only, leaving that hop broken. Add the tls block to your override and remove this file from the check, or turn security.grpcMtls off" $name) -}}
-{{- end -}}
-{{- end -}}
-{{- range $name, $_ := $.Values.workerConfigOverrides -}}
-{{- if eq $name "worker-common.libsonnet" -}}
-{{- fail "workerConfigOverrides[\"worker-common.libsonnet\"] replaces the file that dials the scheduler and storage, and an override is spliced in verbatim without templating, so security.grpcMtls cannot reach it. Add the tls blocks to your override, or turn security.grpcMtls off" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

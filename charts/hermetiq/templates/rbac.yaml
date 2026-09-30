@@ -1,9 +1,12 @@
 {{- if .Values.rbac.enabled }}
 {{- $rbacRulesEnabled := or .Values.rbac.rules.certManager .Values.rbac.rules.secrets .Values.rbac.rules.leases .Values.rbac.rules.deployments .Values.rbac.rules.configMaps .Values.rbac.rules.rbeWorkers .Values.rbac.rules.pods }}
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
-  name: {{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}
+  name: {{ if eq .Values.rbac.mode "namespace" }}{{ printf "%s-%s" .Release.Name .Values.rbac.namespaceRoleName }}{{ else }}{{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}{{ end }}
+  {{- if eq .Values.rbac.mode "namespace" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  {{- end }}
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
 rules:
@@ -15,14 +18,12 @@ rules:
       - cert-manager.io
     resources:
       - certificates
-      - certificates/status
-      - certificaterequests
     verbs:
       - get
       - list
-      - watch
       - create
       - update
+      - delete
   {{- end }}
   {{- if .Values.rbac.rules.secrets }}
   - apiGroups:
@@ -31,8 +32,6 @@ rules:
       - secrets
     verbs:
       - get
-      - list
-      - watch
   {{- end }}
   {{- if .Values.rbac.rules.leases }}
   - apiGroups:
@@ -108,7 +107,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ .Values.rbac.roleBindingName }}
+  name: {{ if eq .Values.rbac.mode "namespace" }}{{ printf "%s-%s" .Release.Name .Values.rbac.namespaceRoleBindingName }}{{ else }}{{ .Values.rbac.roleBindingName }}{{ end }}
   namespace: {{ include "hermetiq-core.namespace" . }}
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
@@ -118,9 +117,9 @@ subjects:
     namespace: {{ include "hermetiq-core.namespace" . }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}
-{{- if .Values.rbac.rules.clusterFingerprint }}
+  kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
+  name: {{ if eq .Values.rbac.mode "namespace" }}{{ printf "%s-%s" .Release.Name .Values.rbac.namespaceRoleName }}{{ else }}{{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}{{ end }}
+{{- if and (eq .Values.rbac.mode "cluster") .Values.rbac.rules.clusterFingerprint }}
 ---
 # License cluster fingerprint: metadata read of ONE cluster-scoped object —
 # the kube-system Namespace — whose UID is the stable identity of the cluster
@@ -129,9 +128,9 @@ roleRef:
 # can NOT list namespaces and grants nothing INSIDE kube-system — Secrets,
 # ConfigMaps, and Pods there are separate resources this role has no verbs
 # on. A ClusterRoleBinding is required because Namespace objects are
-# cluster-scoped; a namespaced RoleBinding cannot grant this read. Opting
-# out (rbac.rules.clusterFingerprint=false) falls back to the own-namespace
-# UID fingerprint granted by the license-state Role below.
+# cluster-scoped; a namespaced RoleBinding cannot grant this read. When this
+# grant is omitted, supply license.fingerprintOverride or arrange a separate
+# cluster-level Namespace read grant.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -169,10 +168,9 @@ roleRef:
 # signed validation cache (offline grace) in the hermetiq-license-state
 # Secret via the K8s API. Write verbs are resourceNames-scoped to that one
 # Secret; create carries no resourceNames because Kubernetes cannot
-# name-scope creation. The namespaces `get` rule is the RBAC special case
-# where a namespaced Role grants read of its OWN Namespace object only —
-# the fallback fingerprint source when rbac.rules.clusterFingerprint is
-# disabled.
+# name-scope creation. Namespace objects are cluster-scoped, so namespace
+# mode requires license.fingerprintOverride instead of an ineffective
+# namespaced rule for reading the Namespace UID.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -197,12 +195,6 @@ rules:
       - secrets
     verbs:
       - create
-  - apiGroups:
-      - ""
-    resources:
-      - namespaces
-    verbs:
-      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

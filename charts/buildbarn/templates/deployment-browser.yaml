@@ -22,6 +22,12 @@ spec:
         {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "browser.jsonnet")) }}
+        {{- if and .Values.browser.oauth2Proxy.enabled (not .Values.browser.oauth2Proxy.existingConfigMap) }}
+        checksum/oauth2-proxy-config: {{ include "buildbarn.oauth2ProxyConfigData" . | sha256sum }}
+        {{- end }}
+        {{- if and .Values.browser.oauth2Proxy.enabled (not .Values.browser.oauth2Proxy.client.existingSecret) }}
+        checksum/oauth2-proxy-secret: {{ .Values.browser.oauth2Proxy.client | toJson | sha256sum }}
+        {{- end }}
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.browser) | nindent 6 }}

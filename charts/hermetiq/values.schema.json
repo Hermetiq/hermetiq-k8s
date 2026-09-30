@@ -594,6 +594,10 @@
     "rbac": {
       "type": "object",
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["cluster", "namespace"]
+        },
         "rules": {
           "type": "object",
           "properties": {

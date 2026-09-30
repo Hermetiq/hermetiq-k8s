@@ -7,6 +7,7 @@ metadata:
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   {{- if ne .Values.podDisruptionBudget.minAvailable nil }}
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   {{- else }}

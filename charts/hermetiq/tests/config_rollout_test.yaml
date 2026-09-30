@@ -1,0 +1,72 @@
+suite: chart-managed configuration rolls its consumers
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+  - templates/deployment-dashboard.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: stamps the Redis Secret checksum on the API
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/redis-secret"]
+          value: abb449fbb36e630835ba270a7be3edf4afc551150069a692b202d84897a4eaa7
+
+  - it: changes the API checksum when the chart-managed Redis password changes
+    template: templates/deployment-api.yaml
+    set:
+      redis.password.value: rotated-password
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/redis-secret"]
+          value: abb449fbb36e630835ba270a7be3edf4afc551150069a692b202d84897a4eaa7
+
+  - it: stamps the Redis Secret checksum on the publisher
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["checksum/redis-secret"]
+
+  - it: stamps the Redis Secret checksum on subscribers
+    template: templates/deployment-subscribers.yaml
+    documentIndex: 0
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["checksum/redis-secret"]
+
+  - it: omits an inline checksum for the externally managed PostgreSQL Secret
+    template: templates/deployment-api.yaml
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/postgres-secret"]
+
+  - it: changes the PostgreSQL checksum when its chart-managed password changes
+    template: templates/deployment-api.yaml
+    set:
+      bootstrap.hook.enabled: false
+      postgres.password.existingSecret: ""
+      postgres.password.value: rotated-password
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/postgres-secret"]
+          value: 931e4166938cd19ae1795ccc0103bfbcb46dac1ba09bc72e4d40a31e01321971
+
+  - it: changes the dashboard checksum when inline Quickstart config changes
+    template: templates/deployment-dashboard.yaml
+    set:
+      dashboard.quickstartConfig.data.foo: baz
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/quickstart-config"]
+          value: 7314b5a79468fff94ae9951236c7c7222835aef61a5648a1627e8d35edb4078c
+
+  - it: changes the dashboard checksum when its secret environment changes
+    template: templates/deployment-dashboard.yaml
+    set:
+      dashboard.secretEnv.FOO: baz
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/dashboard-secret-env"]
+          value: be7c5980b9b66cce49a6e1ceefe459465ad4030d91f813f26274a58310cef018

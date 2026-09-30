@@ -54,6 +54,14 @@ tests:
       - isNotNullOrEmpty:
           path: spec.template.metadata.annotations["hermetiq.com/shared-env-checksum"]
 
+  - it: hardcodes on-prem app mode on subscriber pods
+    template: templates/deployment-subscribers.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "APP_ENV")].value
+          value: on-prem
+
   # Pins the checksum for the unmodified ci-values render, so the two tests
   # below prove the annotation actually tracks shared env content rather than
   # being a constant. Recompute if ci-values or the shared env keys change.

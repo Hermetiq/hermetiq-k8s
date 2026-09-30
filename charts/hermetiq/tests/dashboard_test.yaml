@@ -7,6 +7,9 @@ tests:
   - it: disables dashboard cost integration by default
     asserts:
       - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ON_PREM")].value
+          value: "true"
+      - equal:
           path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
           value: "false"
 

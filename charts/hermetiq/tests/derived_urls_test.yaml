@@ -1,0 +1,55 @@
+suite: domain-based browser and Grafana URLs
+templates:
+  - templates/job-schema-bootstrap.yaml
+  - templates/deployment-dashboard.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: derives managed namespace URLs from domainBase
+    template: templates/job-schema-bootstrap.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '--bootstrap-namespace-browser-url="https://browser.ci.hermetiq.test"'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '--bootstrap-namespace-dashboard-url="https://grafana.ci.hermetiq.test/d/hermetiq-demo"'
+
+  - it: derives the UI overview URL from domainBase
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_METRICS_DASHBOARD_URL")].value
+          value: https://grafana.ci.hermetiq.test/d/hermetiq-demo
+
+  - it: uses a custom Grafana host for both overview links
+    set:
+      hosts.grafana: metrics.example.com
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '--bootstrap-namespace-dashboard-url="https://metrics.example.com/d/hermetiq-demo"'
+        template: templates/job-schema-bootstrap.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_METRICS_DASHBOARD_URL")].value
+          value: https://metrics.example.com/d/hermetiq-demo
+        template: templates/deployment-dashboard.yaml
+
+  - it: preserves explicit URL overrides
+    set:
+      bootstrap.namespaceBrowserUrl: https://browser.example.com
+      bootstrap.namespaceDashboardUrl: https://metrics.example.com/d/custom
+      victoriaMetrics.dashboardUrl: https://metrics.example.com/d/other
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '--bootstrap-namespace-browser-url="https://browser.example.com"'
+        template: templates/job-schema-bootstrap.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '--bootstrap-namespace-dashboard-url="https://metrics.example.com/d/custom"'
+        template: templates/job-schema-bootstrap.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_METRICS_DASHBOARD_URL")].value
+          value: https://metrics.example.com/d/other
+        template: templates/deployment-dashboard.yaml

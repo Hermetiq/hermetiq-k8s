@@ -1,0 +1,19 @@
+suite: operator disruption budget
+templates:
+  - templates/pdb.yaml
+tests:
+  - it: does not create a disruption budget by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: lets node drains evict unhealthy operator pods when enabled
+    set:
+      podDisruptionBudget.enabled: true
+    asserts:
+      - equal:
+          path: spec.unhealthyPodEvictionPolicy
+          value: AlwaysAllow
+      - equal:
+          path: spec.maxUnavailable
+          value: 1

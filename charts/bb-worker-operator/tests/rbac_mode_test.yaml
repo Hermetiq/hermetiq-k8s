@@ -1,0 +1,107 @@
+suite: complete namespace RBAC mode
+templates:
+  - templates/rbac.yaml
+  - templates/deployment.yaml
+  - templates/validate.yaml
+release:
+  name: operator
+  namespace: tenant-ns
+tests:
+  - it: renders only Roles and RoleBindings for a namespaced operator
+    template: templates/rbac.yaml
+    set:
+      rbac.mode: namespace
+      metrics.secure: false
+    asserts:
+      - hasDocuments:
+          count: 7
+      - isKind:
+          of: Role
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: tenant-ns
+        documentIndex: 0
+      - isKind:
+          of: RoleBinding
+        documentIndex: 1
+      - equal:
+          path: roleRef.kind
+          value: Role
+        documentIndex: 1
+      - isKind:
+          of: Role
+        documentIndex: 2
+      - isKind:
+          of: RoleBinding
+        documentIndex: 3
+      - isKind:
+          of: Role
+        documentIndex: 4
+      - isKind:
+          of: Role
+        documentIndex: 5
+      - isKind:
+          of: Role
+        documentIndex: 6
+
+  - it: scopes the watch to the install namespace automatically
+    template: templates/deployment.yaml
+    set:
+      rbac.mode: namespace
+      metrics.secure: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --watch-namespace=tenant-ns
+
+  - it: follows namespaceOverride for Roles and manager watch
+    set:
+      namespaceOverride: operator-ns
+      rbac.mode: namespace
+      metrics.secure: false
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: operator-ns
+        documentIndex: 0
+        template: templates/rbac.yaml
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --watch-namespace=operator-ns
+        template: templates/deployment.yaml
+
+  - it: rejects secure metrics without cluster RBAC
+    template: templates/validate.yaml
+    set:
+      rbac.mode: namespace
+    asserts:
+      - failedTemplate:
+          errorPattern: "rbac.mode=namespace cannot use secure metrics"
+
+  - it: rejects a watch namespace outside the Role scope
+    template: templates/validate.yaml
+    set:
+      rbac.mode: namespace
+      metrics.secure: false
+      watchNamespace: other-ns
+    asserts:
+      - failedTemplate:
+          errorPattern: "watchNamespace must be empty or tenant-ns"
+
+  - it: keeps the legacy namespace binding behavior in cluster mode
+    template: templates/rbac.yaml
+    set:
+      rbac.managerBindingMode: namespace
+      watchNamespace: tenant-ns
+    asserts:
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - isKind:
+          of: RoleBinding
+        documentIndex: 1
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+        documentIndex: 1

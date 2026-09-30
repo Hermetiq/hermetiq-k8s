@@ -34,6 +34,18 @@ spec:
         kubectl.kubernetes.io/default-container: api
         hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
         hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
+        {{- if not .Values.postgres.password.existingSecret }}
+        checksum/postgres-secret: {{ dict "key" .Values.postgres.password.existingSecretKey "value" .Values.postgres.password.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if not .Values.redis.password.existingSecret }}
+        checksum/redis-secret: {{ dict "key" .Values.redis.password.existingSecretKey "value" .Values.redis.password.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if and .Values.slack.botToken.value (not .Values.slack.botToken.existingSecret) }}
+        checksum/slack-secret: {{ dict "key" .Values.slack.botToken.existingSecretKey "value" .Values.slack.botToken.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if and .Values.license.key.value (not .Values.license.key.existingSecret) }}
+        checksum/license-secret: {{ dict "key" .Values.license.key.existingSecretKey "value" .Values.license.key.value | toJson | sha256sum }}
+        {{- end }}
         {{- if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled (not .Values.api.jwt.audience) (not .Values.dashboard.oauth2Proxy.client.existingSecret) }}
         hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
         {{- end }}

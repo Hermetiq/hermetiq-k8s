@@ -1,0 +1,49 @@
+suite: browser OAuth configuration rolls its pod
+templates:
+  - templates/deployment-browser.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: changes the config checksum when chart-managed OAuth settings change
+    set:
+      browser.oauth2Proxy.enabled: true
+      browser.oauth2Proxy.existingConfigMap: ""
+      browser.oauth2Proxy.oidcIssuerUrl: https://idp.example.com/
+      browser.oauth2Proxy.scope: openid email
+      browser.oauth2Proxy.client.existingSecret: ""
+      browser.oauth2Proxy.client.clientId: client
+      browser.oauth2Proxy.client.clientSecret: one
+      browser.oauth2Proxy.client.cookieSecret: cookie
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-config"]
+          value: 4a7a7504c23c25c8aed38a9f11f552ee3d61735162491a2d7a3843154928c3a5
+      - equal:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-secret"]
+          value: 06736b941e563de901b1d29faad6542c660ad6a41190872bfbe2320a914c84a2
+
+  - it: changes the secret checksum when chart-managed OAuth credentials change
+    set:
+      browser.oauth2Proxy.enabled: true
+      browser.oauth2Proxy.existingConfigMap: ""
+      browser.oauth2Proxy.oidcIssuerUrl: https://idp.example.com/
+      browser.oauth2Proxy.client.existingSecret: ""
+      browser.oauth2Proxy.client.clientId: client
+      browser.oauth2Proxy.client.clientSecret: two
+      browser.oauth2Proxy.client.cookieSecret: cookie
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-secret"]
+          value: 06736b941e563de901b1d29faad6542c660ad6a41190872bfbe2320a914c84a2
+      - equal:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-config"]
+          value: 4a7a7504c23c25c8aed38a9f11f552ee3d61735162491a2d7a3843154928c3a5
+
+  - it: omits chart-managed checksums when using external OAuth resources
+    set:
+      browser.oauth2Proxy.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-config"]
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/oauth2-proxy-secret"]

@@ -1,4 +1,10 @@
 {{- $provider := include "hermetiq-core.routingProvider" . -}}
+{{- if not (has .Values.rbac.mode (list "cluster" "namespace")) -}}
+{{- fail "rbac.mode must be cluster or namespace" -}}
+{{- end -}}
+{{- if and .Values.rbac.enabled (eq .Values.rbac.mode "namespace") (not .Values.license.fingerprintOverride) -}}
+{{- fail "rbac.mode=namespace requires a stable license.fingerprintOverride; namespace-scoped RBAC cannot read a Namespace UID" -}}
+{{- end -}}
 {{- $validRoutingProviders := list "gateway" "gateway-httproute-only" "contour" "ingress" "none" -}}
 {{- $requestedRoutingProvider := default "" .Values.routing.provider -}}
 {{- if and $requestedRoutingProvider (not (has $requestedRoutingProvider $validRoutingProviders)) -}}

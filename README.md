@@ -1,8 +1,8 @@
-# Hermetiq Kubernetes
+# Hermetiq on Kubernetes
 
 This repository is the source for Hermetiq's Kubernetes deployment artifacts:
 
-- Helm charts for Hermetiq, Buildbarn, and the Buildbarn worker operator
+- Helm charts for Hermetiq, Buildbarn, and Hermetiq's RBE worker operator
 - starter values for the charts and their external dependencies
 - example `RbeWorker` pools and Bazel integrations
 - operational and architecture runbooks
@@ -35,7 +35,7 @@ configuration.
   - [Prepare custom values](#prepare-custom-values)
   - [Create the namespace](#create-the-namespace)
   - [Prepare routing, DNS, and TLS](#prepare-routing-dns-and-tls)
-  - [Provision external services](#provision-external-services)
+  - [Provision shared services](#provision-shared-services)
   - [Install Hermetiq](#install-hermetiq)
   - [Install the worker operator](#install-the-worker-operator)
   - [Install Buildbarn and worker pools](#install-buildbarn-and-worker-pools)
@@ -149,9 +149,21 @@ You need:
 - `kubectl` configured for the target cluster
 - a Gateway API, Contour, or Ingress controller
 - DNS and a TLS certificate for the external hosts
+- cert-manager installed and a configured issuer (`ClusterIssuer` by default)
+  if the charts manage TLS certificates for Contour or Ingress (also required
+  by optional TopoLVM)
 - PostgreSQL 16 or newer with `pg_partman`
 - an OIDC identity provider
 - persistent storage suitable for NATS and, when selected, Buildbarn
+
+The Hermetiq chart defaults to namespace RBAC. Set a stable
+`license.fingerprintOverride` in its values file. The bb-worker-operator chart
+defaults to cluster RBAC; for a namespace-scoped operator installation, set
+`rbac.mode=namespace` and `metrics.secure=false`. See the
+[Hermetiq RBAC settings](charts/hermetiq/README.md#serviceaccount-tokens-and-rbac)
+and [operator RBAC settings](charts/bb-worker-operator/README.md#rbac-scope).
+For a namespace-scoped operator installation, a cluster administrator must
+install its CRD separately.
 
 Verify the basics before starting:
 
@@ -177,14 +189,6 @@ The following versions form the first tested bundle in this repository:
 | Buildbarn |       `0.9.4` |  `20260908T142448Z` |
 | BB Worker Operator |       `0.3.4` |            `v0.3.4` |
 
-The commands below define these versions once and reuse them:
-
-```bash
-HERMETIQ_CHART_VERSION=0.9.2
-BUILDBARN_CHART_VERSION=0.9.4
-BB_WORKER_OPERATOR_CHART_VERSION=0.3.4
-```
-
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
 both version sets unchanged and describe their user-visible change in the
@@ -195,8 +199,9 @@ supported current state, not a cumulative release history.
 
 Install in this order:
 
-1. Prepare the namespace, routing, DNS, TLS, PostgreSQL, OIDC, NATS,
-   VictoriaMetrics, OpenTelemetry, DragonflyDB, and KEDA.
+1. Prepare the namespace, routing, DNS, TLS, and shared services below. Follow
+   the [Hermetiq prerequisite guide](charts/hermetiq/README.md#install-prerequisites)
+   to provision PostgreSQL, NATS JetStream, and DragonflyDB.
 2. Install Hermetiq. It creates the shared dashboard OAuth configuration used
    by the optional Grafana and Buildbarn Browser proxies.
 3. Install the BB Worker Operator.
@@ -218,28 +223,13 @@ cp -R custom-values my-custom-values
 `-custom-values`, so a more descriptive name such as
 `gke-production-custom-values` also stays out of version control.
 
+The files in `custom-values/` are starter overrides, not copies of every chart
+setting. Each values file points to the chart's full `values.yaml` (or the
+`helm show values` command for an upstream chart) when you need advanced options.
+
 Helm deep-merges maps and replaces lists wholesale. When overriding a list,
 repeat every entry that should remain. Multiple `-f` arguments are applied
 left-to-right, with the rightmost value winning.
-
-Inspect the packaged documentation and defaults before editing overrides:
-
-```bash
-helm show readme oci://ghcr.io/hermetiq/hermetiq \
-  --version "$HERMETIQ_CHART_VERSION"
-helm show values oci://ghcr.io/hermetiq/hermetiq \
-  --version "$HERMETIQ_CHART_VERSION"
-
-helm show readme oci://ghcr.io/hermetiq/buildbarn \
-  --version "$BUILDBARN_CHART_VERSION"
-helm show values oci://ghcr.io/hermetiq/buildbarn \
-  --version "$BUILDBARN_CHART_VERSION"
-
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version "$BB_WORKER_OPERATOR_CHART_VERSION"
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version "$BB_WORKER_OPERATOR_CHART_VERSION"
-```
 
 ### Create the namespace
 
@@ -282,43 +272,31 @@ TLS depends on the provider. In the Gateway modes, TLS terminates on the
 Gateway listener you own and the charts render no certificates. In the Contour
 and Ingress modes, each chart can render a wildcard cert-manager `Certificate`
 or reuse an existing wildcard Secret through `tls.secretName`. The Hermetiq
-chart's Certificate is opt-in. The Buildbarn chart renders one by default and
-references the `ClusterIssuer` named by `certificate.issuerRef.name`, so point
-that at an issuer that exists or the routes serve no usable TLS.
+chart's shared Certificate is opt-in; it can also use per-route cert-manager
+Certificates for Contour or cert-manager Ingress annotations when enabled. The
+Buildbarn chart renders a Certificate by default and references the
+`ClusterIssuer` named by `certificate.issuerRef.name`. Install cert-manager and
+configure the issuer before using these chart-managed certificate modes. If
+you manage TLS Secrets outside the charts, supply those Secrets instead.
 
 The exact Hermetiq routing values are documented in the
 [Hermetiq chart reference](charts/hermetiq/README.md#routing). Buildbarn routing
 is documented in the
 [Buildbarn chart reference](charts/buildbarn/README.md#routing-and-tls).
 
-### Provision external services
+### Provision shared services
 
-#### PostgreSQL
+These services support multiple parts of the stack. Install them before the
+application charts, then follow the
+[Hermetiq prerequisite guide](charts/hermetiq/README.md#install-prerequisites)
+for its PostgreSQL, NATS JetStream, and DragonflyDB setup.
 
-Provision PostgreSQL 16 or newer before installing Hermetiq. The database must:
-
-- use UTF-8 and be owned by a dedicated application user
-- provide the `pg_partman` extension
-- allow the owner to create and alter tables, indexes, functions, materialized
-  views, and partitions
-- require encrypted connections and be reachable from the Hermetiq namespace
-- have backups, tested restores, and enough storage/I/O/WAL headroom for BEP
-  ingest and retention
-
-PostgreSQL is Hermetiq's system of record. NATS is a short-lived ingest buffer;
-DragonflyDB and Buildbarn are rebuildable caches.
-
-Create the password Secret referenced by the starter values:
-
-```bash
-kubectl -n hermetiq create secret generic postgres-db \
-  --from-literal=password='<db-password>'
-```
-
-Configure the host, port, database, user, SSL mode, and Secret reference in
-`my-custom-values/hermetiq-values.yaml`. Bootstrap and partition settings are
-documented in the
-[Hermetiq PostgreSQL reference](charts/hermetiq/README.md#postgresql-and-schema-management).
+| Service | Used by |
+| --- | --- |
+| OIDC identity provider | Hermetiq dashboard and authenticated BEP/API traffic; Buildbarn Browser and Grafana can share the dashboard sign-in. |
+| VictoriaMetrics and Grafana | Hermetiq and Buildbarn dashboards, metrics, and alert rules; Buildbarn frontend and operator-managed worker autoscaling query VictoriaMetrics. |
+| OpenTelemetry Collector | Receives Hermetiq telemetry and optional operator/Buildbarn telemetry, then exports metrics to VictoriaMetrics. |
+| KEDA | Reconciles `ScaledObject` resources for operator-managed `RbeWorker` pools and optional Buildbarn frontend scaling. |
 
 #### Identity provider
 
@@ -347,28 +325,6 @@ the ConfigMap rendered by the Hermetiq chart. Configure issuer, audiences,
 groups, and the Buildbarn CAL trust boundary using the
 [Hermetiq authentication reference](charts/hermetiq/README.md#authentication-and-sso).
 
-#### NATS JetStream
-
-Review `my-custom-values/nats-values.yaml`, including storage class, volume
-size, and resource requests, then install NATS:
-
-```bash
-helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-helm repo update
-helm upgrade --install --namespace hermetiq nats nats/nats \
-  --values my-custom-values/nats-values.yaml
-```
-
-Verify JetStream:
-
-```bash
-kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
-kubectl -n hermetiq exec -it \
-  "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
-    -o jsonpath='{.items[0].metadata.name}')" \
-  -- nats server check jetstream
-```
-
 #### VictoriaMetrics and OpenTelemetry
 
 Create the Grafana administrator Secret and install the metrics stack:
@@ -393,39 +349,15 @@ helm upgrade --install --namespace hermetiq otel \
 ```
 
 Confirm the VictoriaMetrics insert endpoint and Grafana domain in the starter
-values before installation. The Hermetiq and Buildbarn charts render dashboards,
-scrape objects, and recording rules consumed by this stack.
-
-#### DragonflyDB
-
-Create the cache password:
-
-```bash
-kubectl -n hermetiq create secret generic dragonfly-auth \
-  --from-literal=password="$(openssl rand -base64 24)"
-```
-
-If the DragonflyDB operator is already installed, apply the instance:
-
-```bash
-kubectl explain dragonflies.dragonflydb.io
-kubectl -n hermetiq apply \
-  -f my-custom-values/dragonflydb-operator-crd-instance.yaml
-```
-
-Otherwise install the standalone chart:
-
-```bash
-helm upgrade --install --namespace hermetiq dragonfly \
-  oci://ghcr.io/dragonflydb/dragonfly/helm/dragonfly \
-  --version v1.38.0 \
-  --values my-custom-values/dragonflydb-values.yaml
-```
+values before installation. Hermetiq and Buildbarn render dashboards, scrape
+objects, and recording rules consumed by this stack. The operator's worker
+autoscaling and Buildbarn's optional scalers query VictoriaMetrics; configure
+their Prometheus-compatible server addresses to match the installation.
 
 #### KEDA
 
-KEDA scales operator-managed Buildbarn workers and, when enabled in the
-Buildbarn values, its frontend Deployment:
+KEDA reconciles `ScaledObject` resources for operator-managed Buildbarn
+workers and, when enabled in Buildbarn values, the frontend:
 
 ```bash
 helm repo add kedacore https://kedacore.github.io/charts
@@ -433,8 +365,9 @@ helm repo update
 helm upgrade --install --namespace hermetiq keda kedacore/keda
 ```
 
-Before installing the application charts, verify the dependency releases and
-workloads:
+Before installing the application charts, verify the shared service releases
+and workloads. The [Hermetiq readiness checks](charts/hermetiq/README.md#verify-dependencies-ready)
+cover the remaining dependencies:
 
 ```bash
 helm list -n hermetiq
@@ -443,77 +376,20 @@ kubectl -n hermetiq get pods
 
 ### Install Hermetiq
 
-Edit `my-custom-values/hermetiq-values.yaml`, then install the pinned OCI chart:
-
-```bash
-helm upgrade --install --namespace hermetiq hmq \
-  oci://ghcr.io/hermetiq/hermetiq \
-  --version "$HERMETIQ_CHART_VERSION" \
-  --values my-custom-values/hermetiq-values.yaml
-```
-
-The starter values set `license.agreement.accepted: true`. Installing with it
-confirms acceptance of the
-[Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md); the chart refuses to
-render while it is false.
-
-Follow the [Hermetiq chart reference](charts/hermetiq/README.md) for required
-inputs, routing, authentication, licensing, schema management, hardening, and
-component-level verification.
+Follow the [Hermetiq chart install instructions](charts/hermetiq/README.md#install)
+for the required inputs, readiness checks, and installation command.
 
 ### Install the worker operator
 
-```bash
-helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version "$BB_WORKER_OPERATOR_CHART_VERSION" \
-  | kubectl apply --server-side -f -
-
-helm upgrade --install --namespace hermetiq bb-worker-operator \
-  oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version "$BB_WORKER_OPERATOR_CHART_VERSION" \
-  --values my-custom-values/bb-worker-operator-values.yaml
-```
-
-Applying the CRD explicitly is safe on first install and is required for future
-CRD updates because Helm does not upgrade CRDs automatically. Leave `image.tag`
-empty so the controller image follows the chart's `appVersion` and stays on the
-same release as the CRD. See the
-[operator reference](charts/bb-worker-operator/README.md) for verification,
-scope, RBAC, KEDA, and observability settings.
+Follow the [worker operator install instructions](charts/bb-worker-operator/README.md#install),
+including its CRD and [RBAC scope](charts/bb-worker-operator/README.md#rbac-scope)
+steps.
 
 ### Install Buildbarn and worker pools
 
-Edit `my-custom-values/buildbarn-values.yaml`, then install Buildbarn:
-
-```bash
-helm upgrade --install --namespace hermetiq buildbarn \
-  oci://ghcr.io/hermetiq/buildbarn \
-  --version "$BUILDBARN_CHART_VERSION" \
-  --values my-custom-values/buildbarn-values.yaml
-```
-
-The release renders `buildbarn-worker-config`, which is consumed by the example
-`RbeWorker` pools. Apply workers only after Buildbarn is ready. The standard
-Ubuntu 22.04, Ubuntu 24.04, Codex, and Envoy pools form the default Kustomize
-base. These manifests require the namespace-filtering operator v0.3.4+:
-
-```bash
-kubectl apply -n hermetiq -k my-custom-values/rbeworkers
-```
-
-The example manifests assume the `hermetiq` namespace and the starter service
-addresses. Use the
-[RBE worker overlay instructions](custom-values/rbeworkers/README.md) to set the
-namespace, Prometheus address, node scheduling, and
-completed-action logger for another environment. That README also describes
-each pool.
-
-Optional pools for size classes, Testcontainers, Sysbox, and Drake live under
-`custom-values/rbeworkers/optional/` and have additional storage, runtime, or
-node-pool prerequisites. Read the
-[Testcontainers node-pool prerequisites](charts/buildbarn/README.md#node-pool-prerequisites)
-and the [ISCC size-class runbook](docs/iscc-size-classes.md) before enabling
-them.
+Follow the [Buildbarn chart install instructions](charts/buildbarn/README.md#install),
+then the [RBE worker pool instructions](custom-values/rbeworkers/README.md)
+to apply and tailor the worker manifests.
 
 ## Verify the stack
 
@@ -642,7 +518,7 @@ Example defaults comparison:
 
 ```bash
 helm show values oci://ghcr.io/hermetiq/hermetiq \
-  --version "$HERMETIQ_CHART_VERSION" > /tmp/hermetiq-old-values.yaml
+  --version 0.9.2 > /tmp/hermetiq-old-values.yaml
 helm show values oci://ghcr.io/hermetiq/hermetiq \
   --version '<new-version>' > /tmp/hermetiq-new-values.yaml
 diff -u /tmp/hermetiq-old-values.yaml /tmp/hermetiq-new-values.yaml

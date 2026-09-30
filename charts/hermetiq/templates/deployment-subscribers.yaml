@@ -42,6 +42,12 @@ spec:
         kubectl.kubernetes.io/default-container: bep-nats-sub
         hermetiq.com/runtime-config-checksum: {{ include "hermetiq-core.natsStreamConfigChecksum" $root }}
         hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" $root }}
+        {{- if not $root.Values.postgres.password.existingSecret }}
+        checksum/postgres-secret: {{ dict "key" $root.Values.postgres.password.existingSecretKey "value" $root.Values.postgres.password.value | toJson | sha256sum }}
+        {{- end }}
+        {{- if not $root.Values.redis.password.existingSecret }}
+        checksum/redis-secret: {{ dict "key" $root.Values.redis.password.existingSecretKey "value" $root.Values.redis.password.value | toJson | sha256sum }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "hermetiq-core.serviceAccountName" $root }}
       {{- include "hermetiq-core.automountServiceAccountToken" $root.Values.subscriber | nindent 6 }}
@@ -100,6 +106,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: APP_MODE
               value: sub
+            - name: APP_ENV
+              value: "on-prem"
             - name: STREAM_PARTITION
               value: {{ $partition | quote }}
             - name: DB_HOSTNAME

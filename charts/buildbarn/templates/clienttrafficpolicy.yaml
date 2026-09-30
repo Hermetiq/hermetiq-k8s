@@ -18,6 +18,10 @@ spec:
       {{- with .sectionName }}
       sectionName: {{ . | quote }}
       {{- end }}
+  tls:
+    alpnProtocols:
+      - h2
+      - http/1.1
   {{- with .bufferLimit }}
   connection:
     bufferLimit: {{ . | quote }}

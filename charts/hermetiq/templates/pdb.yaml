@@ -8,6 +8,7 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.api.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -24,6 +25,7 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.publisher.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -40,6 +42,7 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.dashboard.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -56,6 +59,7 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ .Values.grafana.oauth2Proxy.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
@@ -75,6 +79,7 @@ metadata:
     {{- include "hermetiq-core.componentLabel" (dict "component" "subscriber") | nindent 4 }}
     hermetiq.com/stream-partition: {{ $partition | quote }}
 spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
   maxUnavailable: {{ $root.Values.subscriber.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:

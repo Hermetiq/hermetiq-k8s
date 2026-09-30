@@ -47,6 +47,11 @@ tests:
               kind: Gateway
               name: gw
       - equal:
+          path: spec.tls.alpnProtocols
+          value:
+            - h2
+            - http/1.1
+      - equal:
           path: spec.connection.bufferLimit
           value: "8Mi"
       - equal:

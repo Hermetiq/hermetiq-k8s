@@ -16,13 +16,24 @@
 {{- if not (has .Values.rbac.managerBindingMode (list "cluster" "namespace")) -}}
 {{- fail (printf "rbac.managerBindingMode must be one of: cluster, namespace (got %s)" .Values.rbac.managerBindingMode) -}}
 {{- end -}}
+{{- if not (has .Values.rbac.mode (list "cluster" "namespace")) -}}
+{{- fail "rbac.mode must be cluster or namespace" -}}
+{{- end -}}
+{{- $ns := include "bb-worker-operator.namespace" . -}}
+{{- if eq .Values.rbac.mode "namespace" -}}
+{{- if and .Values.watchNamespace (ne .Values.watchNamespace $ns) -}}
+{{- fail (printf "rbac.mode=namespace watches %s; watchNamespace must be empty or %s" $ns $ns) -}}
+{{- end -}}
+{{- if and .Values.rbac.create .Values.metrics.enabled .Values.metrics.secure -}}
+{{- fail "rbac.mode=namespace cannot use secure metrics without cluster-scoped TokenReview and SubjectAccessReview grants; set metrics.enabled=false or metrics.secure=false" -}}
+{{- end -}}
+{{- end -}}
 {{/* A namespaced RoleBinding only authorizes the release namespace, so in
      namespace mode the manager's informers must be scoped to that namespace via
      --watch-namespace. Unscoped, it issues cluster-scoped list/watch for
      RbeWorker, Deployment and ConfigMap, gets Forbidden on all of them, and
      reconciles nothing without ever failing loudly. */}}
-{{- $ns := include "bb-worker-operator.namespace" . -}}
-{{- if and .Values.rbac.create (eq .Values.rbac.managerBindingMode "namespace") -}}
+{{- if and .Values.rbac.create (eq .Values.rbac.mode "cluster") (eq .Values.rbac.managerBindingMode "namespace") -}}
 {{- if not .Values.watchNamespace -}}
 {{- fail (printf "rbac.managerBindingMode=namespace requires watchNamespace=%s. A namespaced RoleBinding cannot authorize the cluster-scoped list/watch an unscoped manager performs, so no RbeWorker would ever reconcile. Set watchNamespace, or use managerBindingMode=cluster." $ns) -}}
 {{- end -}}

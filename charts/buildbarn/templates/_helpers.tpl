@@ -132,36 +132,51 @@ affinity:
 {{- end -}}
 {{- join "\n---\n" $parts | sha256sum -}}
 {{- end -}}
-{{- define "buildbarn.workerConfigChecksum" -}}
-{{- $root := .root -}}
-{{- $configOverrides := default dict $root.Values.configOverrides -}}
-{{- $workerOverrides := default dict $root.Values.workerConfigOverrides -}}
-{{- $parts := list -}}
-{{- range $name := .files -}}
-  {{- if eq $name "common.libsonnet" -}}
-    {{- $override := index $configOverrides $name | default "" -}}
-    {{- if $override -}}
-      {{- $parts = append $parts (printf "%s:%s" $name $override) -}}
-    {{- else -}}
-      {{- $parts = append $parts (printf "%s:%s" $name (tpl ($root.Files.Get "files/config/common.libsonnet") $root)) -}}
-    {{- end -}}
-  {{- else -}}
-    {{- $override := index $workerOverrides $name | default "" -}}
-    {{- if $override -}}
-      {{- $parts = append $parts (printf "%s:%s" $name $override) -}}
-    {{- else -}}
-      {{- $parts = append $parts (printf "%s:%s" $name (tpl ($root.Files.Get (printf "files/worker-config/%s" $name)) $root)) -}}
-    {{- end -}}
-  {{- end -}}
-{{- end -}}
-{{- join "\n---\n" $parts | sha256sum -}}
-{{- end -}}
 {{- define "buildbarn.oauth2ProxyConfigName" -}}
 {{- if .Values.browser.oauth2Proxy.existingConfigMap -}}
 {{- .Values.browser.oauth2Proxy.existingConfigMap -}}
 {{- else -}}
 oauth2-proxy-config-browser
 {{- end -}}
+{{- end -}}
+{{- define "buildbarn.oauth2ProxyConfigData" -}}
+OAUTH2_PROXY_AUTH_LOGGING: "true"
+OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
+OAUTH2_PROXY_COOKIE_SAMESITE: lax
+OAUTH2_PROXY_COOKIE_SECURE: {{ .Values.browser.oauth2Proxy.cookieSecure | quote }}
+OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:8888"
+OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: {{ .Values.browser.oauth2Proxy.insecureOidcAllowUnverifiedEmail | quote }}
+OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: {{ .Values.browser.oauth2Proxy.insecureOidcSkipIssuerVerification | quote }}
+OAUTH2_PROXY_OIDC_GROUPS_CLAIM: {{ .Values.browser.oauth2Proxy.oidcGroupsClaim | quote }}
+OAUTH2_PROXY_OIDC_ISSUER_URL: {{ required "browser.oauth2Proxy.oidcIssuerUrl is required when oauth2Proxy is enabled" .Values.browser.oauth2Proxy.oidcIssuerUrl | quote }}
+OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+OAUTH2_PROXY_PASS_USER_HEADERS: {{ .Values.browser.oauth2Proxy.passUserHeaders | quote }}
+OAUTH2_PROXY_PROVIDER: {{ .Values.browser.oauth2Proxy.provider | quote }}
+OAUTH2_PROXY_REAL_CLIENT_IP_HEADER: X-Forwarded-For
+OAUTH2_PROXY_REQUEST_LOGGING: "true"
+OAUTH2_PROXY_REVERSE_PROXY: "true"
+OAUTH2_PROXY_SCOPE: {{ .Values.browser.oauth2Proxy.scope | quote }}
+OAUTH2_PROXY_SET_XAUTHREQUEST: {{ .Values.browser.oauth2Proxy.setXAuthRequest | quote }}
+OAUTH2_PROXY_SESSION_COOKIE_MINIMAL: {{ .Values.browser.oauth2Proxy.sessionCookieMinimal | quote }}
+OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR: {{ .Values.browser.oauth2Proxy.showDebugOnError | quote }}
+OAUTH2_PROXY_SILENCE_PING_LOGGING: "true"
+OAUTH2_PROXY_SKIP_AUTH_PREFLIGHT: {{ .Values.browser.oauth2Proxy.skipAuthPreflight | quote }}
+OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS: {{ .Values.browser.oauth2Proxy.skipJwtBearerTokens | quote }}
+OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: {{ .Values.browser.oauth2Proxy.skipOidcDiscovery | quote }}
+OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: {{ .Values.browser.oauth2Proxy.skipProviderButton | quote }}
+OAUTH2_PROXY_SSL_INSECURE_SKIP_VERIFY: {{ .Values.browser.oauth2Proxy.sslInsecureSkipVerify | quote }}
+OAUTH2_PROXY_STANDARD_LOGGING: "true"
+{{- if .Values.browser.oauth2Proxy.cookieDomains }}
+OAUTH2_PROXY_COOKIE_DOMAINS: {{ join "," .Values.browser.oauth2Proxy.cookieDomains | quote }}
+{{- end }}
+{{- if .Values.browser.oauth2Proxy.backendLogoutUrl }}
+OAUTH2_PROXY_BACKEND_LOGOUT_URL: {{ .Values.browser.oauth2Proxy.backendLogoutUrl | quote }}
+{{- end }}
+{{- if .Values.browser.oauth2Proxy.validateUrl }}
+OAUTH2_PROXY_VALIDATE_URL: {{ .Values.browser.oauth2Proxy.validateUrl | quote }}
+{{- end }}
 {{- end -}}
 {{- define "buildbarn.oauth2ProxySecretName" -}}
 {{- default "oauth2-proxy-client" .Values.browser.oauth2Proxy.client.existingSecret -}}

@@ -67,8 +67,12 @@ spec:
             - --metrics-bind-address={{ ternary .Values.metrics.bindAddress "0" .Values.metrics.enabled }}
             - --metrics-secure={{ .Values.metrics.secure }}
             - --health-probe-bind-address={{ .Values.healthProbe.bindAddress }}
+            {{- if eq .Values.rbac.mode "namespace" }}
+            - --watch-namespace={{ include "bb-worker-operator.namespace" . }}
+            {{- else }}
             {{- with .Values.watchNamespace }}
             - --watch-namespace={{ . }}
+            {{- end }}
             {{- end }}
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect

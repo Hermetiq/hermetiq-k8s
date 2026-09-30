@@ -1,7 +1,7 @@
+# Starter overrides. Full chart defaults: helm show values nats/nats
 config:
   cluster:
     enabled: true
-    replicas: 3
   jetstream:
     enabled: true
     fileStore:
@@ -10,7 +10,6 @@ config:
         storageClassName: premium-rwo
     memoryStore:
       enabled: true
-      maxSize: 1Gi
   merge:
     max_payload: << 16MB >>
 container:
@@ -21,16 +20,7 @@ container:
     requests:
       cpu: 1100m
       memory: 2Gi
-fullnameOverride: nats
 podTemplate:
   configChecksumAnnotation: true
-#  merge:
-#    spec:
-#      nodeSelector:
-#        node-type: core8
-#      tolerations:
-#        - effect: NoSchedule
-#          key: hermetiq/core8
-#          operator: Exists
 promExporter:
   enabled: true
