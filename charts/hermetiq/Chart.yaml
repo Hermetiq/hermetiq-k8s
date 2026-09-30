@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.3
+version: 0.9.4
 appVersion: "0.9.4"
 annotations:
   artifacthub.io/license: Apache-2.0
