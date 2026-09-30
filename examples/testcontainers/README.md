@@ -182,6 +182,86 @@ same node cannot share its cache path. See the worker example
 for a node selector and toleration patch. Check Pending Pods with
 `kubectl describe pod` before debugging Bazel routing or Docker startup.
 
+## GKE node pool requirements
+
+For a GKE deployment, the Testcontainers worker fleets should land on
+dedicated node pools. The reference setup uses one pool for the
+Docker-in-Docker worker and one for the Sysbox worker. The portable `RbeWorker`
+examples do not include the GKE labels and tolerations below; add the matching
+`spec.pod` settings in your deployment overlay.
+
+For the DinD-backed `worker-testcontainers` `RbeWorker`, create a node pool with:
+
+- GKE image type `UBUNTU_CONTAINERD`.
+- Autoscaling enabled, with `minNodeCount: 0`; KEDA can scale the worker
+  deployment independently from the node pool.
+- Non-spot, non-preemptible nodes.
+- A machine type, boot disk size, and local SSD count sized for your
+  container-heavy test workload. The reference Pulumi inputs are
+  `testcontainersMachineType`, `testcontainersDiskGb`, and
+  `testcontainersSsdCount`.
+- Workload Identity metadata mode `GKE_METADATA`.
+- The node label `workload=testcontainers`.
+- The taint `workload=testcontainers:NoSchedule`.
+
+Add matching fields to `spec.pod` for
+`custom-values/rbeworkers/optional/testcontainers/worker-testcontainers.yaml`:
+
+```yaml
+pod:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+    workload: testcontainers
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: testcontainers
+      effect: NoSchedule
+```
+
+For the Sysbox-backed `worker-testcontainers-sysbox` `RbeWorker`, create a
+separate node pool with:
+
+- GKE image type `UBUNTU_CONTAINERD`.
+- Autoscaling enabled, with `minNodeCount: 1`; keeping one node warm avoids
+  paying the Sysbox install/bootstrap cost on the first test action.
+- Non-spot, non-preemptible nodes.
+- A machine type, boot disk size, and local SSD count sized for Docker-in-Docker
+  style workloads. The reference Pulumi inputs are
+  `testcontainersSysboxMachineType`, `testcontainersSysboxDiskGb`, and
+  `testcontainersSysboxSsdCount`.
+- Workload Identity metadata mode `GKE_METADATA`.
+- The node labels `workload=testcontainers-sysbox` and `sysbox-install=yes`.
+- The taint `workload=testcontainers-sysbox:NoSchedule`.
+- Sysbox installed on the nodes and a Kubernetes `RuntimeClass` named
+  `sysbox-runc`.
+
+The Sysbox example already sets `docker.mode: sysbox`,
+`docker.sysbox.runtimeClassName: sysbox-runc`, and
+`docker.sysbox.hostUsers: false`. Add the node selectors and toleration to its
+`spec.pod` through your overlay:
+
+```yaml
+pod:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+    workload: testcontainers-sysbox
+    sysbox-install: "yes"
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: testcontainers-sysbox
+      effect: NoSchedule
+```
+
+The shipped `RbeWorker` examples use `emptyDir` for worker scratch and local
+CAS read-cache storage. On GKE, back these nodes with enough ephemeral storage
+for Docker layers, test containers, and Buildbarn's read cache. If you switch
+the examples to hostPath-backed local SSD, make the path unique per worker pool
+and size/schedule pods so two workers do not share one CAS blocks file.
+
 ## Run
 
 If this is the only worker pool you have enabled for the smoke test, route all
