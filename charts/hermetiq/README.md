@@ -1,6 +1,6 @@
 # Hermetiq Helm Chart
 
-This README is the operator reference packaged with the Hermetiq `0.9.3`
+This README is the operator reference packaged with the Hermetiq `0.9.4`
 chart. It covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for

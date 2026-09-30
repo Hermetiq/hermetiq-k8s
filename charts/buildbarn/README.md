@@ -102,8 +102,8 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.4
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.4
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.5
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.5
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
@@ -112,7 +112,7 @@ After the Hermetiq chart and worker operator are installed, install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --values my-custom-values/buildbarn-values.yaml
 ```
 
@@ -204,7 +204,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --values my-custom-values/buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -1859,7 +1859,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
