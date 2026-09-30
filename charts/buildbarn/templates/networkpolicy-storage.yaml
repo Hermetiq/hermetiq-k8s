@@ -19,8 +19,8 @@ spec:
     - Ingress
   ingress:
     # Storage gRPC is unauthenticated (authn/authz happens at the frontend):
-    # restrict it to Buildbarn components in this namespace plus any
-    # explicitly listed peers (e.g. RbeWorker pods in other namespaces).
+    # restrict it to Buildbarn components and RbeWorkers in this namespace,
+    # plus any explicitly listed trusted peers.
     - from:
         - podSelector:
             matchExpressions:

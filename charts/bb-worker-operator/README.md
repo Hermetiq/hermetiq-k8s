@@ -287,9 +287,13 @@ On OpenShift, set `podSecurityContext.runAsUser` and
 them.
 
 The worker pods the operator creates are configured on each `RbeWorker`. FUSE
-build directories and Docker-in-Docker need privileged containers, so run
-worker pools in their own namespace labelled
-`pod-security.kubernetes.io/enforce: privileged`.
+build directories and Docker-in-Docker need privileged containers. Create
+`RbeWorker` resources in the same namespace as their Buildbarn installation;
+the shared ConfigMap, scheduler address, and generated queue query all assume
+this placement. That namespace must permit privileged worker Pods (for example,
+with `pod-security.kubernetes.io/enforce: privileged`). The manager Pod keeps
+its restricted security context. For `rbac.mode=namespace`, install the
+operator in the Buildbarn namespace so it watches those `RbeWorker` resources.
 
 ## RBAC Scope
 
@@ -334,7 +338,8 @@ the installer cannot create ClusterRoles. In cluster mode, setting
 To manage `RbeWorker` resources across several namespaces, keep
 `rbac.mode=cluster`, `rbac.managerBindingMode=cluster`, and `watchNamespace`
 empty. The operator watches one namespace or all namespaces, not an arbitrary
-list of namespaces.
+list of namespaces. Each `RbeWorker` must still share a namespace with the
+Buildbarn installation it uses.
 
 Switching an existing release to namespace mode removes its old ClusterRoles
 and ClusterRoleBindings, so that upgrade requires permission to delete them.

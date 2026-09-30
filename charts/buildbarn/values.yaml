@@ -1,9 +1,5 @@
 # Namespace for every namespaced resource. Empty follows the release namespace
-# (`helm --namespace`). Through chart 0.9.4 this defaulted to hermetiq, so a
-# release installed with --namespace <other> and no override has its resources
-# in hermetiq: set `namespaceOverride: hermetiq` to keep them there. Upgrading
-# such a release without it fails instead of recreating everything, with
-# empty storage, in the release namespace (see templates/validate.yaml).
+# (`helm --namespace`).
 namespaceOverride: ""
 createNamespace: false
 
@@ -659,14 +655,9 @@ storage:
   # CNI that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
   networkPolicy:
     enabled: false
-    # Extra NetworkPolicyPeer entries allowed to reach gRPC :8981 — e.g.
-    # operator-managed RbeWorker pods in another namespace:
-    #   - podSelector:
-    #       matchLabels:
-    #         app.kubernetes.io/name: bb-worker
-    #     namespaceSelector:
-    #       matchLabels:
-    #         kubernetes.io/metadata.name: rbe-workers
+    # Extra trusted NetworkPolicyPeer entries allowed to reach gRPC :8981.
+    # Standard RbeWorker pods live in this namespace and are already allowed
+    # by app=worker; leave this empty unless another client needs direct access.
     additionalClientPeers: []
     # Peers allowed to scrape metrics :9980. Empty list => allow from anywhere
     # (scrapers usually run in another namespace, e.g. victoriametrics).
@@ -1104,15 +1095,9 @@ scheduler:
   # that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
   networkPolicy:
     enabled: false
-    # Extra NetworkPolicyPeer entries allowed on worker gRPC :8983. RbeWorker
-    # pods in this namespace (app=worker) are always allowed. List pools in
-    # other namespaces, e.g.:
-    #   - podSelector:
-    #       matchLabels:
-    #         app.kubernetes.io/name: bb-worker
-    #     namespaceSelector:
-    #       matchLabels:
-    #         kubernetes.io/metadata.name: rbe-workers
+    # Extra trusted NetworkPolicyPeer entries allowed on worker gRPC :8983.
+    # Standard RbeWorker pods live in this namespace and are already allowed
+    # by app=worker; leave this empty unless a custom client needs access.
     additionalWorkerPeers: []
     # Extra peers allowed on client gRPC :8982 and BuildQueueState :8984,
     # beyond this release's frontend and bb-portal.

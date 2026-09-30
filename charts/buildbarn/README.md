@@ -38,6 +38,10 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Reads are open by design](#reads-are-open-by-design)
   - [CAS read efficiency](#cas-read-efficiency)
 - [Frontend Read Cache](#frontend-read-cache)
+  - [Where the volume lives](#where-the-volume-lives)
+  - [Always set an ephemeral-storage request](#always-set-an-ephemeral-storage-request)
+  - [Sizing the key-location map](#sizing-the-key-location-map)
+  - [Verifying it](#verifying-it)
 - [JWKS ConfigMap Management](#jwks-configmap-management)
 - [Tracing, Metrics, And Diagnostics](#tracing-metrics-and-diagnostics)
 - [Frontend Autoscaling](#frontend-autoscaling)
@@ -50,6 +54,8 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Action Routing And Catch-All Workers](#action-routing-and-catch-all-workers)
 - [Security And Availability Hardening](#security-and-availability-hardening)
   - [Restricting direct storage access](#restricting-direct-storage-access)
+  - [Restricting direct scheduler access](#restricting-direct-scheduler-access)
+  - [Locking down the rest](#locking-down-the-rest)
 - [Scheduling](#scheduling)
 - [Verification](#verification)
 - [Hermetiq grpc-cache-proxy sidecar](#hermetiq-grpc-cache-proxy-sidecar)
@@ -123,15 +129,6 @@ createNamespace: false
 
 Set `namespaceOverride` to render into a different namespace, and
 `createNamespace: true` if Helm should create it.
-
-> **Upgrading from chart 0.9.4 or earlier:** `namespaceOverride` used to
-> default to `hermetiq`. If you installed with a `--namespace` other than
-> `hermetiq` and never set `namespaceOverride`, your Buildbarn resources are in
-> `hermetiq`. Add `namespaceOverride: hermetiq` to your values before upgrading
-> to keep them there. Without it the upgrade fails rather than recreating
-> everything, with empty storage, in the release namespace. Installs made with
-> `--namespace hermetiq`, or that already set `namespaceOverride`, need no
-> change.
 
 Contributors can render the checked-out chart locally:
 
@@ -1564,7 +1561,8 @@ and its `buildbarn-worker-config` ConfigMap are ready. The chart publishes only
 `common.libsonnet` in that ConfigMap; the operator generates each pool's worker
 and runner Jsonnet from its `RbeWorker` spec. Review the example
 [pod scheduling checklist](../../custom-values/rbeworkers/README.md#pod-scheduling)
-before applying the pools.
+before applying the pools. Apply every `RbeWorker` in the Buildbarn release
+namespace; the example below uses `hermetiq` for both.
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
@@ -1669,8 +1667,9 @@ first, naming the list and the required order.
 
 ## Security And Availability Hardening
 
-Every chart-managed pod meets the Pod Security Standards `restricted` profile
-and the CIS Kubernetes Benchmark v2.0.1 securityContext recommendations:
+The standard chart-managed workloads use the Pod Security Standards
+`restricted` securityContext fields and the CIS Kubernetes Benchmark v2.0.1
+recommendations:
 - non-root UID/GID 65534
 - `seccompProfile: RuntimeDefault`
 - `allowPrivilegeEscalation: false` and `privileged: false`
@@ -1678,14 +1677,19 @@ and the CIS Kubernetes Benchmark v2.0.1 securityContext recommendations:
 - all capabilities dropped
 
 These settings live under `security.pod` and `security.container`. Storage
-keeps its own settings because they depend on `storage.persistence`. The
-hostPath storage modes and a hostPath frontend read cache need a `privileged`
-namespace.
+keeps its own settings because they depend on `storage.persistence`. HostPath
+storage modes and a hostPath frontend read cache also prevent `restricted`
+admission.
 
 `RbeWorker` pods are configured on their `RbeWorker` resources, and FUSE and
-Docker-in-Docker need privileged containers. To enforce `restricted` on the
-Buildbarn namespace, run worker pools in a separate namespace labelled
-`privileged`.
+Docker-in-Docker need privileged containers. Create the `RbeWorker` resources
+in the Buildbarn release namespace: they use its `buildbarn-worker-config`
+ConfigMap, the scheduler's local DNS name, and namespace-scoped queue metrics.
+That namespace must allow privileged worker Pods (for example, with
+`pod-security.kubernetes.io/enforce: privileged`); it cannot enforce Pod
+Security Standards `restricted`. The chart-managed Pods retain their hardened
+security contexts. Use dedicated worker nodes to limit where privileged builds
+run. A separately installed Hermetiq namespace can enforce `restricted`.
 
 On OpenShift, let the `restricted-v2` SCC assign the IDs:
 
@@ -1751,20 +1755,14 @@ that bypasses the frontend. The port is never routed externally, so the
 exposure is in-cluster: by default any pod in the cluster can reach it.
 
 `storage.networkPolicy` restricts it to the Buildbarn components plus peers you
-name. It is disabled by default because it has to know where your workers run:
+name. Workers in the Buildbarn namespace are admitted by their `app=worker`
+label. It is disabled by default so you can check any additional clients before
+enabling it:
 
 ```yaml
 storage:
   networkPolicy:
     enabled: true
-    # Operator-managed RbeWorker pods outside the Buildbarn namespace.
-    additionalClientPeers:
-      - podSelector:
-          matchLabels:
-            app.kubernetes.io/name: bb-worker
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: rbe-workers
     # Peers allowed to scrape metrics on :9980. An empty list allows any
     # source, which suits a scraper that runs in another namespace.
     metricsPeers:
@@ -1791,21 +1789,12 @@ The scheduler has the same exposure:
 `scheduler.networkPolicy` admits only these callers, plus any peers you list:
 - the frontend on `:8982`
 - bb-portal on BuildQueueState `:8984`
-- workers on `:8983`
+- workers in the Buildbarn namespace on `:8983`
 
 ```yaml
 scheduler:
   networkPolicy:
     enabled: true
-    # Operator-managed RbeWorker pods outside the Buildbarn namespace. Pods in
-    # this namespace (app=worker) are already allowed.
-    additionalWorkerPeers:
-      - podSelector:
-          matchLabels:
-            app.kubernetes.io/name: bb-worker
-        namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: rbe-workers
     # The admin web UI on :7982, published by the rbeWeb route, stays open to
     # any source until you name your ingress controller or Gateway namespace.
     adminPeers:
@@ -1815,9 +1804,10 @@ scheduler:
 ```
 
 `additionalClientPeers` adds callers of `:8982` and `:8984`. `metricsPeers`
-narrows `:9980`, as it does for storage. List every worker namespace before
-you enable it. A missing worker peer shows up as workers that never register,
-not as a clear connection error.
+narrows `:9980`, as it does for storage. Standard `RbeWorker` pods need no
+`additionalWorkerPeers` entry; keep their `app=worker` label so they can
+register on `:8983`. Reserve additional peers for explicitly trusted custom
+clients of that port.
 
 ### Locking down the rest
 

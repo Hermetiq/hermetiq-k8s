@@ -239,6 +239,19 @@ kubectl config set-context --current --namespace=hermetiq
 kubectl auth can-i '*' '*' -n hermetiq
 ```
 
+The Buildbarn release and its `RbeWorker` pools must share a namespace. FUSE
+workers need privileged containers, so if Pod Security Admission enforces a
+restrictive policy, allow privileged Pods in that namespace before applying
+the worker pools:
+
+```bash
+kubectl label namespace hermetiq pod-security.kubernetes.io/enforce=privileged --overwrite
+```
+
+Use dedicated worker nodes. A Hermetiq release installed in a separate
+namespace can retain `restricted` admission there; install the namespace-scoped
+worker operator with Buildbarn so it can reconcile their shared worker pools.
+
 If the cluster already hosts another Hermetiq installation, check for
 cluster-scoped singleton operators before installing another copy. KEDA, the
 DragonflyDB operator, and an unscoped BB Worker Operator commonly watch every

@@ -43,8 +43,8 @@ spec:
         - port: 8984
           protocol: TCP
     # Worker gRPC: a caller here can register as a worker, receive actions and
-    # report results. RbeWorker pods in this namespace carry app=worker; pools
-    # in other namespaces come from additionalWorkerPeers.
+    # report results. RbeWorker pods in this namespace carry app=worker;
+    # additionalWorkerPeers is only for explicitly trusted custom clients.
     - from:
         - podSelector:
             matchLabels:

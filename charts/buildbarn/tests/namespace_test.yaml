@@ -3,7 +3,6 @@ templates:
   - templates/statefulset-storage.yaml
   - templates/deployment-frontend.yaml
   - templates/vmrules.yaml
-  - templates/validate.yaml
 release:
   name: buildbarn
   namespace: team-a
@@ -39,10 +38,3 @@ tests:
           path: metadata.namespace
           value: pinned
         template: templates/vmrules.yaml
-
-  # No cluster objects to find, so the upgrade guard in validate.yaml has
-  # nothing to object to.
-  - it: allows a fresh install into a namespace other than hermetiq
-    template: templates/validate.yaml
-    asserts:
-      - notFailedTemplate: {}

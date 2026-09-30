@@ -3,7 +3,9 @@
 This directory is a Kustomize base for the standard Ubuntu, Codex, and Envoy
 worker pools. After copying `custom-values/` to `my-custom-values/` and
 installing Buildbarn, edit the copied manifests for your environment. Apply
-them after the Buildbarn release and `buildbarn-worker-config` are ready:
+them in the Buildbarn release namespace after the Buildbarn release and
+`buildbarn-worker-config` are ready. The example release namespace is
+`hermetiq`:
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
@@ -85,8 +87,9 @@ and Kubernetes 1.29 or newer.
 
 ## Environment overlays
 
-For another environment, reference this directory from a Kustomize overlay and
-patch the environment-specific values without copying the worker manifests:
+For another environment, reference this directory from a Kustomize overlay.
+Set its namespace to the Buildbarn release namespace and patch the
+environment-specific values without copying the worker manifests:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -159,7 +162,9 @@ components:
 
 The overlay's namespace and `RbeWorker` patch apply to component resources too,
 so the optional workers receive the same environment-specific addresses as the
-standard bundle. Generated queue-depth queries filter by each worker's namespace.
+standard bundle. Set the overlay namespace to the Buildbarn release namespace:
+generated queue-depth queries filter by each worker's namespace, and the
+operator reads `buildbarn-worker-config` there.
 
 ## Pod security
 
@@ -169,12 +174,12 @@ build directory needs privileged containers:
 - The operator's `fuse-cleanup` sidecar runs privileged as root.
 - Docker-in-Docker pools also run `dind` privileged.
 
-Run the pools in a namespace of their own, labelled
-`pod-security.kubernetes.io/enforce: privileged`, so the Buildbarn and Hermetiq
-namespaces can enforce `restricted`. Give the pools dedicated nodes. If you enable the
-Buildbarn chart's NetworkPolicies, list the worker namespace in
-`storage.networkPolicy.additionalClientPeers` and
-`scheduler.networkPolicy.additionalWorkerPeers`.
+Run the pools in the same namespace as Buildbarn. That namespace must permit
+privileged worker Pods, for example with
+`pod-security.kubernetes.io/enforce: privileged`; it cannot enforce
+`restricted`. Give the pools dedicated nodes. The Buildbarn chart's storage
+and scheduler NetworkPolicies already admit same-namespace `app=worker` Pods,
+so these examples need no additional peer entries.
 
 Everything else is hardened:
 - **Operator-owned containers:** the runner installer runs non-root and

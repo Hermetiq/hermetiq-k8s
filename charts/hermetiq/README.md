@@ -205,11 +205,11 @@ documents advanced settings.
 
 | Starter values section | Review before installation |
 | --- | --- |
-| `license` | [Licensing and trials](#licensing-and-trials), especially [IMPORTANT: License fingerprint RBAC](#important-license-fingerprint-rbac) |
+| `license` | [Licensing and trials](#licensing-and-trials), especially [License fingerprint RBAC](#license-fingerprint-rbac) |
 | `hosts` | [Hosts](#hosts) and DNS/TLS setup in [Routing](#routing) |
 | `bootstrap`, `postgres` | [PostgreSQL and schema management](#postgresql-and-schema-management), including initial partition sizing |
 | `routing`, `gateway` | [Routing](#routing) and the chosen controller's Gateway or Ingress |
-| `redis`, `nats`, `otel`, `victoriaMetrics` | [Install prerequisites](#install-prerequisites), [NATS ingest](#nats-ingest-and-stream-configuration), and [Integrations](#integrations-and-workload-discovery) |
+| `redis`, `nats`, `otel`, `victoriaMetrics` | [Install prerequisites](#install-prerequisites), [NATS ingest](#nats-ingest-and-stream-configuration), and [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools) |
 | `gcpWorkloadIdentity` | [Workload identity](#workload-identity); remove this example block outside GKE |
 | `app`, `api`, `publisher` | [NATS ingest](#nats-ingest-and-stream-configuration), [Authentication and SSO](#authentication-and-sso), and [Scheduling and availability](#scheduling-availability-and-hardening) |
 | `oidc`, `dashboard` | [Authentication and SSO](#authentication-and-sso) and [Dashboard configuration](#dashboard-configuration) |
@@ -264,7 +264,7 @@ online key validation need egress to `license.saasUrl` (default
 
 _Note: The binary rejects `build-team@example.com` on startup as that's just a placeholder in the chart, please supply a valid work email._
 
-Trial licenses are tied to the [Namespace fingerprint](#important-license-fingerprint-rbac).
+Trial licenses are tied to the [Namespace fingerprint](#license-fingerprint-rbac).
 Validation is off the request path and cached so transient licensing-service
 outages do not interrupt requests.
 
@@ -930,7 +930,7 @@ Review every rule under `rbac.rules`:
   those resources
 
 The chart defaults to `rbac.mode=namespace` and creates only Roles and
-RoleBindings. The [Namespace fingerprint](#important-license-fingerprint-rbac)
+RoleBindings. The [Namespace fingerprint](#license-fingerprint-rbac)
 also uses a namespaced Role. Set `rbac.mode=cluster` only when application
 permissions need a ClusterRole; licensing still uses the release Namespace UID.
 Switching an existing release from cluster to namespace mode removes its former
@@ -1127,10 +1127,11 @@ Worker-pool cost and behavior reporting also discovers the namespaced
 `bb.hermetiq.com/v1` `RbeWorker` objects managed by bb-worker-operator. The
 default `rbac.rules.rbeWorkers=true` grants the chart ServiceAccount only
 `get` and `list` on `rbeworkers`. The existing RoleBinding limits that access
-to the Hermetiq release namespace; worker pools in other namespaces are not
-visible. Keep API token mounting enabled (the default: the API inherits
-`serviceAccount.automountServiceAccountToken=true`) so grpc-api can use the
-grant, or disable this rule if RbeWorker discovery is not needed.
+to the Hermetiq release namespace. If Buildbarn runs in another namespace, its
+colocated worker pools are not visible through this grant. Keep API token
+mounting enabled (the API inherits
+`serviceAccount.automountServiceAccountToken=true` by default) so grpc-api can
+use the grant, or disable this rule if RbeWorker discovery is not needed.
 
 ### Cache-event analytics
 
@@ -1228,7 +1229,7 @@ from your own values when they differ from the starter examples.
 
 Before installing, complete the [starter values review](#required-external-inputs),
 including a real work address for `license.contactEmail`, the
-[Namespace fingerprint behavior](#important-license-fingerprint-rbac),
+[Namespace fingerprint behavior](#license-fingerprint-rbac),
 and partition sizing for the expected ingest volume.
 
 ## Install
