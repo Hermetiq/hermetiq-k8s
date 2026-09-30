@@ -338,6 +338,17 @@ storage:
     limits:
       cpu: 7100m
       memory: 16Gi
+  # Requests and limits for the storage init containers: volume-init, and
+  # device-chown when persistence.blockDevice.deviceAccess=chownInit. They only
+  # create, chown and chmod directories or device nodes, then exit, so they
+  # never size the pod.
+  initResources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
   env:
     BB_PPROF_ENABLED: "false"
 #    GOMEMLIMIT: 15GiB
@@ -937,6 +948,8 @@ frontend:
         cpu: 600m
         memory: 1Gi
       limits:
+        # Matches the frontend it fronts: headroom to burst on the cache path.
+        cpu: "2"
         memory: 2Gi
   resources:
     requests:
@@ -1080,6 +1093,36 @@ scheduler:
   podDisruptionBudget:
     enabled: false
     maxUnavailable: 1
+  # Optional NetworkPolicy admitting only the scheduler's callers:
+  #   - this release's frontend on client gRPC :8982
+  #   - workers on :8983
+  #   - bb-portal on BuildQueueState :8984
+  #   - the peers listed below
+  # Without it, and without security.grpcMtls, any pod in the cluster can
+  # submit actions straight to the scheduler, bypassing the frontend's
+  # authorizers, or register as a worker and receive actions. Requires a CNI
+  # that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
+  networkPolicy:
+    enabled: false
+    # Extra NetworkPolicyPeer entries allowed on worker gRPC :8983. RbeWorker
+    # pods in this namespace (app=worker) are always allowed. List pools in
+    # other namespaces, e.g.:
+    #   - podSelector:
+    #       matchLabels:
+    #         app.kubernetes.io/name: bb-worker
+    #     namespaceSelector:
+    #       matchLabels:
+    #         kubernetes.io/metadata.name: rbe-workers
+    additionalWorkerPeers: []
+    # Extra peers allowed on client gRPC :8982 and BuildQueueState :8984,
+    # beyond this release's frontend and bb-portal.
+    additionalClientPeers: []
+    # Peers allowed on the admin web UI :7982, which the rbeWeb route
+    # publishes. Empty list => allow from anywhere, so the route keeps working.
+    # List your ingress controller or Gateway namespace to narrow it.
+    adminPeers: []
+    # Peers allowed to scrape metrics :9980. Empty list => allow from anywhere.
+    metricsPeers: []
 
 browser:
   replicas: 1

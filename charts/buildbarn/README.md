@@ -73,6 +73,7 @@ Core resources:
 - Optional `bb-portal` Deployment and Service when `portal.enabled=true` (see [bb-portal](#bb-portal)).
 - Optional `frontend-internal` ClusterIP Service for trusted in-cluster clients when `frontend.internalService.enabled=true`.
 - Optional `NetworkPolicy` restricting the storage gRPC port to Buildbarn components and named peers when `storage.networkPolicy.enabled=true`.
+- Optional `NetworkPolicy` restricting the scheduler's client, worker, and BuildQueueState ports to the frontend, workers, bb-portal, and named peers when `scheduler.networkPolicy.enabled=true`.
 - Optional `remote-asset` Deployment plus `remote-asset` and `remote-asset-grpc` Services.
 - Optional PodDisruptionBudgets for storage, frontend, scheduler, Browser, and remote asset workloads.
 - Optional cert-manager `Certificate` for Contour or Ingress routing.
@@ -1787,70 +1788,40 @@ The scheduler has the same exposure:
 - Anything that reaches worker gRPC `:8983` can register as a worker, receive
   actions, and report their results.
 
-The chart doesn't render a policy for the scheduler. This example admits only
-its real callers:
+`scheduler.networkPolicy` admits only these callers, plus any peers you list:
 - the frontend on `:8982`
 - bb-portal on BuildQueueState `:8984`
-- RbeWorker pods on `:8983`
-
-It leaves the admin web UI (`:7982`, published by the rbeWeb route) and
-metrics (`:9980`) open. `extraObjects` are rendered with `tpl`, so the
-namespace follows `namespaceOverride`. You can also apply it separately with
-`kubectl`.
+- workers on `:8983`
 
 ```yaml
-extraObjects:
-  - apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: scheduler
-      namespace: '{{ include "buildbarn.namespace" . }}'
-    spec:
-      podSelector:
-        matchLabels:
-          app: scheduler
-      policyTypes:
-        - Ingress
-      ingress:
-        - from:
-            - podSelector:
-                matchLabels:
-                  app: frontend
-          ports:
-            - port: 8982
-              protocol: TCP
-        - from:
-            - podSelector:
-                matchLabels:
-                  app: bb-portal
-          ports:
-            - port: 8984
-              protocol: TCP
-        # RbeWorker pods in this namespace. For pools in another namespace,
-        # add a namespaceSelector to this peer, e.g.
-        # kubernetes.io/metadata.name: rbe-workers.
-        - from:
-            - podSelector:
-                matchLabels:
-                  app.kubernetes.io/name: bb-worker
-          ports:
-            - port: 8983
-              protocol: TCP
-        # Admin web UI and metrics. Add a `from` naming your ingress
-        # controller or Gateway namespace and your scraper to narrow these.
-        - ports:
-            - port: 7982
-              protocol: TCP
-            - port: 9980
-              protocol: TCP
+scheduler:
+  networkPolicy:
+    enabled: true
+    # Operator-managed RbeWorker pods outside the Buildbarn namespace. Pods in
+    # this namespace (app=worker) are already allowed.
+    additionalWorkerPeers:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: bb-worker
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: rbe-workers
+    # The admin web UI on :7982, published by the rbeWeb route, stays open to
+    # any source until you name your ingress controller or Gateway namespace.
+    adminPeers:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: envoy-gateway-system
 ```
 
-Add any other callers before you apply it. A missing worker peer shows up as
-workers that never register, not as a clear connection error.
+`additionalClientPeers` adds callers of `:8982` and `:8984`. `metricsPeers`
+narrows `:9980`, as it does for storage. List every worker namespace before
+you enable it. A missing worker peer shows up as workers that never register,
+not as a clear connection error.
 
 ### Locking down the rest
 
-The storage policy and the scheduler example cover the ports that carry no
+The storage and scheduler policies cover the ports that carry no
 authentication. To restrict everything else, add your own NetworkPolicies,
 either in the release through `extraObjects` or alongside it.
 - Select chart pods by their `app` label: `frontend`, `browser`, `scheduler`,

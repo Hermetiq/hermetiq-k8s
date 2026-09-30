@@ -144,6 +144,13 @@ tests:
             mountPath: /tmp
         template: templates/deployment-dashboard.yaml
 
+  - it: requests CPU for the API's grpc-auth-proxy sidecar
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].resources.requests.cpu
+          value: 100m
+        template: templates/deployment-api.yaml
+
   - it: omits UIDs set to null so OpenShift can assign them
     set:
       security.pod.runAsUser: null

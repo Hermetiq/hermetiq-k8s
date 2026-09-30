@@ -1,0 +1,84 @@
+{{- if .Values.scheduler.networkPolicy.enabled }}
+{{- $np := .Values.scheduler.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scheduler
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      app: scheduler
+  policyTypes:
+    - Ingress
+  ingress:
+    # Client gRPC (Execute/WaitExecution) and BuildQueueState carry no user
+    # identity; authn/authz happens at the frontend. Admit only this release's
+    # frontend and bb-portal plus explicitly listed peers.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+        {{- with $np.additionalClientPeers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 8982
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bb-portal
+        {{- with $np.additionalClientPeers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 8984
+          protocol: TCP
+    # Worker gRPC: a caller here can register as a worker, receive actions and
+    # report results. RbeWorker pods in this namespace carry app=worker; pools
+    # in other namespaces come from additionalWorkerPeers.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: worker
+        {{- with $np.additionalWorkerPeers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 8983
+          protocol: TCP
+    # Admin web UI (the rbeWeb route): the ingress controller or Gateway must
+    # reach it, so allow it from anywhere unless adminPeers narrows it.
+    {{- if $np.adminPeers }}
+    - from:
+        {{- toYaml $np.adminPeers | nindent 8 }}
+      ports:
+        - port: 7982
+          protocol: TCP
+    {{- else }}
+    - ports:
+        - port: 7982
+          protocol: TCP
+    {{- end }}
+    # Diagnostics/metrics: scrapers usually live outside this namespace, so
+    # allow :9980 from anywhere unless metricsPeers narrows it.
+    {{- if $np.metricsPeers }}
+    - from:
+        {{- toYaml $np.metricsPeers | nindent 8 }}
+      ports:
+        - port: 9980
+          protocol: TCP
+    {{- else }}
+    - ports:
+        - port: 9980
+          protocol: TCP
+    {{- end }}
+{{- end }}

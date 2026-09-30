@@ -32,6 +32,8 @@ annotations:
       description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
     - kind: changed
       description: "Meet the CIS Kubernetes Benchmark v2.0.1 securityContext set on every container: explicit privileged: false, and a read-only root filesystem with a /tmp emptyDir for the maintenance CronJobs, bootstrap Job and dashboard. A null runAsUser, runAsGroup or fsGroup is omitted for OpenShift"
+    - kind: changed
+      description: "Request CPU for the API and publisher grpc-auth-proxy sidecars"
 keywords:
   - hermetiq
   - MCP

@@ -46,6 +46,8 @@ spec:
             - -c
             - |
 {{- include "buildbarn.storage.volumeInitScript" . | nindent 14 }}
+          resources:
+            {{- toYaml .Values.storage.initResources | nindent 12 }}
           securityContext:
             {{- include "buildbarn.storage.volumeInitSecurityContext" . | nindent 12 }}
           volumeMounts:

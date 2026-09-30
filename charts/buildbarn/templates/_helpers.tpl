@@ -744,6 +744,8 @@ securityContext:
           chmod 0600 "$dev"
         fi
       done
+  resources:
+    {{- toYaml .Values.storage.initResources | nindent 4 }}
   {{- if $bd.deviceInit.securityContext }}
   securityContext:
     {{- toYaml $bd.deviceInit.securityContext | nindent 4 }}

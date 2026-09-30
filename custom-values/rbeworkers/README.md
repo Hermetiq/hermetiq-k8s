@@ -171,9 +171,10 @@ build directory needs privileged containers:
 
 Run the pools in a namespace of their own, labelled
 `pod-security.kubernetes.io/enforce: privileged`, so the Buildbarn and Hermetiq
-namespaces can enforce `restricted`. Give the pools dedicated nodes. If you restrict
-Buildbarn with NetworkPolicies, allow the worker namespace. See the Buildbarn
-chart README for the storage policy and the scheduler example.
+namespaces can enforce `restricted`. Give the pools dedicated nodes. If you enable the
+Buildbarn chart's NetworkPolicies, list the worker namespace in
+`storage.networkPolicy.additionalClientPeers` and
+`scheduler.networkPolicy.additionalWorkerPeers`.
 
 Everything else is hardened:
 - **Operator-owned containers:** the runner installer runs non-root and

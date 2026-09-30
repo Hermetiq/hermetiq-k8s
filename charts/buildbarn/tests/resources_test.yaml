@@ -1,0 +1,39 @@
+suite: buildbarn container requests and limits
+templates:
+  - templates/statefulset-storage.yaml
+  - templates/deployment-frontend.yaml
+tests:
+  - it: bounds the storage volume-init container
+    template: templates/statefulset-storage.yaml
+    asserts:
+      - isSubset:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].resources
+          content: &initResources
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+
+  - it: bounds the device-chown init container in chownInit mode
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.blockDevice.deviceAccess: chownInit
+    asserts:
+      - isSubset:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].resources
+          content: *initResources
+
+  - it: gives grpc-cache-proxy a CPU limit alongside its memory limit
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-cache-proxy")].resources.limits.cpu
+          value: "2"
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "grpc-cache-proxy")].resources.limits.memory

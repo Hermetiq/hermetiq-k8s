@@ -921,6 +921,7 @@ api:
   resources:
     authProxy:
       requests:
+        cpu: 100m
         memory: 300Mi
       limits:
         cpu: 500m
@@ -1080,6 +1081,7 @@ publisher:
     staticForwardedUser: ""
     resources:
       requests:
+        cpu: 100m
         memory: 300Mi
       limits:
         cpu: 500m

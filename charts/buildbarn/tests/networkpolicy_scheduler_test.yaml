@@ -1,0 +1,109 @@
+suite: scheduler network policy
+templates:
+  - templates/networkpolicy-scheduler.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: admits only the frontend, bb-portal and workers on the gRPC ports when enabled
+    set:
+      scheduler.networkPolicy.enabled: true
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.podSelector.matchLabels.app
+          value: scheduler
+      - equal:
+          path: spec.ingress[0].from
+          value:
+            - podSelector:
+                matchLabels:
+                  app: frontend
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8982
+      - equal:
+          path: spec.ingress[1].from
+          value:
+            - podSelector:
+                matchLabels:
+                  app: bb-portal
+      - equal:
+          path: spec.ingress[1].ports[0].port
+          value: 8984
+      - equal:
+          path: spec.ingress[2].from
+          value:
+            - podSelector:
+                matchLabels:
+                  app: worker
+      - equal:
+          path: spec.ingress[2].ports[0].port
+          value: 8983
+      # The admin UI and metrics stay reachable until adminPeers/metricsPeers
+      # narrow them, so an existing rbeWeb route and scrapers keep working.
+      - notExists:
+          path: spec.ingress[3].from
+      - equal:
+          path: spec.ingress[3].ports[0].port
+          value: 7982
+      - notExists:
+          path: spec.ingress[4].from
+      - equal:
+          path: spec.ingress[4].ports[0].port
+          value: 9980
+
+  - it: appends worker and client peers and narrows the admin UI and scrapers
+    set:
+      scheduler.networkPolicy.enabled: true
+      scheduler.networkPolicy.additionalWorkerPeers:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: bb-worker
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rbe-workers
+      scheduler.networkPolicy.additionalClientPeers:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermetiq
+      scheduler.networkPolicy.adminPeers:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      scheduler.networkPolicy.metricsPeers:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: victoriametrics
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[1].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: hermetiq
+      - equal:
+          path: spec.ingress[1].from[1].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: hermetiq
+      - equal:
+          path: spec.ingress[2].from[1].podSelector.matchLabels["app.kubernetes.io/name"]
+          value: bb-worker
+      - equal:
+          path: spec.ingress[2].from[1].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: rbe-workers
+      - equal:
+          path: spec.ingress[3].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: envoy-gateway-system
+      - equal:
+          path: spec.ingress[4].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: victoriametrics
+
+  - it: follows the release namespace
+    release:
+      namespace: team-a
+    set:
+      scheduler.networkPolicy.enabled: true
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: team-a
