@@ -1,5 +1,4 @@
 {{- if .Values.rbac.enabled }}
-{{- $rbacRulesEnabled := or .Values.rbac.rules.certManager .Values.rbac.rules.secrets .Values.rbac.rules.leases .Values.rbac.rules.deployments .Values.rbac.rules.configMaps .Values.rbac.rules.rbeWorkers .Values.rbac.rules.pods }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
 metadata:
@@ -10,9 +9,6 @@ metadata:
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
 rules:
-  {{- if not $rbacRulesEnabled }}
-  []
-  {{- end }}
   {{- if .Values.rbac.rules.certManager }}
   - apiGroups:
       - cert-manager.io
@@ -103,6 +99,17 @@ rules:
       - get
       - list
   {{- end }}
+  # Reading the release Namespace object is allowed by a namespaced Role and
+  # RoleBinding. Its UID is the on-prem license fingerprint in both RBAC
+  # modes. resourceNames limits this to the release Namespace.
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    resourceNames:
+      - {{ include "hermetiq-core.namespace" . }}
+    verbs:
+      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -119,58 +126,13 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: {{ if eq .Values.rbac.mode "namespace" }}Role{{ else }}ClusterRole{{ end }}
   name: {{ if eq .Values.rbac.mode "namespace" }}{{ printf "%s-%s" .Release.Name .Values.rbac.namespaceRoleName }}{{ else }}{{ printf "%s-%s" .Release.Name .Values.rbac.clusterRoleName }}{{ end }}
-{{- if and (eq .Values.rbac.mode "cluster") .Values.rbac.rules.clusterFingerprint }}
----
-# License cluster fingerprint: metadata read of ONE cluster-scoped object —
-# the kube-system Namespace — whose UID is the stable identity of the cluster
-# for the lifetime of the cluster (same pattern used by Datadog/Replicated
-# agents). resourceNames pins the grant to that single Namespace object: it
-# can NOT list namespaces and grants nothing INSIDE kube-system — Secrets,
-# ConfigMaps, and Pods there are separate resources this role has no verbs
-# on. A ClusterRoleBinding is required because Namespace objects are
-# cluster-scoped; a namespaced RoleBinding cannot grant this read. When this
-# grant is omitted, supply license.fingerprintOverride or arrange a separate
-# cluster-level Namespace read grant.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
-  labels:
-    {{- include "hermetiq-core.labels" . | nindent 4 }}
-rules:
-  - apiGroups:
-      - ""
-    resources:
-      - namespaces
-    verbs:
-      - get
-    resourceNames:
-      - kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
-  labels:
-    {{- include "hermetiq-core.labels" . | nindent 4 }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "hermetiq-core.serviceAccountName" . }}
-    namespace: {{ include "hermetiq-core.namespace" . }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ printf "%s-cluster-fingerprint" .Release.Name }}
-{{- end }}
 {{- if .Values.rbac.rules.licenseState }}
 ---
 # License state writer: the app persists its auto-issued trial key and the
 # signed validation cache (offline grace) in the hermetiq-license-state
 # Secret via the K8s API. Write verbs are resourceNames-scoped to that one
 # Secret; create carries no resourceNames because Kubernetes cannot
-# name-scope creation. Namespace objects are cluster-scoped, so namespace
-# mode requires license.fingerprintOverride instead of an ineffective
-# namespaced rule for reading the Namespace UID.
+# name-scope creation. The release Namespace UID read is in the runtime Role.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

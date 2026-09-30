@@ -34,7 +34,6 @@ publisher:
     audience: https://bep.ci.hermetiq.test
 license:
   contactEmail: ci@hermetiq.test
-  fingerprintOverride: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   agreement:
     accepted: true
 # Disable the dashboard oauth2-proxy for the render fixture (it requires client

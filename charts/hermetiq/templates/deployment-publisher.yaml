@@ -314,10 +314,6 @@ spec:
               value: {{ .Values.license.saasUrl | quote }}
             - name: LICENSE_STATE_SECRET_NAME
               value: {{ include "hermetiq-core.licenseStateSecretName" . | quote }}
-            {{- if .Values.license.fingerprintOverride }}
-            - name: LICENSE_FINGERPRINT_OVERRIDE
-              value: {{ .Values.license.fingerprintOverride | quote }}
-            {{- end }}
             # Paths track the Secret key names (no items: remapping on the
             # volume). LICENSE_LIC_FILE is set unconditionally; the app only
             # reads it in airgap mode.

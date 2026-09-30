@@ -138,7 +138,7 @@ tests:
           of: ClusterRole
         documentIndex: 0
       - notExists:
-          path: rules[6]
+          path: rules[?(@.resources[0] == "pods")]
         documentIndex: 0
 
   - it: omits runtime certificate and broad Secret access by default
@@ -176,7 +176,7 @@ tests:
             - get
         documentIndex: 0
 
-  - it: renders only namespaced RBAC by default
+  - it: renders only namespaced RBAC and reads the release Namespace UID by default
     asserts:
       - hasDocuments:
           count: 4
@@ -194,6 +194,21 @@ tests:
           path: roleRef.kind
           value: Role
         documentIndex: 1
+      - equal:
+          path: rules[?(@.resources[0] == "namespaces")].resources
+          value:
+            - namespaces
+        documentIndex: 0
+      - equal:
+          path: rules[?(@.resources[0] == "namespaces")].resourceNames
+          value:
+            - NAMESPACE
+        documentIndex: 0
+      - equal:
+          path: rules[?(@.resources[0] == "namespaces")].verbs
+          value:
+            - get
+        documentIndex: 0
       - isKind:
           of: Role
         documentIndex: 2
@@ -205,7 +220,6 @@ tests:
     set:
       namespaceOverride: tenant-ns
       rbac.mode: namespace
-      license.fingerprintOverride: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     asserts:
       - equal:
           path: metadata.namespace
@@ -219,3 +233,8 @@ tests:
           path: subjects[0].namespace
           value: tenant-ns
         documentIndex: 1
+      - equal:
+          path: rules[?(@.resources[0] == "namespaces")].resourceNames
+          value:
+            - tenant-ns
+        documentIndex: 0

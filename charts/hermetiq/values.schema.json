@@ -265,10 +265,6 @@
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
         },
-        "fingerprintOverride": {
-          "type": "string",
-          "pattern": "^$|^[a-f0-9]{64}$"
-        },
         "saasUrl": {
           "type": "string"
         }
@@ -602,9 +598,6 @@
           "type": "object",
           "properties": {
             "rbeWorkers": {
-              "type": "boolean"
-            },
-            "clusterFingerprint": {
               "type": "boolean"
             },
             "licenseState": {

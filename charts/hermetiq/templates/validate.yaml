@@ -2,8 +2,8 @@
 {{- if not (has .Values.rbac.mode (list "cluster" "namespace")) -}}
 {{- fail "rbac.mode must be cluster or namespace" -}}
 {{- end -}}
-{{- if and .Values.rbac.enabled (eq .Values.rbac.mode "namespace") (not .Values.license.fingerprintOverride) -}}
-{{- fail "rbac.mode=namespace requires a stable license.fingerprintOverride; namespace-scoped RBAC cannot read a Namespace UID" -}}
+{{- if hasKey .Values.license "fingerprintOverride" -}}
+{{- fail "license.fingerprintOverride is no longer supported; licensing uses the release Namespace UID" -}}
 {{- end -}}
 {{- $validRoutingProviders := list "gateway" "gateway-httproute-only" "contour" "ingress" "none" -}}
 {{- $requestedRoutingProvider := default "" .Values.routing.provider -}}
@@ -50,6 +50,16 @@
 {{- end -}}
 {{- $apiEnv := default (dict) .Values.api.env -}}
 {{- $publisherEnv := default (dict) .Values.publisher.env -}}
+{{- $subscriberEnv := default (dict) .Values.subscriber.env -}}
+{{- if or (hasKey $apiEnv "APP_ENV") (hasKey $publisherEnv "APP_ENV") (hasKey $subscriberEnv "APP_ENV") -}}
+{{- fail "APP_ENV is fixed to on-prem for this chart; remove it from api.env, publisher.env, or subscriber.env" -}}
+{{- end -}}
+{{- if or (hasKey $apiEnv "K8S_NAMESPACE") (hasKey $publisherEnv "K8S_NAMESPACE") -}}
+{{- fail "K8S_NAMESPACE is set from each Pod's metadata for licensing; remove it from api.env or publisher.env" -}}
+{{- end -}}
+{{- if or (hasKey $apiEnv "LICENSE_FINGERPRINT_OVERRIDE") (hasKey $publisherEnv "LICENSE_FINGERPRINT_OVERRIDE") -}}
+{{- fail "LICENSE_FINGERPRINT_OVERRIDE is not supported in api.env or publisher.env; licensing uses the release Namespace UID" -}}
+{{- end -}}
 {{- if hasKey $apiEnv "GRPC_AUTH_USER_PROVIDER" -}}
 {{- fail "api.env must not set GRPC_AUTH_USER_PROVIDER; use app.grpcAuthUserProvider so the chart renders one unambiguous provider" -}}
 {{- end -}}
@@ -159,9 +169,6 @@
 {{- end -}}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" $licenseFileSecretKey) -}}
 {{- fail (printf "license.licenseFileSecretKey %q must be a valid Kubernetes Secret data key (alphanumerics, '.', '_', '-'; must start with an alphanumeric)" $licenseFileSecretKey) -}}
-{{- end -}}
-{{- if and .Values.license.fingerprintOverride (not (regexMatch "^[a-f0-9]{64}$" .Values.license.fingerprintOverride)) -}}
-{{- fail "license.fingerprintOverride must be 64 lowercase sha256 hex characters" -}}
 {{- end -}}
 {{- with .Values.api.mcpResourceUrl -}}
 {{- if not (has (urlParse .).path (list "" "/")) -}}

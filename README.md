@@ -156,8 +156,9 @@ You need:
 - an OIDC identity provider
 - persistent storage suitable for NATS and, when selected, Buildbarn
 
-The Hermetiq chart defaults to namespace RBAC. Set a stable
-`license.fingerprintOverride` in its values file. The bb-worker-operator chart
+The Hermetiq chart defaults to namespace RBAC, including permission to read
+its own Namespace UID for license identity. It creates no ClusterRole or
+ClusterRoleBinding in that mode. The bb-worker-operator chart
 defaults to cluster RBAC; for a namespace-scoped operator installation, set
 `rbac.mode=namespace` and `metrics.secure=false`. See the
 [Hermetiq RBAC settings](charts/hermetiq/README.md#serviceaccount-tokens-and-rbac)
@@ -185,9 +186,9 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.2` |             `0.9.2` |
-| Buildbarn |       `0.9.4` |  `20260908T142448Z` |
-| BB Worker Operator |       `0.3.4` |            `v0.3.4` |
+| Hermetiq |       `0.9.3` |             `0.9.4` |
+| Buildbarn |       `0.9.5` |  `20260908T142448Z` |
+| BB Worker Operator |       `0.3.5` |            `v0.3.4` |
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave

@@ -5,11 +5,6 @@ license:
   # Work email for trial issuance and license notices. Replace this example:
   # the application rejects example.com addresses on startup.
   contactEmail: build-team@example.com
-  # REQUIRED with namespace RBAC. For a new install, replace this with the
-  # output of `openssl rand -hex 32` once; keep it across upgrades. For an
-  # existing install, use the README's IMPORTANT fingerprint procedure so its
-  # license identity stays the same.
-  fingerprintOverride: <stable-64-character-hex>
   # REQUIRED. Installing Hermetiq confirms acceptance of the Hermetiq Software
   # License Agreement (SOFTWARE-LICENSE-AGREEMENT.md in the chart package; URL
   # in license.agreement.url). The install fails while accepted is false.

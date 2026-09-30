@@ -15,7 +15,7 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
     - kind: added
-      description: "Default to namespace RBAC; require a stable license fingerprint override"
+      description: "Default to namespace RBAC, including license fingerprint access"
     - kind: changed
       description: "Derive Browser and Grafana URLs from hosts.domainBase"
     - kind: fixed

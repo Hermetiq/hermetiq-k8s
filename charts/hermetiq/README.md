@@ -16,12 +16,8 @@ the full-stack deployment order and shared services used by the other charts.
   - [Shared services and routing](#shared-services-and-routing)
 - [Required external inputs](#required-external-inputs)
 - [Licensing and trials](#licensing-and-trials)
-  - [IMPORTANT: Set the license fingerprint before installing](#important-set-the-license-fingerprint-before-installing)
+  - [License fingerprint RBAC](#license-fingerprint-rbac)
   - [Required contact and online trial](#required-contact-and-online-trial)
-  - [Paid license keys](#paid-license-keys)
-  - [Air-gapped licenses](#air-gapped-licenses)
-  - [Licensing RBAC](#licensing-rbac)
-  - [Status and expiry](#status-and-expiry)
 - [Hosts](#hosts)
 - [PostgreSQL and schema management](#postgresql-and-schema-management)
   - [Bootstrap job](#bootstrap-job)
@@ -54,11 +50,13 @@ the full-stack deployment order and shared services used by the other charts.
 - [External configuration ConfigMaps](#external-configuration-configmaps)
   - [Cache TTL configuration](#cache-ttl-configuration)
   - [PromQL query configuration](#promql-query-configuration)
-- [Integrations and workload discovery](#integrations-and-workload-discovery)
+- [Advanced Topics](#advanced-topics)
   - [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools)
   - [Cost integration](#cost-integration)
   - [Cache-event analytics](#cache-event-analytics)
   - [Kubernetes workload discovery](#kubernetes-workload-discovery)
+  - [Paid license keys](#paid-license-keys)
+  - [Air-gapped licenses](#air-gapped-licenses)
 - [Verify dependencies ready](#verify-dependencies-ready)
 - [Install](#install)
 - [Verification](#verification)
@@ -205,7 +203,7 @@ documents advanced settings.
 
 | Starter values section | Review before installation |
 | --- | --- |
-| `license` | [Licensing and trials](#licensing-and-trials), especially the [IMPORTANT fingerprint procedure](#important-set-the-license-fingerprint-before-installing) |
+| `license` | [Licensing and trials](#licensing-and-trials), especially [IMPORTANT: License fingerprint RBAC](#important-license-fingerprint-rbac) |
 | `hosts` | [Hosts](#hosts) and DNS/TLS setup in [Routing](#routing) |
 | `bootstrap`, `postgres` | [PostgreSQL and schema management](#postgresql-and-schema-management), including initial partition sizing |
 | `routing`, `gateway` | [Routing](#routing) and the chosen controller's Gateway or Ingress |
@@ -230,50 +228,22 @@ helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.3
 
 ## Licensing and trials
 
-### IMPORTANT: Set the license fingerprint before installing
+### License fingerprint RBAC
 
-The chart defaults to `rbac.mode=namespace`. In this mode it cannot read the
-cluster's Namespace UID, so **`license.fingerprintOverride` is required even
-when you provide a paid license key**. The value must be exactly 64 lowercase
-hex characters. It identifies this installation for trial and license
-validation; changing it later changes the installation's license identity.
+The chart's runtime RBAC grants the `bep-nats` ServiceAccount `get` on the
+release Namespace object only. On-prem licensing hashes that Namespace UID for
+trial and paid license identity, in either RBAC mode. The default
+`rbac.mode=namespace` creates no ClusterRole or ClusterRoleBinding.
 
-Choose the value according to how you are installing:
+A separate namespaced grant stores license state:
 
-1. **New installation:** Generate a value once with `openssl rand -hex 32`.
-   Save that output in your deployment values and retain it for upgrades and
-   reinstalls. Do not run the command again for the same installation.
-2. **Existing installation with `license.fingerprintOverride` already set:**
-   Reuse the exact value. Do not replace it with a new random value.
-3. **Existing installation moving from cluster RBAC without an override:**
-   The default cluster RBAC mode derives its fingerprint by hashing the
-   `kube-system` Namespace UID. Compute the *same* value before switching to
-   namespace mode:
+| Value | Grant | If disabled |
+| --- | --- | --- |
+| `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
 
-   ```bash
-   namespace_uid="$(kubectl get namespace kube-system -o jsonpath='{.metadata.uid}')" &&
-     test -n "$namespace_uid" &&
-     printf '%s' "$namespace_uid" | openssl dgst -sha256 | awk '{print $NF}'
-   ```
-
-   Put the output in your values file. If your account cannot read the
-   `kube-system` Namespace object, ask a cluster administrator to run this
-   command. It reads only the Namespace object's UID. Do not use an empty or
-   failed command's output as the fingerprint.
-
-Replace the placeholder in your copy of
-[`custom-values/hermetiq-values.yaml`](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml):
-
-```yaml
-license:
-  fingerprintOverride: "<64-lowercase-hex-characters>"
-```
-
-Keep that value with the installation's durable configuration. Do not rotate
-it during a routine chart upgrade or reinstall. If you retain
-`rbac.mode=cluster` and its fingerprint grant, the chart can continue deriving
-the UID-based value without an override; choosing namespace mode requires the
-explicit value above.
+The Namespace read and license-state Secret access are exercised in-pod, so
+installs must keep `api.automountServiceAccountToken: true` and
+`publisher.automountServiceAccountToken: true`.
 
 ### Required contact and online trial
 
@@ -292,53 +262,11 @@ online key validation need egress to `license.saasUrl` (default
 
 _Note: The binary rejects `build-team@example.com` on startup as that's just a placeholder in the chart, please supply a valid work email._
 
-Trial licenses are tied to the [installation fingerprint](#important-set-the-license-fingerprint-before-installing).
+Trial licenses are tied to the [Namespace fingerprint](#important-license-fingerprint-rbac).
 Validation is off the request path and cached so transient licensing-service
 outages do not interrupt requests.
 
-### Paid license keys
-
-**Paid keys** go in a Secret named `hermetiq-license` under the data key
-`license.key`. The chart always mounts that Secret name as an optional volume,
-so creating the default-named Secret after install hot-loads the key with no
-values change and no rollout:
-
-```sh
-kubectl -n hermetiq create secret generic hermetiq-license \
-  --from-literal=license.key=<key>
-```
-
-For a customer-managed Secret with different names, set
-`license.key.existingSecret` and `license.key.existingSecretKey` (a values
-change, so it takes a `helm upgrade` and a rollout). `license.key.value` is the
-inline alternative — the chart then creates the `hermetiq-license` Secret
-itself. Converting a trial to a paid license happens server-side against the
-same key; no cluster changes are needed.
-
-### Air-gapped licenses
-
-**Air-gapped installs** set `license.airGapped=true` and must provide
-`license.key.existingSecret` carrying **both** the license key and a
-checked-out license file — data keys `license.key` and `license.lic` by
-default (`license.key.existingSecretKey` / `license.licenseFileSecretKey`).
-Trials are online-only, so `license.trial.enabled` must be `false`; the chart
-refuses to render otherwise. No network calls are made in this mode.
-
-### Licensing RBAC
-
-Two RBAC rule flags back licensing; both default to `true`, but the cluster
-fingerprint grant is rendered only when `rbac.mode=cluster` is selected:
-
-| Value | Grant | If disabled |
-| --- | --- | --- |
-| `rbac.rules.clusterFingerprint` | ClusterRole + ClusterRoleBinding with `get` on the `kube-system` Namespace **object** only (`resourceNames: [kube-system]`) — its metadata UID is the stable cluster fingerprint for license identity. It cannot list namespaces and reads nothing *inside* kube-system. Omitted in `rbac.mode=namespace`. | In cluster mode, use an override or a separately managed Namespace read grant. Namespace mode always requires `license.fingerprintOverride`. |
-| `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
-
-Both are exercised in-pod, so hardened installs must keep
-`api.automountServiceAccountToken: true` and
-`publisher.automountServiceAccountToken: true`.
-
-### Status and expiry
+#### Status and expiry
 
 The status endpoint and `hermetiq_license_*` metrics expose expiry and grace
 state for operator alerting. Past the grace window, `grpc-api` and
@@ -940,7 +868,7 @@ Kubernetes API.
 Review every rule under `rbac.rules`:
 
 - keep `licenseState` enabled for trial persistence and offline validation
-  grace; `clusterFingerprint` applies only when cluster RBAC mode is selected
+  grace
 - keep `deployments`, `configMaps`, and `rbeWorkers` only when the API should
   discover Buildbarn workloads and worker pools
 - keep `leases` only for subscriber lease coordination
@@ -948,13 +876,12 @@ Review every rule under `rbac.rules`:
   those resources
 
 The chart defaults to `rbac.mode=namespace` and creates only Roles and
-RoleBindings. Follow the [IMPORTANT fingerprint procedure](#important-set-the-license-fingerprint-before-installing)
-before installing or changing RBAC modes. Set `rbac.mode=cluster` explicitly
-if the application should read the `kube-system` Namespace UID instead.
-Switching an existing
-release from cluster to namespace mode removes its old ClusterRoles and
-ClusterRoleBindings, so the upgrade still requires an installer allowed to
-delete those old resources.
+RoleBindings. The [Namespace fingerprint](#important-license-fingerprint-rbac)
+also uses a namespaced Role. Set `rbac.mode=cluster` only when application
+permissions need a ClusterRole; licensing still uses the release Namespace UID.
+Switching an existing release from cluster to namespace mode removes its former
+application ClusterRole, so the upgrade requires an installer allowed to delete
+that resource.
 
 `rbac.rules.certManager` and `rbac.rules.secrets` default to `false`. They
 control the application's optional client-certificate management, not route
@@ -1113,7 +1040,7 @@ Partial query overrides are supported. Unknown template placeholders and blank
 required queries fail API startup instead of silently returning incomplete
 diagnostics.
 
-## Integrations and workload discovery
+## Advanced Topics
 
 ### Metrics-backed infrastructure tools
 
@@ -1122,14 +1049,15 @@ API can reach the configured VictoriaMetrics read endpoint. When disabled, the
 five PromQL-backed Buildbarn health tools and the two VictoriaLogs-backed tools
 are not registered; the remaining MCP tools are unaffected.
 
-Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and
-reachable. `victoriaMetrics.projectLabelEnabled` controls whether the packaged
+`victoriaMetrics.projectLabelEnabled` controls whether the packaged
 PromQL selectors are scoped to the project, and `victoriaMetrics.projectLabel`
 (default `namespace`) names the label. With `namespace`, queries match the
 project's Buildbarn namespace setting, which must name the namespace Buildbarn
 runs in; the Buildbarn chart's recording rules keep that label. Keep it `false`
 for a self-managed, single-tenant Buildbarn whose metrics do not follow those
 rules.
+
+Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
 
 ### Cost integration
 
@@ -1173,6 +1101,34 @@ Disabling these grants leaves metrics queries available but removes the
 installed-component inventory and Buildbarn configuration context from MCP
 diagnostics. The API needs a mounted ServiceAccount token to use workload and
 `RbeWorker` discovery.
+
+### Paid license keys
+
+**Paid keys** go in a Secret named `hermetiq-license` under the data key
+`license.key`. The chart always mounts that Secret name as an optional volume,
+so creating the default-named Secret after install hot-loads the key with no
+values change and no rollout:
+
+```sh
+kubectl -n hermetiq create secret generic hermetiq-license \
+  --from-literal=license.key=<key>
+```
+
+For a customer-managed Secret with different names, set
+`license.key.existingSecret` and `license.key.existingSecretKey` (a values
+change, so it takes a `helm upgrade` and a rollout). `license.key.value` is the
+inline alternative — the chart then creates the `hermetiq-license` Secret
+itself. Converting a trial to a paid license happens server-side against the
+same key; no cluster changes are needed.
+
+### Air-gapped licenses
+
+**Air-gapped installs** set `license.airGapped=true` and must provide
+`license.key.existingSecret` carrying **both** the license key and a
+checked-out license file — data keys `license.key` and `license.lic` by
+default (`license.key.existingSecretKey` / `license.licenseFileSecretKey`).
+Trials are online-only, so `license.trial.enabled` must be `false`; the chart
+refuses to render otherwise. No network calls are made in this mode.
 
 ## Verify dependencies ready
 
@@ -1218,7 +1174,7 @@ from your own values when they differ from the starter examples.
 
 Before installing, complete the [starter values review](#required-external-inputs),
 including a real work address for `license.contactEmail`, the
-[fingerprint procedure](#important-set-the-license-fingerprint-before-installing),
+[Namespace fingerprint behavior](#important-license-fingerprint-rbac),
 and partition sizing for the expected ingest volume.
 
 ## Install
