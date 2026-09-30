@@ -328,6 +328,15 @@ true
 {{- default (include "hermetiq-core.oidcJwksUrl" .) .Values.publisher.jwks.url -}}
 {{- end -}}
 
+{{/* publisher.jwks.audience defaults to the public BEP gRPC origin. */}}
+{{- define "hermetiq-core.publisherJwksAudience" -}}
+{{- if .Values.publisher.jwks.audience -}}
+{{- .Values.publisher.jwks.audience -}}
+{{- else if or .Values.hosts.bepGrpc .Values.hosts.domainBase -}}
+{{- printf "https://%s" (include "hermetiq-core.bepGrpcHost" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Identity provider for every bep-nats core that serves gRPC, rendered as
      GRPC_AUTH_USER_PROVIDER. The core validates it at startup and refuses to
      run without it, so this is always emitted rather than gated on

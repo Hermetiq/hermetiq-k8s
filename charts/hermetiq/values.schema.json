@@ -705,7 +705,8 @@
               "type": "string"
             },
             "audience": {
-              "type": "string"
+              "type": "string",
+              "description": "BES/CAL token audience. Defaults to the public BEP gRPC origin derived from hosts.bepGrpc or hosts.domainBase."
             },
             "groupsClaim": {
               "type": "string"

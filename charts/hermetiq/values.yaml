@@ -1036,8 +1036,8 @@ publisher:
     enabled: true
     url: ""
     issuer: ""
-    # BES/CAL token audience. Comma-separated: a token matching any entry is
-    # accepted.
+    # BES/CAL token audience. Defaults to https://<hosts.bepGrpc> or
+    # https://bep.<hosts.domainBase>. Comma-separated overrides are accepted.
     audience: ""
     groupsClaim: hermetiq/roles
     existingSecret: ""

@@ -116,8 +116,8 @@
     {{- if not (include "hermetiq-core.publisherJwksIssuer" .) -}}
     {{- fail "publisher.jwks.issuer or oidc.issuerUrl is required when publisher.jwks.enabled=true (GRPC_AUTH_ISSUER is mandatory for the jwks provider; an unset issuer used to mean no issuer check)" -}}
     {{- end -}}
-    {{- if not .Values.publisher.jwks.audience -}}
-    {{- fail "publisher.jwks.audience is required when publisher.jwks.enabled=true (GRPC_AUTH_AUDIENCE is mandatory for the jwks provider; an unset audience used to mean any audience was accepted)" -}}
+    {{- if not (include "hermetiq-core.publisherJwksAudience" .) -}}
+    {{- fail "publisher.jwks.audience, hosts.bepGrpc, or hosts.domainBase is required when publisher.jwks.enabled=true (GRPC_AUTH_AUDIENCE is mandatory for the jwks provider)" -}}
     {{- end -}}
     {{- if and (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) (not (trim .Values.publisher.jwks.json)) -}}
     {{- fail "publisher.jwks.json or publisher.jwks.existingSecret is required when publisher.jwks.enabled=true and no publisher.jwks.url or oidc JWKS URL resolves" -}}

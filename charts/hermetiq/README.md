@@ -507,7 +507,10 @@ core, choose exactly one configuration mode:
 
 1. **Chart-managed (default):** keep `api.jwt.enabled=true` and
    `publisher.jwks.enabled=true`, then configure their issuer/JWKS/audience
-   values (the issuer and JWKS URL can derive from `oidc.issuerUrl`).
+   values. The issuer and JWKS URL can derive from `oidc.issuerUrl`; the
+   publisher audience defaults to `https://bep.<hosts.domainBase>` (or
+   `https://<hosts.bepGrpc>` when that host is overridden). Register this
+   audience with the IdP and configure Bazel's BEP token to match it.
 2. **Custom environment:** set the component's `enabled=false` and put a
    complete contract in `api.env` or `publisher.env`: exactly one non-empty
    `GRPC_AUTH_JWKS_URL`, `GRPC_AUTH_JWKS_FILE`, or `GRPC_AUTH_JWKS_INLINE`, plus

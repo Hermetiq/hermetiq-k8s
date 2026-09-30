@@ -272,10 +272,10 @@ spec:
             - name: GRPC_AUTH_ISSUER
               value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.publisher.jwks.audience }}
+            {{- with (include "hermetiq-core.publisherJwksAudience" .) }}
             # Comma-separated; a token matching any entry is accepted.
             - name: GRPC_AUTH_AUDIENCE
-              value: {{ .Values.publisher.jwks.audience | quote }}
+              value: {{ . | quote }}
             {{- end }}
             {{- end }}
             # Admin resolution is split across two consumers: GRPC_AUTH_* is

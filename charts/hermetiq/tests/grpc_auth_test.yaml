@@ -34,6 +34,29 @@ tests:
       - exists:
           path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
         template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://bep.ci.hermetiq.test
+        template: templates/deployment-publisher.yaml
+
+  - it: derives the publisher audience from an overridden BEP host
+    set:
+      hosts.bepGrpc: ingest.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://ingest.example.com
+        template: templates/deployment-publisher.yaml
+
+  - it: preserves an explicit publisher audience override
+    set:
+      hosts.bepGrpc: ingest.example.com
+      publisher.jwks.audience: https://custom-audience.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://custom-audience.example.com
+        template: templates/deployment-publisher.yaml
 
   - it: accepts complete custom JWKS contracts when chart-managed settings are disabled
     set:
@@ -397,14 +420,16 @@ tests:
       - failedTemplate:
           errorPattern: "api.jwt.audience is required"
 
-  - it: rejects publisher JWKS auth with no audience
+  - it: rejects publisher JWKS auth with no audience or BEP host
     template: templates/validate.yaml
     set:
       publisher.jwks.enabled: true
       publisher.jwks.audience: ""
+      hosts.domainBase: ""
+      hosts.bepGrpc: ""
     asserts:
       - failedTemplate:
-          errorPattern: "publisher.jwks.audience is required"
+          errorPattern: "publisher.jwks.audience, hosts.bepGrpc, or hosts.domainBase is required"
 
   - it: rejects publisher JWKS auth with no resolvable issuer
     template: templates/validate.yaml

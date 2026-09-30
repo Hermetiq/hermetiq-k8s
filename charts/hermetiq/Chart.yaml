@@ -18,6 +18,8 @@ annotations:
       description: "Default to namespace RBAC, including license fingerprint access"
     - kind: changed
       description: "Derive Browser and Grafana URLs from hosts.domainBase"
+    - kind: changed
+      description: "Derive the publisher JWKS audience from the BEP host"
     - kind: fixed
       description: "Disable unused cert-manager and Secret permissions by default"
     - kind: changed

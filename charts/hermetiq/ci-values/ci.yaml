@@ -31,7 +31,6 @@ api:
 publisher:
   jwks:
     enabled: true
-    audience: https://bep.ci.hermetiq.test
 license:
   contactEmail: ci@hermetiq.test
   agreement:

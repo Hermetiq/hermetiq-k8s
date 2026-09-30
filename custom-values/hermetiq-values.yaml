@@ -102,10 +102,8 @@ publisher:
     requests:
       cpu: 600m
       memory: 1200Mi
-  jwks:
-    # Audience the publisher requires in BEP JWTs. Register this identifier
-    # with the IdP and configure Bazel's BEP token for the same audience.
-    audience: https://bep.helm.hermetiq.dev
+  # JWKS audience defaults to https://bep.<hosts.domainBase>; register that
+  # identifier with the IdP and configure Bazel's BEP token to match.
 
 dashboard:
   # Quickstart's Bazel remote-cache URL derives as grpcs://bb.<hosts.domainBase>.
