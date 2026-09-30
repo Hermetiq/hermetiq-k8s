@@ -33,22 +33,31 @@ helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.4
 helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.4
 ```
 
-Install the CRD and then the controller:
+For a namespace-scoped install, set `rbac.mode=namespace` and
+`metrics.secure=false` in the values file. Have a cluster administrator apply
+the CRD from the matching release tag:
 
 ```bash
-helm show crds oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.4 | kubectl apply --server-side -f -
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.4/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
+```
 
+Then install the controller in the namespace:
+
+```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
   --version 0.3.4 \
+  --skip-crds \
   --values my-custom-values/bb-worker-operator-values.yaml
 ```
 
-For a namespace-scoped install, have a cluster administrator apply the CRD
-from the first command, set `rbac.mode=namespace` and `metrics.secure=false`
-in the values file, and add `--skip-crds` to the Helm install command. See
-[RBAC Scope](#rbac-scope) for the remaining namespace-mode requirements.
+See [RBAC Scope](#rbac-scope) for the remaining namespace-mode requirements.
+If the Helm installer can create cluster-scoped resources, the separate CRD
+step is optional: omit `--skip-crds` and Helm installs the CRD on the first
+install. For later upgrades, apply the updated CRD separately before upgrading
+the chart.
 
 Keep the CRD and controller image on the same release. Leave `image.tag` empty
 so the image follows the chart's `appVersion`: the CRD is what accepts a field
@@ -98,8 +107,8 @@ depend on the new schema.
 
 Release 0.3.3 refreshes the embedded Kubernetes Pod and volume schemas in the
 `RbeWorker` CRD for the operator's Kubernetes v0.37 dependencies. Apply the
-0.3.3 CRD before upgrading the operator image, using the `helm show crds`
-command in [Install](#install).
+0.3.3 CRD before upgrading the operator image, using the versioned CRD YAML
+from that release tag as shown in [Install](#install).
 
 Release 0.3.4 removes `spec.autoscaling.prometheus.projectID`. Generated
 queries now filter on the `RbeWorker`'s own namespace, so the worker must live
