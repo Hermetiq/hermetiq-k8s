@@ -72,7 +72,12 @@ spec:
       # not need the privileged/root runner container that the Testcontainers
       # and Envoy pools require.
       allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
       runAsUser: 65534
+      capabilities:
+        drop:
+          - ALL
   storage:
     casMountPath: /storage-worker-cas
     casVolume:

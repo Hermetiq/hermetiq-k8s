@@ -1,0 +1,174 @@
+suite: buildbarn pod and container securityContext
+templates:
+  - templates/deployment-frontend.yaml
+  - templates/deployment-browser.yaml
+  - templates/deployment-scheduler.yaml
+  - templates/deployment-portal.yaml
+  - templates/deployment-asset.yaml
+  - templates/jwks-sync.yaml
+  - templates/statefulset-storage.yaml
+set:
+  remoteAsset.enabled: true
+  portal.enabled: true
+  frontend.grpcCacheProxy.enabled: true
+  frontend.jwks.enabled: true
+  frontend.jwks.sync.enabled: true
+  frontend.jwks.sync.url: https://idp.example.com/.well-known/jwks.json
+  browser.oauth2Proxy.enabled: true
+tests:
+  # CIS Kubernetes Benchmark v2.0.1 (5.2.x, 5.6.x) and PSS "restricted",
+  # set explicitly rather than left to runtime defaults.
+  - it: sets the restricted pod securityContext on every workload
+    asserts:
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: &restrictedPod
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+        template: templates/deployment-frontend.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-browser.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-scheduler.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-portal.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-asset.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/statefulset-storage.yaml
+      - isSubset:
+          path: spec.jobTemplate.spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: Job
+
+  - it: sets the restricted container securityContext on every container
+    asserts:
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "frontend")].securityContext
+          content: &restrictedContainer
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            capabilities:
+              drop:
+                - ALL
+        template: templates/deployment-frontend.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "grpc-cache-proxy")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-frontend.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "browser")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-browser.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "scheduler")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-scheduler.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "bb-portal")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-portal.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "remote-asset")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-asset.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "storage")].securityContext
+          content: *restrictedContainer
+        template: templates/statefulset-storage.yaml
+      - isSubset:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].securityContext
+          content: *restrictedContainer
+        template: templates/statefulset-storage.yaml
+      - isSubset:
+          path: spec.jobTemplate.spec.template.spec.containers[0].securityContext
+          content: *restrictedContainer
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - isSubset:
+          path: spec.template.spec.containers[0].securityContext
+          content: *restrictedContainer
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: Job
+      # oauth2-proxy keeps its own non-root IDs (1000:2000).
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].securityContext
+          content:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 2000
+            capabilities:
+              drop:
+                - ALL
+        template: templates/deployment-browser.yaml
+
+  - it: gives remote-asset a writable /tmp under its read-only root filesystem
+    template: templates/deployment-asset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            mountPath: /tmp
+            name: tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+
+  - it: omits UIDs set to null so OpenShift can assign them
+    set:
+      security.pod.runAsUser: null
+      security.pod.runAsGroup: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+        template: templates/deployment-frontend.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.runAsGroup
+        template: templates/deployment-frontend.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "frontend")].securityContext.runAsUser
+        template: templates/deployment-frontend.yaml
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+        template: templates/deployment-frontend.yaml
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+        template: templates/deployment-frontend.yaml

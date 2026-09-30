@@ -73,7 +73,12 @@ spec:
         memory: 48Gi
     securityContext:
       allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
       runAsUser: 65534
+      capabilities:
+        drop:
+          - ALL
   storage:
     casMountPath: /storage-worker-cas
     casVolume:

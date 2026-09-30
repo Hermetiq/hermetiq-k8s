@@ -52,6 +52,8 @@ spec:
           emptyDir: {}
         - name: dashboard-nginx-run
           emptyDir: {}
+        - name: dashboard-tmp
+          emptyDir: {}
         {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
         - name: dashboard-quickstart-config
           configMap:
@@ -86,10 +88,15 @@ spec:
               mountPath: /workdir/html
           securityContext:
             allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
+            privileged: false
             readOnlyRootFilesystem: true
             runAsNonRoot: {{ .Values.dashboard.security.runAsNonRoot }}
+            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsUser) }}
             runAsUser: {{ .Values.dashboard.security.runAsUser }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsGroup) }}
             runAsGroup: {{ .Values.dashboard.security.runAsGroup }}
+            {{- end }}
             {{- if .Values.dashboard.security.dropCapabilities }}
             capabilities:
               drop:
@@ -210,5 +217,7 @@ spec:
               mountPath: /var/cache/nginx
             - name: dashboard-nginx-run
               mountPath: /var/run
+            - name: dashboard-tmp
+              mountPath: /tmp
           securityContext:
             {{- include "hermetiq-core.dashboardContainerSecurityContext" . | nindent 12 }}

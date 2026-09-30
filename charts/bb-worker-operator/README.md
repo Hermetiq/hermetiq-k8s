@@ -13,6 +13,7 @@ supported full-stack deployment order.
 - [KEDA Autoscaling](#keda-autoscaling)
   - [Tuning generated autoscaling](#tuning-generated-autoscaling)
   - [Diagnose a pool that does not scale](#diagnose-a-pool-that-does-not-scale)
+- [Security Context](#security-context)
 - [RBAC Scope](#rbac-scope)
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
@@ -270,6 +271,25 @@ If the HPA target is above threshold but replicas stay flat, inspect scale-up
 stabilization and `selectPolicy`. If the target itself remains unexpectedly
 low, run the generated query both with and without `avg_over_time(...)`; a
 large difference means the smoothing window is hiding the backlog.
+
+## Security Context
+
+The manager pod meets the Pod Security Standards `restricted` profile and the
+CIS Kubernetes Benchmark v2.0.1 securityContext recommendations:
+- UID/GID 65532, the image's distroless nonroot user
+- `seccompProfile: RuntimeDefault`
+- `allowPrivilegeEscalation: false` and `privileged: false`
+- `readOnlyRootFilesystem: true`
+- all capabilities dropped
+
+On OpenShift, set `podSecurityContext.runAsUser` and
+`podSecurityContext.runAsGroup` to `null` so the `restricted-v2` SCC can assign
+them.
+
+The worker pods the operator creates are configured on each `RbeWorker`. FUSE
+build directories and Docker-in-Docker need privileged containers, so run
+worker pools in their own namespace labelled
+`pod-security.kubernetes.io/enforce: privileged`.
 
 ## RBAC Scope
 

@@ -15,6 +15,8 @@ annotations:
       description: "Add namespace RBAC mode and scoped manager watch"
     - kind: changed
       description: "Allow unhealthy pod eviction from the operator PDB"
+    - kind: changed
+      description: "Run the manager with explicit runAsUser/runAsGroup 65532 and privileged: false"
 keywords:
   - buildbarn
   - bazel

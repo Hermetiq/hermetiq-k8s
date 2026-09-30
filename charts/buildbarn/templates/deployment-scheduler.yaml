@@ -27,6 +27,7 @@ spec:
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
+      {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       containers:
         - name: scheduler
           image: {{ include "buildbarn.image" (dict "root" . "name" "images.scheduler" "repository" .Values.images.scheduler.repository "tag" .Values.images.scheduler.tag "digest" .Values.images.scheduler.digest) }}
@@ -66,13 +67,7 @@ spec:
           resources:
             {{- toYaml .Values.scheduler.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            capabilities:
-              drop:
-                - ALL
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
             {{- if .Values.security.grpcMtls.enabled }}

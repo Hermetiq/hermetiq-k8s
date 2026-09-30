@@ -165,14 +165,21 @@ extraEnv: []
 podAnnotations: {}
 podLabels: {}
 
+# Together these meet the CIS Kubernetes Benchmark v2.0.1 and Pod Security
+# Standards "restricted". 65532 is the image's distroless nonroot user. Set
+# runAsUser/runAsGroup to null to let the platform assign them, e.g.
+# OpenShift's restricted-v2 SCC.
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 
 securityContext:
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
+  privileged: false
   capabilities:
     drop:
       - ALL

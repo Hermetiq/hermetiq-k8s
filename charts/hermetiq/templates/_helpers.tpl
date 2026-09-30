@@ -550,37 +550,39 @@ tcpSocket:
 {{- toYaml .settings | nindent 0 }}
 {{- end -}}
 
+{{/* Pod and container securityContexts carry the full CIS Kubernetes
+     Benchmark / PSS "restricted" set explicitly. A runAsUser, runAsGroup or
+     fsGroup set to null is omitted so the platform can assign it (OpenShift's
+     restricted-v2 SCC picks a UID from the namespace range). */}}
 {{- define "hermetiq-core.podSecurityContext" -}}
-runAsNonRoot: {{ .Values.security.pod.runAsNonRoot }}
-runAsUser: {{ .Values.security.pod.runAsUser }}
-runAsGroup: {{ .Values.security.pod.runAsGroup }}
-fsGroup: {{ .Values.security.pod.fsGroup }}
-fsGroupChangePolicy: {{ .Values.security.pod.fsGroupChangePolicy }}
+{{- $pod := .Values.security.pod -}}
+runAsNonRoot: {{ $pod.runAsNonRoot }}
+{{- if not (kindIs "invalid" $pod.runAsUser) }}
+runAsUser: {{ $pod.runAsUser }}
+{{- end }}
+{{- if not (kindIs "invalid" $pod.runAsGroup) }}
+runAsGroup: {{ $pod.runAsGroup }}
+{{- end }}
+{{- if not (kindIs "invalid" $pod.fsGroup) }}
+fsGroup: {{ $pod.fsGroup }}
+{{- end }}
+fsGroupChangePolicy: {{ $pod.fsGroupChangePolicy }}
 seccompProfile:
-  type: {{ .Values.security.pod.seccompProfile.type }}
+  type: {{ $pod.seccompProfile.type }}
 {{- end -}}
 
 {{- define "hermetiq-core.containerSecurityContext" -}}
+{{- $pod := .Values.security.pod -}}
 allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
+privileged: false
 readOnlyRootFilesystem: {{ .Values.security.container.readOnlyRootFilesystem }}
-runAsNonRoot: {{ .Values.security.pod.runAsNonRoot }}
-runAsUser: {{ .Values.security.pod.runAsUser }}
-runAsGroup: {{ .Values.security.pod.runAsGroup }}
-{{- if .Values.security.container.dropCapabilities }}
-capabilities:
-  drop:
-{{- range .Values.security.container.dropCapabilities }}
-    - {{ . | quote }}
+runAsNonRoot: {{ $pod.runAsNonRoot }}
+{{- if not (kindIs "invalid" $pod.runAsUser) }}
+runAsUser: {{ $pod.runAsUser }}
 {{- end }}
+{{- if not (kindIs "invalid" $pod.runAsGroup) }}
+runAsGroup: {{ $pod.runAsGroup }}
 {{- end }}
-{{- end -}}
-
-{{- define "hermetiq-core.writableContainerSecurityContext" -}}
-allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
-readOnlyRootFilesystem: false
-runAsNonRoot: {{ .Values.security.pod.runAsNonRoot }}
-runAsUser: {{ .Values.security.pod.runAsUser }}
-runAsGroup: {{ .Values.security.pod.runAsGroup }}
 {{- if .Values.security.container.dropCapabilities }}
 capabilities:
   drop:
@@ -591,11 +593,17 @@ capabilities:
 {{- end -}}
 
 {{- define "hermetiq-core.dashboardContainerSecurityContext" -}}
+{{- $dashboard := .Values.dashboard.security -}}
 allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
-readOnlyRootFilesystem: {{ .Values.dashboard.security.readOnlyRootFilesystem }}
-runAsNonRoot: {{ .Values.dashboard.security.runAsNonRoot }}
-runAsUser: {{ .Values.dashboard.security.runAsUser }}
-runAsGroup: {{ .Values.dashboard.security.runAsGroup }}
+privileged: false
+readOnlyRootFilesystem: {{ $dashboard.readOnlyRootFilesystem }}
+runAsNonRoot: {{ $dashboard.runAsNonRoot }}
+{{- if not (kindIs "invalid" $dashboard.runAsUser) }}
+runAsUser: {{ $dashboard.runAsUser }}
+{{- end }}
+{{- if not (kindIs "invalid" $dashboard.runAsGroup) }}
+runAsGroup: {{ $dashboard.runAsGroup }}
+{{- end }}
 {{- if .Values.dashboard.security.dropCapabilities }}
 capabilities:
   drop:

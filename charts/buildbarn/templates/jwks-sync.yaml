@@ -148,6 +148,7 @@ spec:
           serviceAccountName: {{ $saName }}
           {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 10 }}
           restartPolicy: Never
+          {{- include "buildbarn.podSecurityContext" $ | nindent 10 }}
           containers:
             - name: sync
               image: {{ include "buildbarn.image" (dict "root" . "name" "frontend.jwks.sync.image" "repository" .Values.frontend.jwks.sync.image.repository "tag" .Values.frontend.jwks.sync.image.tag "digest" .Values.frontend.jwks.sync.image.digest) | quote }}
@@ -156,6 +157,8 @@ spec:
                 - /etc/jwks-sync/sync_jwks_to_configmap.jsonnet
               resources:
                 {{- toYaml .Values.frontend.jwks.sync.resources | nindent 16 }}
+              securityContext:
+                {{- include "buildbarn.containerSecurityContext" $ | nindent 16 }}
               volumeMounts:
                 - name: config
                   mountPath: /etc/jwks-sync
@@ -205,6 +208,7 @@ spec:
       # pod instead of restarting the container in place — prior failure
       # logs survive on the older pods.
       restartPolicy: Never
+      {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       containers:
         - name: sync
           image: {{ include "buildbarn.image" (dict "root" . "name" "frontend.jwks.sync.image" "repository" .Values.frontend.jwks.sync.image.repository "tag" .Values.frontend.jwks.sync.image.tag "digest" .Values.frontend.jwks.sync.image.digest) | quote }}
@@ -213,6 +217,8 @@ spec:
             - /etc/jwks-sync/sync_jwks_to_configmap.jsonnet
           resources:
             {{- toYaml .Values.frontend.jwks.sync.resources | nindent 12 }}
+          securityContext:
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/jwks-sync

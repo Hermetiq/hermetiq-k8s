@@ -40,6 +40,8 @@ the full-stack deployment order and shared services used by the other charts.
 - [Progress log storage](#progress-log-storage)
   - [Retention and sizing](#retention-and-sizing)
 - [Scheduling, availability, and hardening](#scheduling-availability-and-hardening)
+  - [Pod and container security context](#pod-and-container-security-context)
+  - [Network policies](#network-policies)
   - [Workload identity](#workload-identity)
   - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
   - [Node scheduling](#node-scheduling)
@@ -802,6 +804,55 @@ running build's newest output appears in live log tailing),
 `PROGRESS_BLOB_CHUNK_MAX_EVENTS` (default `1000`).
 
 ## Scheduling, availability, and hardening
+
+### Pod and container security context
+
+Every pod and container sets the Pod Security Standards `restricted` fields
+explicitly, which also covers the securityContext recommendations in the CIS
+Kubernetes Benchmark v2.0.1:
+- non-root UID/GID 65532
+- `seccompProfile: RuntimeDefault`
+- `allowPrivilegeEscalation: false` and `privileged: false`
+- `readOnlyRootFilesystem: true`
+- all capabilities dropped
+
+Workloads that need scratch space get a `/tmp` emptyDir. The release therefore
+runs in a namespace labelled `pod-security.kubernetes.io/enforce: restricted`.
+
+On OpenShift, let the `restricted-v2` SCC assign IDs from the namespace range:
+
+```yaml
+security:
+  pod:
+    runAsUser: null
+    runAsGroup: null
+    fsGroup: null
+dashboard:
+  security:
+    runAsUser: null
+    runAsGroup: null
+```
+
+### Network policies
+
+The chart renders no NetworkPolicy by default. To lock the release down, add
+policies through `extraObjects` or alongside the release.
+
+Select pods by `app.kubernetes.io/component`: `api`, `publisher`, `subscriber`,
+`dashboard`, `grafana-auth-proxy`, `maintenance`, or `bootstrap`.
+
+Callers to allow:
+- your ingress controller or Gateway, which reaches the API, publisher,
+  dashboard, and Grafana proxy
+- Buildbarn worker pods, which send completed-action logs to the publisher's
+  gRPC port (`:50091`)
+
+Egress needs to reach:
+- PostgreSQL, DragonflyDB, NATS, and the OTLP collector
+- your OIDC provider
+- VictoriaMetrics (`victoriaMetrics.baseUrl`)
+- the Kubernetes API server
+- the Hermetiq license service (`license.saasUrl`)
 
 ### Workload identity
 

@@ -1,0 +1,173 @@
+suite: hermetiq pod and container securityContext
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+  - templates/deployment-dashboard.yaml
+  - templates/deployment-grafana-oauth2-proxy.yaml
+  - templates/cronjobs.yaml
+  - templates/job-schema-bootstrap.yaml
+values:
+  - ../ci-values/ci.yaml
+set:
+  dashboard.oauth2Proxy.enabled: true
+  dashboard.oauth2Proxy.client.existingSecret: dashboard-oauth
+tests:
+  # CIS Kubernetes Benchmark v2.0.1 (5.2.x, 5.6.x) and PSS "restricted",
+  # set explicitly rather than left to runtime defaults.
+  - it: sets the restricted pod securityContext on every workload
+    asserts:
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: &restrictedPod
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+        template: templates/deployment-api.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-publisher.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-subscribers.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-dashboard.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - isSubset:
+          path: spec.jobTemplate.spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/cronjobs.yaml
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content: *restrictedPod
+        template: templates/job-schema-bootstrap.yaml
+
+  - it: sets the restricted container securityContext on every container
+    asserts:
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "api")].securityContext
+          content: &restrictedContainer
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+        template: templates/deployment-api.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-api.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-publisher.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-subscribers.yaml
+      - isSubset:
+          path: spec.template.spec.initContainers[?(@.name == "prepare-dashboard-html")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-dashboard.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-dashboard.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-dashboard.yaml
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].securityContext
+          content: *restrictedContainer
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - isSubset:
+          path: spec.jobTemplate.spec.template.spec.containers[0].securityContext
+          content: *restrictedContainer
+        template: templates/cronjobs.yaml
+      - isSubset:
+          path: spec.template.spec.containers[0].securityContext
+          content: *restrictedContainer
+        template: templates/job-schema-bootstrap.yaml
+
+  # The maintenance jobs and nginx run with a read-only root filesystem; /tmp
+  # is the only scratch space they get beyond the dashboard's existing mounts.
+  - it: gives the read-only jobs and dashboard a writable /tmp
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+        template: templates/cronjobs.yaml
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+        template: templates/cronjobs.yaml
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+        template: templates/job-schema-bootstrap.yaml
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+        template: templates/job-schema-bootstrap.yaml
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts
+          content:
+            name: dashboard-tmp
+            mountPath: /tmp
+        template: templates/deployment-dashboard.yaml
+
+  - it: omits UIDs set to null so OpenShift can assign them
+    set:
+      security.pod.runAsUser: null
+      security.pod.runAsGroup: null
+      security.pod.fsGroup: null
+      dashboard.security.runAsUser: null
+      dashboard.security.runAsGroup: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroup
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].securityContext.runAsUser
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].securityContext.runAsGroup
+        template: templates/deployment-dashboard.yaml
+      - notExists:
+          path: spec.template.spec.initContainers[?(@.name == "prepare-dashboard-html")].securityContext.runAsUser
+        template: templates/deployment-dashboard.yaml
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+        template: templates/deployment-api.yaml

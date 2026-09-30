@@ -17,6 +17,10 @@ annotations:
       description: "Roll pods when managed ConfigMaps or Secrets change"
     - kind: changed
       description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
+    - kind: changed
+      description: "Breaking: namespaceOverride defaults to the release namespace instead of hermetiq. A release installed outside hermetiq without an override must set namespaceOverride: hermetiq; the upgrade fails until it does"
+    - kind: changed
+      description: "Meet the CIS Kubernetes Benchmark v2.0.1 securityContext set and PSS restricted on every pod: seccomp RuntimeDefault and runAsGroup everywhere, explicit privileged: false, and a full securityContext for remote-asset and jwks-sync. Configure it under security.pod and security.container"
 keywords:
   - buildbarn
   - remote-execution

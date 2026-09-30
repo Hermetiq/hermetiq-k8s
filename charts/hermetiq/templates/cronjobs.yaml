@@ -43,7 +43,7 @@ spec:
               image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
               imagePullPolicy: IfNotPresent
               securityContext:
-                {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 16 }}
+                {{- include "hermetiq-core.containerSecurityContext" . | nindent 16 }}
               command:
                 - /app/dbadmin
               args:
@@ -75,6 +75,12 @@ spec:
                   value: {{ .Values.postgres.sslMode | quote }}
               resources:
                 {{- toYaml .Values.partitionMaintenance.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
 ---
 {{- end }}
 {{- if .Values.progressesPartitionMaintenance.enabled }}
@@ -122,7 +128,7 @@ spec:
               image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
               imagePullPolicy: IfNotPresent
               securityContext:
-                {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 16 }}
+                {{- include "hermetiq-core.containerSecurityContext" . | nindent 16 }}
               command:
                 - /app/dbadmin
               args:
@@ -151,6 +157,12 @@ spec:
                   value: {{ .Values.postgres.sslMode | quote }}
               resources:
                 {{- toYaml .Values.progressesPartitionMaintenance.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
 ---
 {{- end }}
 {{- if .Values.targetTrendsRefresh.enabled }}
@@ -200,7 +212,7 @@ spec:
               image: {{ include "hermetiq-core.image" (dict "root" $root "name" "images.bepNats.bootstrap" "repository" $root.Values.images.bepNats.repository "tag" $root.Values.images.bepNats.bootstrapTag "digest" $root.Values.images.bepNats.bootstrapDigest) }}
               imagePullPolicy: IfNotPresent
               securityContext:
-                {{- include "hermetiq-core.writableContainerSecurityContext" $root | nindent 16 }}
+                {{- include "hermetiq-core.containerSecurityContext" $root | nindent 16 }}
               command:
                 - /app/dbadmin
               args:
@@ -230,6 +242,12 @@ spec:
                   value: {{ $root.Values.postgres.sslMode | quote }}
               resources:
                 {{- toYaml $root.Values.targetTrendsRefresh.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
 ---
 {{- end }}
 {{- end }}

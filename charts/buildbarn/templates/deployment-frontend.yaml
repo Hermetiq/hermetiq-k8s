@@ -27,6 +27,7 @@ spec:
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend) | nindent 6 }}
+      {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       {{- if .Values.frontend.podAntiAffinity.enabled }}
       {{- include "buildbarn.preferredPodAntiAffinity" (dict "app" "frontend") | nindent 6 }}
       {{- end }}
@@ -114,13 +115,7 @@ spec:
           resources:
             {{- toYaml $proxy.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            capabilities:
-              drop:
-                - ALL
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
         {{- end }}
         - name: frontend
           image: {{ include "buildbarn.image" (dict "root" . "name" "images.storage" "repository" .Values.images.storage.repository "tag" .Values.images.storage.tag "digest" .Values.images.storage.digest) }}
@@ -160,13 +155,7 @@ spec:
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            capabilities:
-              drop:
-                - ALL
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
             {{- if .Values.frontend.mtlsClientCert.enabled }}
             - name: mtls-client-cert

@@ -106,9 +106,11 @@ spec:
             runAsUser: 65534
             {{- else }}
             allowPrivilegeEscalation: false
+            privileged: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 65534
+            runAsGroup: 65534
             capabilities:
               drop:
                 - ALL

@@ -58,7 +58,7 @@ spec:
           image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.bootstrap" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.bootstrapTag "digest" .Values.images.bepNats.bootstrapDigest) }}
           imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}
           securityContext:
-            {{- include "hermetiq-core.writableContainerSecurityContext" . | nindent 12 }}
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
           command:
             - /bin/sh
             - -ec
@@ -119,3 +119,9 @@ spec:
               value: {{ .Values.postgres.sslMode | quote }}
           resources:
             {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

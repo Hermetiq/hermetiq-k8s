@@ -345,6 +345,50 @@ automountServiceAccountToken: {{ $value }}
 {{- end }}
 {{- end -}}
 
+{{/* Pod securityContext for every workload except storage, which renders
+     buildbarn.storage.podSecurityContext. Column 0, key included. With the
+     container helper below it carries the full CIS Kubernetes Benchmark / PSS
+     "restricted" set explicitly. A runAsUser, runAsGroup or fsGroup that is
+     null or unset is omitted so the platform can assign it (OpenShift's
+     restricted-v2 SCC picks a UID from the namespace range). */}}
+{{- define "buildbarn.podSecurityContext" -}}
+{{- $pod := .Values.security.pod -}}
+securityContext:
+  runAsNonRoot: {{ $pod.runAsNonRoot }}
+  {{- if not (kindIs "invalid" $pod.runAsUser) }}
+  runAsUser: {{ $pod.runAsUser }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $pod.runAsGroup) }}
+  runAsGroup: {{ $pod.runAsGroup }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $pod.fsGroup) }}
+  fsGroup: {{ $pod.fsGroup }}
+  {{- end }}
+  seccompProfile:
+    type: {{ $pod.seccompProfile.type }}
+{{- end -}}
+
+{{/* Container securityContext body (no key) for the same workloads. */}}
+{{- define "buildbarn.containerSecurityContext" -}}
+{{- $pod := .Values.security.pod -}}
+{{- $container := .Values.security.container -}}
+allowPrivilegeEscalation: {{ $container.allowPrivilegeEscalation }}
+privileged: false
+readOnlyRootFilesystem: {{ $container.readOnlyRootFilesystem }}
+runAsNonRoot: {{ $pod.runAsNonRoot }}
+{{- if not (kindIs "invalid" $pod.runAsUser) }}
+runAsUser: {{ $pod.runAsUser }}
+{{- end }}
+{{- if not (kindIs "invalid" $pod.runAsGroup) }}
+runAsGroup: {{ $pod.runAsGroup }}
+{{- end }}
+{{- with $container.dropCapabilities }}
+capabilities:
+  drop:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end -}}
+
 {{- define "buildbarn.host" -}}
 {{- $root := .root -}}
 {{- $value := default "" .value -}}
@@ -593,6 +637,7 @@ mode runs unprivileged as the storage uid.
 {{- define "buildbarn.storage.volumeInitSecurityContext" -}}
 {{- if eq .Values.storage.persistence.mode "hostPath" }}
 allowPrivilegeEscalation: false
+privileged: false
 readOnlyRootFilesystem: true
 runAsNonRoot: false
 runAsUser: 0
@@ -605,6 +650,7 @@ capabilities:
     - DAC_OVERRIDE
 {{- else }}
 allowPrivilegeEscalation: false
+privileged: false
 readOnlyRootFilesystem: true
 runAsNonRoot: true
 runAsUser: 65534
@@ -714,9 +760,7 @@ securityContext:
         - CHOWN
         - FOWNER
         - DAC_OVERRIDE
-    {{- if $bd.deviceInit.privileged }}
-    privileged: true
-    {{- end }}
+    privileged: {{ $bd.deviceInit.privileged }}
   {{- end }}
   {{- if eq .Values.storage.persistence.mode "hostPath" }}
   volumeMounts:

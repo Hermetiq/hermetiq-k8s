@@ -870,6 +870,11 @@ rbac:
     # create cannot be name-scoped in Kubernetes RBAC.
     licenseState: true
 
+# Applied to every pod and container the chart renders. Together they meet the
+# CIS Kubernetes Benchmark v2.0.1 and Pod Security Standards "restricted";
+# containers also always get privileged: false. Set runAsUser, runAsGroup or
+# fsGroup (here and under dashboard.security) to null to let the platform
+# assign them, e.g. OpenShift's restricted-v2 SCC.
 security:
   pod:
     runAsNonRoot: true
@@ -1152,7 +1157,10 @@ dashboard:
       cpu: 1000m
       memory: 1024Mi
   security:
-    readOnlyRootFilesystem: false
+    # nginx writes only to its html, cache, run and /tmp emptyDirs, so the
+    # image filesystem stays read-only. Set false only for a custom image that
+    # writes elsewhere.
+    readOnlyRootFilesystem: true
     runAsNonRoot: true
     runAsUser: 65532
     runAsGroup: 65532

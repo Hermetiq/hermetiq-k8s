@@ -21,6 +21,24 @@
     "security": {
       "type": "object",
       "properties": {
+        "pod": {
+          "type": "object",
+          "properties": {
+            "runAsNonRoot": { "type": "boolean" },
+            "runAsUser": { "type": ["integer", "null"] },
+            "runAsGroup": { "type": ["integer", "null"] },
+            "fsGroup": { "type": ["integer", "null"] },
+            "seccompProfile": { "type": "object" }
+          }
+        },
+        "container": {
+          "type": "object",
+          "properties": {
+            "readOnlyRootFilesystem": { "type": "boolean" },
+            "allowPrivilegeEscalation": { "type": "boolean" },
+            "dropCapabilities": { "type": "array", "items": { "type": "string" } }
+          }
+        },
         "grpcMtls": {
           "type": "object",
           "properties": {

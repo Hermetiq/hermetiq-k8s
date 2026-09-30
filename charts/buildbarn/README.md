@@ -113,15 +113,24 @@ Check [Buildbarn readiness](#verification), then follow the
 [RBE worker pool instructions](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
 to apply the worker manifests.
 
-By default, namespaced resources render into `hermetiq`:
+Namespaced resources render into the release namespace (`--namespace`):
 
 ```yaml
-namespaceOverride: hermetiq
+namespaceOverride: ""
 createNamespace: false
 ```
 
-Set `createNamespace: true` if Helm should create that namespace, or override
-`namespaceOverride` to render into a different namespace.
+Set `namespaceOverride` to render into a different namespace, and
+`createNamespace: true` if Helm should create it.
+
+> **Upgrading from chart 0.9.4 or earlier:** `namespaceOverride` used to
+> default to `hermetiq`. If you installed with a `--namespace` other than
+> `hermetiq` and never set `namespaceOverride`, your Buildbarn resources are in
+> `hermetiq`. Add `namespaceOverride: hermetiq` to your values before upgrading
+> to keep them there. Without it the upgrade fails rather than recreating
+> everything, with empty storage, in the release namespace. Installs made with
+> `--namespace hermetiq`, or that already set `namespaceOverride`, need no
+> change.
 
 Contributors can render the checked-out chart locally:
 
@@ -1659,6 +1668,33 @@ first, naming the list and the required order.
 
 ## Security And Availability Hardening
 
+Every chart-managed pod meets the Pod Security Standards `restricted` profile
+and the CIS Kubernetes Benchmark v2.0.1 securityContext recommendations:
+- non-root UID/GID 65534
+- `seccompProfile: RuntimeDefault`
+- `allowPrivilegeEscalation: false` and `privileged: false`
+- `readOnlyRootFilesystem: true`
+- all capabilities dropped
+
+These settings live under `security.pod` and `security.container`. Storage
+keeps its own settings because they depend on `storage.persistence`. The
+hostPath storage modes and a hostPath frontend read cache need a `privileged`
+namespace.
+
+`RbeWorker` pods are configured on their `RbeWorker` resources, and FUSE and
+Docker-in-Docker need privileged containers. To enforce `restricted` on the
+Buildbarn namespace, run worker pools in a separate namespace labelled
+`privileged`.
+
+On OpenShift, let the `restricted-v2` SCC assign the IDs:
+
+```yaml
+security:
+  pod:
+    runAsUser: null
+    runAsGroup: null
+```
+
 The chart preserves existing Kubernetes defaults unless you opt in. To stop
 chart-managed application pods from receiving default ServiceAccount tokens,
 set a global default and keep JWKS sync enabled only when that feature is in
@@ -1742,6 +1778,89 @@ storage directly, and a missing peer surfaces as cache misses and RBE failures
 rather than a clear connection error. The cluster also needs a
 NetworkPolicy-enforcing CNI; without one the policy is accepted and silently
 does nothing.
+
+### Restricting direct scheduler access
+
+The scheduler has the same exposure:
+- Its client gRPC port `:8982` accepts Execute calls without passing through
+  the frontend's authorizers.
+- Anything that reaches worker gRPC `:8983` can register as a worker, receive
+  actions, and report their results.
+
+The chart doesn't render a policy for the scheduler. This example admits only
+its real callers:
+- the frontend on `:8982`
+- bb-portal on BuildQueueState `:8984`
+- RbeWorker pods on `:8983`
+
+It leaves the admin web UI (`:7982`, published by the rbeWeb route) and
+metrics (`:9980`) open. `extraObjects` are rendered with `tpl`, so the
+namespace follows `namespaceOverride`. You can also apply it separately with
+`kubectl`.
+
+```yaml
+extraObjects:
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: scheduler
+      namespace: '{{ include "buildbarn.namespace" . }}'
+    spec:
+      podSelector:
+        matchLabels:
+          app: scheduler
+      policyTypes:
+        - Ingress
+      ingress:
+        - from:
+            - podSelector:
+                matchLabels:
+                  app: frontend
+          ports:
+            - port: 8982
+              protocol: TCP
+        - from:
+            - podSelector:
+                matchLabels:
+                  app: bb-portal
+          ports:
+            - port: 8984
+              protocol: TCP
+        # RbeWorker pods in this namespace. For pools in another namespace,
+        # add a namespaceSelector to this peer, e.g.
+        # kubernetes.io/metadata.name: rbe-workers.
+        - from:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: bb-worker
+          ports:
+            - port: 8983
+              protocol: TCP
+        # Admin web UI and metrics. Add a `from` naming your ingress
+        # controller or Gateway namespace and your scraper to narrow these.
+        - ports:
+            - port: 7982
+              protocol: TCP
+            - port: 9980
+              protocol: TCP
+```
+
+Add any other callers before you apply it. A missing worker peer shows up as
+workers that never register, not as a clear connection error.
+
+### Locking down the rest
+
+The storage policy and the scheduler example cover the ports that carry no
+authentication. To restrict everything else, add your own NetworkPolicies,
+either in the release through `extraObjects` or alongside it.
+- Select chart pods by their `app` label: `frontend`, `browser`, `scheduler`,
+  `storage`, `bb-portal`, or `remote-asset`.
+- Select RbeWorker pods by `app.kubernetes.io/name: bb-worker`.
+- The frontend, Browser, portal, and remote asset service receive traffic from
+  your ingress controller or Gateway.
+
+Once any ingress policy selects a pod, traffic that no policy allows is
+dropped, so list every caller before you enable one.
 
 ## Scheduling
 

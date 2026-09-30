@@ -26,6 +26,7 @@ spec:
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.portal) | nindent 6 }}
+      {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       containers:
         # One process serves the whole portal: the web UI is embedded in the
         # binary (frontendServiceConfiguration.frontendSource.embedded), so
@@ -71,13 +72,7 @@ spec:
           resources:
             {{- toYaml .Values.portal.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            capabilities:
-              drop:
-                - ALL
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
             {{- if .Values.security.grpcMtls.enabled }}

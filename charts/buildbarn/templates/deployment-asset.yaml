@@ -26,6 +26,7 @@ spec:
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.remoteAsset) | nindent 6 }}
+      {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       containers:
         - name: remote-asset
           image: {{ include "buildbarn.image" (dict "root" . "name" "images.remoteAsset" "repository" .Values.images.remoteAsset.repository "tag" .Values.images.remoteAsset.tag "digest" .Values.images.remoteAsset.digest) }}
@@ -51,6 +52,8 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.remoteAsset.resources | nindent 12 }}
+          securityContext:
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
             {{- include "buildbarn.tracingVolumeMount" . | nindent 12 }}
             {{- if .Values.security.grpcMtls.enabled }}
@@ -59,6 +62,9 @@ spec:
             - mountPath: /config/
               name: configs
               readOnly: true
+            # Scratch space for fetches under readOnlyRootFilesystem.
+            - mountPath: /tmp
+              name: tmp
       {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.remoteAsset) | nindent 6 }}
       volumes:
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
@@ -73,4 +79,6 @@ spec:
                 path: common.libsonnet
               - key: asset.jsonnet
                 path: asset.jsonnet
+        - name: tmp
+          emptyDir: {}
 {{- end }}

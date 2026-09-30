@@ -1,5 +1,10 @@
-# By default this chart renders all namespaced resources into hermetiq.
-namespaceOverride: hermetiq
+# Namespace for every namespaced resource. Empty follows the release namespace
+# (`helm --namespace`). Through chart 0.9.4 this defaulted to hermetiq, so a
+# release installed with --namespace <other> and no override has its resources
+# in hermetiq: set `namespaceOverride: hermetiq` to keep them there. Upgrading
+# such a release without it fails instead of recreating everything, with
+# empty storage, in the release namespace (see templates/validate.yaml).
+namespaceOverride: ""
 createNamespace: false
 
 global:
@@ -163,6 +168,23 @@ bbcal:
   address: bep-nats-pub.hermetiq.svc.cluster.local:50091
 
 security:
+  # Pod and container securityContext for every workload except storage, which
+  # keeps its own because it adapts to storage.persistence. Together they meet
+  # the CIS Kubernetes Benchmark v2.0.1 and Pod Security Standards
+  # "restricted"; containers also always get privileged: false. Set runAsUser
+  # or runAsGroup to null to let the platform assign them, e.g. OpenShift's
+  # restricted-v2 SCC. fsGroup is unset unless you add it.
+  pod:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    dropCapabilities:
+      - ALL
   # Mutual TLS on the gRPC hops BETWEEN Buildbarn services inside the cluster.
   #
   # mTLS is four settings, not one, and they live in two different protobuf

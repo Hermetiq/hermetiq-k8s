@@ -160,3 +160,39 @@ components:
 The overlay's namespace and `RbeWorker` patch apply to component resources too,
 so the optional workers receive the same environment-specific addresses as the
 standard bundle. Generated queue-depth queries filter by each worker's namespace.
+
+## Pod security
+
+Worker pods can't meet Pod Security Standards `restricted`, because the FUSE
+build directory needs privileged containers:
+- The `worker` container runs privileged as root.
+- The operator's `fuse-cleanup` sidecar runs privileged as root.
+- Docker-in-Docker pools also run `dind` privileged.
+
+Run the pools in a namespace of their own, labelled
+`pod-security.kubernetes.io/enforce: privileged`, so the Buildbarn and Hermetiq
+namespaces can enforce `restricted`. Give the pools dedicated nodes. If you restrict
+Buildbarn with NetworkPolicies, allow the worker namespace. See the Buildbarn
+chart README for the storage policy and the scheduler example.
+
+Everything else is hardened:
+- **Operator-owned containers:** the runner installer runs non-root and
+  read-only. `volume-init` runs as root with only `DAC_OVERRIDE` and `FOWNER`.
+- **ServiceAccount token:** the operator mounts none unless
+  `spec.pod.automountServiceAccountToken` is `true`. Build actions therefore
+  can't read Kubernetes credentials.
+- **Runners in these examples:** they run as a non-root user with no privilege
+  escalation and no capabilities.
+
+For regulated environments, the runner can also take the settings below. Test
+them against your builds first, since they change the actions' primary group
+and block some syscalls:
+
+```yaml
+spec:
+  runner:
+    securityContext:
+      runAsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+```

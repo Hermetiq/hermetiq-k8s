@@ -282,3 +282,20 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{/* namespaceOverride defaulted to hermetiq through chart 0.9.4, so a release
+     installed with --namespace <other> and no override has its objects in
+     hermetiq. The default now follows the release namespace, and upgrading
+     such a release unchanged would delete everything in hermetiq and recreate
+     it in the release namespace with new, empty storage volumes. Refuse, and
+     make the owner choose. An explicit namespaceOverride (hermetiq to stay, the
+     release namespace to move) skips the check. `lookup` returns nothing under
+     `helm template` and client-side dry runs, so this only fires against a
+     live cluster. */}}
+{{- if and (not .Values.namespaceOverride) (ne .Release.Namespace "hermetiq") -}}
+{{- $legacyStorage := lookup "apps/v1" "StatefulSet" "hermetiq" "storage" -}}
+{{- $ownerName := dig "metadata" "annotations" "meta.helm.sh/release-name" "" $legacyStorage -}}
+{{- $ownerNamespace := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" $legacyStorage -}}
+{{- if and (eq $ownerName .Release.Name) (eq $ownerNamespace .Release.Namespace) -}}
+{{- fail (printf "namespaceOverride now defaults to the release namespace, but release %q (namespace %q) has its Buildbarn resources in hermetiq from the old default. Upgrading as-is would delete them there and recreate them in %q with new, empty storage volumes. Set namespaceOverride=hermetiq to keep them where they are, or namespaceOverride=%s to move them deliberately" .Release.Name .Release.Namespace .Release.Namespace .Release.Namespace) -}}
+{{- end -}}
+{{- end -}}
