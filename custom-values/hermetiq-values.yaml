@@ -120,3 +120,7 @@ dashboard:
     client:
       # Secret with OAuth2 client credentials shared by dashboard and Browser.
       existingSecret: oauth2-proxy-client
+
+rbac:
+  enabled: true
+  mode: namespace
