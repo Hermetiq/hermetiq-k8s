@@ -27,9 +27,9 @@ agents:
 steps:
   # PR validation (non-tag builds): per-chart lint + template (ci-values) +
   # kubeconform + maintenance/release metadata gates + helm-unittest. Chart PRs
-  # may bump Chart.yaml in the same PR as chart changes; versions must move
-  # forward while README pins stay on the published OCI package. A post-release
-  # docs PR moves those pins forward.
+  # may bump Chart.yaml in the same PR as chart changes; the root README bundle
+  # table follows the chart version, while chart README OCI examples may stay
+  # on the published package until a later docs update.
   - group: ":helm: chart validation"
     if: build.tag == null
     steps:

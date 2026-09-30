@@ -3,11 +3,12 @@
 #
 # Chart change PR:
 #   - may increase Chart.yaml to a higher version in the same PR as chart work
-#   - leaves README pins on the version that is actually published
+#   - updates the root README bundle table to that chart version
+#   - may leave chart README OCI commands on the published version
 #   - updates artifacthub.io/changes so release notes accumulate
 #
 # Post-release docs PR:
-#   - moves the README pins to the Chart.yaml version after OCI publication
+#   - moves chart README OCI commands to the Chart.yaml version after publication
 #
 # Tag builds get a final tag/version equality and no-overwrite check in
 # publish-chart.sh.
@@ -19,15 +20,12 @@ CHART_FILE="${DIR}/Chart.yaml"
 
 case "${CHART}" in
   hermetiq)
-    ROOT_VARIABLE="HERMETIQ_CHART_VERSION"
     BUNDLE_LABEL="Hermetiq"
     ;;
   buildbarn)
-    ROOT_VARIABLE="BUILDBARN_CHART_VERSION"
     BUNDLE_LABEL="Buildbarn"
     ;;
   bb-worker-operator)
-    ROOT_VARIABLE="BB_WORKER_OPERATOR_CHART_VERSION"
     BUNDLE_LABEL="BB Worker Operator"
     ;;
   *)
@@ -47,8 +45,36 @@ read_chart_version() {
 }
 
 read_root_version() {
-  awk -F= -v key="${ROOT_VARIABLE}" \
-    '$1 == key { gsub(/[[:space:]]/, "", $2); print $2; exit }' "$1"
+  awk -F'|' -v expected="${BUNDLE_LABEL}" '
+    /^## Supported chart bundle[[:space:]]*$/ { in_bundle = 1; next }
+    in_bundle && /^##[[:space:]]/ { exit }
+    in_bundle && NF >= 4 {
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      if (label == expected) {
+        version = $3
+        gsub(/[`[:space:]]/, "", version)
+        print version
+        exit
+      }
+    }
+  ' "$1"
+}
+
+# Only consider Helm commands for this chart. Other tools in a chart README
+# may also have --version flags (for example, KEDA installation instructions).
+read_chart_readme_version() {
+  awk -v chart="${CHART}" '
+    index($0, "oci://ghcr.io/hermetiq/" chart) { in_command = 1 }
+    in_command {
+      if (match($0, /--version[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?/)) {
+        version = substr($0, RSTART, RLENGTH)
+        sub(/^--version[[:space:]]+v?/, "", version)
+        print version
+      }
+      if ($0 !~ /\\[[:space:]]*$/) in_command = 0
+    }
+  ' "$1" | sort -u
 }
 
 extract_changes() {
@@ -84,47 +110,6 @@ stable_version_is_greater() {
   ((10#${candidate_minor} > 10#${previous_minor})) && return 0
   ((10#${candidate_minor} < 10#${previous_minor})) && return 1
   ((10#${candidate_patch} > 10#${previous_patch}))
-}
-
-verify_readme_versions() {
-  local version="$1"
-  local root_version bundle_version readme_refs ref ref_version
-
-  root_version="$(read_root_version README.md)"
-  if [[ "${root_version}" != "${version}" ]]; then
-    fail "README.md sets ${ROOT_VARIABLE}=${root_version:-<missing>}; expected released version ${version}"
-  fi
-
-  bundle_version="$(awk -F'|' -v expected="${BUNDLE_LABEL}" '
-    /^## Supported chart bundle[[:space:]]*$/ { in_bundle = 1; next }
-    in_bundle && /^##[[:space:]]/ { exit }
-    in_bundle && NF >= 4 {
-      label = $2
-      gsub(/^[[:space:]]+/, "", label)
-      gsub(/[[:space:]]+$/, "", label)
-      if (label == expected) {
-        pinned = $3
-        gsub(/[`[:space:]]/, "", pinned)
-        print pinned
-        exit
-      }
-    }
-  ' README.md)"
-  if [[ "${bundle_version}" != "${version}" ]]; then
-    fail "README.md supported chart bundle lists ${BUNDLE_LABEL} ${bundle_version:-<missing>}; released version is ${version}"
-  fi
-
-  readme_refs="$(grep -oE -- "--version[[:space:]]+['\"]?v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?" "${DIR}/README.md" || true)"
-  if [[ -z "${readme_refs}" ]]; then
-    fail "${DIR}/README.md has no literal --version reference to validate"
-  fi
-
-  while IFS= read -r ref; do
-    ref_version="$(printf '%s\n' "${ref}" | sed -E "s/^--version[[:space:]]+['\"]?v?//")"
-    if [[ "${ref_version}" != "${version}" ]]; then
-      fail "${DIR}/README.md references --version ${ref_version}; release version is ${version}"
-    fi
-  done <<<"${readme_refs}"
 }
 
 # Whether this PR changed anything about ${CHART} that a user of the published
@@ -218,8 +203,14 @@ chart_is_release_worthy() {
 
 current_version="$(read_chart_version "${CHART_FILE}")"
 [[ -n "${current_version}" ]] || fail "${CHART_FILE} has no chart version"
-released_version="$(read_root_version README.md)"
-[[ -n "${released_version}" ]] || fail "README.md does not set ${ROOT_VARIABLE}"
+bundle_version="$(read_root_version README.md)"
+[[ -n "${bundle_version}" ]] || fail "README.md does not list ${BUNDLE_LABEL} in the supported chart bundle"
+[[ "${bundle_version}" == "${current_version}" ]] || fail "README.md lists ${BUNDLE_LABEL} ${bundle_version}; ${CHART_FILE} is ${current_version}"
+readme_version="$(read_chart_readme_version "${DIR}/README.md")"
+[[ "${readme_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "${DIR}/README.md must use one chart version in its OCI commands"
+if [[ "${readme_version}" != "${current_version}" ]] && ! stable_version_is_greater "${current_version}" "${readme_version}"; then
+  fail "${DIR}/README.md references ${readme_version}, newer than chart ${current_version}"
+fi
 
 if ! current_changes="$(extract_changes "${CHART_FILE}")"; then
   fail "${CHART_FILE} is missing the artifacthub.io/changes block"
@@ -227,13 +218,9 @@ fi
 current_descriptions="$(printf '%s\n' "${current_changes}" | sed -nE 's/^[[:space:]]*description:[[:space:]]*//p')"
 [[ -n "${current_descriptions}" ]] || fail "${CHART_FILE} artifacthub.io/changes has no description"
 
-# All documentation pins must agree with each other, but Chart.yaml is allowed
-# to be ahead while it represents the next, not-yet-published release.
-verify_readme_versions "${released_version}"
-
 base="${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-}"
 if [[ -z "${base}" || "${base}" == "false" ]]; then
-  echo ":white_check_mark: ${CHART} metadata is consistent (chart ${current_version}; published README pin ${released_version})"
+  echo ":white_check_mark: ${CHART} metadata is consistent (chart ${current_version}; chart README OCI version ${readme_version})"
   exit 0
 fi
 
@@ -244,6 +231,33 @@ git fetch -q --no-tags origin \
 merge_base="$(git merge-base "origin/${base}" HEAD 2>/dev/null || true)"
 [[ -n "${merge_base}" ]] || fail "cannot resolve origin/${base}; refusing to skip chart metadata validation"
 
+base_chart="$(mktemp)"
+base_chart_readme="$(mktemp)"
+trap 'rm -f "${base_chart}" "${base_chart_readme}"' EXIT
+git show "${merge_base}:${CHART_FILE}" >"${base_chart}" 2>/dev/null \
+  || fail "cannot read ${CHART_FILE} from the PR base"
+git show "${merge_base}:${DIR}/README.md" >"${base_chart_readme}" 2>/dev/null \
+  || fail "cannot read ${DIR}/README.md from the PR base"
+
+base_version="$(read_chart_version "${base_chart}")"
+base_readme_version="$(read_chart_readme_version "${base_chart_readme}")"
+[[ "${base_readme_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "${DIR}/README.md at the PR base has inconsistent OCI versions"
+
+# A chart PR may keep OCI examples on the previously published version or move
+# them to the new chart version. A later docs PR can move them once published.
+if [[ "${current_version}" != "${base_version}" ]]; then
+  if ! stable_version_is_greater "${current_version}" "${base_version}"; then
+    fail "${CHART} version changes ${base_version} -> ${current_version}; it must be a higher X.Y.Z version"
+  fi
+  if [[ "${readme_version}" != "${base_readme_version}" && "${readme_version}" != "${current_version}" ]]; then
+    fail "${DIR}/README.md moves from ${base_readme_version} to ${readme_version}; expected ${current_version}"
+  fi
+elif [[ "${readme_version}" != "${base_readme_version}" ]]; then
+  if [[ "${readme_version}" != "${current_version}" ]] || ! stable_version_is_greater "${readme_version}" "${base_readme_version}"; then
+    fail "${DIR}/README.md moves from ${base_readme_version} to ${readme_version}; expected chart ${current_version}"
+  fi
+fi
+
 if git diff --quiet "${merge_base}" HEAD -- "${DIR}"; then
   echo ":white_check_mark: ${CHART} did not change in this PR"
   exit 0
@@ -253,39 +267,8 @@ if ! chart_is_release_worthy "${merge_base}"; then
   exit 0
 fi
 
-base_chart="$(mktemp)"
-base_readme="$(mktemp)"
-trap 'rm -f "${base_chart}" "${base_readme}"' EXIT
-git show "${merge_base}:${CHART_FILE}" >"${base_chart}" 2>/dev/null \
-  || fail "cannot read ${CHART_FILE} from the PR base"
-git show "${merge_base}:README.md" >"${base_readme}" 2>/dev/null \
-  || fail "cannot read README.md from the PR base"
-
-base_version="$(read_chart_version "${base_chart}")"
-base_released_version="$(read_root_version "${base_readme}")"
-
-# Moving the README pin is the post-release documentation step. It may only
-# move to the chart version, and that chart version must be newer than the
-# previously documented release.
-if [[ "${released_version}" != "${base_released_version}" ]]; then
-  if [[ "${released_version}" != "${current_version}" ]]; then
-    fail "README.md moves ${CHART} to ${released_version}, but ${CHART_FILE} is ${current_version}"
-  fi
-  if ! stable_version_is_greater "${current_version}" "${base_released_version}"; then
-    fail "README.md release pin ${base_released_version} -> ${current_version} must increase to a higher X.Y.Z version"
-  fi
-  echo ":white_check_mark: ${CHART} post-release docs move README pins ${base_released_version} -> ${current_version}"
-  exit 0
-fi
-
-# A PR may establish the next chart version while making the chart changes for
-# that release. README pins deliberately stay on the package customers can
-# currently pull until the post-release documentation step.
 if [[ "${current_version}" != "${base_version}" ]]; then
-  if ! stable_version_is_greater "${current_version}" "${base_version}"; then
-    fail "${CHART} version changes ${base_version} -> ${current_version}; it must be a higher X.Y.Z version"
-  fi
-  echo ":white_check_mark: ${CHART} PR bumps ${base_version} -> ${current_version}; chart changes are allowed and README stays on published ${released_version}"
+  echo ":white_check_mark: ${CHART} PR bumps ${base_version} -> ${current_version}; bundle table and chart README OCI version ${readme_version} are consistent"
   exit 0
 fi
 
