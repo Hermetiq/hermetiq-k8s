@@ -1552,7 +1552,9 @@ The Buildbarn chart does not create worker Deployments or KEDA worker
 [`RbeWorker` pools](../../custom-values/rbeworkers/README.md) after Buildbarn
 and its `buildbarn-worker-config` ConfigMap are ready. The chart publishes only
 `common.libsonnet` in that ConfigMap; the operator generates each pool's worker
-and runner Jsonnet from its `RbeWorker` spec.
+and runner Jsonnet from its `RbeWorker` spec. Review the example
+[pod scheduling checklist](../../custom-values/rbeworkers/README.md#pod-scheduling)
+before applying the pools.
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
@@ -1578,8 +1580,9 @@ configuration, so worker metrics continue to be collected.
 
 Optional [`RbeWorker` examples](../../custom-values/rbeworkers/README.md#pools)
 provide Docker-in-Docker and Sysbox pools. Apply the appropriate Kustomize
-component after preparing its node pool. They advertise `pool=testcontainers`
-and `pool=testcontainers-sysbox`, respectively. The sample
+component after preparing the required runtime and node capacity. Use an
+environment overlay to target Sysbox-capable nodes. The pools advertise
+`pool=testcontainers` and `pool=testcontainers-sysbox`, respectively. The sample
 [`examples/testcontainers/`](../../examples/testcontainers/) workspace shows
 how Bazel targets select a pool and set `DOCKER_HOST`,
 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, and
@@ -1587,8 +1590,10 @@ how Bazel targets select a pool and set `DOCKER_HOST`,
 
 ### Node Pool Prerequisites
 
-The chart does not create worker node pools. Match node labels and tolerations
-to the optional `RbeWorker` manifests for your environment.
+The chart does not create worker node pools. The example `RbeWorker` manifests
+select only `amd64` Linux nodes and include no custom tolerations. Add any
+node-pool selectors and tolerations in your environment overlay, and confirm
+the nodes have enough resources and scratch storage for the selected pools.
 
 For the Docker-in-Docker pool, provide nodes that permit its privileged DinD
 container and the configured CAS storage volume. For the Sysbox pool, install

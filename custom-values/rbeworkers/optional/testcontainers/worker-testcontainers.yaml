@@ -60,8 +60,6 @@ spec:
       image: docker:27.3.1-dind
       imagePullPolicy: IfNotPresent
       storageDriver: overlay2
-      registryMirrors:
-        - https://mirror.gcr.io
       storageVolume:
         emptyDir:
           sizeLimit: 64Gi
@@ -81,14 +79,8 @@ spec:
     nodeSelector:
       kubernetes.io/arch: amd64
       kubernetes.io/os: linux
-      workload: testcontainers
     schedulerName: default-scheduler
     terminationGracePeriodSeconds: 30
-    tolerations:
-      - effect: NoSchedule
-        key: workload
-        operator: Equal
-        value: testcontainers
   runner:
     imagePullPolicy: IfNotPresent
     resources:

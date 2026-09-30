@@ -28,7 +28,7 @@ It includes:
 - A larger Vespa deploy/feed/query workflow.
 - Per-target `exec_properties` that route Docker-dependent tests to the
   Buildbarn Testcontainers worker pool.
-- GKE node pool requirements for both DinD and Sysbox worker fleets.
+- Pod scheduling requirements for both DinD and Sysbox worker fleets.
 
 Start here when validating that Docker-capable Buildbarn workers are wired
 end-to-end:

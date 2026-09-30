@@ -29,6 +29,11 @@ Drake source is not included. Bazel runs on the client, while source files and
 declared build inputs reach workers through the remote-execution
 content-addressable store.
 
+Before applying the optional Drake `RbeWorker` example, check that nodes can
+meet its CPU, memory, and scratch-storage needs. The manifest selects only
+`amd64` Linux nodes; add any node-pool selector and tolerations through your
+environment overlay. See [worker pod scheduling](../../custom-values/rbeworkers/README.md#pod-scheduling).
+
 ## Build and publish
 
 From the `hermetiq-k8s` checkout, build the required Linux x86-64 image

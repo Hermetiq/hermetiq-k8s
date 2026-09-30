@@ -53,15 +53,8 @@ spec:
     nodeSelector:
       kubernetes.io/arch: amd64
       kubernetes.io/os: linux
-      sysbox-install: "yes"
-      workload: testcontainers-sysbox
     schedulerName: default-scheduler
     terminationGracePeriodSeconds: 30
-    tolerations:
-      - effect: NoSchedule
-        key: workload
-        operator: Equal
-        value: testcontainers-sysbox
   runner:
     installerEnabled: false
     # Preserve the runner image ENTRYPOINT so it can start dockerd, then exec

@@ -41,9 +41,39 @@ Every manifest references the `buildbarn-worker-config` ConfigMap rendered by
 the Buildbarn chart. Pools that should emit completed-action events must point
 `spec.config.generated.completedActionLoggerAddress` at the Hermetiq publisher;
 the starter value `bep-nats-pub.hermetiq.svc.cluster.local:50091` matches
-`bbcal.address` in `custom-values/buildbarn-values.yaml`. Adjust node labels,
-tolerations, platform properties, runner images, and resource sizes to match
-your environment.
+`bbcal.address` in `custom-values/buildbarn-values.yaml`. Adjust platform
+properties and runner images for your workloads.
+
+## Pod scheduling
+
+Review scheduling before applying any pool. KEDA can request worker replicas,
+but those Pods still need nodes that satisfy their resource requests, selectors,
+taints, runtime, and scratch-storage needs.
+
+- The examples select only standard Kubernetes `amd64` Linux node labels. They
+  do not select a cloud provider, node pool, or spot nodes. Use an environment
+  overlay to add `spec.pod.nodeSelector` and `spec.pod.tolerations` for dedicated
+  pools or tainted nodes. Make sure a matching node or node autoscaler can
+  supply the requested CPU and memory; the example resource sizes are large.
+- The CAS scratch volumes use `emptyDir`. Their data is lost when a Pod is
+  removed, and they consume node ephemeral storage alongside image layers and
+  other scratch files. Check available disk capacity and set appropriate
+  ephemeral-storage requests and limits for your cluster. If you use a local
+  disk through `hostPath` instead, patch `spec.storage.casVolume` and ensure
+  concurrently scheduled workers cannot share the same CAS cache path.
+- Docker-in-Docker workers need nodes and Pod policies that permit their
+  privileged Docker container. Sysbox workers need Sysbox installed on the
+  selected nodes and the `sysbox-runc` RuntimeClass. Configure RuntimeClass
+  scheduling or an overlay so Sysbox Pods cannot land on nodes without Sysbox.
+
+Before running builds, check that the worker Pods reached their intended nodes.
+For a Pending Pod, `kubectl describe` shows scheduling failures such as missing
+labels, untolerated taints, or insufficient CPU, memory, and ephemeral storage:
+
+```bash
+kubectl -n hermetiq get pods -l app=worker -o wide
+kubectl -n hermetiq describe pod <pending-worker-pod>
+```
 
 FUSE-backed pools get `spec.storage.fuse.cleanupOnTermination: true` by default.
 The worker operator renders a Kubernetes-native sidecar that terminates after
@@ -88,11 +118,22 @@ patches:
       - op: replace
         path: /spec/autoscaling/minReplicas
         value: 2
+      - op: add
+        path: /spec/pod/nodeSelector/node-type
+        value: spot-std-large
+      - op: add
+        path: /spec/pod/tolerations
+        value:
+          - key: hermetiq/allows-spot
+            operator: Exists
+            effect: NoSchedule
 ```
 
 The JSON Patch `replace` operations intentionally fail if a future manifest no
 longer contains one of these fields, preventing an overlay from silently
-leaving a worker pointed at the starter environment.
+leaving a worker pointed at the starter environment. The node selector and
+toleration above are examples for one pool; replace them with your own node
+labels and taints.
 
 The size-class, Testcontainers, and Drake manifests are intentionally excluded
 from the standard bundle. Apply them only after satisfying the scheduler,

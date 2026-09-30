@@ -159,81 +159,28 @@ The build's own record is the tiebreaker. Open the invocation in the dashboard
 `--default_override=1:build:rbe=...` in the latter were read from your
 `.bazelrc` but never applied.
 
-## GKE node pool requirements
+## Worker pod scheduling
 
-The Testcontainers worker fleets should land on dedicated GKE node pools. The
-reference GKE setup creates two pools: one for the Docker-in-Docker worker and
-one for the Sysbox worker.
+The optional [`RbeWorker` examples](../../custom-values/rbeworkers/README.md#pod-scheduling)
+select only `amd64` Linux nodes. They have no node-pool selectors or
+tolerations. Before enabling either pool, check that matching nodes have enough
+CPU, memory, and ephemeral storage for the example resource requests, Docker
+image layers, test containers, and the `emptyDir` worker and CAS volumes. KEDA
+scaling a Deployment does not guarantee that its Pods can be scheduled.
 
-For the DinD-backed `worker-testcontainers` `RbeWorker`, create a node pool with:
+- **Docker-in-Docker:** Nodes and Pod policies must permit the privileged DinD
+  container and its configured storage driver. Add a selector and tolerations
+  through your Kustomize overlay if you dedicate or taint nodes for this pool.
+- **Sysbox:** Install Sysbox on the nodes and provide a `sysbox-runc`
+  RuntimeClass. Ensure the RuntimeClass scheduling rules or your overlay select
+  only Sysbox-capable nodes. The example's `runtimeClassName` names the runtime;
+  it does not add a node-pool selector to the `RbeWorker` manifest.
 
-- GKE image type `UBUNTU_CONTAINERD`.
-- Autoscaling enabled, with `minNodeCount: 0`; KEDA can scale the worker
-  deployment independently from the node pool.
-- Non-spot, non-preemptible nodes.
-- A machine type, boot disk size, and local SSD count sized for your
-  container-heavy test workload. The reference Pulumi inputs are
-  `testcontainersMachineType`, `testcontainersDiskGb`, and
-  `testcontainersSsdCount`.
-- Workload Identity metadata mode `GKE_METADATA`.
-- The node label `workload=testcontainers`.
-- The taint `workload=testcontainers:NoSchedule`.
-
-Those last two fields must match `spec.pod` in
-`custom-values/rbeworkers/optional/testcontainers/worker-testcontainers.yaml`:
-
-```yaml
-pod:
-  nodeSelector:
-    workload: testcontainers
-  tolerations:
-    - key: workload
-      operator: Equal
-      value: testcontainers
-      effect: NoSchedule
-```
-
-For the Sysbox-backed `worker-testcontainers-sysbox` `RbeWorker`, create a separate
-node pool with:
-
-- GKE image type `UBUNTU_CONTAINERD`.
-- Autoscaling enabled, with `minNodeCount: 1`; keeping one node warm avoids
-  paying the Sysbox install/bootstrap cost on the first test action.
-- Non-spot, non-preemptible nodes.
-- A machine type, boot disk size, and local SSD count sized for Docker-in-Docker
-  style workloads. The reference Pulumi inputs are
-  `testcontainersSysboxMachineType`, `testcontainersSysboxDiskGb`, and
-  `testcontainersSysboxSsdCount`.
-- Workload Identity metadata mode `GKE_METADATA`.
-- The node labels `workload=testcontainers-sysbox` and `sysbox-install=yes`.
-- The taint `workload=testcontainers-sysbox:NoSchedule`.
-- Sysbox installed on the nodes and a Kubernetes `RuntimeClass` named
-  `sysbox-runc`.
-
-The matching `RbeWorker` settings are:
-
-```yaml
-docker:
-  mode: sysbox
-  sysbox:
-    runtimeClassName: sysbox-runc
-    hostUsers: false
-pod:
-  nodeSelector:
-    workload: testcontainers-sysbox
-    sysbox-install: "yes"
-  tolerations:
-    - key: workload
-      operator: Equal
-      value: testcontainers-sysbox
-      effect: NoSchedule
-```
-
-The shipped `RbeWorker` examples use `emptyDir` for worker scratch and local
-CAS read-cache storage. On GKE, back these nodes with enough ephemeral storage
-for Docker layers, test containers, and Buildbarn's read cache. If you switch
-the examples to hostPath-backed local SSD, make the path unique per worker pool
-and size/schedule pods so two workers do not share one CAS blocks file.
+If you change the CAS cache to a `hostPath` volume, ensure two workers on the
+same node cannot share its cache path. See the worker example
+[environment overlay](../../custom-values/rbeworkers/README.md#environment-overlays)
+for a node selector and toleration patch. Check Pending Pods with
+`kubectl describe pod` before debugging Bazel routing or Docker startup.
 
 ## Run
 

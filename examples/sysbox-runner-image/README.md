@@ -48,6 +48,11 @@ a `RuntimeClass` named `sysbox-runc`. On Kubernetes 1.33+ with containerd 2,
 Sysbox v0.7 also requires Kubernetes user namespaces (`hostUsers: false`) and
 containerd 2.0.5 or newer.
 
+The `RbeWorker` example does not select Sysbox nodes by label or tolerate
+node-pool taints. Configure scheduling on the RuntimeClass or add a
+`spec.pod.nodeSelector` and matching tolerations in your environment overlay
+before applying it. See [worker pod scheduling](../../custom-values/rbeworkers/README.md#pod-scheduling).
+
 ```yaml
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
