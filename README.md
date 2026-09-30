@@ -185,7 +185,7 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.3` |             `0.9.4` |
+| Hermetiq |       `0.9.4` |             `0.9.4` |
 | Buildbarn |       `0.9.5` |  `20260908T142448Z` |
 | BB Worker Operator |       `0.3.5` |            `v0.3.5` |
 
