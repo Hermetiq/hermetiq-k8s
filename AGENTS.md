@@ -16,148 +16,125 @@ This file provides instructions and guidelines for AI coding assistants (includi
 
 ---
 
-## Architecture Diagram Generation & Maintenance (Gemini 3.8+)
+## Architecture Diagram Maintenance Guide (Gemini 3.8+)
 
-This repository maintains three primary architectural diagrams in the root directory:
+This repository maintains three primary customer-facing presentation diagrams in the root directory:
 1. `hermetiq-gke-deployment.png`: End-to-end Kubernetes platform deployment architecture.
 2. `hermetiq-nats-db-ingest.png`: BEP event ingestion pipeline, NATS JetStream, and partitioned PostgreSQL persistence.
 3. `hermetiq-buildbarn-diagram.png`: Buildbarn caching, remote execution, worker pools, and storage topology.
 
-For customer-facing and presentation collateral, diagrams use a **3D isometric presentation aesthetic** (the "keynote glassmorphism" style). Future Gemini models (Gemini 3.8+) and other multimodal AI agents must adhere to the style definitions, prompt templates, and technical constraints below when generating or updating these diagrams.
+These diagrams use a **3D isometric keynote glassmorphism presentation aesthetic** ("AI bling" style). They are customer-facing visuals featured in project documentation, READMEs, and executive architecture reviews.
 
-### 1. Visual Style & Aesthetic Specifications
+### 1. CRITICAL RULE: Preventing Quality Loss (NEVER Use Full-Image Diffusion)
 
-When generating or editing diagrams in this style:
-- **Perspective**: 3D isometric view (orthographic isometric projection, 30° / 60° angles) looking down onto multi-tiered floating platforms or pedestals.
-- **Surface Materials & Geometry**:
-  - Frosted glass and translucent acrylic pedestals with subtle bevels and rounded corners (glassmorphism).
-  - Clean separation into layered architectural planes (Ingress plane, Microservices plane, Messaging/Queue plane, Data & Storage plane).
-  - Soft ambient occlusion, realistic directional studio drop shadows, and subtle edge lighting.
-  - No messy clutter: clear visual hierarchy with high contrast and spacious component positioning.
-- **Background**: Clean, crisp off-white or light slate studio canvas (`#f8fafc` to `#ffffff`) with subtle ambient diffusion.
-- **Color Coding**:
-  - **Networking / Ingress / Gateway**: Deep Indigo / Violet (`#4f46e5` / `#6366f1`).
-  - **Messaging / NATS JetStream**: Vibrant Emerald / Teal (`#059669` / `#10b981`).
-  - **Microservices / Go Services / Subscribers**: Vivid Cobalt / Sky Blue (`#0284c7` / `#0ea5e9`).
-  - **Storage / PostgreSQL / GCS / VictoriaMetrics**: Warm Amber / Coral / Gold (`#d97706` / `#f59e0b`).
-  - **Observability / KEDA / Grafana**: Crimson / Rose (`#e11d48`).
-- **Connection Grammar**:
-  - **Solid sleek arrows**: Synchronous control plane and RPC flows (e.g., Bazel BEP → TLS Gateway → Publisher).
-  - **Glowing blue conduits / pipelines**: Heavy payload blob and CAS reads/writes (e.g., Buildbarn Frontend → Storage, Subscribers → GCS).
-  - **Dashed / pulsed lines**: Telemetry, metrics queries, and async scaling loops (e.g., KEDA → VictoriaMetrics PromQL).
-- **Typography & Labels**:
-  - Clean sans-serif modern typography (Inter, SF Pro, or Roboto style).
-  - Clear, legible component titles, protocol tags (e.g. `gRPC/TLS`, `Port 8981`, `JetStream`), and port numbers.
-  - Zero illegible glyphs, gibberish artifacts, or hallucinatory labels.
+> [!CAUTION]
+> **NEVER use full-image generative diffusion tools (such as `generate_image`) to regenerate or update these technical diagrams.**
+>
+> In PR #37, an automated agent attempted to update diagrams by calling `generate_image` on the entire image canvas. This resulted in catastrophic quality loss:
+> - Crisp vector typography degraded into blurry, garbled AI hallucinations (e.g. "hermetic gateway", "Ezecute RPC", "Cack & Action Store", "heshes hasees").
+> - Sharp geometric glass pedestals, edges, and connection routes were warped and artifacted.
+> - High-contrast technical precision was replaced with diffusion noise and fuzzy textures.
+>
+> Generative diffusion models are stochastic latent synthesizers; they cannot reliably maintain precise technical text, exact port numbers, or strict network topologies across an entire architecture diagram.
 
-### 2. Architectural Rules & Topology Invariants (Issue #111)
+### 2. Composition Architecture: How High-Quality Visuals Are Built
 
-Under no circumstances should any generated or modified diagram violate these core technical invariants:
+The high-quality presentation diagrams consist of two decoupled visual tiers:
+1. **The 3D Glassmorphism Base Plate**:
+   - Floating translucent pedestals, frosted acrylic slabs, hardware chassis (e.g., NVMe storage bays, server racks, glowing JetStream cubes).
+   - Soft directional studio lighting, drop shadows, and clean off-white / light slate canvas (`#f6f8fc` to `#ffffff`).
+   - **Crucially: The base visual plate contains ZERO or minimal baked-in text.**
+2. **The Vector Typography & Annotation Overlay**:
+   - Crisp, pixel-perfect digital typography (Inter, SF Pro, Roboto) rendered at native resolution (`1376 x 768` or `1920 x 1080`).
+   - High-contrast labels, badges, protocol tags (`gRPC/TLS`, `:8982`, `:8981`, `Stream 0..N-1`), and color-coded directional conduits.
+   - Clean semi-transparent badge containers (`background: rgba(255, 255, 255, 0.75)`, `border: 1px solid rgba(255, 255, 255, 0.9)`, subtle drop shadows).
 
-1. **Ingress Routing (`hermetiq-gke-deployment.png`)**:
-   - The Edge TLS Gateway (`edge-tls-gateway`) terminates external TLS and proxies directly to the BEP publisher (`bep-nats-pub`).
-   - The Gateway does **NOT** connect directly to NATS JetStream.
-2. **Stream Publishing & Consumption**:
-   - `bep-nats-pub` is the exclusive ingress publisher to the NATS JetStream stream (`events.build_event`).
-   - Partitioned Go subscribers (`bep-nats-sub`) consume JetStream events via consumer groups.
-3. **Query API Decoupling**:
-   - The Query API (`bep-nats-query-api` / `grpc-api`) reads directly from PostgreSQL (metadata) and Google Cloud Storage (chunked blobs).
-   - The Query API does **NOT** connect to or read from NATS stream topics.
-4. **Subscriber Data Offloading**:
-   - Subscribers write structured build metadata to PostgreSQL.
-   - Subscribers offload large raw payload chunks directly to Google Cloud Storage (GCS).
-5. **OIDC / SSO Isolation**:
-   - OIDC Provider connects exclusively to the Edge TLS Gateway for authentication/SSO.
-   - It has no data-path arrows to backend storage or data services.
-6. **1:1 Partition Mapping (`hermetiq-nats-db-ingest.png`)**:
-   - NATS JetStream partitions `0..N-1` map 1:1 to dedicated subscriber deployments (`bep-nats-sub-partition-0`, `partition-1`, etc.).
-7. **Default Partition**:
-   - The 5-partition timeline includes `<parent>_default` as the catch-all partition alongside numeric partitions.
-8. **Buildbarn Frontend Connections (`hermetiq-buildbarn-diagram.png`)**:
-   - Frontend execution RPC connects to `scheduler:8982`.
-   - Browser and frontend blobstore reads connect to `storage:8981`.
-9. **Storage Connection Styling**:
-   - Storage connections use rich blue data conduit styling.
-10. **KEDA Scaling Architecture**:
-    - KEDA queries VictoriaMetrics via PromQL (`sum(nats_jetstream_consumer_num_pending)`) through the Kubernetes metrics adapter.
-    - KEDA does **NOT** connect to disk, PVCs, or NATS internals directly.
-11. **Internal L4 Routing**:
-    - Internal worker execution queues and inter-service communications use Kubernetes L4 ClusterIP routing without TLS termination.
+### 3. How Future Agents Must Update These Diagrams (Delta Modifications)
 
-### 3. Image Generation with Gemini 3.8+ / Antigravity Tools
+When an architectural change, service rename, port change, or connection routing update is requested:
 
-To generate or update these images using the agent `generate_image` tool:
+#### Method A: Programmatic Canvas / Image Patching (Recommended for Text & Flow Changes)
+For updates to labels, ports, service names, or routing arrows:
+1. **Isolate the Target Bounding Box**: Identify the exact coordinate rectangle `(x1, y1, x2, y2)` of the element to modify.
+2. **Patch the Background**:
+   - Sample the underlying background color or gradient (e.g., `#f8fafc`, `#ffffff`, or the frosted glass panel fill `rgba(...)`).
+   - Draw a clean rounded rectangle or patch over the outdated text/arrow using Python (`PIL.ImageDraw`), Canvas, or OpenCV.
+3. **Render Crisp Vector Typography**:
+   - Use a true sans-serif font (e.g. `Inter-SemiBold.ttf`, `Inter-Regular.ttf`, or `DejaVuSans`).
+   - Render the updated text at the exact font size, color (`#17223b` for titles, `#4d5b72` for body, `#66738a` for subtext), and alignment.
+   - If a container badge is needed, draw the rounded rectangle with subtle border and shadow before drawing the text.
+4. **Draw Directional Conduits & Connectors**:
+   - Draw anti-aliased lines and arrowheads using the established semantic color palette (solid blue for RPCs, glowing magenta for event streams, green for metrics, purple for auth).
+5. **Save Lossless PNG**: Save the result directly as a high-quality PNG.
 
-#### Tool Invocation Pattern
-```json
-{
-  "ImageName": "hermetiq_platform_3d",
-  "AspectRatio": "16:9",
-  "ImagePaths": ["/home/ndipiazza/source/hermetiq/hermetiq-k8s/hermetiq-gke-deployment.png"],
-  "Prompt": "<Detailed prompt below>"
-}
-```
+#### Method B: SVG Source of Truth with Keynote Styling
+The repository also maintains vector sources (e.g. `bb-architecture.svg.bak` in Downloads / docs):
+1. **Edit the SVG directly**: Modify `<text>`, `<path>`, and `<rect>` elements in SVG.
+2. **Apply Keynote Glassmorphism in SVG**:
+   - Use `<filter id="shadow">` with `feDropShadow`.
+   - Use linear and radial gradients with soft opacity stops (`fill="url(#glass-gradient)"`, `stroke="rgba(255,255,255,0.8)"`).
+   - Use rounded corners (`rx="12" ry="12"`).
+3. **Render to PNG**: Render via headless Chromium, `resvg`, or `cairosvg` at 1376x768 (or 2x 2752x1536) for pristine vector clarity.
 
-#### Base Prompts for Each Diagram
+#### Method C: Adding or Replacing 3D Visual Elements
+If a completely new 3D component (e.g., a new storage appliance or cluster pedestal) is needed:
+1. **Generate the Element in Isolation**: Use `generate_image` or 3D rendering for *only that specific isolated element on a transparent or neutral background*, with **NO TEXT**.
+2. **Mask and Composite**: Composite the isolated 3D element onto the base diagram canvas.
+3. **Overlay Text via Code**: Add all technical labels, titles, and arrows using the vector overlay method (Method A or B).
 
-##### A. Platform Architecture (`hermetiq-gke-deployment.png`)
-```text
-A stunning 3D isometric architectural diagram of the Hermetiq Kubernetes platform on a clean white background. 
-Isometric perspective with frosted glass translucent floating pedestals and modern enterprise glassmorphism aesthetics.
-Layers from top to bottom:
-1. Top layer: 'Clients & Bazel Runners' sending gRPC/TLS traffic to 'Edge TLS Gateway'. An 'OIDC Provider' connects to the Edge TLS Gateway for SSO authentication.
-2. Ingress layer: 'Edge TLS Gateway' routes traffic down to 'bep-nats-pub' (publisher service) and 'Web UI'.
-3. Messaging layer: 'bep-nats-pub' publishes events into 'NATS JetStream Cluster' (green glowing cluster pedestal).
-4. Processing layer: Dedicated 'bep-nats-sub' subscribers pull from JetStream partitions and write build metadata to 'PostgreSQL Cluster' (amber cylinder) and large blobs to 'Google Cloud Storage'.
-5. Query layer: 'Query API' reads directly from 'PostgreSQL' and 'Google Cloud Storage'. It does NOT connect to NATS JetStream.
-6. Observability: 'VictoriaMetrics & Grafana' collecting metrics, with 'KEDA' querying VictoriaMetrics via PromQL to autoscale subscribers.
-Clean, sharp typography, precise isometric angles, glowing blue data conduits, elegant soft ambient lighting.
-```
+### 4. Mandatory Quality Gates & Verification Checklist
 
-##### B. BEP Ingest & Database Partitioning (`hermetiq-nats-db-ingest.png`)
-```text
-A high-end 3D isometric diagram of the Hermetiq BEP event ingestion and database partitioning pipeline on a clean light background.
-Isometric view with elegant glassmorphism translucent platforms, soft shadows, and clean modern tech aesthetics.
-Flow from left to right:
-1. 'Bazel BEP Stream' enters 'bep-nats-pub' microservice via gRPC.
-2. 'bep-nats-pub' distributes events into 'NATS JetStream' partitioned subjects (Partition 0, Partition 1, Partition 2, ..., and Catch-all Partition <parent>_default).
-3. 1:1 mapping: each partition maps directly to a dedicated Go subscriber deployment ('bep-nats-sub-0', 'bep-nats-sub-1', ..., 'bep-nats-sub-default').
-4. The subscribers write relational build records into a partitioned 'PostgreSQL' database (divided into monthly and hash partition blocks) and stream heavy payload chunks directly into 'Google Cloud Storage (GCS)'.
-5. 'Query API' stands apart, reading historical metadata from PostgreSQL and blobs from GCS, with zero connection to the NATS streams.
-6. 'KEDA Scaler' monitors partition consumer lag via PromQL queries to 'VictoriaMetrics'.
-Vibrant green for JetStream, cobalt blue for Go subscriber pods, amber gold for PostgreSQL partitions, clean legible text labels.
-```
+Before opening a PR or committing any diagram changes, the agent MUST execute this verification workflow:
 
-##### C. Buildbarn Deployment Architecture (`hermetiq-buildbarn-diagram.png`)
-```text
-A sophisticated 3D isometric technical diagram of Hermetiq Buildbarn deployment architecture on a clean white studio background.
-Featuring layered floating translucent glass pedestals, rounded cards, and isometric projection.
-Key components:
-1. Ingress: Bazel clients and Web Browser connecting through an Ingress / Gateway layer.
-2. Routing & Frontend: 'bb-frontend' routing execution requests to 'bb-scheduler' on port 8982, and CAS/blobstore reads to 'bb-storage' on port 8981 via blue data conduits. 'bb-browser' providing human UI.
-3. Scheduling & Queuing: 'bb-scheduler' managing execution queues and assigning actions to workers over internal Kubernetes L4 ClusterIP connections (no TLS termination).
-4. Storage Layer: 'bb-storage' distributed across CAS (Content Addressable Storage) and AC (Action Cache) with SSD/NVMe volume backing.
-5. Worker Fleet: 'bb-worker' pools managed by the 'BB Worker Operator' custom controller, with KEDA autoscaling worker pods based on queue depth metrics in VictoriaMetrics.
-Glowing blue data conduits for CAS storage paths, sleek directional control arrows, clean enterprise aesthetic.
-```
+1. **Pixel-Level Inspection (`view_file` / Visual Inspection)**:
+   - Crop regions of interest and inspect them at 100% zoom.
+   - **Zero Hallucination Test**: Check every single label in the image. Does every word match valid English and official Hermetiq/Kubernetes terminology?
+   - If any text looks like "hermetic", "Ezecute", "heshes", "manocqer", or any other distorted artifact, the image **FAILS** immediately.
+2. **Resolution & Format Verification**:
+   - Output format: PNG, 8-bit/color RGB, non-interlaced.
+   - Standard resolution: `1376 x 768` (16:9) or `1920 x 1080`.
+   - File size: Typically 700 KB – 1.5 MB for clean PNGs.
+3. **Architectural Invariants Verification (Issue #111 / #31)**:
+   Verify that all 10 invariants are strictly upheld:
+   - [ ] **1. Ingress Flow**: Gateway terminates TLS and routes to `bep-nats-pub` (NOT directly to JetStream).
+   - [ ] **2. JetStream Separation**: `bep-nats-pub` publishes; partitioned Go `bep-nats-sub` subscribers consume.
+   - [ ] **3. Query API Decoupled**: `grpc-api` / `bep-nats-query-api` reads PostgreSQL & GCS; NO connection to NATS streams.
+   - [ ] **4. Log Chunk Offloading**: Subscribers upload progress chunks to GCS (with PostgreSQL fallback); API reads from GCS; PostgreSQL does NOT write to GCS.
+   - [ ] **5. OIDC Isolation**: OIDC Provider connects only for authentication/SSO at Gateway/Edge; NO connection to telemetry pipelines or metrics.
+   - [ ] **6. 1:1 Partition Mapping**: NATS JetStream partitions `0..N-1` map 1:1 to dedicated subscriber deployments `bep-nats-sub-0..N-1`.
+   - [ ] **7. Default Partition**: Database partition timeline shows `<parent>_default` catch-all partition (should normally be 0 rows).
+   - [ ] **8. Buildbarn Frontend RPCs**: `bb-frontend` -> `bb-scheduler:8982` (Execute RPC); `bb-browser` and `bb-frontend` -> `bb-storage:8981` (Storage RPCs).
+   - [ ] **9. Buildbarn Storage RPC Color**: Storage connections use blue data lines; magenta is reserved for event streams.
+   - [ ] **10. KEDA PromQL Backlog**: KEDA queries VictoriaMetrics via PromQL for queue backlog; NO connection to disk, PVC, or local storage.
+4. **Tooling Hygiene**:
+   - Run `helm lint charts/hermetiq charts/buildbarn charts/bb-worker-operator` to ensure zero chart regressions.
 
-### 4. How to Update These Diagrams (Delta Updates)
+### 5. Visual Style Specifications & Design Tokens
 
-When an architecture change or component update is required:
-1. **Pass the Base Image**: Always supply the path to the current diagram in the `ImagePaths` parameter of `generate_image` (e.g. `ImagePaths: ["/home/ndipiazza/source/hermetiq/hermetiq-k8s/hermetiq-gke-deployment.png"]`).
-2. **Describe Specific Deltas**: In the prompt, explicitly instruct the model to maintain the exact 3D isometric perspective, glass pedestal styling, color scheme, and typography, but apply the specific modifications. Example:
-   ```text
-   Reference the attached 3D isometric architecture diagram. Maintain the exact same isometric angle, glassmorphism pedestal styling, and color coding.
-   Modify the following:
-   - Change the Redis cache component to DragonflyDB.
-   - Ensure the Edge TLS Gateway route clearly splits to bep-nats-pub and Web UI.
-   - Retain all other components, connections, and labels exactly as depicted.
-   ```
-3. **Verify Topology & Text**: Inspect the resulting output image to ensure:
-   - All labels are legible English without garbled characters.
-   - Arrow directions correctly reflect data and control flow.
-   - None of the 10 architecture invariants listed in Section 2 are broken.
-4. **Publish Output**:
-   - Convert/save the image to the repository root matching the original filename (`hermetiq-gke-deployment.png`, etc.).
-   - Verify file size and dimensions (typically 1920x1080 or 1600x900 PNG).
-   - Run `helm lint charts/hermetiq` to ensure repository hygiene.
+- **Perspective**: 30° / 60° orthographic isometric projection on multi-tiered floating platforms.
+- **Canvas / Background**: Clean studio slate `#f6f8fc` to `#ffffff` with subtle ambient lighting.
+- **Color Palette**:
+  - Ingress / Gateway: Deep Indigo `#4f46e5` / `#6366f1`
+  - Messaging / NATS: Vibrant Emerald `#059669` / `#10b981` / Glowing Magenta `#d946ef` for JetStream
+  - Microservices / Subscribers: Vivid Cobalt `#0284c7` / `#0ea5e9`
+  - Storage / Database: Warm Amber `#d97706` / Gold `#f59e0b`
+  - Telemetry / Observability: Jade Green `#10b981` / Rose Crimson `#e11d48`
+- **Typography**: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto.
+  - Section headers: 700 15px uppercase, letter-spacing 0.08em
+  - Component titles: 700 16px `#17223b`
+  - Body / Subtext: 500 13px `#4d5b72` / 11.5px `#66738a`
+
+### 6. Reference Master Assets & Style Benchmarks
+
+For reference and delta baseline editing, master originals and style benchmarks are archived at:
+- **Hermetiq Presentation Originals (Light Keynote Style)**:
+  - `bb-architecture-ai.png` (Buildbarn Remote Execution Cluster)
+  - `hermetiq-architecture-ai.png` (Hermetiq Platform Architecture)
+  - `bep-ingest-architecture-ai.png` (BEP Ingest & PostgreSQL Partitioning Pipeline)
+- **High-Tech Datacenter Benchmark (Dark Glassmorphic Style)**:
+  - `fixed-images/bb-architecture-ai.png` (Buildbarn High-Tech Datacenter Architecture)
+- **RobOS Infographic & Living Architecture Benchmarks**:
+  - `agent-tier-dispatch-algorithm.jpg` (RobOS Agent Tier Dispatch Algorithm)
+  - `kgraph-living-architecture.jpg` (SDLC Knowledge Graph: Living Architecture Engine)
+- **Vector Technical Source**:
+  - `bb-architecture.svg.bak` / `charts/buildbarn/docs/*.svg`
