@@ -2,13 +2,13 @@
 
 This directory is a Kustomize base for the standard Ubuntu, Codex, and Envoy
 worker pools. After copying `custom-values/` to `my-custom-values/` and
-installing Buildbarn, edit the copied manifests for your environment. Apply
+entering the copied directory, edit the manifests for your environment. Apply
 them in the Buildbarn release namespace after the Buildbarn release and
 `buildbarn-worker-config` are ready. The example release namespace is
 `hermetiq`:
 
 ```bash
-kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
+kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
 
 These manifests require operator 0.3.4 or later, which filters queue-depth

@@ -95,8 +95,9 @@ render worker Deployments or worker KEDA `ScaledObject` resources.
 
 Start with the
 [Buildbarn starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/buildbarn-values.yaml),
-copied to `my-custom-values/buildbarn-values.yaml` as described in the
+copied as described in the
 [repository setup guide](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values).
+Run the commands below from inside your copied values directory.
 
 Inspect the packaged documentation and defaults before editing Buildbarn
 values:
@@ -107,18 +108,26 @@ helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.5
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
-After the Hermetiq chart and worker operator are installed, install Buildbarn:
+Check `kubectl get storageclass` and set
+`storage.persistence.cas.storageClassName` and
+`storage.persistence.ac.storageClassName` to a StorageClass available in your
+cluster. The chart defaults to the GKE-style name `premium-rwo`; on EKS, use
+`gp3` unless your cluster provides a `premium-rwo` alias backed by EBS gp3.
+Review the other `storage.persistence.*.storageClassName` values if you enable
+additional stores. After the Hermetiq chart and worker operator are installed,
+install Buildbarn:
 
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
   --version 0.9.5 \
-  --values my-custom-values/buildbarn-values.yaml
+  --values buildbarn-values.yaml
 ```
 
-Check [Buildbarn readiness](#verification), then follow the
+Check the [Buildbarn services](#verification), then follow the
 [RBE worker pool instructions](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
-to apply the worker manifests.
+to apply the worker manifests. Return to [Verification](#verification) to
+check those pools.
 
 Namespaced resources render into the release namespace (`--namespace`):
 
@@ -130,12 +139,13 @@ createNamespace: false
 Set `namespaceOverride` to render into a different namespace, and
 `createNamespace: true` if Helm should create it.
 
-Contributors can render the checked-out chart locally:
+Contributors can render the checked-out chart locally from the copied values
+directory:
 
 ```bash
-helm template buildbarn ./charts/buildbarn \
+helm template buildbarn ../charts/buildbarn \
   --namespace hermetiq \
-  --values custom-values/buildbarn-values.yaml > /tmp/buildbarn.yaml
+  --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
 
 ## Service Topology
@@ -205,7 +215,7 @@ values model:
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
   --version 0.9.5 \
-  --values my-custom-values/buildbarn-values.yaml \
+  --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
 
@@ -1565,7 +1575,7 @@ before applying the pools. Apply every `RbeWorker` in the Buildbarn release
 namespace; the example below uses `hermetiq` for both.
 
 ```bash
-kubectl apply --namespace hermetiq --kustomize my-custom-values/rbeworkers
+kubectl apply --namespace hermetiq --kustomize rbeworkers
 kubectl -n hermetiq get rbeworkers
 ```
 
@@ -1864,15 +1874,12 @@ helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
 
-Check workloads:
+Before applying worker pools, check the Buildbarn workloads:
 
 ```bash
 kubectl get deploy browser frontend scheduler-ubuntu22-04 -n hermetiq
 kubectl get sts storage -n hermetiq
-kubectl get rbeworkers.bb.hermetiq.com -n hermetiq
 ```
-
-Worker status is reported on each `RbeWorker` custom resource.
 
 Check endpoints:
 
@@ -1907,10 +1914,11 @@ If VictoriaMetrics resources are enabled, check scrapes and recording rules:
 kubectl get vmpodscrape,vmrule -n hermetiq
 ```
 
-Inspect an operator-managed worker pool through its `RbeWorker` status, which
-records the managed Deployment name and the pod selector:
+After applying worker pools, check their `RbeWorker` resources. Each resource
+reports the managed Deployment name and Pod selector in its status:
 
 ```bash
+kubectl -n hermetiq get rbeworkers
 kubectl -n hermetiq describe rbeworker worker-ubuntu22-04
 
 SELECTOR=$(kubectl -n hermetiq get rbeworker worker-ubuntu22-04 \

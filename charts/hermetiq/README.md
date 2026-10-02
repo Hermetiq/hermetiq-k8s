@@ -16,8 +16,8 @@ the full-stack deployment order and shared services used by the other charts.
   - [Shared services and routing](#shared-services-and-routing)
 - [Required external inputs](#required-external-inputs)
 - [Licensing and trials](#licensing-and-trials)
-  - [License fingerprint RBAC](#license-fingerprint-rbac)
   - [Required contact and online trial](#required-contact-and-online-trial)
+  - [License fingerprint RBAC](#license-fingerprint-rbac)
 - [Hosts](#hosts)
 - [PostgreSQL and schema management](#postgresql-and-schema-management)
   - [Bootstrap job](#bootstrap-job)
@@ -28,49 +28,49 @@ the full-stack deployment order and shared services used by the other charts.
   - [gRPC route timeouts](#grpc-route-timeouts)
   - [Tuning the downstream leg for high-RTT clients](#tuning-the-downstream-leg-for-high-rtt-clients)
 - [NATS ingest and stream configuration](#nats-ingest-and-stream-configuration)
-  - [Stream configuration](#stream-configuration)
 - [Authentication and SSO](#authentication-and-sso)
   - [OIDC provider](#oidc-provider)
   - [gRPC authentication](#grpc-authentication)
   - [MCP Authentication](#mcp-authentication)
-  - [Unsupported static publisher identity](#unsupported-static-publisher-identity)
   - [Admin Emails](#admin-emails)
   - [oauth2-proxy](#oauth2-proxy)
   - [Grafana SSO](#grafana-sso)
-- [Progress log storage](#progress-log-storage)
-  - [Retention and sizing](#retention-and-sizing)
-- [Scheduling, availability, and hardening](#scheduling-availability-and-hardening)
-  - [Pod and container security context](#pod-and-container-security-context)
-  - [Network policies](#network-policies)
-  - [Workload identity](#workload-identity)
-  - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
-  - [Node scheduling](#node-scheduling)
-  - [Pod disruption budgets and anti-affinity](#pod-disruption-budgets-and-anti-affinity)
-  - [Additional environment variables](#additional-environment-variables)
-- [Dashboard configuration](#dashboard-configuration)
-  - [Quickstart customization](#quickstart-customization)
-- [External configuration ConfigMaps](#external-configuration-configmaps)
-  - [Cache TTL configuration](#cache-ttl-configuration)
-  - [PromQL query configuration](#promql-query-configuration)
+- [Verify dependencies ready](#verify-dependencies-ready)
+- [Install](#install)
+  - [Verification](#verification)
+  - [Installation checkpoint](#installation-checkpoint)
 - [Advanced Topics](#advanced-topics)
+  - [Progress log storage](#progress-log-storage)
+    - [Retention and sizing](#retention-and-sizing)
+  - [Scheduling, availability, and hardening](#scheduling-availability-and-hardening)
+    - [Pod and container security context](#pod-and-container-security-context)
+    - [Network policies](#network-policies)
+    - [Workload identity](#workload-identity)
+    - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
+    - [Node scheduling](#node-scheduling)
+    - [Pod disruption budgets and anti-affinity](#pod-disruption-budgets-and-anti-affinity)
+    - [Additional environment variables](#additional-environment-variables)
+  - [Dashboard configuration](#dashboard-configuration)
+    - [Quickstart customization](#quickstart-customization)
+  - [External configuration ConfigMaps](#external-configuration-configmaps)
+    - [Cache TTL configuration](#cache-ttl-configuration)
+    - [PromQL query configuration](#promql-query-configuration)
   - [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools)
+  - [Stream configuration](#stream-configuration)
   - [Cost integration](#cost-integration)
   - [Cache-event analytics](#cache-event-analytics)
   - [Kubernetes workload discovery](#kubernetes-workload-discovery)
   - [Paid license keys](#paid-license-keys)
   - [Air-gapped licenses](#air-gapped-licenses)
-- [Verify dependencies ready](#verify-dependencies-ready)
-- [Install](#install)
-- [Verification](#verification)
-- [Operations](#operations)
-  - [Inspect Pods and logs](#inspect-pods-and-logs)
-  - [Pause and resume subscribers](#pause-and-resume-subscribers)
-  - [Inspect database partitions](#inspect-database-partitions)
-  - [Inspect NATS and the dead-letter queue](#inspect-nats-and-the-dead-letter-queue)
-  - [Temporary image overrides](#temporary-image-overrides)
-  - [Rotate Secrets](#rotate-secrets)
-- [Local chart development](#local-chart-development)
-- [License](#license)
+  - [Operations](#operations)
+    - [Inspect Pods and logs](#inspect-pods-and-logs)
+    - [Pause and resume subscribers](#pause-and-resume-subscribers)
+    - [Inspect database partitions](#inspect-database-partitions)
+    - [Inspect NATS and the dead-letter queue](#inspect-nats-and-the-dead-letter-queue)
+    - [Temporary image overrides](#temporary-image-overrides)
+    - [Rotate Secrets](#rotate-secrets)
+  - [Local chart development](#local-chart-development)
+  - [License](#license)
 
 ## Chart scope
 
@@ -89,10 +89,10 @@ these are very common services that most likely already exist in your organizati
 ## Install prerequisites
 
 Create the `hermetiq` namespace and provision PostgreSQL, NATS JetStream, and
-a Redis-compatible cache before installing this chart. The commands below use
-the `my-custom-values/` directory created in the repository's
+a Redis-compatible cache before installing this chart. Run the commands below
+from inside the copied values directory created in the repository's
 [prepare custom values](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values)
-step. Use your own namespace and file paths if they differ.
+step. Use your own namespace if it differs.
 
 ### PostgreSQL
 
@@ -134,14 +134,21 @@ first install.
 
 Review the
 [NATS starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/nats-values.yaml),
-especially the storage class, volume size, and resource requests. The starter
-enables JetStream. Install NATS in the Hermetiq namespace:
+especially the volume size and resource requests. The starter enables
+JetStream and, by default, creates a three-replica NATS StatefulSet with one
+JetStream PVC per Pod. It sets `config.jetstream.fileStore.pvc.storageClassName`
+to `premium-rwo`, which comes from the GKE example. Before installing, replace
+it with a StorageClass available in your cluster; on EKS, use `gp3` if that
+class is installed. An unavailable class leaves the JetStream PVCs unbound and
+the Pods Pending. Check the available classes, then install NATS in the
+Hermetiq namespace:
 
 ```bash
+kubectl get storageclass
 helm repo add nats https://nats-io.github.io/k8s/helm/charts/
 helm repo update
 helm upgrade --install --namespace hermetiq nats nats/nats \
-  --values my-custom-values/nats-values.yaml
+  --values nats-values.yaml
 ```
 
 Set `nats.url` to the reachable NATS service. Hermetiq creates its streams;
@@ -164,7 +171,7 @@ If the DragonflyDB operator is already installed, review and apply the
 ```bash
 kubectl explain dragonflies.dragonflydb.io
 kubectl -n hermetiq apply \
-  -f my-custom-values/dragonflydb-operator-crd-instance.yaml
+  -f dragonflydb-operator-crd-instance.yaml
 ```
 
 Otherwise, install the standalone chart with the
@@ -173,8 +180,8 @@ Otherwise, install the standalone chart with the
 ```bash
 helm upgrade --install --namespace hermetiq dragonfly \
   oci://ghcr.io/dragonflydb/dragonfly/helm/dragonfly \
-  --version v1.38.0 \
-  --values my-custom-values/dragonflydb-values.yaml
+  --version v1.40.0 \
+  --values dragonflydb-values.yaml
 ```
 
 Set `redis.host` and the password Secret reference to match the chosen
@@ -196,7 +203,7 @@ values and TLS Secret alternatives.
 
 Start with the
 [Hermetiq starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml),
-copy them to `my-custom-values/hermetiq-values.yaml`, and work through **every
+edit the copied `hermetiq-values.yaml`, and work through **every
 top-level section in that file before installing**. Replace the example hosts,
 credentials, and sizing choices for your environment. Use this README to make
 each choice; the starter shows the main inputs, while the chart's
@@ -230,23 +237,6 @@ helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.4
 
 ## Licensing and trials
 
-### License fingerprint RBAC
-
-The chart's runtime RBAC grants the `bep-nats` ServiceAccount `get` on the
-release Namespace object only. On-prem licensing hashes that Namespace UID for
-trial and paid license identity, in either RBAC mode. The default
-`rbac.mode=namespace` creates no ClusterRole or ClusterRoleBinding.
-
-A separate namespaced grant stores license state:
-
-| Value | Grant | If disabled |
-| --- | --- | --- |
-| `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
-
-The Namespace read and license-state Secret access are exercised in-pod, so
-installs must keep `api.automountServiceAccountToken: true` and
-`publisher.automountServiceAccountToken: true`.
-
 ### Required contact and online trial
 
 `license.agreement.accepted` must be `true`. The Hermetiq container images
@@ -267,6 +257,23 @@ _Note: The binary rejects `build-team@example.com` on startup as that's just a p
 Trial licenses are tied to the [Namespace fingerprint](#license-fingerprint-rbac).
 Validation is off the request path and cached so transient licensing-service
 outages do not interrupt requests.
+
+### License fingerprint RBAC
+
+The chart's runtime RBAC grants the `bep-nats` ServiceAccount `get` on the
+release Namespace object only. On-prem licensing hashes that Namespace UID for
+trial and paid license identity, in either RBAC mode. The default
+`rbac.mode=namespace` creates no ClusterRole or ClusterRoleBinding.
+
+A separate namespaced grant stores license state:
+
+| Value | Grant | If disabled |
+| --- | --- | --- |
+| `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
+
+The Namespace read and license-state Secret access are exercised in-pod, so
+installs must keep `api.automountServiceAccountToken: true` and
+`publisher.automountServiceAccountToken: true`.
 
 #### Status and expiry
 
@@ -442,38 +449,6 @@ preserves per-build ordering within that partition. Size the count before a
 large production rollout; changing it changes the stream and Deployment
 topology.
 
-`app.invocationStartEvent` defaults to `build_tool`. This mode creates
-invocations from build-tool events and provisions no `BEP_LIFECYCLE_*` streams.
-The `lifecycle` value remains exposed for compatibility with non-chart
-deployments but should not be selected for a new chart installation.
-
-### Stream configuration
-
-The chart renders `files/config/nats_streams.json` into the
-`bep-nats-stream-config` ConfigMap by default. To use an externally managed
-stream and consumer config, create a ConfigMap with your JSON and point the
-chart at it:
-
-```yaml
-nats:
-  streamConfig:
-    existingConfigMap: hermetiq-nats-stream-config
-    configMapKey: nats_streams.json
-    rolloutChecksum: "sha256-or-version-of-the-config"
-```
-
-The selected key is mounted to `/config/nats-streams/nats_streams.json` for
-publisher and subscriber pods, so the container path stays fixed. Helm cannot
-hash external ConfigMap data; update `rolloutChecksum` when the external
-ConfigMap changes and the publisher/subscriber pods need a rollout.
-
-Per-consumer `workerQueueCapacity`, `pipelineMaxQueuedMessages`, and
-`pipelineMaxQueuedBytes` tune fetch-ahead. Keep `maxAckPending` at or above
-`pipelineMaxQueuedMessages` so the server does not cap the pipeline first.
-`storeBatchMaxEvents`, `storeBatchMaxWait`, and `storeBatchParallelism` tune
-database-call coalescing. These are advanced settings; start with the packaged
-file and change them only with ingest, NATS, and database telemetry in view.
-
 ## Authentication and SSO
 
 ### OIDC provider
@@ -554,124 +529,15 @@ terminates mTLS in front of bep-nats, so client-cert identities stay fail-closed
 
 ### MCP Authentication
 
-The MCP server runs inside the `api` container and is authenticated by the same
-core verifier as the gRPC API. Turn it on with `api.jwt.enabled=true`; the chart
-then derives everything else from `oidc.issuerUrl` and the MCP host:
+The MCP server runs in the API Deployment and uses the same OIDC verifier as
+the gRPC API. Set `oidc.issuerUrl`, choose the public MCP host, and enable
+`api.jwt`. The chart derives the protected MCP resource URLs from that host;
+clients connect to `https://mcp.<domainBase>/mcp` and need a token issued for
+that exact resource.
 
-- `GRPC_AUTH_JWKS_URL` / `GRPC_AUTH_ISSUER` ← `oidc.issuerUrl` (or `api.jwt.*` overrides)
-- `GRPC_AUTH_AUDIENCE` ← the MCP server's two protected resources, the origin
-  (`mcpResourceUrl`, default `https://mcp.<domainBase>`) and `<origin>/mcp` —
-  under RFC 8707 the resource *is* the token audience — **plus** the gRPC API
-  audience, joined with commas. One process now authenticates both callers and
-  they carry different audiences, so a token matching any entry is accepted
-- `MCP_AUTHORIZATION_SERVER` ← the OIDC issuer (trailing slash stripped)
-- `GRPC_AUTH_GROUPS_CLAIM` ← `api.jwt.groupsClaim`
-
-The gRPC API half of that audience list is `api.jwt.audience` when set, and
-otherwise the dashboard oauth2-proxy client ID. That client ID lives in a Secret,
-so the chart injects it as `GRPC_AUTH_AUDIENCE_CLIENT_ID` and interpolates it
-into the list with the kubelet's `$(VAR)` expansion — the rendered value reads
-`https://mcp.<domainBase>,https://mcp.<domainBase>/mcp,$(GRPC_AUTH_AUDIENCE_CLIENT_ID)`.
-If you disable the dashboard oauth2-proxy, set `api.jwt.audience` explicitly;
-the chart refuses to render otherwise, because the list would carry only the MCP
-audiences and every gRPC API token would be rejected.
-
-Without these the MCP server falls back to claims-based auth mode and rejects
-every bearer token with `JWT verification requires JWKS auth in claims-based
-auth mode`. The minimal configuration is just the issuer, the host, and the
-toggle:
-
-```yaml
-oidc:
-  issuerUrl: https://<tenant>.auth0.com/
-hosts:
-  domainBase: example.com            # MCP clients connect to https://mcp.example.com/mcp
-api:
-  jwt:
-    enabled: true
-    groupsClaim: hermetiq/roles
-```
-
-You do **not** set the MCP audience: it derives from the MCP host. The verifier
-ignores trailing-slash differences in a token's audience, but your IdP does not
-when it matches the resource a client requests (see below). `api.jwt.audience`
-sets the **gRPC API** audience (dashboard/web traffic) and is added alongside the
-MCP ones — leave it unset to reuse the dashboard oauth2-proxy client ID, or set it
-when the gRPC API needs a specific audience. Override the derived MCP defaults
-only when needed: `api.mcpResourceUrl` when the public MCP origin differs from
-`https://mcp.<domainBase>`, and `api.mcpAuthorizationServer` for the advertised
-authorization server.
-
-Point MCP clients and your IdP's API identifier at `https://mcp.<domainBase>/mcp`.
-Every MCP client sends that resource URL identically, while a bare origin goes
-out with or without a trailing slash depending on the client — and IdPs such as
-Auth0 match the requested resource exactly. `api.mcpResourceUrl` stays the
-origin: the chart refuses a value with a path such as `/mcp`, because the server
-derives the `/mcp` resource from it. See the
-[Auth0 runbook](../../docs/mcp-auth0-runbook.md).
-
-MCP is served only by the API Deployment; the publisher does not run an MCP
-server. MCP identity metadata is opaque by default. Set
-`api.mcpExposeUserIdentities: true` to expose developer identity metadata for an
-installation that requires it. This sets `MCP_EXPOSE_USER_IDENTITIES` on the API
-Deployment. An explicit `api.env.MCP_EXPOSE_USER_IDENTITIES` value overrides it
-without creating a duplicate environment entry. This setting does not change
-project authorization.
-
-Build links in MCP responses (`buildDetailsUrl`, and the links in MCP prompts)
-point at this install's dashboard: the chart sets `MCP_BUILD_DETAILS_URL` to
-`https://<dashboard host>/build`, and the server appends the invocation ID. Set
-`api.env.MCP_BUILD_DETAILS_URL` to override it.
-
-Admin access is granted when the token's groups claim (`api.jwt.groupsClaim`,
-default `hermetiq/roles`) contains `publisher.hermetiqAdminGroup` (default
-`hermetiq-admin`), or via `app.adminEmails`.
-
-#### IdP setup for MCP clients (Dynamic Client Registration)
-
-MCP clients such as Claude register themselves via OAuth Dynamic Client
-Registration (DCR), then request a token whose audience is the MCP resource URL.
-Configure your IdP once so any DCR client is authorized automatically. Using
-Auth0 as a worked example (the [Auth0 runbook](../../docs/mcp-auth0-runbook.md)
-has the full commands):
-
-1. **Enable Dynamic Client Registration** on the tenant
-   (`PATCH /api/v2/tenants/settings` → `flags.enable_dynamic_client_registration=true`).
-2. **Register the MCP server as an API / resource server** whose identifier is
-   the MCP endpoint URL, `https://mcp.<domainBase>/mcp`, and point MCP clients
-   at that same URL (the install notes and the dashboard Quickstart print it).
-   Auth0 matches the requested resource exactly; a mismatch yields its
-   `Service not found` error.
-3. **Authorize all DCR clients for that API** with a default client grant, so
-   each newly registered client is authorized without a per-client step
-   (DCR apps are third-party and otherwise get `Client … is not authorized to
-   access resource server …`):
-
-   ```
-   POST /api/v2/client-grants
-   { "default_for": "third_party_clients",
-     "subject_type": "user",
-     "audience": "https://mcp.<domainBase>/mcp",
-     "scope": [] }
-   ```
-
-4. **Promote a login connection to domain-level**
-   (`PATCH /api/v2/connections/{id}` → `is_domain_connection=true`) so
-   third-party (DCR) clients can authenticate users.
-
-Other IdPs expose equivalent concepts (DCR, an API/audience definition, and a
-way to grant all dynamically-registered clients access to that audience); the
-chart side is identical — point `api.jwt.*` at the issuer, and the MCP
-audiences derive from the MCP host.
-
-### Unsupported static publisher identity
-
-`publisher.authProxy.staticForwardedUser` remains in the values schema for
-configuration compatibility but is not an authentication mechanism. The core
-strips the `X-Forwarded-User` header injected by that sidecar and rejects the
-request. Do not configure new installations this way. Use chart-managed
-`publisher.jwks` or supply the complete `GRPC_AUTH_*` contract through
-`publisher.env`.
+For the values, audience rules, Dynamic Client Registration, and identity
+settings, follow the [MCP authentication guide](../../docs/mcp-authentication.md).
+The [Auth0 runbook](../../docs/mcp-auth0-runbook.md) gives a worked IdP example.
 
 ### Admin Emails
 
@@ -733,7 +599,137 @@ If dashboard OAuth is disabled, the shared proxy ConfigMap is still rendered
 when the Grafana proxy consumes it. The Buildbarn Browser proxy can reuse the
 same Secret and ConfigMap after the Hermetiq release is installed.
 
-## Progress log storage
+## Verify dependencies ready
+
+Check these before installing Hermetiq. Use the namespace and service names
+from your own values when they differ from the starter examples.
+
+1. Confirm the Secrets and Service endpoints referenced by the starter values
+   exist. Every listed endpoint should have at least one ready address:
+
+   ```bash
+   kubectl -n hermetiq get secret postgres-db dragonfly-auth oauth2-proxy-client
+   kubectl -n hermetiq get endpoints nats dragonfly otel-collector vmselect-vmks vminsert-vmks
+   kubectl -n hermetiq rollout status deployment/otel-collector --timeout=5m
+   ```
+
+2. Confirm the NATS server is ready and JetStream is enabled:
+
+   ```bash
+   kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
+   kubectl -n hermetiq exec -it \
+     "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
+       -o jsonpath='{.items[0].metadata.name}')" \
+     -- nats server check jetstream
+   ```
+
+3. Confirm the OIDC issuer's discovery document is reachable, its dashboard
+   callback URL and BEP audience are registered, and the configured routing
+   Gateway or Ingress controller has a ready address. For chart-managed
+   Ingress or Contour certificates, also confirm cert-manager and the matching
+   issuer are ready. KEDA is needed for the subsequent operator-managed
+   worker pools; verify its operator is ready before installing those pools.
+
+Before installing, complete the [starter values review](#required-external-inputs),
+including a real work address for `license.contactEmail`, the
+[Namespace fingerprint behavior](#license-fingerprint-rbac),
+and partition sizing for the expected ingest volume.
+
+## Install
+
+Run this only after working through every top-level block in
+`hermetiq-values.yaml`, replacing all placeholders, and completing
+[Verify dependencies ready](#verify-dependencies-ready).
+Then install the pinned OCI release:
+
+```bash
+helm upgrade --install --namespace hermetiq hmq \
+  oci://ghcr.io/hermetiq/hermetiq \
+  --version 0.9.4 \
+  --values hermetiq-values.yaml
+```
+
+### Verification
+
+Wait for the bootstrap hook and core Deployments:
+
+```bash
+helm status hmq -n hermetiq
+kubectl -n hermetiq get jobs
+kubectl -n hermetiq get deploy \
+  -l app.kubernetes.io/part-of=hermetiq
+kubectl -n hermetiq rollout status deployment/grpc-api --timeout=5m
+kubectl -n hermetiq rollout status deployment/bep-nats-pub --timeout=5m
+kubectl -n hermetiq rollout status deployment/web-ui --timeout=5m
+```
+
+The number of `bep-nats-sub-*` Deployments should match
+`app.streamPartitionCount`. Verify each one without relying on hard-coded image
+versions:
+
+```bash
+kubectl -n hermetiq get deploy -l app.kubernetes.io/component=subscriber
+kubectl -n hermetiq get pods \
+  -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.spec.containers[*].image'
+```
+
+Check Services, endpoints, and routing resources:
+
+```bash
+kubectl -n hermetiq get svc,endpoints grpc-api web-ui bep-nats-pub
+kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
+kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
+```
+
+Check NATS and the license endpoint:
+
+```bash
+kubectl -n hermetiq exec -it \
+  "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
+    -o jsonpath='{.items[0].metadata.name}')" \
+  -- nats stream report
+
+kubectl -n hermetiq port-forward deployment/grpc-api 8008
+curl -fsS localhost:8008/api/v1/license/status
+```
+
+Render-time validation is intentionally strict. If installation fails before
+creating resources, run the same values through `helm template --debug` and
+read the validation error before changing a value.
+
+### Installation checkpoint
+
+Congratulations — the Hermetiq core is running. Before moving on, take a quick
+look at the workloads in your installation namespace:
+
+```bash
+kubectl -n hermetiq get pods
+```
+
+For the starter setup, expect `bep-nats-pub-*`, `bep-nats-sub-*`, `grpc-api-*`,
+and `web-ui-*` Pods to be `Running` with every container ready. If you installed
+the shared services here too, expect ready Pods for Dex, Dragonfly, KEDA, NATS
+JetStream, and VictoriaMetrics (including `vmstorage-*` and `vmselect-*`).
+The starter NATS StatefulSet has three Pods. Pods from completed Jobs, such as
+`database-schema-bootstrap-*` and a scheduled
+`progresses-partition-maintenance-*` run, show `Completed`; that is healthy.
+Pod suffixes, replica counts, and the services present depend on your values
+and where you installed the dependencies.
+
+Resolve Pods stuck in `Pending` or `CrashLoopBackOff`, containers that are not
+ready, and failed Jobs before continuing. When this checkpoint is healthy, go to
+[installing the BB Worker Operator](../../README.md#install-the-worker-operator)
+and
+[installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
+Come back to the advanced topics below after the deployment is working end to
+end.
+
+## Advanced Topics
+
+The sections below cover optional tuning, hardening, operations, and chart
+development. Review them earlier when your environment requires a setting.
+
+### Progress log storage
 
 Build stdout/stderr (BEP progress events) is stored one of two ways, chosen per
 project in **Project Settings**, not by a chart value:
@@ -772,7 +768,7 @@ keep ingesting by writing progress rows to Postgres rather than dropping
 events; watch `hermetiq_progress_chunk_flush_total{outcome="spilled"}` and treat
 a sustained rate as a storage problem to fix.
 
-### Retention and sizing
+#### Retention and sizing
 
 Progress logs are now served from exactly these two places, so **how long users
 can open a completed build's logs is set by whichever mode the project uses**:
@@ -803,9 +799,9 @@ running build's newest output appears in live log tailing),
 `PROGRESS_BLOB_CHUNK_MAX_BYTES` (default `262144`), and
 `PROGRESS_BLOB_CHUNK_MAX_EVENTS` (default `1000`).
 
-## Scheduling, availability, and hardening
+### Scheduling, availability, and hardening
 
-### Pod and container security context
+#### Pod and container security context
 
 Every pod and container sets the Pod Security Standards `restricted` fields
 explicitly, which also covers the securityContext recommendations in the CIS
@@ -833,7 +829,7 @@ dashboard:
     runAsGroup: null
 ```
 
-### Network policies
+#### Network policies
 
 The chart renders no NetworkPolicy by default. To lock the release down, add
 policies through `extraObjects` or alongside the release.
@@ -854,7 +850,7 @@ Egress needs to reach:
 - the Kubernetes API server
 - the Hermetiq license service (`license.saasUrl`)
 
-### Workload identity
+#### Workload identity
 
 The chart annotates the shared ServiceAccount for GKE or labels/annotates Pods
 for Azure workload identity:
@@ -896,7 +892,7 @@ resulting identity only the object-storage permissions required by enabled
 features. Progress-log object storage needs subscriber read/write access;
 trace and output-file features may need additional read access.
 
-### ServiceAccount tokens and RBAC
+#### ServiceAccount tokens and RBAC
 
 The shared `bep-nats` ServiceAccount mounts a token by default. Per-workload
 `automountServiceAccountToken` values override the shared setting.
@@ -950,7 +946,7 @@ capabilities, disables privilege escalation, uses a read-only root filesystem,
 and applies `RuntimeDefault` seccomp. Test overrides with server-side dry-run
 and the target cluster's admission policies.
 
-### Node scheduling
+#### Node scheduling
 
 Set top-level defaults with `k8sNodeScheduling`:
 
@@ -964,7 +960,7 @@ k8sNodeScheduling:
 
 Set `nodeSelector` or `tolerations` under an individual workload to override the top-level values. Supported workload keys include `api`, `publisher`, `subscriber`, `dashboard`, `bootstrap`, `partitionMaintenance`, `progressesPartitionMaintenance`, and `targetTrendsRefresh`.
 
-### Pod disruption budgets and anti-affinity
+#### Pod disruption budgets and anti-affinity
 
 API and publisher Pods use preferred hostname anti-affinity and have
 `maxUnavailable: 1` PodDisruptionBudgets enabled by default. Keep at least two
@@ -976,7 +972,7 @@ Every rendered PDB sets `unhealthyPodEvictionPolicy: AlwaysAllow`, so a node
 drain can evict an unready Pod even when the healthy Pod budget is exhausted.
 Healthy Pods still follow `maxUnavailable`.
 
-### Additional environment variables
+#### Additional environment variables
 
 Use workload-specific `env` maps for application flags that are not modeled as
 first-class chart values. Supported maps include `api.env`,
@@ -993,9 +989,9 @@ publisher and subscribers cannot drift into different ingest modes.
 Only the pass-through maps documented as templated accept Helm expressions.
 Do not use expressions in `hosts.*`, which several templates consume verbatim.
 
-## Dashboard configuration
+### Dashboard configuration
 
-### Quickstart customization
+#### Quickstart customization
 
 The dashboard Quickstart page renders Bazel remote caching instructions from
 `dashboard.remoteCacheUrl`. Leave it empty for the default on-prem Buildbarn
@@ -1042,7 +1038,7 @@ dashboard:
 
 `existingConfigMap` and `data` are mutually exclusive. The dashboard ignores unknown fields and never renders raw HTML from this file.
 
-## External configuration ConfigMaps
+### External configuration ConfigMaps
 
 Several JSON configuration files can be supplied by a ConfigMap owned outside
 the Helm release. The selected key is mounted at the same container path as the
@@ -1063,7 +1059,7 @@ The dashboard Quickstart ConfigMap uses a Pod checksum when its data comes
 from chart values. For `dashboard.quickstartConfig.existingConfigMap`, change a
 `commonAnnotations` value on the next Helm upgrade to roll the dashboard pod.
 
-### Cache TTL configuration
+#### Cache TTL configuration
 
 The API reads cache TTL settings from `/config/cache-ttl/cache_ttl.json`. By default, the chart renders `files/config/cache_ttl.json` into the `bep-cache-ttl-config` ConfigMap. To override it with an externally managed ConfigMap, provide the ConfigMap name and key:
 
@@ -1076,7 +1072,7 @@ cacheTtl:
 
 The selected key is always mounted to `/config/cache-ttl/cache_ttl.json`, so the API container path does not change. Helm cannot hash data from an external ConfigMap; update `rolloutChecksum` when the ConfigMap contents change and the API pods need a rollout.
 
-### PromQL query configuration
+#### PromQL query configuration
 
 The MCP infrastructure tools read query templates from
 `/config/promql/promql.json`. The packaged templates target the recording rules
@@ -1094,7 +1090,6 @@ Partial query overrides are supported. Unknown template placeholders and blank
 required queries fail API startup instead of silently returning incomplete
 diagnostics.
 
-## Advanced Topics
 
 ### Metrics-backed infrastructure tools
 
@@ -1112,6 +1107,33 @@ for a self-managed, single-tenant Buildbarn whose metrics do not follow those
 rules.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
+
+### Stream configuration
+
+The chart renders `files/config/nats_streams.json` into the
+`bep-nats-stream-config` ConfigMap by default. To use an externally managed
+stream and consumer config, create a ConfigMap with your JSON and point the
+chart at it:
+
+```yaml
+nats:
+  streamConfig:
+    existingConfigMap: hermetiq-nats-stream-config
+    configMapKey: nats_streams.json
+    rolloutChecksum: "sha256-or-version-of-the-config"
+```
+
+The selected key is mounted to `/config/nats-streams/nats_streams.json` for
+publisher and subscriber pods, so the container path stays fixed. Helm cannot
+hash external ConfigMap data; update `rolloutChecksum` when the external
+ConfigMap changes and the publisher/subscriber pods need a rollout.
+
+Per-consumer `workerQueueCapacity`, `pipelineMaxQueuedMessages`, and
+`pipelineMaxQueuedBytes` tune fetch-ahead. Keep `maxAckPending` at or above
+`pipelineMaxQueuedMessages` so the server does not cap the pipeline first.
+`storeBatchMaxEvents`, `storeBatchMaxWait`, and `storeBatchParallelism` tune
+database-call coalescing. These are advanced settings; start with the packaged
+file and change them only with ingest, NATS, and database telemetry in view.
 
 ### Cost integration
 
@@ -1185,121 +1207,12 @@ default (`license.key.existingSecretKey` / `license.licenseFileSecretKey`).
 Trials are online-only, so `license.trial.enabled` must be `false`; the chart
 refuses to render otherwise. No network calls are made in this mode.
 
-## Verify dependencies ready
-
-Check these before installing Hermetiq. Use the namespace and service names
-from your own values when they differ from the starter examples.
-
-1. From a client with access to the application database, connect as the
-   Hermetiq user and confirm `pg_partman` is available. `psql` prompts for the
-   password; the result should show one `pg_partman` row with a populated
-   `installed_version` and `can_create=t`:
-
-   ```bash
-   psql 'host=<db-host> port=5432 dbname=<db-name> user=<db-user> sslmode=require' \
-     -c "SELECT name, installed_version FROM pg_available_extensions WHERE name = 'pg_partman'" \
-     -c "SELECT has_database_privilege(current_user, current_database(), 'CREATE') AS can_create"
-   ```
-
-2. Confirm the Secrets and Service endpoints referenced by the starter values
-   exist. Every listed endpoint should have at least one ready address:
-
-   ```bash
-   kubectl -n hermetiq get secret postgres-db dragonfly-auth oauth2-proxy-client
-   kubectl -n hermetiq get endpoints nats dragonfly otel-collector vmselect-vmks vminsert-vmks
-   kubectl -n hermetiq rollout status deployment/otel-collector --timeout=5m
-   ```
-
-3. Confirm the NATS server is ready and JetStream is enabled:
-
-   ```bash
-   kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
-   kubectl -n hermetiq exec -it \
-     "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
-       -o jsonpath='{.items[0].metadata.name}')" \
-     -- nats server check jetstream
-   ```
-
-4. Confirm the OIDC issuer's discovery document is reachable, its dashboard
-   callback URL and BEP audience are registered, and the configured routing
-   Gateway or Ingress controller has a ready address. For chart-managed
-   Ingress or Contour certificates, also confirm cert-manager and the matching
-   issuer are ready. KEDA is needed for the subsequent operator-managed
-   worker pools; verify its operator is ready before installing those pools.
-
-Before installing, complete the [starter values review](#required-external-inputs),
-including a real work address for `license.contactEmail`, the
-[Namespace fingerprint behavior](#license-fingerprint-rbac),
-and partition sizing for the expected ingest volume.
-
-## Install
-
-Run this only after working through every top-level block in
-`my-custom-values/hermetiq-values.yaml` using the sections above, replacing
-all placeholders, and completing [Verify dependencies ready](#verify-dependencies-ready).
-Then install the pinned OCI release:
-
-```bash
-helm upgrade --install --namespace hermetiq hmq \
-  oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.4 \
-  --values my-custom-values/hermetiq-values.yaml
-```
-
-## Verification
-
-Wait for the bootstrap hook and core Deployments:
-
-```bash
-helm status hmq -n hermetiq
-kubectl -n hermetiq get jobs
-kubectl -n hermetiq get deploy \
-  -l app.kubernetes.io/part-of=hermetiq
-kubectl -n hermetiq rollout status deployment/grpc-api --timeout=5m
-kubectl -n hermetiq rollout status deployment/bep-nats-pub --timeout=5m
-kubectl -n hermetiq rollout status deployment/web-ui --timeout=5m
-```
-
-The number of `bep-nats-sub-*` Deployments should match
-`app.streamPartitionCount`. Verify each one without relying on hard-coded image
-versions:
-
-```bash
-kubectl -n hermetiq get deploy -l app.kubernetes.io/component=subscriber
-kubectl -n hermetiq get pods \
-  -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.spec.containers[*].image'
-```
-
-Check Services, endpoints, and routing resources:
-
-```bash
-kubectl -n hermetiq get svc,endpoints grpc-api web-ui bep-nats-pub
-kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
-kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
-```
-
-Check NATS and the license endpoint:
-
-```bash
-kubectl -n hermetiq exec -it \
-  "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
-    -o jsonpath='{.items[0].metadata.name}')" \
-  -- nats stream report
-
-kubectl -n hermetiq port-forward deployment/grpc-api 8008
-curl -fsS localhost:8008/api/v1/license/status
-```
-
-Render-time validation is intentionally strict. If installation fails before
-creating resources, run the same values through `helm template --debug` and
-read the validation error before changing a value.
-
-## Operations
+### Operations
 
 Commands below specify `-n hermetiq` so they do not depend on the current
 kubectl namespace.
 
-### Inspect Pods and logs
+#### Inspect Pods and logs
 
 ```bash
 kubectl -n hermetiq get pods
@@ -1326,7 +1239,7 @@ done
 gzip "$LOG"
 ```
 
-### Pause and resume subscribers
+#### Pause and resume subscribers
 
 Pausing subscribers leaves new events queued in JetStream, subject to each
 stream's retention limits:
@@ -1351,7 +1264,7 @@ done
 
 A later `helm upgrade` restores the replica count from values.
 
-### Inspect database partitions
+#### Inspect database partitions
 
 In `psql`, inspect table size and `pg_partman` state:
 
@@ -1389,7 +1302,7 @@ kubectl -n hermetiq create job \
   --from=cronjob/progresses-partition-maintenance
 ```
 
-### Inspect NATS and the dead-letter queue
+#### Inspect NATS and the dead-letter queue
 
 ```bash
 NATS_BOX=$(kubectl -n hermetiq get pods \
@@ -1409,7 +1322,7 @@ kubectl -n hermetiq exec -it "$NATS_BOX" \
   -- nats stream purge BEP_DLQ_STREAM --force
 ```
 
-### Temporary image overrides
+#### Temporary image overrides
 
 For short-lived diagnosis, patch running Deployments with `kubectl set image`:
 
@@ -1430,7 +1343,7 @@ done
 These changes drift from Helm state and are reverted by the next upgrade. Put
 long-lived image changes under `images.*` in values.
 
-### Rotate Secrets
+#### Rotate Secrets
 
 Secrets injected as environment variables require a workload restart after
 their contents change. Changes to chart-managed Secret values change the
@@ -1468,21 +1381,21 @@ Coordinate database and cache credential changes with the corresponding
 external service. Rotating `OAUTH2_PROXY_COOKIE_SECRET` invalidates active UI
 sessions.
 
-## Local chart development
+### Local chart development
 
 OCI releases are the supported customer installation path. Contributors can
-render and install the checked-out chart directly:
+render and install the checked-out chart from the copied values directory:
 
 ```bash
-helm lint ./charts/hermetiq \
-  --values ./charts/hermetiq/ci-values/ci.yaml
+helm lint ../charts/hermetiq \
+  --values ../charts/hermetiq/ci-values/ci.yaml
 
-helm template hmq ./charts/hermetiq \
+helm template hmq ../charts/hermetiq \
   --namespace hermetiq \
-  --values ./charts/hermetiq/ci-values/ci.yaml > /tmp/hermetiq-render.yaml
+  --values ../charts/hermetiq/ci-values/ci.yaml > /tmp/hermetiq-render.yaml
 
-helm upgrade --install --namespace hermetiq hmq ./charts/hermetiq \
-  --values ./custom-values/hermetiq-values.yaml
+helm upgrade --install --namespace hermetiq hmq ../charts/hermetiq \
+  --values hermetiq-values.yaml
 ```
 
 Before installing locally, review the repository's
@@ -1490,7 +1403,7 @@ Before installing locally, review the repository's
 for private registries, digest pinning, common metadata, `extraObjects`, and
 templated pass-through values.
 
-## License
+### License
 
 The chart source in this package is licensed under the Apache License 2.0;
 see the packaged `LICENSE` file. The Hermetiq container images it deploys are

@@ -21,10 +21,25 @@ supported full-stack deployment order.
 
 ## Install
 
+The Buildbarn release and its `RbeWorker` pools must share a namespace. FUSE
+workers need privileged containers, so if Pod Security Admission enforces a
+restrictive policy, allow privileged Pods in that namespace before applying
+the worker pools:
+
+```bash
+kubectl label namespace hermetiq pod-security.kubernetes.io/enforce=privileged --overwrite
+```
+
+Use dedicated worker nodes. A Hermetiq release installed in a separate
+namespace can retain `restricted` admission there. Install the
+namespace-scoped operator alongside Buildbarn so it reconciles their shared
+worker pools.
+
 Start with the
 [operator starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/bb-worker-operator-values.yaml),
-copied to `my-custom-values/bb-worker-operator-values.yaml` as described in
-the [repository setup guide](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values).
+copied as described in the
+[repository setup guide](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values).
+Run the commands below from inside your copied values directory.
 
 Inspect this release's packaged documentation and defaults before editing the
 operator values:
@@ -51,7 +66,7 @@ helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
   --version 0.3.5 \
   --skip-crds \
-  --values my-custom-values/bb-worker-operator-values.yaml
+  --values bb-worker-operator-values.yaml
 ```
 
 See [RBAC Scope](#rbac-scope) for the remaining namespace-mode requirements.
@@ -64,9 +79,6 @@ Keep the CRD and controller image on the same release. Leave `image.tag` empty
 so the image follows the chart's `appVersion`: the CRD is what accepts a field
 and the controller is what acts on it, so a controller older than the CRD
 silently ignores fields it does not know.
-
-The chart places the RbeWorker CRD in `crds/`, so Helm installs it before the
-controller on a first-time `helm install`.
 
 ## Verify
 
@@ -85,42 +97,54 @@ When `podDisruptionBudget.enabled=true`, the chart sets
 `unhealthyPodEvictionPolicy: AlwaysAllow`. Node drains can evict an unready
 operator Pod even when its healthy Pod budget is exhausted.
 
+Once the CRD is established and the operator Deployment is ready, continue with
+[installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
+
 ## CRD Lifecycle
 
-The RbeWorker CRD intentionally lives in the chart's top-level `crds/` directory:
+`RbeWorker` is a cluster-wide Kubernetes API, even when the operator watches
+only one namespace. Its CRD is packaged in the chart's `crds/` directory:
 
 ```text
 charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
-This gives the right bootstrap behavior for new clusters: Helm installs CRDs
-from `crds/` before rendering or applying templates, so the operator can start
-watching `RbeWorker` resources after installation.
+The recommended way to install or upgrade the CRD is to apply the versioned
+file and wait for Kubernetes to establish it. This example uses release 0.3.5;
+use the target chart's release tag when upgrading:
 
-`helm template` does not include CRDs by default; pass `--include-crds` when
-rendering a complete install bundle, as shown under
-[Local chart development](#local-chart-development).
+```bash
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.5/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
+```
 
-For upgrades, manage CRD changes as an explicit step. Helm installs CRDs from
-`crds/`, but it does not upgrade or delete them during `helm upgrade`. Apply
-updated CRDs intentionally before applying any `RbeWorker` custom resources that
-depend on the new schema.
+On a **first install**, Helm installs the CRD before the controller if you omit
+`--skip-crds` and the installer has cluster-wide permissions. The
+namespace-scoped path in [Install](#install) instead has a cluster administrator
+apply the CRD, then installs the controller with `--skip-crds`.
 
-Release 0.3.3 refreshes the embedded Kubernetes Pod and volume schemas in the
-`RbeWorker` CRD for the operator's Kubernetes v0.37 dependencies. Apply the
-0.3.3 CRD before upgrading the operator image, using the versioned CRD YAML
-from that release tag as shown in [Install](#install).
+On an **upgrade**, run the CRD command above before upgrading the chart or
+applying `RbeWorker` manifests that use new fields. Helm does not upgrade CRDs in
+`crds/` during `helm upgrade`, even when the chart contains a newer schema.
+Keep the chart and CRD at the same version, and leave `image.tag` empty so the
+controller follows the chart's `appVersion`. A newer CRD may accept fields
+that an older controller cannot act on.
 
-Release 0.3.4 removes `spec.autoscaling.prometheus.projectID`. Generated
-queries now filter on the `RbeWorker`'s own namespace, so the worker must live
-in the same namespace as the Buildbarn scheduler it scales on. After applying
-the 0.3.4 CRD, delete `projectID` from every `RbeWorker` manifest and Kustomize
-patch; `kubectl apply` rejects it as an unknown field.
+On **uninstall**, Helm leaves the CRD in place. Deleting that CRD also deletes
+all `RbeWorker` objects in the cluster, so remove it only when you intend to
+retire the API and those worker pools.
 
-Do not move the CRD into `templates/` just to make it appear in default
-`helm template` output. Keeping CRDs in `crds/` preserves Helm's install-order
-semantics and avoids mixing cluster-scoped API lifecycle with the controller's
-normal namespaced release resources.
+If upgrading from a release before 0.3.3, the target release's CRD includes
+updated Pod and volume schemas. If upgrading from a release before 0.3.4,
+remove `spec.autoscaling.prometheus.projectID` from `RbeWorker` manifests and
+Kustomize patches before reapplying them; the CRD no longer accepts that field.
+Generated queries now use the `RbeWorker` namespace, so each worker must share
+a namespace with the Buildbarn scheduler it scales on.
+
+For a rendered install bundle, pass `--include-crds` to `helm template` as shown
+in [Local chart development](#local-chart-development); Helm omits CRDs from
+its default template output.
 
 ## KEDA Autoscaling
 
@@ -287,13 +311,10 @@ On OpenShift, set `podSecurityContext.runAsUser` and
 them.
 
 The worker pods the operator creates are configured on each `RbeWorker`. FUSE
-build directories and Docker-in-Docker need privileged containers. Create
-`RbeWorker` resources in the same namespace as their Buildbarn installation;
-the shared ConfigMap, scheduler address, and generated queue query all assume
-this placement. That namespace must permit privileged worker Pods (for example,
-with `pod-security.kubernetes.io/enforce: privileged`). The manager Pod keeps
-its restricted security context. For `rbac.mode=namespace`, install the
-operator in the Buildbarn namespace so it watches those `RbeWorker` resources.
+build directories and Docker-in-Docker need privileged containers, while the
+manager Pod keeps its restricted security context. The shared ConfigMap,
+scheduler address, and generated queue query assume workers run in the
+Buildbarn namespace, as described in [Install](#install).
 
 ## RBAC Scope
 
@@ -389,8 +410,8 @@ the ClusterRole created by `rbac.metricsReader.create`. Use
 
 ## Local chart development
 
-OCI releases are the supported customer path. Contributors can render the
-checked-out chart, including its CRD, with:
+OCI releases are the supported customer path. From the repository root,
+contributors can render the checked-out chart, including its CRD, with:
 
 ```bash
 helm lint ./charts/bb-worker-operator

@@ -1,0 +1,46 @@
+# Dex chart 0.25.2 from https://charts.dexidp.io.
+# Copy this file with the other starter values and run dex-bootstrap.sh.
+fullnameOverride: dex
+replicaCount: 1
+
+# The config includes a local user's bcrypt hash, so it is created directly
+# as a Kubernetes Secret by dex-bootstrap.sh and never placed in Helm values.
+configSecret:
+  create: false
+  name: dex-config
+
+# staticClients[].secretEnv in config.yaml reads this environment variable.
+envVars:
+  - name: DEX_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-client
+        key: DEX_CLIENT_SECRET
+
+rbac:
+  create: true
+  createClusterScoped: true
+
+service:
+  type: ClusterIP
+
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: hermetiq-gateway
+  hostnames:
+    # dex-bootstrap.sh overrides this hostname from DEX_DOMAIN_BASE.
+    - dex.helm.hermetiq.dev
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

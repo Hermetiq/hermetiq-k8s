@@ -27,6 +27,7 @@ configuration.
 - [Key features](#key-features)
   - [Hermetiq chart](#hermetiq-chart)
   - [Buildbarn chart](#buildbarn-chart)
+  - [BB Worker Operator chart](#bb-worker-operator-chart)
 - [Repository layout](#repository-layout)
 - [Supported chart bundle](#supported-chart-bundle)
 - [Architecture](#architecture)
@@ -83,9 +84,6 @@ pools sized for your workloads.
 - **Deploy a coordinated build backend.** One chart configures the frontend,
   scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping
   authentication, tracing, and service addresses aligned.
-- **Scale workers with demand.** With the worker operator and KEDA, declare
-  `RbeWorker` pools that scale from zero as work queues, keep scheduled minimum
-  capacity, and route actions by size class.
 - **Run Docker-dependent tests remotely.** Optional Docker-in-Docker and Sysbox
   fleets support Testcontainers suites, with image preloading and registry
   mirrors to reduce startup overhead.
@@ -98,6 +96,21 @@ pools sized for your workloads.
 - **See execution in context.** The Completed Action Logger feeds remote-action
   details into Hermetiq, while project-labeled worker and storage metrics let
   teams track their own performance and cache health.
+
+### BB Worker Operator chart
+
+Define and manage Buildbarn worker pools as Kubernetes resources.
+
+- **Declare workers alongside your workloads.** Each `RbeWorker` describes a
+  pool; the operator maintains its worker Deployment, configuration, and KEDA
+  `ScaledObject` when autoscaling is enabled.
+- **Match capacity to the queue.** With KEDA, pools can scale from zero based on
+  queued work, keep a scheduled minimum with cron triggers, and use separate
+  small and large workers for size-class routing.
+- **Tailor each pool.** Configure runner images, resources, storage, and Pod
+  scheduling for different build environments and dedicated worker nodes.
+- **Choose the operator's scope.** Run it within the Buildbarn namespace or
+  manage pools across namespaces with cluster-scoped RBAC.
 
 ## Repository layout
 
@@ -171,8 +184,6 @@ Verify the basics before starting:
 ```bash
 helm version
 kubectl version
-kubectl get gatewayclass
-kubectl get storageclass
 ```
 
 This guide assumes familiarity with Kubernetes and your cloud provider. Apply
@@ -217,11 +228,14 @@ directory so future updates do not overwrite your configuration:
 git clone git@github.com:Hermetiq/hermetiq-k8s.git
 cd hermetiq-k8s
 cp -R custom-values my-custom-values
+cd my-custom-values
 ```
 
 `my-custom-values/` is ignored by Git, as is any directory whose name ends in
 `-custom-values`, so a more descriptive name such as
 `gke-production-custom-values` also stays out of version control.
+If you use another name, enter that directory instead. The installation and
+upgrade commands below assume your shell is in the copied values directory.
 
 The files in `custom-values/` are starter overrides, not copies of every chart
 setting. Each values file points to the chart's full `values.yaml` (or the
@@ -239,58 +253,23 @@ kubectl config set-context --current --namespace=hermetiq
 kubectl auth can-i '*' '*' -n hermetiq
 ```
 
-The Buildbarn release and its `RbeWorker` pools must share a namespace. FUSE
-workers need privileged containers, so if Pod Security Admission enforces a
-restrictive policy, allow privileged Pods in that namespace before applying
-the worker pools:
-
-```bash
-kubectl label namespace hermetiq pod-security.kubernetes.io/enforce=privileged --overwrite
-```
-
-Use dedicated worker nodes. A Hermetiq release installed in a separate
-namespace can retain `restricted` admission there; install the namespace-scoped
-worker operator with Buildbarn so it can reconcile their shared worker pools.
-
-If the cluster already hosts another Hermetiq installation, check for
-cluster-scoped singleton operators before installing another copy. KEDA, the
-DragonflyDB operator, and an unscoped BB Worker Operator commonly watch every
-namespace and should not be duplicated without explicit namespace scoping.
-
 ### Prepare routing, DNS, and TLS
 
-The Hermetiq and Buildbarn charts attach routes to infrastructure you own; they
-do not create the Gateway or Ingress controller. Prepare:
+Most organizations already have a Kubernetes platform solution for ingress,
+DNS, and certificates. The Hermetiq and Buildbarn charts do not install a
+routing controller or manage public DNS. They attach application routes to the
+platform you choose, so use the Gateway, Contour, or Ingress setup your cluster
+already supports; Envoy Gateway is one option, not a requirement.
 
-- a Gateway/listener, Contour installation, or Ingress controller
-- a wildcard certificate or individual certificates for the selected hosts
-- DNS records pointing those hosts at the controller address
-- a routing provider that matches the controller:
-  - `gateway` for Envoy Gateway and other `GRPCRoute`-capable implementations
-  - `gateway-httproute-only` for GKE Gateway
-  - `contour` for `HTTPProxy`
-  - `ingress` for classic Ingress
-  - `none` when another system owns all external routes
-
-Both application charts expose a Gateway-scoped `ClientTrafficPolicy`. When
-Hermetiq and Buildbarn share a Gateway, enable that policy in exactly one chart;
-Envoy Gateway does not merge two policies targeting the same Gateway.
-
-The `gateway` provider renders Envoy Gateway policy resources in addition to
-the standard routes. On a `GRPCRoute`-capable controller that is not Envoy
-Gateway those kinds do not exist and the install fails on unknown kinds;
-disable them with the values listed in each chart reference.
-
-TLS depends on the provider. In the Gateway modes, TLS terminates on the
-Gateway listener you own and the charts render no certificates. In the Contour
-and Ingress modes, each chart can render a wildcard cert-manager `Certificate`
-or reuse an existing wildcard Secret through `tls.secretName`. The Hermetiq
-chart's shared Certificate is opt-in; it can also use per-route cert-manager
-Certificates for Contour or cert-manager Ingress annotations when enabled. The
-Buildbarn chart renders a Certificate by default and references the
-`ClusterIssuer` named by `certificate.issuerRef.name`. Install cert-manager and
-configure the issuer before using these chart-managed certificate modes. If
-you manage TLS Secrets outside the charts, supply those Secrets instead.
+Before installing the application charts, make sure the external hostnames
+resolve to your controller and have valid TLS certificates. Set
+`routing.provider` to match it: `gateway` for a `GRPCRoute`-capable Gateway,
+`gateway-httproute-only` for an HTTPRoute-only Gateway such as GKE Gateway,
+`contour` for `HTTPProxy`, `ingress` for classic Ingress, or `none` if another
+system owns the routes. Gateway listeners terminate TLS; for Contour and
+Ingress, the charts can use existing TLS Secrets or cert-manager Certificates.
+Review the chart references for certificate settings and any policies specific
+to your routing controller.
 
 The exact Hermetiq routing values are documented in the
 [Hermetiq chart reference](charts/hermetiq/README.md#routing). Buildbarn routing
@@ -304,6 +283,11 @@ application charts, then follow the
 [Hermetiq prerequisite guide](charts/hermetiq/README.md#install-prerequisites)
 for its PostgreSQL, NATS JetStream, and DragonflyDB setup.
 
+If the cluster already hosts another Hermetiq installation, check for
+cluster-scoped singleton operators before installing another copy. KEDA, the
+DragonflyDB operator, and an unscoped BB Worker Operator commonly watch every
+namespace and should not be duplicated without explicit namespace scoping.
+
 | Service | Used by |
 | --- | --- |
 | OIDC identity provider | Hermetiq dashboard and authenticated BEP/API traffic; Buildbarn Browser and Grafana can share the dashboard sign-in. |
@@ -313,7 +297,13 @@ for its PostgreSQL, NATS JetStream, and DragonflyDB setup.
 
 #### Identity provider
 
-Prepare two OIDC applications:
+Use your organization's OIDC provider when available. For a small test
+installation, [Dex provides a Helm-based example](docs/dex-quickstart.md); see
+the [Dex documentation](https://dexidp.io/docs/) for its configuration and
+connectors.
+
+For authenticated Bazel traffic as well as browser sign-in, prepare two OIDC
+applications:
 
 - A regular web application using Authorization Code flow for the dashboard.
   Register callback URLs for every enabled UI, for example
@@ -324,7 +314,9 @@ Prepare two OIDC applications:
   traffic. Register the expected API audiences and authorize the client for
   those audiences.
 
-Create the shared dashboard OAuth Secret:
+Create the shared dashboard OAuth Secret. If you used the Dex starter's
+`dex-bootstrap.sh`, it already created this Secret in `hermetiq`, so skip this
+command:
 
 ```bash
 kubectl -n hermetiq create secret generic oauth2-proxy-client \
@@ -353,12 +345,12 @@ helm repo update
 
 helm upgrade --install --namespace hermetiq vmks \
   vm/victoria-metrics-k8s-stack \
-  --values my-custom-values/victoriametrics-values.yaml
+  --values victoriametrics-values.yaml
 
 helm upgrade --install --namespace hermetiq otel \
   open-telemetry/opentelemetry-collector \
-  --version 0.153.0 \
-  --values my-custom-values/otel-collector-values.yaml
+  --version 0.174.0 \
+  --values otel-collector-values.yaml
 ```
 
 Confirm the VictoriaMetrics insert endpoint and Grafana domain in the starter
@@ -378,9 +370,8 @@ helm repo update
 helm upgrade --install --namespace hermetiq keda kedacore/keda
 ```
 
-Before installing the application charts, verify the shared service releases
-and workloads. The [Hermetiq readiness checks](charts/hermetiq/README.md#verify-dependencies-ready)
-cover the remaining dependencies:
+Check the shared services installed so far. Confirm their Helm releases appear
+and inspect any Pods that are not Running or Completed before continuing:
 
 ```bash
 helm list -n hermetiq
@@ -389,8 +380,9 @@ kubectl -n hermetiq get pods
 
 ### Install Hermetiq
 
-Follow the [Hermetiq chart install instructions](charts/hermetiq/README.md#install)
-for the required inputs, readiness checks, and installation command.
+Start at the [Hermetiq install prerequisites](charts/hermetiq/README.md#install-prerequisites)
+and work through the required inputs and readiness checks before reaching the
+installation command.
 
 ### Install the worker operator
 
@@ -484,6 +476,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/buildbarn-storage-operations.md`](docs/buildbarn-storage-operations.md) | Buildbarn storage lifecycle and runbooks |
 | [`docs/buildbarn-block-storage.md`](docs/buildbarn-block-storage.md) | Raw block-device deployment guidance |
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
+| [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 
 ## Shared chart conventions
