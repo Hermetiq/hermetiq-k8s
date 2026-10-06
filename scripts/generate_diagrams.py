@@ -196,6 +196,70 @@ def inpaint_gcs_hybrid(im, box=(1012, 374, 1285, 475)):
     return im_copy
 
 
+def clean_upper_gcs_bucket(im):
+    """
+    Dissolves the hallucinated duplicate upper GCS bucket and phantom blue arrow
+    from PostgreSQL in Diagram 1, restoring the pristine container background.
+    """
+    im_clean = im.copy()
+    box = (1095, 250, 1338, 398)
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+
+    top_row = [im.getpixel((box[0] + x, 249))[:3] for x in range(w)]
+    bottom_row = [im.getpixel((box[0] + x, 399))[:3] for x in range(w)]
+    right_col = [im.getpixel((1338, box[1] + y))[:3] for y in range(h)]
+
+    left_col = []
+    for y in range(h):
+        cur_y = box[1] + y
+        if 336 <= cur_y <= 356:
+            t_pix = im.getpixel((1095, 335))[:3]
+            b_pix = im.getpixel((1095, 357))[:3]
+            weight = (cur_y - 335) / (357 - 335)
+            nr = int(t_pix[0] * (1 - weight) + b_pix[0] * weight)
+            ng = int(t_pix[1] * (1 - weight) + b_pix[1] * weight)
+            nb = int(t_pix[2] * (1 - weight) + b_pix[2] * weight)
+            left_col.append((nr, ng, nb))
+        else:
+            left_col.append(im.getpixel((box[0], cur_y))[:3])
+
+    canvas = Image.new("RGB", (w, h))
+    cpix = canvas.load()
+    for y in range(h):
+        v_weight = y / (h - 1)
+        for x in range(w):
+            h_weight = x / (w - 1)
+            lr, lg, lb = left_col[y]
+            rr, rg, rb = right_col[y]
+            hr = lr * (1 - h_weight) + rr * h_weight
+            hg = lg * (1 - h_weight) + rg * h_weight
+            hb = lb * (1 - h_weight) + rb * h_weight
+
+            tr, tg, tb = top_row[x]
+            br, bg, bb = bottom_row[x]
+            vr = tr * (1 - v_weight) + br * v_weight
+            vg = tg * (1 - v_weight) + bg * v_weight
+            vb = tb * (1 - v_weight) + bb * v_weight
+
+            cpix[x, y] = (int(0.5 * hr + 0.5 * vr), int(0.5 * hg + 0.5 * vg), int(0.5 * hb + 0.5 * vb))
+
+    im_clean.paste(canvas, (box[0], box[1]))
+
+    # Clean arrow stub from postgres: x from 1069 to 1096, y from 336 to 356
+    for y in range(336, 357):
+        weight = (y - 335) / (357 - 335)
+        for x in range(1069, 1096):
+            tr, tg, tb = im.getpixel((x, 335))[:3]
+            br, bg, bb = im.getpixel((x, 357))[:3]
+            nr = int(tr * (1 - weight) + br * weight)
+            ng = int(tg * (1 - weight) + bg * weight)
+            nb = int(tb * (1 - weight) + bb * weight)
+            im_clean.putpixel((x, y), (nr, ng, nb))
+
+    return im_clean
+
+
 def prepare_clean_base_images():
     """Pre-processes base images by dissolving baked-in text in overlay areas."""
     # Prefer pristine fixed-images if present
@@ -209,8 +273,8 @@ def prepare_clean_base_images():
     d1_base = inpaint_text_smooth(d1_base, (872, 128, 1106, 222), lum_threshold=185)
     # Clean OIDC Provider inside card: (1180, 126, 1295, 200) - starts at x=1180 to preserve purple arrow tip (x=1173)
     d1_base = inpaint_text_smooth(d1_base, (1180, 126, 1295, 200), lum_threshold=216)
-    # Clean garbled stderr text next to upper GCS bucket: (1230, 320, 1330, 400)
-    d1_base = inpaint_text_smooth(d1_base, (1230, 320, 1330, 400), lum_threshold=185)
+    # Remove hallucinated duplicate upper GCS bucket & phantom arrow from PostgreSQL
+    d1_base = clean_upper_gcs_bucket(d1_base)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
@@ -478,21 +542,10 @@ def build_d1_html(bg_path: Path) -> str:
   <!-- Section 2: bep-nats-sub replaces erroneous 'bep-nats-pub' under blue writer pod -->
   <div class="glass-sub-pill" style="top: 368px; left: 794px; width: 108px; height: 24px; font-size: 9.5px;">bep-nats-sub</div>
 
-  <!-- Section 2: Finding 3 - No DB write to GCS -->
-  <div class="glass-rose" style="top: 332px; left: 1012px; width: 130px; height: 30px; padding: 2px 4px; text-align: center;">
-    <div style="font-size: 8px; font-weight: 800; color: #e11d48;">No DB-to-GCS Write</div>
-    <div style="font-size: 7px; font-weight: 700; color: #1e293b;">Subscribers upload to GCS directly</div>
-  </div>
-
   <!-- Section 2: Finding 3 - Direct Chunk Offload -->
   <div class="glass-cyan" style="top: 464px; left: 865px; width: 165px; height: 38px; padding: 4px 6px; text-align: center;">
     <div style="font-size: 8.5px; font-weight: 800; color: #0284c7;">Direct Chunk Offload</div>
     <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Subscribers upload stdout/stderr to GCS</div>
-  </div>
-
-  <!-- Section 2: GCS compressed stdout/stderr chunks label -->
-  <div style="position: absolute; z-index: 10; top: 348px; left: 1244px; width: 120px;">
-    <div style="font-size: 10px; font-weight: 700; color: #1e293b; line-height: 1.35;">compressed stdout /<br>stderr chunks</div>
   </div>
 
   <!-- Section 3: Finding 4 - VMAgent Scraper -->
