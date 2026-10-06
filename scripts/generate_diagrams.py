@@ -374,10 +374,9 @@ d2_html = f"""<!DOCTYPE html>
     <span style="font-size: 8px; font-weight: 700; color: #0284c7;">progress chunks uploaded to GCS</span>
   </div>
 
-  <!-- 8. Control plane typo fix: height: 56px covers 'source tom' -->
-  <div class="glass-slate" style="top: 540px; left: 285px; width: 220px; height: 56px; padding: 6px 9px;">
-    <div class="card-title" style="font-size: 10.5px;">public.part_config</div>
-    <div class="card-sub" style="font-size: 8px; margin-top: 2px;">pg_partman source of truth<br>Automatic retention and premake control</div>
+  <!-- 8. Control plane typo fix (source tom -> source of truth) preserving native card & arrows -->
+  <div style="position: absolute; z-index: 10; top: 585px; left: 334px; width: 130px; height: 14px; background: #d4dde6; display: flex; align-items: center;">
+    <span style="font-size: 7.5px; color: #334155; font-weight: 500; font-family: Inter, sans-serif; line-height: 1;">pg_partman source of truth</span>
   </div>
 
   <!-- 9. Bottom Conveyor Partition Timeline Dock -->
