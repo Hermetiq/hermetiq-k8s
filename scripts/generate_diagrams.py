@@ -207,8 +207,8 @@ def prepare_clean_base_images():
     d1_base = Image.open(d1_source)
     # Clean ClusterIP Services inside card: (872, 128, 1106, 222)
     d1_base = inpaint_text_smooth(d1_base, (872, 128, 1106, 222), lum_threshold=185)
-    # Clean OIDC Provider inside card: (1165, 126, 1295, 196)
-    d1_base = inpaint_text_smooth(d1_base, (1165, 126, 1295, 196), lum_threshold=185)
+    # Clean OIDC Provider inside card: (1180, 126, 1295, 200) - starts at x=1180 to preserve purple arrow tip (x=1173)
+    d1_base = inpaint_text_smooth(d1_base, (1180, 126, 1295, 200), lum_threshold=216)
     # Clean garbled stderr text next to upper GCS bucket: (1230, 320, 1330, 400)
     d1_base = inpaint_text_smooth(d1_base, (1230, 320, 1330, 400), lum_threshold=185)
     clean_d1_path = TMP_DIR / "clean_d1.png"
