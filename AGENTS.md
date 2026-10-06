@@ -82,34 +82,96 @@ If a completely new 3D component (e.g., a new storage appliance or cluster pedes
 2. **Mask and Composite**: Composite the isolated 3D element onto the base diagram canvas.
 3. **Overlay Text via Code**: Add all technical labels, titles, and arrows using the vector overlay method (Method A or B).
 
-### 4. Mandatory Quality Gates & Verification Checklist
+### 4. The 3-Pass Verification Framework
 
-Before opening a PR or committing any diagram changes, the agent MUST execute this verification workflow:
+To guarantee presentation-grade visuals with zero hallucinations and full architectural rigor, every diagram modification MUST undergo and pass all three independent verification passes before committing:
 
-1. **Pixel-Level Inspection (`view_file` / Visual Inspection)**:
-   - Crop regions of interest and inspect them at 100% zoom.
-   - **Zero Hallucination Test**: Check every single label in the image. Does every word match valid English and official Hermetiq/Kubernetes terminology?
-   - If any text looks like "hermetic", "Ezecute", "heshes", "manocqer", or any other distorted artifact, the image **FAILS** immediately.
-2. **Resolution & Format Verification**:
-   - Output format: PNG, 8-bit/color RGB, non-interlaced.
-   - Standard resolution: `1376 x 768` (16:9) or `1920 x 1080`.
-   - File size: Typically 700 KB – 1.5 MB for clean PNGs.
-3. **Architectural Invariants Verification (Issue #111 / #31)**:
-   Verify that all 10 invariants are strictly upheld:
-   - [ ] **1. Ingress Flow**: Gateway terminates TLS and routes to `bep-nats-pub` (NOT directly to JetStream).
-   - [ ] **2. JetStream Separation**: `bep-nats-pub` publishes; partitioned Go `bep-nats-sub` subscribers consume.
-   - [ ] **3. Query API Decoupled**: `grpc-api` / `bep-nats-query-api` reads PostgreSQL & GCS; NO connection to NATS streams.
-   - [ ] **4. Log Chunk Offloading**: Subscribers upload progress chunks to GCS (with PostgreSQL fallback); API reads from GCS; PostgreSQL does NOT write to GCS.
-   - [ ] **5. OIDC Isolation**: OIDC Provider connects only for authentication/SSO at Gateway/Edge; NO connection to telemetry pipelines or metrics.
-   - [ ] **6. 1:1 Partition Mapping**: NATS JetStream partitions `0..N-1` map 1:1 to dedicated subscriber deployments `bep-nats-sub-0..N-1`.
-   - [ ] **7. Default Partition**: Database partition timeline shows `<parent>_default` catch-all partition (should normally be 0 rows).
-   - [ ] **8. Buildbarn Frontend RPCs**: `bb-frontend` -> `bb-scheduler:8982` (Execute RPC); `bb-browser` and `bb-frontend` -> `bb-storage:8981` (Storage RPCs).
-   - [ ] **9. Buildbarn Storage RPC Color**: Storage connections use blue data lines; magenta is reserved for event streams.
-   - [ ] **10. KEDA PromQL Backlog**: KEDA queries VictoriaMetrics via PromQL for queue backlog; NO connection to disk, PVC, or local storage.
-4. **Tooling Hygiene**:
-   - Run `helm lint charts/hermetiq charts/buildbarn charts/bb-worker-operator` to ensure zero chart regressions.
+```
+Pass 1: Architecture & Flow Verification (Invariants & Topology)
+   │
+   ▼
+Pass 2: Glassmorphism Aesthetics & Bling (Keynote 3D Presentation)
+   │
+   ▼
+Pass 3: Typography & Label Zero-Hallucination (Pixel-Perfect Legibility)
+```
 
-### 5. Visual Style Specifications & Design Tokens
+#### Pass 1: Architecture & Flow Verification
+Verify every data path and service boundary against the 10 invariants established in Issues #31 and #111:
+1. **Ingress Flow**: Gateway terminates TLS at the cluster edge and routes to `bep-nats-pub` (:50091) and `grpc-api` (:50091, :8008, :5150) via L4 ClusterIP routing.
+2. **JetStream Separation**: `bep-nats-pub` acts strictly as the publisher into NATS JetStream; Go-based `bep-nats-sub` subscribers consume partitions. `bep-nats-pub` never writes directly to PostgreSQL or GCS.
+3. **Query API Decoupled**: `grpc-api` / `bep-nats-query-api` reads PostgreSQL metadata and GCS progress chunks; it maintains ZERO NATS dependencies and subscribes to no streams.
+4. **Log Chunk Offloading**: `bep-nats-sub` uploads progress log chunks directly to GCS (with DB progress fallback); PostgreSQL stores metadata only and never writes directly to GCS.
+5. **OIDC Isolation**: OIDC Provider connects exclusively to Edge Gateway and application pods for auth/SSO; it has no link to telemetry pipelines or metrics scrapers.
+6. **1:1 Partition Mapping**: NATS JetStream partitions `Stream 0..N-1` map 1:1 to dedicated subscriber deployments `bep-nats-sub-0..N-1` (`replica: 1 each`).
+7. **Default Partition**: PostgreSQL conveyor partition timeline explicitly displays the `<parent>_default` catch-all partition with an alert indicator if rows > 0.
+8. **Buildbarn Frontend RPCs**: `bb-frontend` routes Execute RPCs to `bb-scheduler:8982` and CAS/AC to `bb-storage:8981`; `bb-browser` reads directly from storage (:8981).
+9. **Buildbarn Storage RPC Traffic**: Worker storage connections (`:8981 CAS · AC · FSAC`) use blue data conduits, distinct from magenta event streams.
+10. **KEDA PromQL Backlog**: KEDA queries VictoriaMetrics via PromQL for queue backlog (`tasks_scheduled_total`); no connection to worker local disks, PVCs, or NVMe chassis.
+
+#### Pass 2: Glassmorphism Aesthetics & "Bling" Quality
+Ensure the customer-facing keynote aesthetic is maintained with full visual polish:
+- **Depth & Lighting**: Translucent floating pedestals, soft studio lighting, directional drop shadows, and multi-tier isometric projection.
+- **Card Containers**: Semi-transparent frosted acrylic glass cards (`rgba(255, 255, 255, 0.94)`, `backdrop-filter: blur(12px)`, `border: 1px solid rgba(255, 255, 255, 0.95)`, `box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08)`).
+- **Micro-Pills & Badges**: Clean rounded pill badges (`border-radius: 5px`, `border: 1px solid rgba(203, 213, 225, 0.9)`) matching component dimensions.
+- **Geometric Alignment**: Symmetrical top-right edge boxes (`ClusterIP Services` at `818px x 128px`, `OIDC Provider` at `1115px x 128px`), 1:1 parent table stack alignment, and seamless bottom conveyor timeline.
+- **No Diffusion Degradation**: No noisy artifacts, blurred edges, warped boxes, or mangled textures.
+
+#### Pass 3: Typography & Label Zero-Hallucination
+Inspect 100% of visible text elements across all three images:
+- **Vector Rendering**: All updated text must be rendered through true digital typography (Google Inter, Apple SF Pro, or Roboto) via headless Chromium / Chrome.
+- **Zero Garble Policy**: Absolutely zero pseudo-words, scrambled characters, or latent diffusion hallucinations.
+- **Resolved Hallucination Reference**:
+  - `remote wite` -> `remote write`
+  - `pisfens` -> `grafana`
+  - `bep-nsts-pub` -> `bep-nats-pub :50091`
+  - `web-ut-80` -> `web-ui :80`
+  - `Gafana` -> `Grafana`
+  - `Bszel clients` -> `Bazel clients`
+  - `outprt_tests` -> `output_tests`
+  - `remote_ramne` -> `remote_exec`
+  - `parents tents` -> `parent tables`
+  - `normal evorts · BEFBEP stream` -> `SQL metadata writes (batch INSERT)`
+  - `retamed` -> `retained`
+  - `source tom` -> `source of truth`
+  - `protobol chonks` -> `gzip protobuf chunks`
+  - `GRE Workload` -> `GKE Workload Identity`
+  - Erroneous `bep-nats-pub` under consumer writer pod -> `bep-nats-sub`
+
+---
+
+### 5. Automated Diagram Generation Pipeline
+
+The repository provides an automated diagram generator script:
+
+```bash
+# Run from repository root:
+./scripts/generate_diagrams.py
+```
+
+#### How it works:
+1. Loads the high-resolution 3D base plates (`hermetiq-architecture-ai.png`, `bep-ingest-architecture-ai.png`, `bb-architecture-ai.png`).
+2. Composes the HTML/CSS frosted-glass vector overlays with exact pixel-level coordinates.
+3. Renders each diagram with Google Chrome headless at native 1376x768 resolution:
+   `google-chrome --headless --disable-gpu --hide-scrollbars --screenshot=<output.png> --window-size=1376,768 <overlay.html>`
+4. Writes the production PNGs directly to repository root:
+   - `hermetiq-gke-deployment.png`
+   - `hermetiq-nats-db-ingest.png`
+   - `hermetiq-buildbarn-diagram.png`
+
+#### How Future Agents Must Update Diagrams:
+1. Open `scripts/generate_diagrams.py`.
+2. Locate the relevant diagram template (`d1_html`, `d2_html`, or `d3_html`).
+3. Adjust coordinates or add glass-card / pill overlay elements.
+4. Execute `./scripts/generate_diagrams.py`.
+5. Use `view_file` to inspect cropped regions of modified areas at 100% zoom.
+6. Verify against the 3-Pass Verification Framework (Pass 1, Pass 2, Pass 3).
+7. Run `helm lint charts/hermetiq charts/buildbarn charts/bb-worker-operator`.
+8. Commit and submit PR.
+
+---
+
+### 6. Visual Style Specifications & Design Tokens
 
 - **Perspective**: 30° / 60° orthographic isometric projection on multi-tiered floating platforms.
 - **Canvas / Background**: Clean studio slate `#f6f8fc` to `#ffffff` with subtle ambient lighting.
@@ -124,7 +186,7 @@ Before opening a PR or committing any diagram changes, the agent MUST execute th
   - Component titles: 700 16px `#17223b`
   - Body / Subtext: 500 13px `#4d5b72` / 11.5px `#66738a`
 
-### 6. Reference Master Assets & Style Benchmarks
+### 7. Reference Master Assets & Style Benchmarks
 
 For reference and delta baseline editing, master originals and style benchmarks are archived at:
 - **Hermetiq Presentation Originals (Light Keynote Style)**:
