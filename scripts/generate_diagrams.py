@@ -260,6 +260,92 @@ def clean_upper_gcs_bucket(im):
     return im_clean
 
 
+def clean_d2_title_bar(im):
+    """
+    Dissolves the AI glass bar and baked-in title in Diagram 2,
+    restoring pristine top canvas background matching Diagrams 1 & 3.
+    """
+    im_clean = im.copy()
+    box = (40, 0, 880, 87)
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+
+    top_row = [im.getpixel((box[0] + x, 0))[:3] for x in range(w)]
+    bottom_row = [im.getpixel((box[0] + x, 87))[:3] for x in range(w)]
+    left_col = [im.getpixel((box[0], y))[:3] for y in range(h)]
+    right_col = [im.getpixel((box[2] - 1, y))[:3] for y in range(h)]
+
+    canvas = Image.new("RGB", (w, h))
+    cpix = canvas.load()
+    for y in range(h):
+        v = y / (h - 1)
+        for x in range(w):
+            u = x / (w - 1)
+            lr, lg, lb = left_col[y]
+            rr, rg, rb = right_col[y]
+            hr = lr * (1 - u) + rr * u
+            hg = lg * (1 - u) + rg * u
+            hb = lb * (1 - u) + rb * u
+
+            tr, tg, tb = top_row[x]
+            br, bg, bb = bottom_row[x]
+            vr = tr * (1 - v) + br * v
+            vg = tg * (1 - v) + bg * v
+            vb = tb * (1 - v) + bb * v
+
+            cpix[x, y] = (int(0.5 * hr + 0.5 * vr), int(0.5 * hg + 0.5 * vg), int(0.5 * hb + 0.5 * vb))
+
+    im_clean.paste(canvas, (box[0], box[1]))
+    return im_clean
+
+
+def clean_d2_query_slab(im):
+    """
+    Dissolves the awkward AI-generated slanted blue glass slab under Query API,
+    restoring the pristine light container background and docking into the red query line.
+    """
+    im_clean = im.copy()
+    tl = (226, 228, 233)
+    tr = (222, 225, 230)
+    bl = (225, 227, 232)
+    br = (220, 223, 229)
+
+    y_start, y_end = 368, 526
+    x_start = 50
+
+    for y in range(y_start, y_end):
+        v = (y - y_start) / (y_end - 1 - y_start)
+        if 433 <= y <= 447:
+            max_x = 278
+        elif 423 <= y < 433:
+            max_x = 283
+        else:
+            max_x = 287
+
+        for x in range(x_start, max_x):
+            u = (x - x_start) / (287 - x_start)
+            r = int((1-u)*(1-v)*tl[0] + u*(1-v)*tr[0] + (1-u)*v*bl[0] + u*v*br[0])
+            g = int((1-u)*(1-v)*tl[1] + u*(1-v)*tr[1] + (1-u)*v*bl[1] + u*v*br[1])
+            b = int((1-u)*(1-v)*tl[2] + u*(1-v)*tr[2] + (1-u)*v*bl[2] + u*v*br[2])
+
+            dist_top = y - y_start
+            dist_bot = y_end - 1 - y
+            dist_left = x - x_start
+            dist_right = max_x - 1 - x
+            min_dist = min(dist_top, dist_bot, dist_left, dist_right)
+            
+            if min_dist < 5:
+                alpha = min_dist / 5.0
+                orig = im.getpixel((x, y))[:3]
+                r = int(orig[0] * (1 - alpha) + r * alpha)
+                g = int(orig[1] * (1 - alpha) + g * alpha)
+                b = int(orig[2] * (1 - alpha) + b * alpha)
+
+            im_clean.putpixel((x, y), (r, g, b))
+
+    return im_clean
+
+
 def prepare_clean_base_images():
     """Pre-processes base images by dissolving baked-in text in overlay areas."""
     # Prefer pristine fixed-images if present
@@ -280,14 +366,16 @@ def prepare_clean_base_images():
 
     # 2. Clean D2 base (bep-ingest-architecture-ai.png)
     d2_base = Image.open(BASE_DIR / "bep-ingest-architecture-ai.png")
+    # Dissolve 3D glass bar & baked title to restore clean keynote top canvas
+    d2_base = clean_d2_title_bar(d2_base)
+    # Dissolve awkward slanted blue glass slab under Query API
+    d2_base = clean_d2_query_slab(d2_base)
     # Clean Bazel clients inside card (70, 118, 195, 164)
     d2_base = inpaint_text_smooth(d2_base, (70, 118, 195, 164), lum_threshold=185)
     # Clean Delivery guarantees inside card (74, 276, 485, 340)
     d2_base = inpaint_text_smooth(d2_base, (74, 276, 485, 340), lum_threshold=185)
     # Clean File storage native card under JetStream: (776, 274, 1025, 318)
     d2_base = inpaint_text_smooth(d2_base, (776, 274, 1025, 318), lum_threshold=185)
-    # Clean Query API slab
-    d2_base = inpaint_text_smooth(d2_base, (50, 375, 240, 506), lum_threshold=185)
     # Clean GCS hybrid (slab face + ribs)
     d2_base = inpaint_gcs_hybrid(d2_base)
     # Clean query text above GCS arrow
@@ -473,6 +561,129 @@ SHARED_CSS = """
     border-radius: 8px;
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.95);
   }
+
+  /* Keynote Header Title */
+  .diagram-title-box {
+    position: absolute;
+    z-index: 15;
+    top: 24px;
+    left: 45px;
+  }
+  .diagram-title {
+    font-size: 23px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  .diagram-subtitle {
+    font-size: 11px;
+    font-weight: 500;
+    color: #475569;
+    letter-spacing: -0.01em;
+    margin-top: 4px;
+  }
+
+  /* Sleek 3D Frosted Glass Query API Node */
+  .query-api-node {
+    position: absolute;
+    z-index: 12;
+    top: 372px;
+    left: 54px;
+    width: 226px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(240, 246, 254, 0.88) 45%, rgba(224, 238, 255, 0.82) 100%);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(186, 230, 253, 0.95);
+    border-radius: 9px;
+    padding: 8px 9px 7px 9px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07), 0 1px 3px rgba(2, 132, 199, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.95);
+  }
+  .query-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  }
+  .query-title {
+    font-size: 11px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .deploy-badge {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    color: #ffffff;
+    font-size: 7.5px;
+    font-weight: 800;
+    padding: 1.5px 5px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    box-shadow: 0 1px 3px rgba(2, 132, 199, 0.25);
+  }
+  .pod-grid {
+    display: flex;
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .pod-card {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(203, 213, 225, 0.85);
+    border-radius: 6px;
+    padding: 3.5px 5px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  }
+  .pod-title {
+    font-size: 8px;
+    font-weight: 800;
+    color: #0369a1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .status-dot {
+    width: 5px;
+    height: 5px;
+    background: #10b981;
+    border-radius: 50%;
+    box-shadow: 0 0 4px #10b981;
+    display: inline-block;
+  }
+  .port-row {
+    display: flex;
+    gap: 3px;
+    margin-top: 5px;
+  }
+  .port-chip {
+    flex: 1;
+    text-align: center;
+    background: rgba(241, 245, 249, 0.9);
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    border-radius: 4px;
+    font-size: 7px;
+    font-weight: 700;
+    color: #334155;
+    padding: 1.5px 0;
+  }
+  .query-meta {
+    margin-top: 5px;
+    font-size: 7.5px;
+    line-height: 1.35;
+    color: #1e293b;
+  }
+  .invariant-badge {
+    font-size: 7.5px;
+    font-weight: 800;
+    color: #047857;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
 """
 
 
@@ -568,6 +779,12 @@ def build_d2_html(bg_path: Path) -> str:
 <body>
   <img class="bg" src="{bg_path}">
 
+  <!-- 0. Redone Title Box: Clean Keynote Typography matching D1 and D3 -->
+  <div class="diagram-title-box">
+    <div class="diagram-title">Hermetiq BEP Ingest & PostgreSQL Partitioning Pipeline</div>
+    <div class="diagram-subtitle">Partition-routed JetStream ingestion, 1:1 subscriber Deployments, 20 parent table sets, and GCS progress store</div>
+  </div>
+
   <!-- 1. Bazel Clients: Directly in native container, no textbox -->
   <div class="direct-card" style="top: 118px; left: 78px; width: 195px;">
     <div class="card-title">Bazel clients</div>
@@ -619,15 +836,50 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 8px; font-weight: 800; color: #0284c7;">SQL metadata writes (batch INSERT)</span>
   </div>
 
-  <!-- 5. Query API: Directly in native glass slab container, seated down & right, no textbox -->
-  <div class="direct-card" style="top: 391px; left: 92px; width: 200px;">
-    <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em;">Query API · Deploy x2</div>
-    <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 5px;">grpc-api</div>
-    <div style="font-size: 8.5px; line-height: 1.38; font-weight: 700; color: #1e293b; margin-top: 3px;">
-      <span style="white-space: nowrap;">gRPC (:50091) · REST (:8008) · MCP (:5150)</span><br>
-      Time-bounded queries · Pruned reads<br>
-      Reads PostgreSQL & GCS progress store<br>
-      <span style="font-weight: 800; color: #047857;">Zero NATS dependency</span>
+  <!-- 5. Redone Query API Node: Sleek 3D Frosted Glass Container with Dual Pod Replicas -->
+  <div class="query-api-node">
+    <div class="query-header">
+      <div class="query-title">
+        <span>Query API</span>
+        <span style="font-size: 8.5px; font-weight: 700; color: #64748b;">· grpc-api</span>
+      </div>
+      <div class="deploy-badge">Deploy x2</div>
+    </div>
+
+    <!-- Dual Pod Replica Tier -->
+    <div class="pod-grid">
+      <div class="pod-card">
+        <div class="pod-title">
+          <span>grpc-api-0</span>
+          <span class="status-dot"></span>
+        </div>
+        <div style="font-size: 6.5px; color: #64748b; margin-top: 1px;">Replica 1 · Ready</div>
+      </div>
+      <div class="pod-card">
+        <div class="pod-title">
+          <span>grpc-api-1</span>
+          <span class="status-dot"></span>
+        </div>
+        <div style="font-size: 6.5px; color: #64748b; margin-top: 1px;">Replica 2 · Ready</div>
+      </div>
+    </div>
+
+    <!-- Protocols & Ports -->
+    <div class="port-row">
+      <div class="port-chip">gRPC :50091</div>
+      <div class="port-chip">REST :8008</div>
+      <div class="port-chip">MCP :5150</div>
+    </div>
+
+    <!-- Invariants & Responsibilities -->
+    <div class="query-meta">
+      <div class="invariant-badge">
+        <span style="display: inline-block; width: 4px; height: 4px; background: #059669; border-radius: 50%;"></span>
+        <span>Zero NATS dependency · Stateless tier</span>
+      </div>
+      <div style="color: #475569; font-weight: 600; margin-top: 2px;">
+        Partition-pruned reads · PostgreSQL & GCS progress
+      </div>
     </div>
   </div>
 
