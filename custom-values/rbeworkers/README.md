@@ -85,6 +85,31 @@ no cleanup sidecar; a FUSE pool can explicitly opt out with
 `cleanupOnTermination: false`. This requires bb-worker-operator v0.3.3 or newer
 and Kubernetes 1.29 or newer.
 
+## Worker and runner memory
+
+Each worker Pod divides its memory between the runner container, where actions
+execute, and the worker container, which runs bb_worker. bb_worker memory-maps
+the operator-generated 16 GiB local CAS and, in pools with a virtual build
+directory, the file pool. The kernel charges the page cache for those reads to
+the worker container, so its limit must hold that cache as well as bb_worker's
+heap. When the limit is too small, cached data is read from disk again and
+again: the node reports a high major page-fault rate (for example, the
+node-exporter `NodeMemoryMajorPagesFaults` alert), and the worker container
+reads several times more from disk than it writes.
+
+The examples give the worker container 9Gi (4Gi in the concurrency-2
+Testcontainers pools) and take that memory from the runner, so no Pod requests
+more memory than before. When you resize a pool:
+
+- Lower the runner only after comparing its peak working set
+  (`container_memory_working_set_bytes{container="runner"}`) with its limit.
+  Actions are killed when the runner reaches its limit.
+- An overlay that changes only the runner's memory still adds the worker's
+  request to every Pod. Check that both fit on the target nodes.
+- If the worker container keeps reading more from disk than it writes
+  (`container_fs_reads_bytes_total` and `container_fs_writes_bytes_total` with
+  `container="worker"`), its cache does not fit in its limit.
+
 ## Environment overlays
 
 For another environment, reference this directory from a Kustomize overlay.
