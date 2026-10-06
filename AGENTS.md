@@ -128,7 +128,7 @@ Inspect 100% of visible text elements across all three images:
   - `web-ut-80` -> `web-ui :80`
   - `Gafana` -> `Grafana`
   - `Bszel clients` -> `Bazel clients`
-  - `outprt_tests` -> `output_tests`
+  - `outprt_tests` -> `output_files`
   - `remote_ramne` -> `remote_exec`
   - `parents tents` -> `parent tables`
   - `normal evorts · BEFBEP stream` -> `SQL metadata writes (batch INSERT)`

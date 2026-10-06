@@ -346,6 +346,50 @@ def clean_d2_query_slab(im):
     return im_clean
 
 
+def clean_gateway_tls_hop(im):
+    """
+    Dissolves the inaccurate 'TLS' text and blue padlock between Gateway
+    and Kubernetes ClusterIP Services, reflecting cleartext HTTP/2 (h2c) in production.
+    """
+    im_clean = im.copy()
+    # 1. Dissolve 'TLS' text above arrow: (830, 134, 875, 156)
+    im_clean = inpaint_text_smooth(im_clean, (830, 134, 875, 156), lum_threshold=180)
+
+    # 2. Dissolve padlock below arrow: (834, 165, 874, 218)
+    box = (834, 165, 874, 218)
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+
+    tl = (218, 230, 242)
+    tr = (212, 226, 238)
+    bl = (210, 226, 240)
+    br = (206, 222, 236)
+
+    for y in range(h):
+        v = y / (h - 1)
+        for x in range(w):
+            u = x / (w - 1)
+            r = int((1-u)*(1-v)*tl[0] + u*(1-v)*tr[0] + (1-u)*v*bl[0] + u*v*br[0])
+            g = int((1-u)*(1-v)*tl[1] + u*(1-v)*tr[1] + (1-u)*v*bl[1] + u*v*br[1])
+            b = int((1-u)*(1-v)*tl[2] + u*(1-v)*tr[2] + (1-u)*v*bl[2] + u*v*br[2])
+
+            dist_top = y
+            dist_bot = h - 1 - y
+            dist_left = x
+            dist_right = w - 1 - x
+            min_dist = min(dist_top, dist_bot, dist_left, dist_right)
+            if min_dist < 4:
+                alpha = min_dist / 4.0
+                orig = im.getpixel((box[0] + x, box[1] + y))[:3]
+                r = int(orig[0] * (1 - alpha) + r * alpha)
+                g = int(orig[1] * (1 - alpha) + g * alpha)
+                b = int(orig[2] * (1 - alpha) + b * alpha)
+
+            im_clean.putpixel((box[0] + x, box[1] + y), (r, g, b))
+
+    return im_clean
+
+
 def prepare_clean_base_images():
     """Pre-processes base images by dissolving baked-in text in overlay areas."""
     # Prefer pristine fixed-images if present
@@ -361,6 +405,12 @@ def prepare_clean_base_images():
     d1_base = inpaint_text_smooth(d1_base, (1180, 126, 1295, 200), lum_threshold=216)
     # Remove hallucinated duplicate upper GCS bucket & phantom arrow from PostgreSQL
     d1_base = clean_upper_gcs_bucket(d1_base)
+    # Dissolve misleading TLS text & padlock on internal gateway->services hop
+    d1_base = clean_gateway_tls_hop(d1_base)
+    # Dissolve misleading NATS OTLP Push text (NATS uses Prometheus exporter + VMPodScrape)
+    d1_base = inpaint_text_smooth(d1_base, (429, 520, 490, 538), lum_threshold=180)
+    # Dissolve hallucinated 'promistores' text
+    d1_base = inpaint_text_smooth(d1_base, (830, 530, 920, 555), lum_threshold=180)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
@@ -392,6 +442,11 @@ def prepare_clean_base_images():
     d3_base.paste(oidc_patch, (1080, 100))
     # Inpaint ClusterIP on D3
     d3_base = inpaint_text_smooth(d3_base, (872, 128, 1106, 222), lum_threshold=185)
+    # Dissolve misleading TLS text & padlock on internal gateway->services hop
+    d3_base = clean_gateway_tls_hop(d3_base)
+    # Dissolve contradictory legend text: cyan (request / data) and magenta (event stream)
+    d3_base = inpaint_text_smooth(d3_base, (948, 28, 1028, 44), lum_threshold=180)
+    d3_base = inpaint_text_smooth(d3_base, (1080, 28, 1160, 44), lum_threshold=180)
     clean_d3_path = TMP_DIR / "clean_d3.png"
     d3_base.save(clean_d3_path)
 
@@ -708,12 +763,18 @@ def build_d1_html(bg_path: Path) -> str:
   <div class="glass-pill" style="top: 159px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">GRPCRoute · bep-cloud-grpc · api-cloud-grpc</div>
   <div class="glass-pill" style="top: 187px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">HTTPRoute · api-web · dashboard · grafana · mcp</div>
 
+  <!-- Gateway to ClusterIP cleartext HTTP/2 hop -->
+  <div style="position: absolute; z-index: 15; top: 139px; left: 818px; width: 54px; text-align: center;">
+    <div style="font-size: 8px; font-weight: 800; color: #0284c7; line-height: 1;">h2c</div>
+    <div style="font-size: 6px; font-weight: 700; color: #475569; margin-top: 1px;">cleartext</div>
+  </div>
+
   <!-- Section 1: ClusterIP Services Box: Directly in native container, no textbox -->
   <div class="direct-card" style="top: 136px; left: 882px; width: 220px;">
     <div class="card-title">Kubernetes ClusterIP Services</div>
     <div style="font-size: 8px; font-weight: 800; color: #3730a3; margin-top: 1px;">L4 Routing Only · No TLS Termination</div>
     <div class="card-sub" style="margin-top: 2px;">
-      bep-nats-pub :50091 · grpc-api :50091, :8008, :5150<br>
+      bep-nats-pub :50091 · grpc-api :50091, :80, :5150<br>
       web-ui :80 · grafana-oauth2-proxy :8080<br>
       <span style="font-weight: 700; color: #334155;">Auth verified by app pods, not Services</span>
     </div>
@@ -744,7 +805,7 @@ def build_d1_html(bg_path: Path) -> str:
     <div class="card-title">Hermetiq Query API & MCP</div>
     <div style="font-size: 8px; font-weight: 800; color: #047857; margin-top: 1px;">Zero NATS Dependency · Stateless</div>
     <div class="card-sub" style="font-size: 8px; line-height: 1.35; margin-top: 3px;">
-      gRPC (:50091) · REST (:8008) · MCP (:5150)<br>
+      gRPC (:50091) · REST (:80 / target:8008) · MCP (:5150)<br>
       Reads PostgreSQL metadata & GCS log chunks<br>
       <span style="font-weight: 700; color: #334155;">No stream subscriptions · Decoupled from JetStream</span>
     </div>
@@ -758,6 +819,9 @@ def build_d1_html(bg_path: Path) -> str:
     <div style="font-size: 8.5px; font-weight: 800; color: #0284c7;">Direct Chunk Offload</div>
     <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Subscribers upload stdout/stderr to GCS</div>
   </div>
+
+  <!-- Section 3: NATS Telemetry via Prometheus exporter scraped by VMPodScrape -->
+  <div class="glass-emerald" style="top: 520px; left: 432px; width: 142px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 7.5px; font-weight: 800; color: #047857;">Prometheus exporter (VMPodScrape)</div>
 
   <!-- Section 3: Finding 4 - VMAgent Scraper -->
   <div class="glass-emerald" style="top: 683px; left: 938px; width: 110px; height: 23px; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 800; color: #047857;">VMAgent Scraper</div>
@@ -867,7 +931,7 @@ def build_d2_html(bg_path: Path) -> str:
     <!-- Protocols & Ports -->
     <div class="port-row">
       <div class="port-chip">gRPC :50091</div>
-      <div class="port-chip">REST :8008</div>
+      <div class="port-chip">REST :80 (:8008)</div>
       <div class="port-chip">MCP :5150</div>
     </div>
 
@@ -885,7 +949,7 @@ def build_d2_html(bg_path: Path) -> str:
 
   <!-- 6. Cloud SQL Parent Table Stacks -->
   <div class="glass-pill" style="top: 390px; left: 402px; width: 126px; height: 22px; font-size: 8px;">invocations · targets · tests</div>
-  <div class="glass-pill" style="top: 390px; left: 538px; width: 126px; height: 22px; font-size: 8px;">actions · logs · output_tests</div>
+  <div class="glass-pill" style="top: 390px; left: 538px; width: 126px; height: 22px; font-size: 8px;">actions · logs · output_files</div>
   <div class="glass-pill" style="top: 390px; left: 672px; width: 132px; height: 22px; font-size: 8px;">cache_events · remote_exec</div>
   <div class="glass-pill" style="top: 390px; left: 816px; width: 135px; height: 22px; font-size: 8px;">progresses · 20 parent tables</div>
 
@@ -900,7 +964,7 @@ def build_d2_html(bg_path: Path) -> str:
     <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 5px;">per-project artifact bucket</div>
     <div style="font-size: 8.5px; line-height: 1.38; font-weight: 700; color: #1e293b; margin-top: 3px;">
       <span style="white-space: nowrap;">Async gzip protobuf chunks · Workload Identity</span><br>
-      <code style="font-size: 7.5px; color: #0f172a; letter-spacing: -0.02em; white-space: nowrap;">progress/v1/&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz</code><br>
+      <code style="font-size: 7.5px; color: #0f172a; letter-spacing: -0.02em; white-space: nowrap;"><strong style="color: #0369a1;">progress/v1/</strong>&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz</code><br>
       <span style="font-weight: 800; color: #0284c7; white-space: nowrap;">grpc-api reads chunks directly · DB fallback</span>
     </div>
   </div>
@@ -956,6 +1020,20 @@ def build_d3_html(bg_path: Path) -> str:
 <body>
   <img class="bg" src="{bg_path}">
 
+  <!-- Legend overrides: cyan = client request / REAPI, magenta = storage RPCs / data -->
+  <div style="position: absolute; z-index: 15; top: 31px; left: 954px; width: 100px;">
+    <span style="font-size: 9.5px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em;">client request / REAPI</span>
+  </div>
+  <div style="position: absolute; z-index: 15; top: 31px; left: 1086px; width: 115px;">
+    <span style="font-size: 9.5px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em;">storage RPCs / data</span>
+  </div>
+
+  <!-- Gateway to ClusterIP cleartext HTTP/2 hop -->
+  <div style="position: absolute; z-index: 15; top: 139px; left: 818px; width: 54px; text-align: center;">
+    <div style="font-size: 8px; font-weight: 800; color: #0284c7; line-height: 1;">h2c</div>
+    <div style="font-size: 6px; font-weight: 700; color: #475569; margin-top: 1px;">cleartext</div>
+  </div>
+
   <!-- Section 1: ClusterIP Services: Directly in native container, no textbox -->
   <div class="direct-card" style="top: 136px; left: 882px; width: 220px;">
     <div class="card-title">Kubernetes ClusterIP Services</div>
@@ -996,10 +1074,10 @@ def build_d3_html(bg_path: Path) -> str:
     <div style="font-size: 9px; font-weight: 700; color: #1e293b; margin-top: 2px;">Worker payloads · Direct gRPC data</div>
   </div>
 
-  <!-- Section 3: KEDA autoscaling - No Disk Link -->
-  <div class="glass-rose" style="top: 642px; left: 466px; width: 118px; height: 32px; padding: 2px 4px; text-align: center;">
-    <div style="font-size: 8px; font-weight: 800; color: #e11d48;">No Disk Link</div>
-    <div style="font-size: 7px; font-weight: 700; color: #1e293b;">Workers use NVMe SSD</div>
+  <!-- Section 3: Worker Storage -->
+  <div class="glass-rose" style="top: 641px; left: 450px; width: 122px; height: 32px; padding: 2px 4px; text-align: center; display: flex; flex-direction: column; justify-content: center;">
+    <div style="font-size: 8px; font-weight: 800; color: #e11d48;">No Storage Pod Link</div>
+    <div style="font-size: 6.5px; font-weight: 700; color: #1e293b; line-height: 1.2;">NVMe SSD or boot emptyDir</div>
   </div>
 
   <!-- KEDA PromQL query badge over VictoriaMetrics -->
