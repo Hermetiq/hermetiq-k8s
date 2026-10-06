@@ -1,8 +1,35 @@
 # GKE Standard raw-block Local SSD LVM provisioner for Buildbarn storage.
 #
 # This DaemonSet targets nodes created with --local-nvme-ssd-block, creates an
-# LVM volume group named "ephemeral", carves logical volumes for Buildbarn, and
-# labels the node hermetiq/ephemeral-lvm=ready after all devices exist.
+# LVM volume group named "ephemeral", carves the logical volumes
+# /dev/ephemeral/{cas,ac,iscc,fsac}, and labels the node
+# hermetiq/ephemeral-lvm=ready after all devices exist.
+#
+# How it works, and why it is shaped this way, is documented in
+# docs/buildbarn-block-storage.md ("GKE Example B"). In short:
+#
+# - Node-readiness gate: storage.nodeSelector in
+#   buildbarn-values-local-ssd-block.yaml requires hermetiq/ephemeral-lvm=ready,
+#   so a storage pod stays cleanly Pending until the devices exist instead of
+#   FailedMount-looping on a fresh node. The label is cleared at pod start and
+#   re-applied after provisioning, so a rebooted node with wiped SSDs re-gates.
+# - Why not ghcr.io/buildbarn/bb-partition-ephemeral-disks: that image is built
+#   on distroless_static and shells out to vgcreate/lvcreate, which are absent
+#   there. This runs the same LVM2 commands from an image that has them.
+# - Classic LVM striping (the device-mapper "striped" target in the already
+#   loaded dm-mod) instead of --type raid0, which needs the dm-raid module that
+#   GKE Container-Optimized OS cannot load.
+# - terminationMessagePath is moved off /dev because the container bind-mounts
+#   the host /dev; the kubelet's default /dev/termination-log mount otherwise
+#   races the hostPath mount and runc fails before the process starts.
+#
+# Prerequisites:
+# - A non-preemptible node pool created with `--local-nvme-ssd-block count=N`
+#   (raw block SSDs), NOT `--ephemeral-storage-local-ssd`, labeled
+#   node-type=ssd-block and tainted hermetiq/ssd-block:NoSchedule.
+# - Node egress for `apk add lvm2 curl`, or bake an image with lvm2 and curl
+#   for air-gapped clusters and set `image:` below.
+# - A namespace that permits privileged pods.
 #
 # Use with buildbarn-values-local-ssd-block.yaml. Do not use on GKE Autopilot or
 # on nodes created with --ephemeral-storage-local-ssd; those disks are already
@@ -13,6 +40,8 @@ metadata:
   name: partition-ephemeral-disks
   namespace: hermetiq
 ---
+# Node labels are cluster-scoped, so this must be a ClusterRole. Scope is limited
+# to reading and patching Node objects (used only to set the readiness label).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -70,7 +99,7 @@ spec:
           imagePullPolicy: IfNotPresent
           terminationMessagePath: /tmp/termination-log
           securityContext:
-            privileged: true
+            privileged: true # required to manage host LVM and device-mapper
           env:
             - name: NODE_NAME
               valueFrom:
