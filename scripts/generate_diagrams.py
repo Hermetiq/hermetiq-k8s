@@ -220,8 +220,10 @@ def prepare_clean_base_images():
     d2_base = inpaint_text_smooth(d2_base, (70, 118, 195, 164), lum_threshold=185)
     # Clean Delivery guarantees inside card (74, 276, 485, 340)
     d2_base = inpaint_text_smooth(d2_base, (74, 276, 485, 340), lum_threshold=185)
+    # Clean File storage native card under JetStream: (776, 274, 1025, 318)
+    d2_base = inpaint_text_smooth(d2_base, (776, 274, 1025, 318), lum_threshold=185)
     # Clean Query API slab
-    d2_base = inpaint_text_smooth(d2_base, (50, 375, 230, 480), lum_threshold=185)
+    d2_base = inpaint_text_smooth(d2_base, (50, 375, 240, 506), lum_threshold=185)
     # Clean GCS hybrid (slab face + ribs)
     d2_base = inpaint_gcs_hybrid(d2_base)
     # Clean query text above GCS arrow
@@ -540,10 +542,10 @@ def build_d2_html(bg_path: Path) -> str:
   <div class="stream-tag" style="top: 220px; left: 805px; width: 85px; height: 32px;">Stream 4</div>
   <div class="stream-tag" style="top: 220px; left: 905px; width: 85px; height: 32px;">Stream N-1</div>
 
-  <!-- NATS footer -->
-  <div class="glass-pill" style="top: 278px; left: 800px; width: 220px; height: 36px; text-align: center; flex-direction: column;">
-    <div style="font-size: 8.5px; font-weight: 800; color: #3730a3;">File storage · RF3 (3 replicas)</div>
-    <div style="font-size: 8px; font-weight: 700; color: #334155; margin-top: 1px;">Explicit ACK · 30m retention</div>
+  <!-- NATS footer: Directly in native card container, no overlay textbox -->
+  <div class="direct-card" style="top: 290px; left: 775px; width: 250px; text-align: center;">
+    <div style="font-size: 9.5px; font-weight: 800; color: #3730a3;">File storage · RF3 (3 replicas)</div>
+    <div style="font-size: 8.5px; font-weight: 700; color: #1e293b; margin-top: 2px;">Explicit ACK · 30m retention</div>
   </div>
 
   <!-- 4. Subscriber Pods -->
@@ -564,12 +566,12 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 8px; font-weight: 800; color: #0284c7;">SQL metadata writes (batch INSERT)</span>
   </div>
 
-  <!-- 5. Query API: Directly in native glass slab container, no textbox -->
-  <div class="direct-card" style="top: 376px; left: 62px; width: 195px;">
-    <div class="card-title">Query API · Deploy x2</div>
-    <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 1px;">grpc-api</div>
-    <div class="card-sub" style="margin-top: 2px;">
-      gRPC (:50091) · REST (:8008) · MCP (:5150)<br>
+  <!-- 5. Query API: Directly in native glass slab container, seated down & right, no textbox -->
+  <div class="direct-card" style="top: 391px; left: 92px; width: 200px;">
+    <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em;">Query API · Deploy x2</div>
+    <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 5px;">grpc-api</div>
+    <div style="font-size: 8.5px; line-height: 1.38; font-weight: 700; color: #1e293b; margin-top: 3px;">
+      <span style="white-space: nowrap;">gRPC (:50091) · REST (:8008) · MCP (:5150)</span><br>
       Time-bounded queries · Pruned reads<br>
       Reads PostgreSQL & GCS progress store<br>
       <span style="font-weight: 800; color: #047857;">Zero NATS dependency</span>
@@ -587,14 +589,14 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 7.5px; font-weight: 700; color: #1e293b;">progress fallback (if GCS offline) · No DB write to GCS</span>
   </div>
 
-  <!-- 7. GCS Progress Store: Directly on native glass slab, ribs fully visible, no textbox -->
-  <div class="direct-card" style="top: 374px; left: 1022px; width: 220px;">
-    <div class="card-title">GCS progress store</div>
-    <div style="font-size: 8.5px; font-weight: 800; color: #0369a1; margin-top: 1px;">per-project artifact bucket</div>
-    <div class="card-sub" style="font-size: 7.5px; line-height: 1.25; margin-top: 2px;">
-      Async gzip protobuf chunks · Workload Identity<br>
-      <code style="font-size: 7px; color: #0f172a;">progress/v1/&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz</code><br>
-      <span style="font-weight: 800; color: #0284c7;">grpc-api reads chunks directly · DB fallback</span>
+  <!-- 7. GCS Progress Store: Directly on native glass slab, seated down & right, ribs fully visible, no textbox -->
+  <div class="direct-card" style="top: 391px; left: 1056px; width: 200px;">
+    <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em;">GCS progress store</div>
+    <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 5px;">per-project artifact bucket</div>
+    <div style="font-size: 8.5px; line-height: 1.38; font-weight: 700; color: #1e293b; margin-top: 3px;">
+      <span style="white-space: nowrap;">Async gzip protobuf chunks · Workload Identity</span><br>
+      <code style="font-size: 7.5px; color: #0f172a; letter-spacing: -0.02em; white-space: nowrap;">progress/v1/&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz</code><br>
+      <span style="font-weight: 800; color: #0284c7; white-space: nowrap;">grpc-api reads chunks directly · DB fallback</span>
     </div>
   </div>
 
