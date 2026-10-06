@@ -209,6 +209,8 @@ def prepare_clean_base_images():
     d1_base = inpaint_text_smooth(d1_base, (872, 128, 1106, 222), lum_threshold=185)
     # Clean OIDC Provider inside card: (1165, 126, 1295, 196)
     d1_base = inpaint_text_smooth(d1_base, (1165, 126, 1295, 196), lum_threshold=185)
+    # Clean garbled stderr text next to upper GCS bucket: (1230, 320, 1330, 400)
+    d1_base = inpaint_text_smooth(d1_base, (1230, 320, 1330, 400), lum_threshold=185)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
@@ -484,6 +486,11 @@ def build_d1_html(bg_path: Path) -> str:
   <div class="glass-cyan" style="top: 464px; left: 865px; width: 165px; height: 38px; padding: 4px 6px; text-align: center;">
     <div style="font-size: 8.5px; font-weight: 800; color: #0284c7;">Direct Chunk Offload</div>
     <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Subscribers upload stdout/stderr to GCS</div>
+  </div>
+
+  <!-- Section 2: GCS compressed stdout/stderr chunks label -->
+  <div style="position: absolute; z-index: 10; top: 348px; left: 1244px; width: 120px;">
+    <div style="font-size: 10px; font-weight: 700; color: #1e293b; line-height: 1.35;">compressed stdout /<br>stderr chunks</div>
   </div>
 
   <!-- Section 3: Finding 4 - VMAgent Scraper -->
