@@ -665,21 +665,21 @@ def build_d3_html(bg_path: Path) -> str:
   </div>
 
   <!-- Section 2: bb-frontend execution connection -->
-  <div class="glass-cyan" style="top: 442px; left: 742px; width: 168px; height: 42px; padding: 3px 6px; text-align: center;">
-    <div style="font-size: 9.5px; font-weight: 800; color: #0369a1;">bb-frontend</div>
-    <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Routes Execute to bb-scheduler:8982<br>Routes CAS/AC to bb-storage:8981</div>
+  <div class="glass-cyan" style="top: 444px; left: 742px; width: 166px; height: 36px; padding: 2px 6px; text-align: center; display: flex; flex-direction: column; justify-content: center;">
+    <div style="font-size: 10px; font-weight: 800; color: #0369a1;">bb-frontend</div>
+    <div style="font-size: 9px; font-weight: 700; color: #1e293b; margin-top: 2px;">Execute :8982 · CAS/AC :8981</div>
   </div>
 
   <!-- Section 2: bb-browser blobstore reads -->
-  <div class="glass-cyan" style="top: 442px; left: 918px; width: 158px; height: 42px; padding: 3px 6px; text-align: center;">
-    <div style="font-size: 9.5px; font-weight: 800; color: #0369a1;">bb-browser</div>
-    <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Build exploration Web UI (:80)<br>Direct read-only CAS/AC inspection</div>
+  <div class="glass-cyan" style="top: 444px; left: 918px; width: 162px; height: 36px; padding: 2px 6px; text-align: center; display: flex; flex-direction: column; justify-content: center;">
+    <div style="font-size: 10px; font-weight: 800; color: #0369a1;">bb-browser</div>
+    <div style="font-size: 9px; font-weight: 700; color: #1e293b; margin-top: 2px;">Web UI :80 · Read-only CAS/AC</div>
   </div>
 
   <!-- Section 2: Storage RPCs category -->
-  <div class="glass-ice" style="top: 510px; left: 775px; width: 270px; height: 38px; padding: 3px 6px; text-align: center;">
-    <div style="font-size: 9px; font-weight: 800; color: #1d4ed8;">Storage RPCs :8981 (CAS · AC · FSAC)</div>
-    <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Worker payload reads/writes · Direct gRPC data (NOT event stream)</div>
+  <div class="glass-ice" style="top: 510px; left: 785px; width: 250px; height: 36px; padding: 2px 6px; text-align: center; display: flex; flex-direction: column; justify-content: center;">
+    <div style="font-size: 9.5px; font-weight: 800; color: #1d4ed8;">Storage RPCs :8981 (CAS · AC · FSAC)</div>
+    <div style="font-size: 9px; font-weight: 700; color: #1e293b; margin-top: 2px;">Worker payloads · Direct gRPC data</div>
   </div>
 
   <!-- Section 3: KEDA autoscaling - No Disk Link -->
