@@ -151,23 +151,27 @@ The repository provides an automated diagram generator script:
 
 #### How it works:
 1. Loads the high-resolution 3D base plates (`hermetiq-architecture-ai.png`, `bep-ingest-architecture-ai.png`, `bb-architecture-ai.png`).
-2. Composes the HTML/CSS frosted-glass vector overlays with exact pixel-level coordinates.
-3. Renders each diagram with Google Chrome headless at native 1376x768 resolution:
+2. Pre-processes the base plates via `prepare_clean_base_images()` using smooth background inpainting and vertical rib interpolation to dissolve baked-in AI text. This enables high-transparency frosted glass overlays (`rgba(..., 0.45)`) without underlying ghost text bleeding through.
+3. Composes the HTML/CSS frosted-glass vector overlays with exact, tight bounding box coordinates.
+4. Renders each diagram with Google Chrome headless at native 1376x768 resolution:
    `google-chrome --headless --disable-gpu --hide-scrollbars --screenshot=<output.png> --window-size=1376,768 <overlay.html>`
-4. Writes the production PNGs directly to repository root:
+5. Writes the production PNGs directly to repository root:
    - `hermetiq-gke-deployment.png`
    - `hermetiq-nats-db-ingest.png`
    - `hermetiq-buildbarn-diagram.png`
 
 #### How Future Agents Must Update Diagrams:
 1. Open `scripts/generate_diagrams.py`.
-2. Locate the relevant diagram template (`d1_html`, `d2_html`, or `d3_html`).
-3. Adjust coordinates or add glass-card / pill overlay elements.
-4. Execute `./scripts/generate_diagrams.py`.
-5. Use `view_file` to inspect cropped regions of modified areas at 100% zoom.
-6. Verify against the 3-Pass Verification Framework (Pass 1, Pass 2, Pass 3).
-7. Run `helm lint charts/hermetiq charts/buildbarn charts/bb-worker-operator`.
-8. Commit and submit PR.
+2. Locate the relevant diagram template (`build_d1_html`, `build_d2_html`, or `build_d3_html`).
+3. Keep bounding boxes **tight** to the text actually used (e.g. `ClusterIP Services` at `226x76px`, `Query API` at `198x86px`, `GCS progress store` at `232x86px`). Never let textareas cover underlying 3D glass slabs, beveled edges, or storage partition ribs.
+4. Use transparent frosted glass tokens (`.glass-ice-trans`, `.glass-violet-trans`, `.glass-cyan-trans`) with subtle linear gradients (`rgba(..., 0.45) 0%`, `rgba(..., 0.28) 50%`) and `backdrop-filter: blur(8px) saturate(180%)` so underlying 3D base plates and lighting shine through.
+5. Apply **high-contrast, bold typography** (`font-weight: 700`–`800`) using dark slate (`#0f172a`, `#1e293b`) and dark saturated accents (`#3730a3`, `#5b21b6`, `#0369a1`, `#047857`). Strictly avoid faint, washed-out light gray (`#64748b`, `#475569`) at small font sizes.
+6. If modifying elements that overlay baked-in base image text, ensure `prepare_clean_base_images()` includes the inpainting coordinates so no ghost text shows through.
+7. Execute `python3 scripts/generate_diagrams.py`.
+8. Use `view_file` to inspect cropped regions of modified areas at 100% zoom.
+9. Verify against the 3-Pass Verification Framework (Pass 1, Pass 2, Pass 3).
+10. Run `helm lint charts/hermetiq charts/buildbarn charts/bb-worker-operator`.
+11. Commit and submit PR.
 
 ---
 
@@ -175,16 +179,20 @@ The repository provides an automated diagram generator script:
 
 - **Perspective**: 30° / 60° orthographic isometric projection on multi-tiered floating platforms.
 - **Canvas / Background**: Clean studio slate `#f6f8fc` to `#ffffff` with subtle ambient lighting.
+- **Glass Transparency**:
+  - High-transparency cards: `rgba(..., 0.45)` down to `rgba(..., 0.28)` with `backdrop-filter: blur(8px) saturate(180%)`.
+  - Frosted micro-pills: `rgba(255, 255, 255, 0.90)` to `0.92` with `backdrop-filter: blur(10px)`.
 - **Color Palette**:
-  - Ingress / Gateway: Deep Indigo `#4f46e5` / `#6366f1`
-  - Messaging / NATS: Vibrant Emerald `#059669` / `#10b981` / Glowing Magenta `#d946ef` for JetStream
-  - Microservices / Subscribers: Vivid Cobalt `#0284c7` / `#0ea5e9`
-  - Storage / Database: Warm Amber `#d97706` / Gold `#f59e0b`
-  - Telemetry / Observability: Jade Green `#10b981` / Rose Crimson `#e11d48`
+  - Ingress / Gateway: Deep Indigo `#4f46e5` / `#3730a3`
+  - Messaging / NATS: Vibrant Emerald `#059669` / `#047857` / Magenta `#7e22ce` for JetStream
+  - Microservices / Subscribers: Vivid Cobalt `#0284c7` / `#0369a1`
+  - Storage / Database: Deep Navy `#0f172a` / `#1e293b` / Rose Crimson `#e11d48`
+  - Telemetry / Observability: Jade Green `#047857` / Slate `#334155`
 - **Typography**: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto.
-  - Section headers: 700 15px uppercase, letter-spacing 0.08em
-  - Component titles: 700 16px `#17223b`
-  - Body / Subtext: 500 13px `#4d5b72` / 11.5px `#66738a`
+  - Section headers: 800 15px uppercase, letter-spacing 0.08em
+  - Component titles: 800 11px `#0f172a`
+  - Subtitles & Accent lines: 800 8px–10px (`#3730a3`, `#5b21b6`, `#0369a1`, `#047857`)
+  - Body / Subtext: 700 7.5px–8px `#1e293b` (strictly avoid low-contrast light grays)
 
 ### 7. Reference Master Assets & Style Benchmarks
 
