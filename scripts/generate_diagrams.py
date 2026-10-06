@@ -5,7 +5,7 @@ Using Frosted Glassmorphism Vector Overlay & Headless Chrome Rendering.
 
 Ensures 100% adherence to the 3-Pass Verification Framework:
   Pass 1: Architecture & Flow Correctness (Issue #31 & #111 invariants)
-  Pass 2: Visual Aesthetics & Bling (Layered frosted glass, textured blending, tight boxes)
+  Pass 2: Visual Aesthetics & Bling (Direct container text, no redundant textboxes, exposed 3D glass)
   Pass 3: Typography & Label Zero-Hallucination (Pixel-perfect vector typography)
 """
 
@@ -73,7 +73,7 @@ def inpaint_text_smooth(im, box, lum_threshold=185, blur_radius=1.8):
                         rx = min(right_xs)
                         nr, ng, nb = pixels[rx, y][:3]
                     else:
-                        nr, ng, nb = 220, 235, 245
+                        nr, ng, nb = 240, 245, 252
 
                     if len(pixels[x, y]) == 4:
                         pixels[x, y] = (nr, ng, nb, pixels[x, y][3])
@@ -141,7 +141,6 @@ def inpaint_gcs_hybrid(im, box=(1012, 374, 1285, 475)):
                         if 0 <= nx < w and 0 <= ny < h:
                             dilated[nx][ny] = True
 
-    # Ribs section (x >= 210 in crop) -> interpolate vertically
     for x in range(210, w):
         clean_ys = [y for y in range(h) if not dilated[x][y]]
         if clean_ys:
@@ -163,7 +162,6 @@ def inpaint_gcs_hybrid(im, box=(1012, 374, 1285, 475)):
                         nr, ng, nb = pixels[x, min(bot_ys)][:3]
                     pixels[x, y] = (nr, ng, nb)
 
-    # Face section (x < 210) -> interpolate horizontally
     for y in range(h):
         clean_xs = [x for x in range(210) if not dilated[x][y]]
         if clean_xs:
@@ -200,27 +198,44 @@ def inpaint_gcs_hybrid(im, box=(1012, 374, 1285, 475)):
 
 def prepare_clean_base_images():
     """Pre-processes base images by dissolving baked-in text in overlay areas."""
+    # Prefer pristine fixed-images if present
+    d1_source = BASE_DIR / "fixed-images" / "hermetiq-architecture-ai.png"
+    if not d1_source.exists():
+        d1_source = BASE_DIR / "hermetiq-architecture-ai.png"
+
     # 1. Clean D1 base (hermetiq-architecture-ai.png)
-    d1_base = Image.open(BASE_DIR / "hermetiq-architecture-ai.png")
-    d1_base = inpaint_text_smooth(d1_base, (868, 130, 1106, 222), lum_threshold=185)
-    d1_base = inpaint_text_smooth(d1_base, (1174, 130, 1300, 222), lum_threshold=185)
-    d1_base = inpaint_text_smooth(d1_base, (1090, 185, 1175, 215), lum_threshold=185)
+    d1_base = Image.open(d1_source)
+    # Clean ClusterIP Services inside card: (872, 128, 1106, 222)
+    d1_base = inpaint_text_smooth(d1_base, (872, 128, 1106, 222), lum_threshold=185)
+    # Clean OIDC Provider inside card: (1165, 126, 1295, 196)
+    d1_base = inpaint_text_smooth(d1_base, (1165, 126, 1295, 196), lum_threshold=185)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
     # 2. Clean D2 base (bep-ingest-architecture-ai.png)
     d2_base = Image.open(BASE_DIR / "bep-ingest-architecture-ai.png")
+    # Clean Bazel clients inside card (70, 118, 195, 164)
+    d2_base = inpaint_text_smooth(d2_base, (70, 118, 195, 164), lum_threshold=185)
+    # Clean Delivery guarantees inside card (74, 276, 485, 340)
+    d2_base = inpaint_text_smooth(d2_base, (74, 276, 485, 340), lum_threshold=185)
+    # Clean Query API slab
     d2_base = inpaint_text_smooth(d2_base, (50, 375, 230, 480), lum_threshold=185)
+    # Clean GCS hybrid (slab face + ribs)
     d2_base = inpaint_gcs_hybrid(d2_base)
+    # Clean query text above GCS arrow
+    d2_base = inpaint_text_smooth(d2_base, (970, 415, 1020, 436), lum_threshold=160)
+    # Clean bottom line
     d2_base = inpaint_text_smooth(d2_base, (960, 502, 1260, 526), lum_threshold=190)
     clean_d2_path = TMP_DIR / "clean_d2.png"
     d2_base.save(clean_d2_path)
 
     # 3. Clean D3 base (bb-architecture-ai.png)
     d3_base = Image.open(BASE_DIR / "bb-architecture-ai.png")
-    d3_base = inpaint_text_smooth(d3_base, (868, 130, 1106, 222), lum_threshold=185)
-    d3_base = inpaint_text_smooth(d3_base, (1174, 130, 1300, 222), lum_threshold=185)
-    d3_base = inpaint_text_smooth(d3_base, (1090, 185, 1175, 215), lum_threshold=185)
+    # Patch clean OIDC region from d1 to remove any faint text
+    oidc_patch = d1_base.crop((1080, 100, 1310, 230))
+    d3_base.paste(oidc_patch, (1080, 100))
+    # Inpaint ClusterIP on D3
+    d3_base = inpaint_text_smooth(d3_base, (872, 128, 1106, 222), lum_threshold=185)
     clean_d3_path = TMP_DIR / "clean_d3.png"
     d3_base.save(clean_d3_path)
 
@@ -249,36 +264,13 @@ SHARED_CSS = """
     z-index: 1;
   }
 
-  /* High-Transparency Layered Frosted Glass: Underneath 3D Plate & Geometry Shines Through */
-  .glass-ice-trans {
+  /* Direct Container Text - Placed directly inside underlying 3D container with NO overlay textbox */
+  .direct-card {
     position: absolute;
     z-index: 10;
-    background: linear-gradient(135deg, rgba(230, 242, 255, 0.45) 0%, rgba(210, 230, 255, 0.28) 50%, rgba(235, 245, 255, 0.48) 100%);
-    backdrop-filter: blur(8px) saturate(180%);
-    -webkit-backdrop-filter: blur(8px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.85);
-    border-radius: 7px;
-    box-shadow: 0 4px 12px rgba(30, 58, 138, 0.04);
-  }
-  .glass-violet-trans {
-    position: absolute;
-    z-index: 10;
-    background: linear-gradient(135deg, rgba(245, 240, 255, 0.45) 0%, rgba(232, 222, 255, 0.28) 50%, rgba(248, 242, 255, 0.48) 100%);
-    backdrop-filter: blur(8px) saturate(180%);
-    -webkit-backdrop-filter: blur(8px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.85);
-    border-radius: 7px;
-    box-shadow: 0 4px 12px rgba(109, 40, 217, 0.04);
-  }
-  .glass-cyan-trans {
-    position: absolute;
-    z-index: 10;
-    background: linear-gradient(135deg, rgba(235, 246, 255, 0.45) 0%, rgba(215, 238, 255, 0.28) 50%, rgba(240, 248, 255, 0.48) 100%);
-    backdrop-filter: blur(8px) saturate(180%);
-    -webkit-backdrop-filter: blur(8px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.85);
-    border-radius: 7px;
-    box-shadow: 0 4px 14px rgba(2, 132, 199, 0.04);
+    background: transparent;
+    border: none;
+    box-shadow: none;
   }
 
   /* Semantic Pill & Badge Overlays */
@@ -437,8 +429,8 @@ def build_d1_html(bg_path: Path) -> str:
   <div class="glass-pill" style="top: 159px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">GRPCRoute · bep-cloud-grpc · api-cloud-grpc</div>
   <div class="glass-pill" style="top: 187px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">HTTPRoute · api-web · dashboard · grafana · mcp</div>
 
-  <!-- Section 1: ClusterIP Services Box: Tight bounds, transparent glass -->
-  <div class="glass-ice-trans" style="top: 133px; left: 868px; width: 226px; height: 76px; padding: 5px 8px;">
+  <!-- Section 1: ClusterIP Services Box: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 136px; left: 882px; width: 220px;">
     <div class="card-title">Kubernetes ClusterIP Services</div>
     <div style="font-size: 8px; font-weight: 800; color: #3730a3; margin-top: 1px;">L4 Routing Only · No TLS Termination</div>
     <div class="card-sub" style="margin-top: 2px;">
@@ -448,11 +440,11 @@ def build_d1_html(bg_path: Path) -> str:
     </div>
   </div>
 
-  <!-- Section 1: OIDC Provider: Tight bounds, transparent glass -->
-  <div class="glass-violet-trans" style="top: 133px; left: 1176px; width: 122px; height: 76px; padding: 5px 6px; text-align: center;">
-    <div class="card-title">OIDC Provider</div>
-    <div style="font-size: 8px; font-weight: 800; color: #5b21b6; margin-top: 1px;">Auth & SSO (Control Plane)</div>
-    <div class="card-sub" style="font-size: 7.5px; margin-top: 2px;">
+  <!-- Section 1: OIDC Provider: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 136px; left: 1176px; width: 120px; text-align: center;">
+    <div class="card-title" style="text-align: center;">OIDC Provider</div>
+    <div style="font-size: 8px; font-weight: 800; color: #5b21b6; margin-top: 1px; text-align: center;">Auth & SSO (Control Plane)</div>
+    <div class="card-sub" style="font-size: 7.5px; margin-top: 2px; text-align: center;">
       OIDC & JWKS verification<br>
       Secures UI, Grafana, gRPC, MCP<br>
       <span style="font-weight: 800; color: #4338ca;">Decoupled from ingest</span>
@@ -514,8 +506,8 @@ def build_d2_html(bg_path: Path) -> str:
 <body>
   <img class="bg" src="{bg_path}">
 
-  <!-- 1. Bazel Clients -->
-  <div class="glass-ice" style="top: 112px; left: 74px; width: 210px; height: 86px; padding: 7px 11px;">
+  <!-- 1. Bazel Clients: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 118px; left: 78px; width: 195px;">
     <div class="card-title">Bazel clients</div>
     <div style="font-size: 8px; font-weight: 800; color: #0284c7; margin-top: 1px;">Build Event Protocol (BEP)</div>
     <div class="card-sub" style="font-size: 7.5px; margin-top: 2px;">
@@ -524,8 +516,8 @@ def build_d2_html(bg_path: Path) -> str:
     </div>
   </div>
 
-  <!-- 2. Delivery Guarantees -->
-  <div class="glass-slate" style="top: 278px; left: 68px; width: 428px; height: 64px; padding: 6px 12px;">
+  <!-- 2. Delivery Guarantees: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 284px; left: 78px; width: 415px;">
     <div class="card-title">Delivery guarantees</div>
     <div class="card-sub" style="font-size: 8px; line-height: 1.35; margin-top: 2px;">
       JetStream retries failed deliveries with backoff; terminal errors route to BEP DLQ.<br>
@@ -542,7 +534,7 @@ def build_d2_html(bg_path: Path) -> str:
   <div class="stream-tag" style="top: 220px; left: 905px; width: 85px; height: 32px;">Stream N-1</div>
 
   <!-- NATS footer -->
-  <div class="glass-violet-trans" style="top: 270px; left: 788px; width: 240px; height: 50px; padding: 5px 6px; text-align: center;">
+  <div class="glass-pill" style="top: 278px; left: 800px; width: 220px; height: 36px; text-align: center; flex-direction: column;">
     <div style="font-size: 8.5px; font-weight: 800; color: #3730a3;">File storage · RF3 (3 replicas)</div>
     <div style="font-size: 8px; font-weight: 700; color: #334155; margin-top: 1px;">Explicit ACK · 30m retention</div>
   </div>
@@ -565,8 +557,8 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 8px; font-weight: 800; color: #0284c7;">SQL metadata writes (batch INSERT)</span>
   </div>
 
-  <!-- 5. Query API: Tight bounds, transparent glass, shows 3D glass slab bevel -->
-  <div class="glass-cyan-trans" style="top: 376px; left: 54px; width: 198px; height: 86px; padding: 5px 8px;">
+  <!-- 5. Query API: Directly in native glass slab container, no textbox -->
+  <div class="direct-card" style="top: 376px; left: 62px; width: 195px;">
     <div class="card-title">Query API · Deploy x2</div>
     <div style="font-size: 10px; font-weight: 800; color: #0369a1; margin-top: 1px;">grpc-api</div>
     <div class="card-sub" style="margin-top: 2px;">
@@ -588,13 +580,13 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 7.5px; font-weight: 700; color: #1e293b;">progress fallback (if GCS offline) · No DB write to GCS</span>
   </div>
 
-  <!-- 7. GCS Progress Store: Tight bounds, transparent glass, vertical partition ribs fully exposed -->
-  <div class="glass-cyan-trans" style="top: 376px; left: 1012px; width: 232px; height: 86px; padding: 5px 8px;">
+  <!-- 7. GCS Progress Store: Directly on native glass slab, ribs fully visible, no textbox -->
+  <div class="direct-card" style="top: 374px; left: 1022px; width: 220px;">
     <div class="card-title">GCS progress store</div>
-    <div style="font-size: 9px; font-weight: 800; color: #0369a1; margin-top: 1px;">per-project artifact bucket</div>
-    <div class="card-sub" style="margin-top: 2px;">
+    <div style="font-size: 8.5px; font-weight: 800; color: #0369a1; margin-top: 1px;">per-project artifact bucket</div>
+    <div class="card-sub" style="font-size: 7.5px; line-height: 1.25; margin-top: 2px;">
       Async gzip protobuf chunks · Workload Identity<br>
-      progress/v1/&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz<br>
+      <code style="font-size: 7px; color: #0f172a;">progress/v1/&lt;project&gt;/&lt;inv&gt;/&lt;seq&gt;-&lt;chunk&gt;.pb.gz</code><br>
       <span style="font-weight: 800; color: #0284c7;">grpc-api reads chunks directly · DB fallback</span>
     </div>
   </div>
@@ -650,8 +642,8 @@ def build_d3_html(bg_path: Path) -> str:
 <body>
   <img class="bg" src="{bg_path}">
 
-  <!-- Section 1: ClusterIP Services: Tight bounds, transparent glass -->
-  <div class="glass-ice-trans" style="top: 133px; left: 868px; width: 226px; height: 76px; padding: 5px 8px;">
+  <!-- Section 1: ClusterIP Services: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 136px; left: 882px; width: 220px;">
     <div class="card-title">Kubernetes ClusterIP Services</div>
     <div style="font-size: 8px; font-weight: 800; color: #3730a3; margin-top: 1px;">L4 Routing Only · No TLS Termination</div>
     <div class="card-sub" style="margin-top: 2px;">
@@ -661,11 +653,11 @@ def build_d3_html(bg_path: Path) -> str:
     </div>
   </div>
 
-  <!-- Section 1: OIDC Provider: Tight bounds, transparent glass -->
-  <div class="glass-violet-trans" style="top: 133px; left: 1176px; width: 122px; height: 76px; padding: 5px 6px; text-align: center;">
-    <div class="card-title">OIDC Provider</div>
-    <div style="font-size: 8px; font-weight: 800; color: #5b21b6; margin-top: 1px;">Auth & SSO (Control Plane)</div>
-    <div class="card-sub" style="font-size: 7.5px; margin-top: 2px;">
+  <!-- Section 1: OIDC Provider: Directly in native container, no textbox -->
+  <div class="direct-card" style="top: 136px; left: 1176px; width: 120px; text-align: center;">
+    <div class="card-title" style="text-align: center;">OIDC Provider</div>
+    <div style="font-size: 8px; font-weight: 800; color: #5b21b6; margin-top: 1px; text-align: center;">Auth & SSO (Control Plane)</div>
+    <div class="card-sub" style="font-size: 7.5px; margin-top: 2px; text-align: center;">
       OIDC & JWKS verification<br>
       Secures UI, Grafana, gRPC, MCP<br>
       <span style="font-weight: 800; color: #4338ca;">App token verification</span>

@@ -163,10 +163,12 @@ The repository provides an automated diagram generator script:
 #### How Future Agents Must Update Diagrams:
 1. Open `scripts/generate_diagrams.py`.
 2. Locate the relevant diagram template (`build_d1_html`, `build_d2_html`, or `build_d3_html`).
-3. Keep bounding boxes **tight** to the text actually used (e.g. `ClusterIP Services` at `226x76px`, `Query API` at `198x86px`, `GCS progress store` at `232x86px`). Never let textareas cover underlying 3D glass slabs, beveled edges, or storage partition ribs.
-4. Use transparent frosted glass tokens (`.glass-ice-trans`, `.glass-violet-trans`, `.glass-cyan-trans`) with subtle linear gradients (`rgba(..., 0.45) 0%`, `rgba(..., 0.28) 50%`) and `backdrop-filter: blur(8px) saturate(180%)` so underlying 3D base plates and lighting shine through.
+3. **The Direct Container Principle**: When a native 3D component (card, glass slab, pedestal) already exists in the base 3D plate (e.g. `Kubernetes ClusterIP Services`, `OIDC Provider`, `Bazel clients`, `Delivery guarantees`, `Query API`, `GCS progress store`), **NEVER overlay a redundant textbox with borders, background fill, or shadows on top of it**.
+   - Use `.direct-card` (`background: transparent; border: none; box-shadow: none; position: absolute;`) so the text is placed directly within the underlying 3D container.
+   - This eliminates the "textbox on top of a textbox" artifact, preserves the base image's beveled glass edges, reflections, and partition ribs, and lets the underlying 3D plate shine through.
+4. Keep overlays tight to the text actually used. Reserve pill overlays (`.glass-pill`, `.glass-sub-pill`) strictly for semantic badges (e.g. `bep-nats-sub-*`, route tags) and conduits.
 5. Apply **high-contrast, bold typography** (`font-weight: 700`–`800`) using dark slate (`#0f172a`, `#1e293b`) and dark saturated accents (`#3730a3`, `#5b21b6`, `#0369a1`, `#047857`). Strictly avoid faint, washed-out light gray (`#64748b`, `#475569`) at small font sizes.
-6. If modifying elements that overlay baked-in base image text, ensure `prepare_clean_base_images()` includes the inpainting coordinates so no ghost text shows through.
+6. When updating text inside native containers, inpaint baked-in AI text inside the container's interior bounding box in `prepare_clean_base_images()` before rendering the overlay text.
 7. Execute `python3 scripts/generate_diagrams.py`.
 8. Use `view_file` to inspect cropped regions of modified areas at 100% zoom.
 9. Verify against the 3-Pass Verification Framework (Pass 1, Pass 2, Pass 3).
