@@ -565,13 +565,13 @@ def clean_d3_baked_text(im):
 
     # 4. Misplaced Section 3 labels
     # 'Worker Operator GitOps Control Plane' under VictoriaMetrics
-    im_clean = fill_bilinear_feathered(im_clean, (600, 698, 890, 735), feather=4)
+    im_clean = fill_bilinear_feathered(im_clean, (600, 698, 890, 742), feather=4)
     # 'VictoriaMetrics telemetry' under Grafana screens
-    im_clean = fill_bilinear_feathered(im_clean, (1070, 698, 1310, 735), feather=4)
+    im_clean = fill_bilinear_feathered(im_clean, (1070, 698, 1315, 742), feather=4)
     # 'node-local NVMe SSD disk chassis' to the left of the chassis
     im_clean = fill_bilinear_feathered(im_clean, (195, 620, 335, 715), feather=4)
     # 'LVM Striped Storage' under the chassis
-    im_clean = fill_bilinear_feathered(im_clean, (340, 695, 520, 735), feather=4)
+    im_clean = fill_bilinear_feathered(im_clean, (340, 695, 520, 742), feather=4)
     return im_clean
 
 
@@ -663,8 +663,8 @@ def prepare_clean_base_images():
     d1_base = clean_vm_cubes(d1_base)
     d1_base = clean_vmagent_box(d1_base)
     # Clean bottom floor text under VM and Grafana in D1
-    d1_base = fill_bilinear_feathered(d1_base, (600, 698, 890, 735), feather=4)
-    d1_base = fill_bilinear_feathered(d1_base, (1070, 698, 1310, 735), feather=4)
+    d1_base = fill_bilinear_feathered(d1_base, (600, 698, 890, 742), feather=4)
+    d1_base = fill_bilinear_feathered(d1_base, (1070, 698, 1315, 742), feather=4)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
