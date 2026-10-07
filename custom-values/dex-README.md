@@ -62,19 +62,34 @@ oidc:
   jwksUrl: https://dex.your-domain.example/keys
 api:
   jwt:
+    audience: "hermetiq-web"
     groupsClaim: groups
 publisher:
   jwks:
+    audience: "bazel-cli"
     groupsClaim: groups
 dashboard:
   oauth2Proxy:
     scope: openid email profile groups offline_access
+    backendLogoutUrl: # <-- remove this entry
 ```
 
 The `hermetiq-web` client accepts the dashboard, Buildbarn Browser, and Grafana
 `/oauth2/callback` URLs under your domain. Its ID tokens have audience
 `hermetiq-web`; the Hermetiq API uses that audience from the shared OAuth
 Secret.
+
+Set the following in your copied `buildbarn-values.yaml` before installing the
+buildbarn chart (replace the domain with yours):
+
+```yaml
+frontend:
+  jwks:
+    issuer: https://dex.your-domain.example
+    audience: bazel-cli
+    sync:
+      url: https://dex.your-domain.example/keys
+```
 
 ## Bazel on headless build machines
 
