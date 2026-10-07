@@ -115,12 +115,58 @@ This repository includes a ready-to-edit version of that pattern:
 Apply the DaemonSet first, then layer the overlay after your base
 `buildbarn-values.yaml`.
 
-A practical split is:
+### How the DaemonSet works
 
-- CAS: 97%
-- AC: 1%
-- ISCC: 1%, when enabled
-- FSAC: 1%, when enabled
+`partition-ephemeral-disks-daemonset.yaml` runs one privileged pod per
+`node-type=ssd-block` node. On start it:
+
+1. Clears the node label `hermetiq/ephemeral-lvm`, so a node whose SSDs were
+   wiped by a reboot is not advertised as ready with stale state.
+2. Finds the raw Local SSDs at `/dev/disk/by-id/google-local-nvme-ssd-*` and
+   refuses to run if there are none, which means the node pool was not created
+   with `--local-nvme-ssd-block`.
+3. Creates the LVM2 volume group `ephemeral` across all of them, once.
+4. Creates the logical volumes if they do not exist, striped across every SSD:
+   `ac` 8 GiB, `iscc` 2 GiB, `fsac` 6 GiB, then `cas` with all remaining
+   extents. The small stores use fixed sizes rather than percentages because
+   they hold tiny objects (about 1.1 KiB ActionResults, 0.5 KiB ISCC records,
+   2 KiB FSAC bloom filters). A percentage of a multi-SSD node would hand them
+   tens of GiB and millions of extra key-location-map slots that the values
+   file would then have to cover in RAM. Fixed sizes keep the sizing arithmetic
+   in `buildbarn-values-local-ssd-block.yaml` valid on any node shape.
+5. Verifies that all four block devices exist, labels the node
+   `hermetiq/ephemeral-lvm=ready`, and sleeps. The storage overlay's
+   `nodeSelector` requires that label, so storage pods stay Pending until the
+   devices exist instead of failing to mount.
+
+Every step is idempotent, so a restarted DaemonSet pod is harmless. `lvcreate`
+is guarded by `lvs`, so editing a size never resizes an existing volume; only
+fresh or wiped nodes pick the change up.
+
+Implementation notes:
+
+- It does not use `ghcr.io/buildbarn/bb-partition-ephemeral-disks`. That image
+  is built on `distroless_static` and shells out to `vgcreate` and `lvcreate`,
+  which are not present there. The DaemonSet runs the same LVM2 commands from
+  `alpine:3.20` after `apk add lvm2 curl`. For air-gapped clusters, bake an
+  image with those packages and set `image:`.
+- Volumes are striped with classic LVM striping (the device-mapper `striped`
+  target in the already loaded `dm-mod`) rather than `--type raid0`, which
+  needs the `dm-raid` module that GKE Container-Optimized OS cannot load.
+- `terminationMessagePath` is moved off `/dev` because the container
+  bind-mounts the host `/dev`. The kubelet's default termination-log mount
+  otherwise races the hostPath mount and `runc` fails before the process starts.
+- Node labels are cluster-scoped, so the pod's ServiceAccount has a ClusterRole
+  limited to `get` and `patch` on Nodes.
+
+Troubleshooting:
+
+- A storage pod stays Pending and no node carries `hermetiq/ephemeral-lvm=ready`:
+  read `kubectl -n hermetiq logs ds/partition-ephemeral-disks` for that node.
+- `ERROR: no /dev/disk/by-id/google-local-nvme-ssd-* devices`: the node pool
+  was created with `--ephemeral-storage-local-ssd` or without local SSDs.
+- To change a logical volume size, recreate the node (or run `vgremove
+  ephemeral` on it after draining). The store on that shard comes back empty.
 
 Storage pods then consume the logical volumes as hostPath block devices:
 
@@ -133,6 +179,7 @@ storage:
   # Storage shards should not be preemptible.
   nodeSelector:
     node-type: ssd-block
+    hermetiq/ephemeral-lvm: ready
   persistence:
     mode: hostPath
     blockDevice:
