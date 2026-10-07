@@ -390,6 +390,245 @@ def clean_gateway_tls_hop(im):
     return im_clean
 
 
+def clean_d3_scheduler_racks(im):
+    """
+    Dissolves glowing amber AI squiggles (8M·8V·8, v-x-2) across all 3 server
+    racks in bb-scheduler, cloning clean dark perforated grill texture.
+    """
+    im_clean = im.copy()
+    pix = im_clean.load()
+    racks = [
+        (156, 172, 401, 485),
+        (207, 224, 373, 457),
+        (258, 274, 344, 430),
+    ]
+    for ax0, ax1, y0, y1 in racks:
+        for y in range(y0, y1):
+            for x in range(ax0, ax1):
+                r, g, b = im.getpixel((x, y))[:3]
+                if r > 80 and g > 60 and (r - b) > 15:
+                    src_x = x + 14
+                    pix[x, y] = pix[src_x, y]
+    return im_clean
+
+
+def fill_bilinear_feathered(im, box, feather=5):
+    """
+    Fills a rectangular background patch with bilinear interpolation sampled
+    from its 4 outer corners, smoothly feathered at the borders to eliminate
+    any seams or visible boundaries.
+    """
+    x1, y1, x2, y2 = box
+    w = x2 - x1
+    h = y2 - y1
+    pixels = im.load()
+
+    c_tl = pixels[x1, y1][:3]
+    c_tr = pixels[x2, y1][:3]
+    c_bl = pixels[x1, y2][:3]
+    c_br = pixels[x2, y2][:3]
+
+    for y in range(y1, y2 + 1):
+        v = (y - y1) / max(h, 1)
+        for x in range(x1, x2 + 1):
+            u = (x - x1) / max(w, 1)
+            r = (1 - u) * (1 - v) * c_tl[0] + u * (1 - v) * c_tr[0] + (1 - u) * v * c_bl[0] + u * v * c_br[0]
+            g = (1 - u) * (1 - v) * c_tl[1] + u * (1 - v) * c_tr[1] + (1 - u) * v * c_bl[1] + u * v * c_br[1]
+            b = (1 - u) * (1 - v) * c_tl[2] + u * (1 - v) * c_tr[2] + (1 - u) * v * c_bl[2] + u * v * c_br[2]
+
+            dx = min(x - x1, x2 - x)
+            dy = min(y - y1, y2 - y)
+            d = min(dx, dy)
+            if d < feather:
+                alpha = d / float(feather)
+                orig_p = pixels[x, y][:3]
+                r = orig_p[0] * (1 - alpha) + r * alpha
+                g = orig_p[1] * (1 - alpha) + g * alpha
+                b = orig_p[2] * (1 - alpha) + b * alpha
+
+            pixels[x, y] = (int(r), int(g), int(b))
+    return im
+
+
+def clean_vm_cubes(im):
+    """
+    Softens harsh white matrix/number artifacts on vertical faces of the 4 green
+    VictoriaMetrics cubes while perfectly preserving the 4 sharp top logos.
+    """
+    im_clean = im.copy()
+    box = (700, 520, 880, 680)
+    crop = im_clean.crop(box)
+    w, h = crop.size
+
+    logos = [
+        (85, 27, 28, 18),
+        (44, 62, 28, 18),
+        (128, 62, 28, 18),
+        (87, 98, 28, 18),
+    ]
+
+    def in_logo(x, y):
+        for cx, cy, rx, ry in logos:
+            if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0:
+                return True
+        return False
+
+    med = crop.filter(ImageFilter.MedianFilter(size=7))
+    mpix = med.load()
+    cpix = crop.load()
+    for y in range(h):
+        for x in range(w):
+            if not in_logo(x, y):
+                r, g, b = cpix[x, y][:3]
+                lum = 0.299 * r + 0.587 * g + 0.114 * b
+                if lum > 140 and r < 200 and g > 80:
+                    cpix[x, y] = mpix[x, y]
+
+    im_clean.paste(crop, box)
+    return im_clean
+
+
+def clean_vmagent_box(im):
+    """
+    Dissolves white numbers (1981-8181) and dots from the blue VMAgent Scraper box.
+    """
+    im_clean = im.copy()
+    box_rim = (938, 626, 1022, 646)
+    crop_rim = im_clean.crop(box_rim)
+    med_rim = crop_rim.filter(ImageFilter.MedianFilter(size=9))
+
+    mask = Image.new("L", crop_rim.size, 0)
+    for y in range(crop_rim.size[1]):
+        for x in range(crop_rim.size[0]):
+            border_d = min(x, crop_rim.size[0] - 1 - x, y, crop_rim.size[1] - 1 - y)
+            if border_d >= 3:
+                mask.putpixel((x, y), 255)
+            else:
+                mask.putpixel((x, y), int(255 * (border_d / 3.0)))
+    im_clean.paste(med_rim, box_rim, mask)
+
+    box_dark = (938, 646, 1022, 662)
+    crop_dark = im_clean.crop(box_dark)
+    med_dark = crop_dark.filter(ImageFilter.MedianFilter(size=7))
+    im_clean.paste(med_dark, box_dark)
+    return im_clean
+
+
+def clean_gateway_cube(im):
+    """
+    Dissolves fake IP/binary numbers on Hermetiq-gateway glowing rim and smooths the top chip.
+    """
+    im_clean = im.copy()
+    crop_rim = im_clean.crop((478, 158, 554, 186))
+    med_rim = crop_rim.filter(ImageFilter.MedianFilter(size=7))
+    im_clean.paste(med_rim, (478, 158))
+
+    crop_top = im_clean.crop((495, 140, 535, 168))
+    med_top = crop_top.filter(ImageFilter.MedianFilter(size=9))
+    im_clean.paste(med_top, (495, 140))
+    return im_clean
+
+
+def clean_d3_worker_pedestals(im):
+    """
+    Dissolves fake numbers like '-0 000 0' and '+0 .0' on the dark purple bevels
+    of all 4 bb-worker pedestals.
+    """
+    im_clean = im.copy()
+    boxes = [
+        (582, 443, 634, 465),  # Front pedestal
+        (506, 403, 538, 421),  # Left pedestal
+        (665, 401, 724, 423),  # Right pedestal
+        (586, 355, 630, 373),  # Top pedestal
+    ]
+    for box in boxes:
+        crop = im_clean.crop(box)
+        med = crop.filter(ImageFilter.MedianFilter(size=9))
+        im_clean.paste(med, box)
+    return im_clean
+
+
+def clean_d3_baked_text(im):
+    """
+    Dissolves duplicate, misplaced, and hallucinated AI text in Diagram 3
+    using bilinear background fills with seamless feathered blending.
+    """
+    im_clean = im.copy()
+    # 1. Above frontend & browser cards (eliminates faint white 'bb-frontend' and 'bb-browser')
+    im_clean = fill_bilinear_feathered(im_clean, (750, 382, 1040, 415), feather=4)
+
+    # 2. Extraneous bb-worker label floating under worker platform
+    im_clean = fill_bilinear_feathered(im_clean, (525, 520, 645, 550), feather=4)
+
+    # 3. Hallucinated 3-shard glass storage cabinet caption under cabinet
+    im_clean = fill_bilinear_feathered(im_clean, (1060, 515, 1340, 550), feather=4)
+
+    # 4. Misplaced Section 3 labels
+    # 'Worker Operator GitOps Control Plane' under VictoriaMetrics
+    im_clean = fill_bilinear_feathered(im_clean, (600, 698, 890, 735), feather=4)
+    # 'VictoriaMetrics telemetry' under Grafana screens
+    im_clean = fill_bilinear_feathered(im_clean, (1070, 698, 1310, 735), feather=4)
+    # 'node-local NVMe SSD disk chassis' to the left of the chassis
+    im_clean = fill_bilinear_feathered(im_clean, (195, 620, 335, 715), feather=4)
+    # 'LVM Striped Storage' under the chassis
+    im_clean = fill_bilinear_feathered(im_clean, (340, 695, 520, 735), feather=4)
+    return im_clean
+
+
+def clean_d1_gcs_bucket_rims(im):
+    """
+    Dissolves all 4 lines of baked-in black AI pseudo-letters on the right vertical face
+    and bottom rim of the GCS bucket in Diagram 1 without affecting the floor text.
+    """
+    im_clean = im.copy()
+    box = (1145, 420, 1205, 508)
+    crop = im_clean.crop(box)
+    med = crop.filter(ImageFilter.MedianFilter(size=7))
+    im_clean.paste(med, box)
+    return im_clean
+
+
+def clean_d1_otel_bevel(im):
+    """
+    Dissolves pseudo-characters and binary digits on OpenTelemetry collector in Diagram 1.
+    """
+    im_clean = im.copy()
+    crop_rim = im_clean.crop((372, 638, 458, 675))
+    med_rim = crop_rim.filter(ImageFilter.MedianFilter(size=9))
+    im_clean.paste(med_rim, (372, 638))
+    return im_clean
+
+
+def clean_d1_pub_bevel(im):
+    """
+    Dissolves pseudo-characters on the front bevel rim of bep-nats-pub in Diagram 1.
+    """
+    im_clean = im.copy()
+    crop = im_clean.crop((182, 372, 218, 392))
+    med = crop.filter(ImageFilter.MedianFilter(size=9))
+    im_clean.paste(med, (182, 372))
+    return im_clean
+
+
+def clean_d2_partition_overlap(im):
+    """
+    Dissolves 'partition router' under the purple fan-out icon on the Cloud SQL table slab.
+    """
+    return inpaint_text_smooth(im, (840, 475, 950, 505), lum_threshold=180)
+
+
+def clean_d2_red_pipe(im):
+    """
+    Dissolves white squiggly pseudo-characters on the red pipe coming out of the gateway in Diagram 2.
+    """
+    im_clean = im.copy()
+    box = (520, 185, 595, 210)
+    crop = im_clean.crop(box)
+    med = crop.filter(ImageFilter.MedianFilter(size=7))
+    im_clean.paste(med, box)
+    return im_clean
+
+
 def prepare_clean_base_images():
     """Pre-processes base images by dissolving baked-in text in overlay areas."""
     # Prefer pristine fixed-images if present
@@ -411,6 +650,21 @@ def prepare_clean_base_images():
     d1_base = inpaint_text_smooth(d1_base, (429, 520, 490, 538), lum_threshold=180)
     # Dissolve hallucinated 'promistores' text
     d1_base = inpaint_text_smooth(d1_base, (830, 530, 920, 555), lum_threshold=180)
+    # Dissolve duplicate/garbled 'queries / queries' text
+    d1_base = inpaint_text_smooth(d1_base, (790, 420, 930, 450), lum_threshold=180)
+    # Clean gateway cube glowing rim and top diamond chip
+    d1_base = clean_gateway_cube(d1_base)
+    # Dissolve AI gibberish on GCS bucket glass rims
+    d1_base = clean_d1_gcs_bucket_rims(d1_base)
+    # Dissolve pseudo-characters on OpenTelemetry collector and pub pod
+    d1_base = clean_d1_otel_bevel(d1_base)
+    d1_base = clean_d1_pub_bevel(d1_base)
+    # Clean VM cubes and VMAgent box
+    d1_base = clean_vm_cubes(d1_base)
+    d1_base = clean_vmagent_box(d1_base)
+    # Clean bottom floor text under VM and Grafana in D1
+    d1_base = fill_bilinear_feathered(d1_base, (600, 698, 890, 735), feather=4)
+    d1_base = fill_bilinear_feathered(d1_base, (1070, 698, 1310, 735), feather=4)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
@@ -432,6 +686,12 @@ def prepare_clean_base_images():
     d2_base = inpaint_text_smooth(d2_base, (970, 415, 1020, 436), lum_threshold=160)
     # Clean bottom line
     d2_base = inpaint_text_smooth(d2_base, (960, 502, 1260, 526), lum_threshold=190)
+    # Dissolve 'partition router' under purple fanout icon on table slab
+    d2_base = clean_d2_partition_overlap(d2_base)
+    # Clean red pipe pseudo-characters
+    d2_base = clean_d2_red_pipe(d2_base)
+    # Dissolve garbled 'public. part confia' and 'source tom' inside public.part_config card
+    d2_base = inpaint_text_smooth(d2_base, (326, 558, 475, 600), lum_threshold=185)
     clean_d2_path = TMP_DIR / "clean_d2.png"
     d2_base.save(clean_d2_path)
 
@@ -447,6 +707,17 @@ def prepare_clean_base_images():
     # Dissolve contradictory legend text: cyan (request / data) and magenta (event stream)
     d3_base = inpaint_text_smooth(d3_base, (948, 28, 1028, 44), lum_threshold=180)
     d3_base = inpaint_text_smooth(d3_base, (1080, 28, 1160, 44), lum_threshold=180)
+    # Dissolve glowing amber AI squiggles across all 3 bb-scheduler server racks
+    d3_base = clean_d3_scheduler_racks(d3_base)
+    # Dissolve white squiggles from vertical faces of VictoriaMetrics cubes
+    d3_base = clean_vm_cubes(d3_base)
+    # Dissolve numbers on VMAgent scraper and Hermetiq-gateway
+    d3_base = clean_vmagent_box(d3_base)
+    d3_base = clean_gateway_cube(d3_base)
+    # Smooth worker pedestal bevels
+    d3_base = clean_d3_worker_pedestals(d3_base)
+    # Dissolve all duplicate, misplaced, and hallucinated AI text
+    d3_base = clean_d3_baked_text(d3_base)
     clean_d3_path = TMP_DIR / "clean_d3.png"
     d3_base.save(clean_d3_path)
 
@@ -754,6 +1025,22 @@ def build_d1_html(bg_path: Path) -> str:
 <body>
   <img class="bg" src="{bg_path}">
 
+  <!-- Gateway Router Icon Overlay -->
+  <div style="position: absolute; z-index: 12; top: 144px; left: 508px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 14h6m4 0h6m-6-4l3 4-3 4m-4-8l-3 4 3 4"/>
+      <circle cx="12" cy="14" r="2" fill="#ffffff"/>
+    </svg>
+  </div>
+
+  <!-- OpenTelemetry Collector Telescope Icon Overlay -->
+  <div style="position: absolute; z-index: 12; top: 620px; left: 404px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13l4-8h10l4 8-9 8-9-8z"/>
+      <circle cx="12" cy="11" r="3" fill="#ffffff"/>
+    </svg>
+  </div>
+
   <!-- Legend typo fix (remote wite -> remote write) -->
   <div style="position: absolute; z-index: 15; top: 52px; left: 1083px; width: 135px; height: 18px; background: #dfebf3; display: flex; align-items: center;">
     <span style="font-size: 10.5px; color: #1e293b; font-weight: 700; line-height: 1;">scrape / remote write</span>
@@ -818,6 +1105,11 @@ def build_d1_html(bg_path: Path) -> str:
   <div class="glass-cyan" style="top: 464px; left: 865px; width: 165px; height: 38px; padding: 4px 6px; text-align: center;">
     <div style="font-size: 8.5px; font-weight: 800; color: #0284c7;">Direct Chunk Offload</div>
     <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Subscribers upload stdout/stderr to GCS</div>
+  </div>
+
+  <!-- Section 2: Metadata queries to PostgreSQL replacing garbled 'queries / queries' -->
+  <div style="position: absolute; z-index: 15; top: 430px; left: 815px;">
+    <span style="font-size: 9px; font-weight: 800; color: #0284c7;">Metadata queries</span>
   </div>
 
   <!-- Section 3: NATS Telemetry via Prometheus exporter scraped by VMPodScrape -->
@@ -974,9 +1266,10 @@ def build_d2_html(bg_path: Path) -> str:
     <span style="font-size: 8px; font-weight: 800; color: #0284c7;">progress chunks uploaded to GCS</span>
   </div>
 
-  <!-- 8. Control plane typo fix (source tom -> source of truth) preserving native card & arrows -->
-  <div style="position: absolute; z-index: 10; top: 585px; left: 334px; width: 130px; height: 14px; background: #d4dde6; display: flex; align-items: center;">
-    <span style="font-size: 7.5px; color: #1e293b; font-weight: 700; font-family: Inter, sans-serif; line-height: 1;">pg_partman source of truth</span>
+  <!-- 8. Control plane clean vector title and subtitle on native container -->
+  <div style="position: absolute; z-index: 10; top: 563px; left: 334px; width: 130px; display: flex; flex-direction: column;">
+    <span style="font-size: 10px; font-weight: 800; color: #0f172a; font-family: Inter, sans-serif; line-height: 1.2;">public.part_config</span>
+    <span style="font-size: 7.5px; color: #334155; font-weight: 600; font-family: Inter, sans-serif; margin-top: 2px;">pg_partman source of truth</span>
   </div>
 
   <!-- 9. Bottom Conveyor Partition Timeline Dock -->
@@ -1019,6 +1312,14 @@ def build_d3_html(bg_path: Path) -> str:
 </head>
 <body>
   <img class="bg" src="{bg_path}">
+
+  <!-- Gateway Router Icon Overlay -->
+  <div style="position: absolute; z-index: 12; top: 144px; left: 508px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 14h6m4 0h6m-6-4l3 4-3 4m-4-8l-3 4 3 4"/>
+      <circle cx="12" cy="14" r="2" fill="#ffffff"/>
+    </svg>
+  </div>
 
   <!-- Legend overrides: cyan = client request / REAPI, magenta = storage RPCs / data -->
   <div style="position: absolute; z-index: 15; top: 31px; left: 954px; width: 100px;">
@@ -1074,16 +1375,39 @@ def build_d3_html(bg_path: Path) -> str:
     <div style="font-size: 9px; font-weight: 700; color: #1e293b; margin-top: 2px;">Worker payloads · Direct gRPC data</div>
   </div>
 
+  <!-- Section 2: bb-storage 3-shard cluster label replacing AI hallucinated caption -->
+  <div style="position: absolute; z-index: 15; top: 524px; left: 1075px; width: 250px; text-align: center;">
+    <div style="font-size: 11px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em;">bb-storage (3-shard cluster)</div>
+    <div style="font-size: 8px; font-weight: 700; color: #475569; margin-top: 2px;">CAS · AC · FSAC · Initial Size Class Cache (ISCC)</div>
+  </div>
+
   <!-- Section 3: Worker Storage -->
   <div class="glass-rose" style="top: 641px; left: 450px; width: 122px; height: 32px; padding: 2px 4px; text-align: center; display: flex; flex-direction: column; justify-content: center;">
     <div style="font-size: 8px; font-weight: 800; color: #e11d48;">No Storage Pod Link</div>
     <div style="font-size: 6.5px; font-weight: 700; color: #1e293b; line-height: 1.2;">NVMe SSD or boot emptyDir</div>
   </div>
 
+  <!-- Section 3: Worker Local Storage label -->
+  <div style="position: absolute; z-index: 15; top: 658px; left: 195px; width: 135px; text-align: right;">
+    <div style="font-size: 10px; font-weight: 800; color: #0f172a;">Worker Local Storage</div>
+    <div style="font-size: 8px; font-weight: 700; color: #475569; margin-top: 1px;">NVMe SSD or boot emptyDir</div>
+  </div>
+
   <!-- KEDA PromQL query badge over VictoriaMetrics -->
   <div class="glass-emerald" style="top: 636px; left: 660px; width: 110px; height: 34px; padding: 2px 4px; text-align: center;">
     <div style="font-size: 8px; font-weight: 800; color: #047857;">PromQL Backlog</div>
     <div style="font-size: 7px; font-weight: 700; color: #1e293b;">tasks_scheduled_total<br>scales bb-workers</div>
+  </div>
+
+  <!-- Section 3: VictoriaMetrics TSDB cluster label -->
+  <div style="position: absolute; z-index: 15; top: 706px; left: 690px; width: 180px; text-align: center;">
+    <div style="font-size: 10.5px; font-weight: 800; color: #0f172a;">VictoriaMetrics</div>
+    <div style="font-size: 8px; font-weight: 700; color: #047857; margin-top: 1px;">TSDB cluster · REAPI metrics</div>
+  </div>
+
+  <!-- Section 3: Grafana dashboards label -->
+  <div style="position: absolute; z-index: 15; top: 706px; left: 1100px; width: 220px; text-align: center;">
+    <div style="font-size: 10.5px; font-weight: 800; color: #0f172a;">Grafana monitoring dashboards</div>
   </div>
 
 </body>
