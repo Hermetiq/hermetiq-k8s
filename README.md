@@ -198,7 +198,7 @@ The following versions form the first tested bundle in this repository:
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.4` |             `0.9.4` |
 | Buildbarn |       `0.9.5` |  `20260908T142448Z` |
-| BB Worker Operator |       `0.3.5` |            `v0.3.5` |
+| BB Worker Operator |       `0.3.6` |            `v0.3.6` |
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
