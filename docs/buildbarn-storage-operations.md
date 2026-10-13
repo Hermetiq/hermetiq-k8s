@@ -55,13 +55,13 @@ Volatile stores do not lose anything extra from these changes because they alrea
 
 ## Monitoring
 
-The most useful capacity signal is worst-case retention:
+The most useful capacity signal is eviction age:
 
 ```text
 time() - buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds
 ```
 
-This is the age of the youngest data ever evicted. In plain English, it is the minimum amount of time a blob is guaranteed to survive. Keep it comfortably above your longest build, plus any window where Bazel may still need remote outputs. The chart records per-shard min/max values and ships a `BuildbarnCacheRetentionLow` alert at 24 hours.
+The gauge holds the time at which the most recently discarded block entered the old range. Every blob in that block was written before then, so the value is a lower bound on how long the most recently discarded data survived. It is not a guarantee for any particular blob, and it keeps growing until the next block is discarded. bb-storage sets the gauge to the process start time on startup, so after a restart it reads as uptime until a block filled since the restart is discarded. Keep it comfortably above your longest build, plus any window where Bazel may still need remote outputs. A low value is a strong sign the store is too small; a high value alone does not prove it is big enough. The chart records per-shard min/max values and ships a `BuildbarnCacheRetentionLow` alert at 24 hours.
 
 Watch the key-location map separately:
 

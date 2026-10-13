@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.4
+version: 0.9.5
 appVersion: "0.9.4"
 annotations:
   artifacthub.io/license: Apache-2.0
@@ -14,26 +14,8 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: added
-      description: "Default to namespace RBAC, including license fingerprint access"
     - kind: changed
-      description: "Derive Browser and Grafana URLs from hosts.domainBase"
-    - kind: changed
-      description: "Derive the publisher JWKS audience from the BEP host"
-    - kind: fixed
-      description: "Disable unused cert-manager and Secret permissions by default"
-    - kind: changed
-      description: "Update the OAuth2 proxy image"
-    - kind: fixed
-      description: "Set APP_ENV=on-prem on subscriber pods"
-    - kind: added
-      description: "Roll pods when managed ConfigMaps or Secrets change"
-    - kind: changed
-      description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
-    - kind: changed
-      description: "Meet the CIS Kubernetes Benchmark v2.0.1 securityContext set on every container: explicit privileged: false, and a read-only root filesystem with a /tmp emptyDir for the maintenance CronJobs, bootstrap Job and dashboard. A null runAsUser, runAsGroup or fsGroup is omitted for OpenShift"
-    - kind: changed
-      description: "Request CPU for the API and publisher grpc-auth-proxy sidecars"
+      description: "Add ISCC and FSAC metrics to existing buildbarn dashboards"
 keywords:
   - hermetiq
   - MCP
