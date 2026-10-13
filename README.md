@@ -56,6 +56,9 @@ configuration.
 Understand slow builds, cache misses, flaky tests, and remote execution costs
 with Bazel analytics running in your own cluster.
 
+**Try it in the cloud:** [Sign up for Hermetiq Cloud](https://dashboard.hermetiq.io/)
+to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
+
 - **Find the action behind a slow build.** Connect completed remote actions to
   their invocations, with queue, input-fetch, execution, and upload timings
   broken down by worker and platform.
