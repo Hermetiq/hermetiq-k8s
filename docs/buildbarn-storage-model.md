@@ -19,11 +19,14 @@ Think of the block store as a rotating set of large buckets. Buildbarn orders th
 
 When a blob is read from an old block, Buildbarn copies it forward into a new block. That is what makes eviction LRU-like: recently used data gets refreshed. When the oldest new block fills, blocks rotate forward and the oldest old block is discarded as a whole. There is no per-blob garbage collection; the block is the unit of eviction.
 
-The block size is derived from total storage and block counts:
+The block size is derived from total storage and block counts, in whole sectors:
 
 ```text
-block size = blocks bytes / (spareBlocks + oldBlocks + currentBlocks + newBlocks)
+sectors    = blocks bytes / sector size, rounded up (a file is extended to whole sectors)
+block size = floor(sectors / (spareBlocks + oldBlocks + currentBlocks + newBlocks)) * sector size
 ```
+
+The sector size is the host's, `max(st_blksize, page size)` — 4096 bytes on the nodes we run — not a configured value. Dividing the bytes directly overstates the block by up to one sector, and the true ceiling is the `Y` in the error below, so state the sector size you assumed when you quote a block size.
 
 For `backend: filesystem`, `blocks bytes` is `blocksSizeGi`. For `backend: blockDevice`, it is the usable size of the whole device, which is why `blocksSizeGi` is ignored in raw block mode. `blockDevice.size` requests the PVC size; with `mode: hostPath`, even that is only documentation.
 
@@ -86,7 +89,7 @@ Disk-backed maps are required for restart persistence. On `backend: filesystem`,
 Use this sizing rule:
 
 ```text
-usable bytes     = blocks bytes * (old + current + new) / (spare + old + current + new)
+usable bytes     = block size * (old + current + new)
 expected objects ~= usable bytes / average object size
 entries          = 2...10 * expected objects
 ```
@@ -152,13 +155,13 @@ Four properties decide how you size it.
 
 **It does not replace the existence cache.** `ReadCachingBlobAccess` embeds the slow backend for everything it does not override, so `FindMissingBlobs` still crosses to the shards — and that is the most frequent CAS call a Bazel client makes, before every upload. The chart therefore nests `readCaching` *inside* `existenceCaching` when both are on. Leave `frontend.contentAddressableStorage.existenceCaching.enabled` alone when you turn the read cache on; they are not alternatives.
 
-**The fast tier's block size is a correctness setting.** It derives the same way as any other block store:
+**The fast tier's block size is a correctness setting.** It derives the same way as any other block store, with `blocksSizeGi` as the blocks bytes:
 
 ```text
-block size = blocksSizeGi / (spareBlocks + oldBlocks + currentBlocks + newBlocks)
+block size = floor(blocksSizeGi / sector size / (spareBlocks + oldBlocks + currentBlocks + newBlocks)) * sector size
 ```
 
-A blob larger than one block cannot be stored in the cache at all, and the failure does not stay inside the cache. The fast `Put` fails with `InvalidArgument`, the replicator wraps it as `Replication failed`, and that error rides back on the buffer the client is already reading — so an undersized cache turns a miss on a large blob into a **failed build**, not a slow read. There is no way to route large blobs around it; the `size_distinguishing` backend that once did this was removed from Buildbarn.
+A blob larger than one block cannot be stored in the cache at all, and the failure does not stay inside the cache. The fast `Put` fails with `InvalidArgument`. The chart's deduplicating replicator copies the whole blob before serving it, so the read fails up front with `Failed to replicate blob <digest>` (a bare `local` replicator streams while it copies and fails the read mid-stream with `Replication failed`). Either way an undersized cache turns a miss on a large blob into a **failed build**, not a slow read. There is no way to route large blobs around it; the `size_distinguishing` backend that once did this was removed from Buildbarn.
 
 Size the block above the largest blob the frontend actually moves, measured from its own histogram — and scope the query, because every worker runs its own `readCaching` local CAS and an unscoped query reports the worker's blobs, not the frontend's:
 
@@ -171,7 +174,7 @@ histogram_quantile(1.0, sum by (le) (rate(
 
 Both filters matter, and so does `sum by (le)` rather than `max by (le)` — a max across heterogeneous series is not a distribution. The `backend_type` label names each decorator in the stack, so the chain is directly observable and you can confirm you are reading the right one: `deadline_enforcing, existence_caching, read_caching, local_block_device, sharding, grpc`.
 
-The chart defaults give `250 / (3 + 8 + 24 + 3) = 6.5 GiB` per block, which clears any realistic Bazel output. Shrink `blocksSizeGi` and the block shrinks with it.
+The chart defaults give `250 GiB / (3 + 8 + 24 + 3)` ≈ 6.58 GiB per block (7,064,088,576 bytes with 4096-byte sectors), which clears any realistic Bazel output. Shrink `blocksSizeGi` and the block shrinks with it.
 
 **The fast tier is node ephemeral storage, and the scheduler does not know it exists.** `volume.emptyDir` is the default, and an `emptyDir` draws from the node's allocatable `ephemeral-storage`, which is the kubelet root filesystem. Where that physically lands is a property of the node pool, not of the workload: on a GKE pool created with `--ephemeral-storage-local-ssd count=N` the kubelet root is a RAID-0 of the local SSDs, so the cache gets NVMe with no opt-in from the chart at all. A pool whose local SSDs are attached raw (`--local-nvme-ssd-block`) does **not** back `emptyDir`; those devices exist for the storage tier's `backend: blockDevice`.
 
@@ -197,7 +200,7 @@ Two more settings that are easy to copy wrongly from the storage tier:
 - `keyLocationMapInMemoryEntries` is resident memory on the **frontend** pod at 64 bytes per entry — the chart default of 20971520 is about 1.3 GiB — and it should be sized against what fits in *this* cache, not copied from the storage tier's value. [Do not grow disk without growing the map](#what-an-undersized-map-looks-like) applies here exactly as it does to a shard, and the read cache makes it unusually easy to violate, because `blocksSizeGi` and the map are separate values that nothing relates to each other:
 
   ```text
-  live capacity    = blocksSizeGi * (old + current + new) / (old + current + new + spare)
+  live capacity    = block size * (old + current + new)
   objects that fit = live capacity / mean size of a blob that enters the cache
   entries          = 2 to 10 * objects that fit
   ```

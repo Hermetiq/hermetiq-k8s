@@ -6,25 +6,13 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.5
-appVersion: "v0.3.5"
+version: 0.3.6
+appVersion: "v0.3.6"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: "Add namespace RBAC mode and scoped manager watch"
     - kind: changed
-      description: "Allow unhealthy pod eviction from the operator PDB"
-    - kind: security
-      description: "Run the manager with explicit runAsUser/runAsGroup 65532 and privileged: false"
-    - kind: changed
-      description: "Use bb-worker-operator v0.3.5. Upgrading rolls every worker pool once"
-    - kind: security
-      description: "Mount no ServiceAccount token in worker pods unless the RbeWorker sets spec.pod.automountServiceAccountToken: true"
-    - kind: security
-      description: "Run the runner installer non-root and read-only, keep only DAC_OVERRIDE and FOWNER for volume-init, and make the FUSE cleanup sidecar read-only"
-    - kind: changed
-      description: "Set CPU and memory requests and limits on the runner installer, volume-init, and FUSE cleanup containers"
+      description: "Use bb-worker-operator v0.3.6 to pull in Go 1.27.2 and dependency upgrade"
 keywords:
   - buildbarn
   - bazel

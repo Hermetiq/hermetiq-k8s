@@ -65,10 +65,10 @@ spec:
     resources:
       requests:
         cpu: 13000m
-        memory: 48Gi
+        memory: 40Gi
       limits:
         cpu: 13000m
-        memory: 48Gi
+        memory: 40Gi
     securityContext:
       allowPrivilegeEscalation: true
       privileged: true
@@ -96,14 +96,19 @@ spec:
           fieldRef:
             fieldPath: metadata.namespace
     imagePullPolicy: IfNotPresent
+    # bb_worker memory-maps the operator's 16 GiB local CAS and the file pool,
+    # and the kernel charges the page cache for those reads to this container. A
+    # limit sized for bb_worker's heap alone sends those reads back to disk
+    # (high major page-fault rates, disk reads far above writes). The memory
+    # comes from the runner, so the Pod's total request does not grow.
     resources:
       requests:
         cpu: 1000m
-        memory: 1300Mi
+        memory: 9Gi
         ephemeral-storage: 42Gi
       limits:
         cpu: 1000m
-        memory: 1300Mi
+        memory: 9Gi
         ephemeral-storage: 42Gi
     securityContext:
       allowPrivilegeEscalation: true
