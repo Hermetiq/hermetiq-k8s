@@ -1,5 +1,9 @@
 # Hermetiq Helm Chart
 
+**Try it in the cloud:** [Sign up for Hermetiq Cloud](https://dashboard.hermetiq.io/)
+to explore Hermetiq and Managed Buildbarn before setting up a Kubernetes
+deployment.
+
 This README is the operator reference packaged with the Hermetiq `0.9.4`
 chart. It covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
