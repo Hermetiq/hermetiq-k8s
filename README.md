@@ -94,8 +94,8 @@ pools sized for your workloads.
   outputs are available. Configurable expiry, storage health metrics, and
   retention alerts help expose problems that disk-usage graphs miss.
 - **See execution in context.** The Completed Action Logger feeds remote-action
-  details into Hermetiq, while project-labeled worker and storage metrics let
-  teams track their own performance and cache health.
+  details into Hermetiq, and worker and storage metrics are scoped by namespace
+  so each team can track its own performance and cache health.
 
 ### BB Worker Operator chart
 
