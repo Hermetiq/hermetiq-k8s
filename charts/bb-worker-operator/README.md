@@ -45,8 +45,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.5
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.5
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.6
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.6
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -64,7 +64,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.5 \
+  --version 0.3.6 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
