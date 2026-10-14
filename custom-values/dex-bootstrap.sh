@@ -99,7 +99,11 @@ else
   password_hash=$(printf '%s\n' "$user_password" | htpasswd -niB -C 12 dex | cut -d : -f 2)
   unset user_password
   user_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
-  openssl rand -hex 32 > "$temp_dir/client-secret"
+  # Notice: the newline in secrets is stripped for a reason:
+  # shells (i.e. bash) will strip the newline character silently,
+  # which becomes a non-obvious source of authentication errors
+  # when their values are used to login via curl etc.
+  openssl rand -hex 32 | tr -d '\n' > "$temp_dir/client-secret"
   openssl rand -base64 32 | tr -d '\n' | tr '+/' '-_' > "$temp_dir/cookie-secret"
   printf 'hermetiq-web' > "$temp_dir/client-id"
 
@@ -111,7 +115,12 @@ storage:
     inCluster: true
 oauth2:
   skipApprovalScreen: true
+  passwordConnector: local
 enablePasswordDB: true
+signer:
+  type: local
+  config:
+    keysRotationPeriod: "8760h"
 staticClients:
   - id: hermetiq-web
     name: Hermetiq test installation

@@ -56,6 +56,9 @@ configuration.
 Understand slow builds, cache misses, flaky tests, and remote execution costs
 with Bazel analytics running in your own cluster.
 
+**Try it in the cloud:** [Sign up for Hermetiq Cloud](https://dashboard.hermetiq.io/)
+to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
+
 - **Find the action behind a slow build.** Connect completed remote actions to
   their invocations, with queue, input-fetch, execution, and upload timings
   broken down by worker and platform.
@@ -94,8 +97,8 @@ pools sized for your workloads.
   outputs are available. Configurable expiry, storage health metrics, and
   retention alerts help expose problems that disk-usage graphs miss.
 - **See execution in context.** The Completed Action Logger feeds remote-action
-  details into Hermetiq, while project-labeled worker and storage metrics let
-  teams track their own performance and cache health.
+  details into Hermetiq, and worker and storage metrics are scoped by namespace
+  so each team can track its own performance and cache health.
 
 ### BB Worker Operator chart
 
@@ -120,6 +123,7 @@ Define and manage Buildbarn worker pools as Kubernetes resources.
 | [`charts/buildbarn/`](charts/buildbarn/) | Buildbarn cache, remote execution, Browser, portal, storage, and routing |
 | [`charts/bb-worker-operator/`](charts/bb-worker-operator/) | `RbeWorker` CRD and controller |
 | [`custom-values/`](custom-values/) | Starter overrides for the supported stack and its dependencies |
+| [`custom-values/rbeworkers/`](custom-values/rbeworkers/) | Sample `RbeWorker` pools to apply after Buildbarn |
 | [`examples/`](examples/) | Bazel integrations, runner images, and validation projects |
 | [`docs/`](docs/) | Focused architecture and operational runbooks |
 
@@ -198,7 +202,7 @@ The following versions form the first tested bundle in this repository:
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.5` |             `0.9.4` |
 | Buildbarn |       `0.9.5` |  `20260908T142448Z` |
-| BB Worker Operator |       `0.3.6` |            `v0.3.6` |
+| BB Worker Operator |       `0.3.7` |            `v0.3.7` |
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -217,7 +221,8 @@ Install in this order:
    by the optional Grafana and Buildbarn Browser proxies.
 3. Install the BB Worker Operator.
 4. Install Buildbarn.
-5. Apply the `RbeWorker` pools appropriate for the cluster.
+5. Apply the `RbeWorker` pools appropriate for the cluster, starting from the
+   [sample worker pools](custom-values/rbeworkers/README.md).
 
 ### Prepare custom values
 

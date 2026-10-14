@@ -6,13 +6,27 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.6
-appVersion: "v0.3.6"
+version: 0.3.7
+appVersion: "v0.3.7"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.6 to pull in Go 1.27.2 and dependency upgrade"
+      description: "Use bb-worker-operator v0.3.7. Upgrading rolls every worker pool that uses the built-in generated config once"
+    - kind: fixed
+      description: "Report RbeWorker Ready from the Deployment's replica target, so an autoscaled pool with no available pods is no longer Ready"
+    - kind: fixed
+      description: "Reconcile an RbeWorker when its common or files ConfigMap is created or edited, so a late ConfigMap unblocks the pool and edits roll out right away"
+    - kind: fixed
+      description: "Generated KEDA queue queries watch the pool's spec.config.generated.sizeClass queue. A nonzero prometheus.sizeClass still overrides it"
+    - kind: fixed
+      description: "Sort generated platform properties by name and value, which bb_scheduler requires before it accepts a worker"
+    - kind: fixed
+      description: "Let bb_runner finish in-flight actions when a pod terminates (stopGracefully in the generated runner config). A custom worker-common.libsonnet must set it itself"
+    - kind: changed
+      description: "Document that scaling to zero (minReplicas or idleReplicas 0) needs a matching bb_scheduler predeclaredPlatformQueues entry"
+    - kind: changed
+      description: "Default worker pods to a 60s termination grace period (was 30s) so in-flight actions can drain. RbeWorkers that set spec.pod.terminationGracePeriodSeconds keep their value"
 keywords:
   - buildbarn
   - bazel
