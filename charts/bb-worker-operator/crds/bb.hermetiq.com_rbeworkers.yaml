@@ -367,6 +367,9 @@ spec:
                     - replicas
                     type: object
                   idleReplicas:
+                    description: |-
+                      IdleReplicas scales the pool to zero while no trigger is active. Scaling
+                      to zero has the same scheduler requirement as minReplicas: 0.
                     format: int32
                     maximum: 0
                     minimum: 0
@@ -381,6 +384,16 @@ spec:
                     minimum: 1
                     type: integer
                   minReplicas:
+                    description: |-
+                      MinReplicas is the lowest replica count KEDA scales the pool to.
+
+                      0 allows scaling to zero, which only works if bb_scheduler keeps this
+                      pool's platform queue while it has no workers: list the queue under
+                      predeclaredPlatformQueues in the scheduler config. Otherwise the scheduler
+                      removes the queue platformQueueWithNoWorkersTimeout (15m by default) after
+                      the last worker leaves. It then rejects every action for the platform with
+                      "No workers exist" before counting it, so the queue-depth trigger stays at
+                      zero and the pool never scales back up.
                     format: int32
                     minimum: 0
                     type: integer
@@ -432,6 +445,10 @@ spec:
                         type: string
                       sizeClass:
                         default: "0"
+                        description: |-
+                          SizeClass is the size_class label of the queue the generated query
+                          watches. Leave it unset or "0" to follow spec.config.generated.sizeClass,
+                          the queue the pool's workers register in.
                         type: string
                       threshold:
                         type: string
@@ -9622,6 +9639,10 @@ spec:
                   serviceAccountName:
                     type: string
                   terminationGracePeriodSeconds:
+                    description: |-
+                      TerminationGracePeriodSeconds is how long a terminating worker pod's
+                      in-flight action can keep running before Kubernetes kills it. Defaults to
+                      60.
                     format: int64
                     type: integer
                   tolerations:

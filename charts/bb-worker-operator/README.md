@@ -45,8 +45,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.6
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.6
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.7
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.7
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -55,7 +55,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.5/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.7/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -64,7 +64,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.6 \
+  --version 0.3.7 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -89,9 +89,12 @@ kubectl -n hermetiq get rbeworkers
 ```
 
 `kubectl get rbeworkers` is empty until you apply worker pools, which depend on
-the `buildbarn-worker-config` ConfigMap rendered by the Buildbarn chart. Once
-pools exist, each `RbeWorker` reports the Deployment, ConfigMap, and KEDA
-`ScaledObject` it manages in its status.
+the `buildbarn-worker-config` ConfigMap rendered by the Buildbarn chart. Start
+from the
+[sample worker pools](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
+under `rbeworkers/` in your copied values directory. Once pools exist, each
+`RbeWorker` reports the Deployment, ConfigMap, and KEDA `ScaledObject` it
+manages in its status.
 
 When `podDisruptionBudget.enabled=true`, the chart sets
 `unhealthyPodEvictionPolicy: AlwaysAllow`. Node drains can evict an unready
@@ -110,12 +113,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.5;
+file and wait for Kubernetes to establish it. This example uses release 0.3.7;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.5/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.7/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
