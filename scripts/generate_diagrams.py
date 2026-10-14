@@ -202,11 +202,11 @@ def clean_upper_gcs_bucket(im):
     from PostgreSQL in Diagram 1, restoring the pristine container background.
     """
     im_clean = im.copy()
-    box = (1095, 250, 1338, 398)
+    box = (1095, 260, 1338, 398)
     w = box[2] - box[0]
     h = box[3] - box[1]
 
-    top_row = [im.getpixel((box[0] + x, 249))[:3] for x in range(w)]
+    top_row = [im.getpixel((box[0] + x, 259))[:3] for x in range(w)]
     bottom_row = [im.getpixel((box[0] + x, 399))[:3] for x in range(w)]
     right_col = [im.getpixel((1338, box[1] + y))[:3] for y in range(h)]
 
@@ -242,7 +242,24 @@ def clean_upper_gcs_bucket(im):
             vg = tg * (1 - v_weight) + bg * v_weight
             vb = tb * (1 - v_weight) + bb * v_weight
 
-            cpix[x, y] = (int(0.5 * hr + 0.5 * vr), int(0.5 * hg + 0.5 * vg), int(0.5 * hb + 0.5 * vb))
+            r = int(0.5 * hr + 0.5 * vr)
+            g = int(0.5 * hg + 0.5 * vg)
+            b = int(0.5 * hb + 0.5 * vb)
+
+            # Feather top and left borders to eliminate any seam at x=1095 or y=260
+            cur_y = box[1] + y
+            d_left = x if not (325 <= cur_y <= 360) else 999
+            d_top = y
+            d_right = w - 1 - x
+            d = min(d_left, d_top, d_right)
+            if d < 8:
+                alpha = d / 8.0
+                orig_p = im.getpixel((box[0] + x, cur_y))[:3]
+                r = int(orig_p[0] * (1 - alpha) + r * alpha)
+                g = int(orig_p[1] * (1 - alpha) + g * alpha)
+                b = int(orig_p[2] * (1 - alpha) + b * alpha)
+
+            cpix[x, y] = (r, g, b)
 
     im_clean.paste(canvas, (box[0], box[1]))
 
@@ -348,46 +365,81 @@ def clean_d2_query_slab(im):
 
 def clean_gateway_tls_hop(im):
     """
-    Dissolves the inaccurate 'TLS' text and blue padlock between Gateway
-    and Kubernetes ClusterIP Services, reflecting cleartext HTTP/2 (h2c) in production.
+    Dissolves the inaccurate 'TLS' text, raster arrow, and blue padlock between
+    Gateway and Kubernetes ClusterIP Services using seamless vertical column interpolation
+    so a crisp vector arrow and 'HTTP/2' label can be rendered across the gap.
     """
     im_clean = im.copy()
-    # 1. Dissolve 'TLS' text above arrow: (830, 134, 875, 156)
-    im_clean = inpaint_text_smooth(im_clean, (830, 134, 875, 156), lum_threshold=180)
+    pix = im_clean.load()
+    orig = im.copy()
+    opix = orig.load()
 
-    # 2. Dissolve padlock below arrow: (834, 165, 874, 218)
-    box = (834, 165, 874, 218)
-    w = box[2] - box[0]
-    h = box[3] - box[1]
+    y_top, y_bot = 132, 205
 
-    tl = (218, 230, 242)
-    tr = (212, 226, 238)
-    bl = (210, 226, 240)
-    br = (206, 222, 236)
-
-    for y in range(h):
-        v = y / (h - 1)
-        for x in range(w):
-            u = x / (w - 1)
-            r = int((1-u)*(1-v)*tl[0] + u*(1-v)*tr[0] + (1-u)*v*bl[0] + u*v*br[0])
-            g = int((1-u)*(1-v)*tl[1] + u*(1-v)*tr[1] + (1-u)*v*bl[1] + u*v*br[1])
-            b = int((1-u)*(1-v)*tl[2] + u*(1-v)*tr[2] + (1-u)*v*bl[2] + u*v*br[2])
-
-            dist_top = y
-            dist_bot = h - 1 - y
-            dist_left = x
-            dist_right = w - 1 - x
-            min_dist = min(dist_top, dist_bot, dist_left, dist_right)
-            if min_dist < 4:
-                alpha = min_dist / 4.0
-                orig = im.getpixel((box[0] + x, box[1] + y))[:3]
-                r = int(orig[0] * (1 - alpha) + r * alpha)
-                g = int(orig[1] * (1 - alpha) + g * alpha)
-                b = int(orig[2] * (1 - alpha) + b * alpha)
-
-            im_clean.putpixel((box[0] + x, box[1] + y), (r, g, b))
+    for x in range(835, 876):
+        ct = opix[x, y_top][:3]
+        cb = opix[x, y_bot][:3]
+        for y in range(133, 205):
+            v = (y - y_top) / float(y_bot - y_top)
+            r = int(round((1 - v) * ct[0] + v * cb[0]))
+            g = int(round((1 - v) * ct[1] + v * cb[1]))
+            b = int(round((1 - v) * ct[2] + v * cb[2]))
+            pix[x, y] = (r, g, b)
 
     return im_clean
+
+
+def clean_d3_legend(im):
+    """
+    Dissolves baked-in 'request / data' and 'event stream' legend labels and shifts
+    the first legend column (blue arrow + green solid arrow + 'OTLP push') 36px left
+    using seamless background-delta transfer so 'client request / REAPI' has generous spacing.
+    """
+    im_clean = im.copy()
+    pix = im_clean.load()
+    orig = im.copy()
+    opix = orig.load()
+
+    y_top, y_bot = 18, 72
+
+    def bg_at(x, y):
+        v = (y - y_top) / float(y_bot - y_top)
+        ct = opix[x, y_top][:3]
+        cb = opix[x, y_bot][:3]
+        return (
+            (1 - v) * ct[0] + v * cb[0],
+            (1 - v) * ct[1] + v * cb[1],
+            (1 - v) * ct[2] + v * cb[2],
+        )
+
+    # 1. Wipe old Column 1 (x in [900, 1028], y in [19, 71]) and 'event stream' (x in [1082, 1160], y in [24, 44])
+    for x in range(900, 1029):
+        for y in range(19, 72):
+            b_r, b_g, b_b = bg_at(x, y)
+            pix[x, y] = (int(round(b_r)), int(round(b_g)), int(round(b_b)))
+
+    for x in range(1082, 1161):
+        for y in range(24, 45):
+            b_r, b_g, b_b = bg_at(x, y)
+            pix[x, y] = (int(round(b_r)), int(round(b_g)), int(round(b_b)))
+
+    # 2. Transfer blue arrow (y in [20, 45], src_x in [902, 952]) and
+    # green solid arrow + 'OTLP push' (y in [46, 71], src_x in [902, 1010]) 36px left
+    shift = 36
+    for y in range(20, 72):
+        src_x_max = 952 if y <= 45 else 1010
+        for src_x in range(902, src_x_max + 1):
+            dst_x = src_x - shift
+            dst_bg = bg_at(dst_x, y)
+            src_bg = bg_at(src_x, y)
+            src_p = opix[src_x, y][:3]
+            r = max(0, min(255, int(round(dst_bg[0] + (src_p[0] - src_bg[0])))))
+            g = max(0, min(255, int(round(dst_bg[1] + (src_p[1] - src_bg[1])))))
+            b = max(0, min(255, int(round(dst_bg[2] + (src_p[2] - src_bg[2])))))
+            pix[dst_x, y] = (r, g, b)
+
+    return im_clean
+
 
 
 def clean_d3_scheduler_racks(im):
@@ -564,10 +616,10 @@ def clean_d3_baked_text(im):
     im_clean = fill_bilinear_feathered(im_clean, (1060, 515, 1340, 550), feather=4)
 
     # 4. Misplaced Section 3 labels
-    # 'Worker Operator GitOps Control Plane' under VictoriaMetrics
-    im_clean = fill_bilinear_feathered(im_clean, (600, 698, 890, 742), feather=4)
-    # 'VictoriaMetrics telemetry' under Grafana screens
-    im_clean = fill_bilinear_feathered(im_clean, (1070, 698, 1315, 742), feather=4)
+    # 'Worker Operator GitOps Control Plane' under VictoriaMetrics (preserving blue loop arrow at y<=708)
+    im_clean = fill_bilinear_feathered(im_clean, (610, 710, 885, 742), feather=2)
+    # 'VictoriaMetrics telemetry' under Grafana screens (preserving green telemetry arrow at x<=1100, y<=713)
+    im_clean = fill_bilinear_feathered(im_clean, (1102, 706, 1315, 742), feather=2)
     # 'node-local NVMe SSD disk chassis' to the left of the chassis
     im_clean = fill_bilinear_feathered(im_clean, (195, 620, 335, 715), feather=4)
     # 'LVM Striped Storage' under the chassis
@@ -638,8 +690,11 @@ def prepare_clean_base_images():
 
     # 1. Clean D1 base (hermetiq-architecture-ai.png)
     d1_base = Image.open(d1_source)
-    # Clean ClusterIP Services inside card: (872, 128, 1106, 222)
-    d1_base = inpaint_text_smooth(d1_base, (872, 128, 1106, 222), lum_threshold=185)
+    # Clean gateway route pills interior in D1 (Direct Container Principle)
+    d1_base = inpaint_text_smooth(d1_base, (604, 156, 822, 174), lum_threshold=220)
+    d1_base = inpaint_text_smooth(d1_base, (604, 183, 822, 201), lum_threshold=220)
+    # Clean ClusterIP Services inside card: (882, 128, 1106, 222) - starts at x=882 to preserve left card border & arrow tip
+    d1_base = inpaint_text_smooth(d1_base, (882, 128, 1106, 222), lum_threshold=185)
     # Clean OIDC Provider inside card: (1180, 126, 1295, 200) - starts at x=1180 to preserve purple arrow tip (x=1173)
     d1_base = inpaint_text_smooth(d1_base, (1180, 126, 1295, 200), lum_threshold=216)
     # Remove hallucinated duplicate upper GCS bucket & phantom arrow from PostgreSQL
@@ -648,10 +703,10 @@ def prepare_clean_base_images():
     d1_base = clean_gateway_tls_hop(d1_base)
     # Dissolve misleading NATS OTLP Push text (NATS uses Prometheus exporter + VMPodScrape)
     d1_base = inpaint_text_smooth(d1_base, (429, 520, 490, 538), lum_threshold=180)
-    # Dissolve hallucinated 'promistores' text
-    d1_base = inpaint_text_smooth(d1_base, (830, 530, 920, 555), lum_threshold=180)
-    # Dissolve duplicate/garbled 'queries / queries' text
-    d1_base = inpaint_text_smooth(d1_base, (790, 420, 930, 450), lum_threshold=180)
+    # Dissolve hallucinated 'promistores' text without touching blue conduit at x>=921, y>=553
+    d1_base = inpaint_text_smooth(d1_base, (848, 533, 916, 549), lum_threshold=180)
+    # Dissolve duplicate/garbled 'queries / queries' text without touching blue conduits at x>=911, y>=452
+    d1_base = inpaint_text_smooth(d1_base, (815, 430, 905, 448), lum_threshold=180)
     # Clean gateway cube glowing rim and top diamond chip
     d1_base = clean_gateway_cube(d1_base)
     # Dissolve AI gibberish on GCS bucket glass rims
@@ -662,9 +717,6 @@ def prepare_clean_base_images():
     # Clean VM cubes and VMAgent box
     d1_base = clean_vm_cubes(d1_base)
     d1_base = clean_vmagent_box(d1_base)
-    # Clean bottom floor text under VM and Grafana in D1
-    d1_base = fill_bilinear_feathered(d1_base, (600, 698, 890, 742), feather=4)
-    d1_base = fill_bilinear_feathered(d1_base, (1070, 698, 1315, 742), feather=4)
     clean_d1_path = TMP_DIR / "clean_d1.png"
     d1_base.save(clean_d1_path)
 
@@ -682,14 +734,37 @@ def prepare_clean_base_images():
     d2_base = inpaint_text_smooth(d2_base, (776, 274, 1025, 318), lum_threshold=185)
     # Clean GCS hybrid (slab face + ribs)
     d2_base = inpaint_gcs_hybrid(d2_base)
-    # Clean query text above GCS arrow
-    d2_base = inpaint_text_smooth(d2_base, (970, 415, 1020, 436), lum_threshold=160)
-    # Clean bottom line
-    d2_base = inpaint_text_smooth(d2_base, (960, 502, 1260, 526), lum_threshold=190)
+    # Dissolve erroneous 'Query' text + red arrow stub between PostgreSQL and GCS (x in [967, 1044], y in [418, 450])
+    d2_pix = d2_base.load()
+    for x in range(967, 1045):
+        ct = d2_pix[x, 418][:3]
+        cb = d2_pix[x, 450][:3]
+        for y in range(419, 450):
+            v = (y - 418) / float(450 - 418)
+            d2_pix[x, y] = (
+                int(round((1 - v) * ct[0] + v * cb[0])),
+                int(round((1 - v) * ct[1] + v * cb[1])),
+                int(round((1 - v) * ct[2] + v * cb[2])),
+            )
+    # Dissolve garbled 'disabled dlog or upload faload - - progresses chunks' above bottom blue arrow
+    # while strictly preserving the blue arrow shaft (y>=518), left arrowhead (x<=977), and right stem (x>=1185)
+    for x in range(978, 1185):
+        ct = d2_pix[x, 500][:3]
+        cb = d2_pix[x, 517][:3]
+        for y in range(501, 517):
+            v = (y - 500) / float(517 - 500)
+            d2_pix[x, y] = (
+                int(round((1 - v) * ct[0] + v * cb[0])),
+                int(round((1 - v) * ct[1] + v * cb[1])),
+                int(round((1 - v) * ct[2] + v * cb[2])),
+            )
     # Dissolve 'partition router' under purple fanout icon on table slab
     d2_base = clean_d2_partition_overlap(d2_base)
     # Clean red pipe pseudo-characters
     d2_base = clean_d2_red_pipe(d2_base)
+    # Dissolve random isometric floor artifact between gateway and partition router pedestals
+    d2_base = inpaint_text_smooth(d2_base, (542, 240, 585, 270), lum_threshold=221, blur_radius=2)
+    d2_base = inpaint_text_smooth(d2_base, (485, 265, 618, 335), lum_threshold=223, blur_radius=2)
     # Dissolve garbled 'public. part confia' and 'source tom' inside public.part_config card
     d2_base = inpaint_text_smooth(d2_base, (326, 558, 475, 600), lum_threshold=185)
     clean_d2_path = TMP_DIR / "clean_d2.png"
@@ -697,16 +772,17 @@ def prepare_clean_base_images():
 
     # 3. Clean D3 base (bb-architecture-ai.png)
     d3_base = Image.open(BASE_DIR / "bb-architecture-ai.png")
-    # Patch clean OIDC region from d1 to remove any faint text
+    # Patch clean OIDC region and clean native gateway pills from d1
     oidc_patch = d1_base.crop((1080, 100, 1310, 230))
     d3_base.paste(oidc_patch, (1080, 100))
-    # Inpaint ClusterIP on D3
-    d3_base = inpaint_text_smooth(d3_base, (872, 128, 1106, 222), lum_threshold=185)
+    gw_pills_patch = d1_base.crop((598, 150, 833, 210))
+    d3_base.paste(gw_pills_patch, (598, 150))
+    # Inpaint ClusterIP on D3 - starts at x=882 to preserve left card border & arrow tip
+    d3_base = inpaint_text_smooth(d3_base, (882, 128, 1106, 222), lum_threshold=185)
     # Dissolve misleading TLS text & padlock on internal gateway->services hop
     d3_base = clean_gateway_tls_hop(d3_base)
-    # Dissolve contradictory legend text: cyan (request / data) and magenta (event stream)
-    d3_base = inpaint_text_smooth(d3_base, (948, 28, 1028, 44), lum_threshold=180)
-    d3_base = inpaint_text_smooth(d3_base, (1080, 28, 1160, 44), lum_threshold=180)
+    # Dissolve contradictory legend text and shift column 1 left for clean spacing
+    d3_base = clean_d3_legend(d3_base)
     # Dissolve glowing amber AI squiggles across all 3 bb-scheduler server racks
     d3_base = clean_d3_scheduler_racks(d3_base)
     # Dissolve white squiggles from vertical faces of VictoriaMetrics cubes
@@ -1046,14 +1122,28 @@ def build_d1_html(bg_path: Path) -> str:
     <span style="font-size: 10.5px; color: #1e293b; font-weight: 700; line-height: 1;">scrape / remote write</span>
   </div>
 
-  <!-- Gateway Routes Overlay -->
-  <div class="glass-pill" style="top: 159px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">GRPCRoute · bep-cloud-grpc · api-cloud-grpc</div>
-  <div class="glass-pill" style="top: 187px; left: 601px; width: 220px; height: 24px; font-size: 8px; justify-content: flex-start; padding-left: 8px;">HTTPRoute · api-web · dashboard · grafana · mcp</div>
+  <!-- Gateway Routes Overlay (Direct Container Principle inside native pills) -->
+  <div class="direct-card" style="top: 154px; left: 602px; width: 222px; height: 21px; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: #0f172a;">GRPCRoute · bep-cloud-grpc · api-cloud-grpc</div>
+  <div class="direct-card" style="top: 181px; left: 602px; width: 222px; height: 21px; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: #0f172a;">HTTPRoute · api-web · dashboard · grafana · mcp</div>
 
-  <!-- Gateway to ClusterIP cleartext HTTP/2 hop -->
-  <div style="position: absolute; z-index: 15; top: 139px; left: 818px; width: 54px; text-align: center;">
-    <div style="font-size: 8px; font-weight: 800; color: #0284c7; line-height: 1;">h2c</div>
-    <div style="font-size: 6px; font-weight: 700; color: #475569; margin-top: 1px;">cleartext</div>
+  <!-- Gateway to ClusterIP HTTP/2 hop (crisp vector label + glowing SVG arrow) -->
+  <div style="position: absolute; z-index: 15; top: 136px; left: 834px; width: 41px; height: 16px; display: flex; align-items: center; justify-content: center; background: transparent; pointer-events: none;">
+    <span style="font-size: 9.5px; font-weight: 800; color: #0f172a; line-height: 1; letter-spacing: -0.02em;">HTTP/2</span>
+  </div>
+  <div style="position: absolute; z-index: 15; top: 153px; left: 833px; width: 43px; height: 24px; pointer-events: none;">
+    <svg width="43" height="24" viewBox="0 0 43 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="cyan-glow-d1" x="-20%" y="-40%" width="140%" height="180%">
+          <feDropShadow dx="0" dy="1" stdDeviation="2.2" flood-color="#38bdf8" flood-opacity="0.65"/>
+        </filter>
+        <linearGradient id="arrow-fill-d1" x1="0" y1="12" x2="41" y2="12" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#0ea5e9"/>
+        </linearGradient>
+      </defs>
+      <path d="M1 9.5 H26 V5 L40.5 12 L26 19 V14.5 H1 Z" fill="url(#arrow-fill-d1)" stroke="#0369a1" stroke-width="1.35" stroke-linejoin="round" filter="url(#cyan-glow-d1)"/>
+      <line x1="2.5" y1="12" x2="27" y2="12" stroke="#bae6fd" stroke-width="1.4" stroke-dasharray="2.5 1.5" stroke-linecap="round"/>
+    </svg>
   </div>
 
   <!-- Section 1: ClusterIP Services Box: Directly in native container, no textbox -->
@@ -1101,10 +1191,22 @@ def build_d1_html(bg_path: Path) -> str:
   <!-- Section 2: bep-nats-sub replaces erroneous 'bep-nats-pub' under blue writer pod -->
   <div class="glass-sub-pill" style="top: 368px; left: 794px; width: 108px; height: 24px; font-size: 9.5px;">bep-nats-sub</div>
 
-  <!-- Section 2: Finding 3 - Direct Chunk Offload -->
+  <!-- Section 2: Direct Chunk Offload -->
   <div class="glass-cyan" style="top: 464px; left: 865px; width: 165px; height: 38px; padding: 4px 6px; text-align: center;">
     <div style="font-size: 8.5px; font-weight: 800; color: #0284c7;">Direct Chunk Offload</div>
     <div style="font-size: 7.5px; font-weight: 700; color: #1e293b; margin-top: 1px;">Subscribers upload stdout/stderr to GCS</div>
+  </div>
+
+  <!-- Section 2: Managed Persistence & Artifact Store card in upper-right data tier -->
+  <div class="glass-cyan" style="top: 274px; left: 1098px; width: 234px; height: 104px; padding: 7px 10px;">
+    <div class="card-title">Managed Persistence &amp; Storage</div>
+    <div style="font-size: 8px; font-weight: 800; color: #0369a1; margin-top: 1px;">Cloud SQL (pg_partman) · GCS Artifact Store</div>
+    <div class="card-sub" style="font-size: 7.5px; line-height: 1.38; margin-top: 3px;">
+      <strong style="color: #0f172a;">PostgreSQL:</strong> 20 time-partitioned parent tables<br>
+      Batch SQL metadata writes · No DB-to-GCS path<br>
+      <strong style="color: #0f172a;">GCS Bucket:</strong> <code style="font-size: 7px;">progress/v1/&lt;proj&gt;/&lt;inv&gt;/*.pb.gz</code><br>
+      <span style="font-weight: 700; color: #047857;">GKE Workload Identity · DB progress fallback</span>
+    </div>
   </div>
 
   <!-- Section 2: Metadata queries to PostgreSQL replacing garbled 'queries / queries' -->
@@ -1245,11 +1347,6 @@ def build_d2_html(bg_path: Path) -> str:
   <div class="glass-pill" style="top: 390px; left: 672px; width: 132px; height: 22px; font-size: 8px;">cache_events · remote_exec</div>
   <div class="glass-pill" style="top: 390px; left: 816px; width: 135px; height: 22px; font-size: 8px;">progresses · 20 parent tables</div>
 
-  <!-- PostgreSQL GCS chunk fallback label -->
-  <div class="glass-slate" style="top: 486px; left: 742px; width: 246px; height: 20px; display: flex; align-items: center; justify-content: center;">
-    <span style="font-size: 7.5px; font-weight: 700; color: #1e293b;">progress fallback (if GCS offline) · No DB write to GCS</span>
-  </div>
-
   <!-- 7. GCS Progress Store: Directly on native glass slab, seated down & right, ribs fully visible, no textbox -->
   <div class="direct-card" style="top: 391px; left: 1056px; width: 200px;">
     <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em;">GCS progress store</div>
@@ -1261,9 +1358,9 @@ def build_d2_html(bg_path: Path) -> str:
     </div>
   </div>
 
-  <!-- Bottom progress chunks line under GCS -->
-  <div class="glass-cyan" style="top: 504px; left: 960px; width: 240px; height: 22px; display: flex; align-items: center; justify-content: center;">
-    <span style="font-size: 8px; font-weight: 800; color: #0284c7;">progress chunks uploaded to GCS</span>
+  <!-- Clean label directly above the bottom blue fallback arrow (no oversized box) -->
+  <div style="position: absolute; z-index: 15; top: 500px; left: 985px; width: 195px; text-align: center; background: transparent; pointer-events: none;">
+    <span style="font-size: 8.5px; font-weight: 800; color: #0369a1; letter-spacing: -0.01em;">DB fallback (if GCS offline)</span>
   </div>
 
   <!-- 8. Control plane clean vector title and subtitle on native container -->
@@ -1322,17 +1419,35 @@ def build_d3_html(bg_path: Path) -> str:
   </div>
 
   <!-- Legend overrides: cyan = client request / REAPI, magenta = storage RPCs / data -->
-  <div style="position: absolute; z-index: 15; top: 31px; left: 954px; width: 100px;">
-    <span style="font-size: 9.5px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em;">client request / REAPI</span>
+  <div style="position: absolute; z-index: 15; top: 26px; left: 918px; height: 18px; display: flex; align-items: center; pointer-events: none;">
+    <span style="font-size: 10px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em; white-space: nowrap;">client request / REAPI</span>
   </div>
-  <div style="position: absolute; z-index: 15; top: 31px; left: 1086px; width: 115px;">
-    <span style="font-size: 9.5px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em;">storage RPCs / data</span>
+  <div style="position: absolute; z-index: 15; top: 26px; left: 1086px; height: 18px; display: flex; align-items: center; pointer-events: none;">
+    <span style="font-size: 10px; color: #1e293b; font-weight: 700; line-height: 1; letter-spacing: -0.01em; white-space: nowrap;">storage RPCs / data</span>
   </div>
 
-  <!-- Gateway to ClusterIP cleartext HTTP/2 hop -->
-  <div style="position: absolute; z-index: 15; top: 139px; left: 818px; width: 54px; text-align: center;">
-    <div style="font-size: 8px; font-weight: 800; color: #0284c7; line-height: 1;">h2c</div>
-    <div style="font-size: 6px; font-weight: 700; color: #475569; margin-top: 1px;">cleartext</div>
+  <!-- Gateway Routes Overlay (Direct Container Principle inside native pills) -->
+  <div class="direct-card" style="top: 154px; left: 602px; width: 222px; height: 21px; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: #0f172a;">GRPCRoute · frontend-grpc :8980 (REAPI)</div>
+  <div class="direct-card" style="top: 181px; left: 602px; width: 222px; height: 21px; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: #0f172a;">HTTPRoute · bb-browser (Web UI)</div>
+
+  <!-- Gateway to ClusterIP HTTP/2 hop (crisp vector label + glowing SVG arrow) -->
+  <div style="position: absolute; z-index: 15; top: 136px; left: 834px; width: 41px; height: 16px; display: flex; align-items: center; justify-content: center; background: transparent; pointer-events: none;">
+    <span style="font-size: 9.5px; font-weight: 800; color: #0f172a; line-height: 1; letter-spacing: -0.02em;">HTTP/2</span>
+  </div>
+  <div style="position: absolute; z-index: 15; top: 153px; left: 833px; width: 43px; height: 24px; pointer-events: none;">
+    <svg width="43" height="24" viewBox="0 0 43 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="cyan-glow-d3" x="-20%" y="-40%" width="140%" height="180%">
+          <feDropShadow dx="0" dy="1" stdDeviation="2.2" flood-color="#38bdf8" flood-opacity="0.65"/>
+        </filter>
+        <linearGradient id="arrow-fill-d3" x1="0" y1="12" x2="41" y2="12" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#0ea5e9"/>
+        </linearGradient>
+      </defs>
+      <path d="M1 9.5 H26 V5 L40.5 12 L26 19 V14.5 H1 Z" fill="url(#arrow-fill-d3)" stroke="#0369a1" stroke-width="1.35" stroke-linejoin="round" filter="url(#cyan-glow-d3)"/>
+      <line x1="2.5" y1="12" x2="27" y2="12" stroke="#bae6fd" stroke-width="1.4" stroke-dasharray="2.5 1.5" stroke-linecap="round"/>
+    </svg>
   </div>
 
   <!-- Section 1: ClusterIP Services: Directly in native container, no textbox -->
@@ -1400,13 +1515,13 @@ def build_d3_html(bg_path: Path) -> str:
   </div>
 
   <!-- Section 3: VictoriaMetrics TSDB cluster label -->
-  <div style="position: absolute; z-index: 15; top: 706px; left: 690px; width: 180px; text-align: center;">
+  <div style="position: absolute; z-index: 15; top: 708px; left: 705px; width: 180px; text-align: center; background: transparent; pointer-events: none;">
     <div style="font-size: 10.5px; font-weight: 800; color: #0f172a;">VictoriaMetrics</div>
     <div style="font-size: 8px; font-weight: 700; color: #047857; margin-top: 1px;">TSDB cluster · REAPI metrics</div>
   </div>
 
   <!-- Section 3: Grafana dashboards label -->
-  <div style="position: absolute; z-index: 15; top: 706px; left: 1100px; width: 220px; text-align: center;">
+  <div style="position: absolute; z-index: 15; top: 708px; left: 1100px; width: 220px; text-align: center; background: transparent; pointer-events: none;">
     <div style="font-size: 10.5px; font-weight: 800; color: #0f172a;">Grafana monitoring dashboards</div>
   </div>
 
