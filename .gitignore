@@ -16,3 +16,6 @@ my-custom-values/
 .idea/
 .vscode/
 *.swp
+__pycache__/
+*.pyc
+
