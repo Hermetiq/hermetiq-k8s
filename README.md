@@ -200,7 +200,7 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.5` |             `0.9.4` |
+| Hermetiq |       `0.9.6` |             `0.9.4` |
 | Buildbarn |       `0.9.5` |  `20260908T142448Z` |
 | BB Worker Operator |       `0.3.7` |            `v0.3.7` |
 
@@ -482,6 +482,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/buildbarn-block-storage.md`](docs/buildbarn-block-storage.md) | Raw block-device deployment guidance |
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
+| [`docs/bep-forwarding.md`](docs/bep-forwarding.md) | Forwarding builds to another BES endpoint such as BuildBuddy |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 
 ## Shared chart conventions

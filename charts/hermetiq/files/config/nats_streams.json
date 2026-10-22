@@ -3,7 +3,7 @@
     "buildToolStreamName": "BEP_BUILD_TOOL",
     "dlqStreamName": "BEP_DLQ_STREAM",
     "subjectPrefix": "bep",
-    "buildToolStream": { "maxAge": "30m", "maxBytes": 0, "storage": "file", "replicas": 3, "duplicates": "30s" },
+    "buildToolStream": { "maxAge": "24h", "maxBytes": 0, "storage": "file", "replicas": 3, "duplicates": "30s" },
     "dlq": { "maxAge": "24h" },
     "consumers": {
       "buildTool": { "maxDeliver": 6, "ackWait": "3m", "backoff": ["3m", "6m"], "maxAckPending": 140000, "maxWaiting": 1024, "maxRequestBatch": 6000, "maxRequestExpires": "4s", "maxRequestMaxBytes": 90000000, "batchSize": 3000, "fetchMaxWait": "2s", "parallelism": 50, "storeBatchMaxEvents": 1000, "storeBatchMaxWait": "5ms", "storeBatchParallelism": 24 },
@@ -13,7 +13,7 @@
   "forwarder": {
     "streamName": "FWD_STREAM",
     "stream": { "maxAge": "10m", "storage": "file", "replicas": 1, "duplicates": "30s" },
-    "consumer": { "maxDeliver": 4, "ackWait": "60s", "maxAckPending": 1000, "maxWaiting": 1024, "maxRequestBatch": 500, "maxRequestExpires": "1500ms", "batchSize": 500, "fetchMaxWait": "1500ms" }
+    "consumer": { "maxDeliver": 4, "ackWait": "60s", "maxAckPending": 100000, "maxWaiting": 1024, "maxRequestBatch": 500, "maxRequestExpires": "1500ms", "batchSize": 500, "fetchMaxWait": "1500ms" }
   },
   "raw": {
     "consumer": { "maxDeliver": 8, "ackWait": "120s", "maxAckPending": 4000, "maxWaiting": 1024, "maxRequestBatch": 500, "maxRequestExpires": "2s", "batchSize": 500, "fetchMaxWait": "2s" }

@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.5
+version: 0.9.6
 appVersion: "0.9.4"
 annotations:
   artifacthub.io/license: Apache-2.0
@@ -14,8 +14,10 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Add ISCC and FSAC metrics to existing buildbarn dashboards"
+    - kind: fixed
+      description: "Keep BEP build-tool events 24h instead of 30m so builds longer than 30 minutes can be re-forwarded after a subscriber restart"
+    - kind: fixed
+      description: "Raise the BEP forwarder maxAckPending from 1000 to 100000 so large builds stay replayable"
 keywords:
   - hermetiq
   - MCP
