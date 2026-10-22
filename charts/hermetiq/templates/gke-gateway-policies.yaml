@@ -46,7 +46,7 @@ metadata:
     {{- include "hermetiq-core.labels" $ | nindent 4 }}
 spec:
   default:
-    timeoutSec: {{ $.Values.gateway.gke.backendPolicy.timeoutSec }}
+    timeoutSec: {{ if and $.Values.assistant.enabled (eq $svc (include "hermetiq-core.apiName" $)) }}{{ $.Values.assistant.streamTimeoutSeconds }}{{ else }}{{ $.Values.gateway.gke.backendPolicy.timeoutSec }}{{ end }}
   targetRef:
     group: ""
     kind: Service

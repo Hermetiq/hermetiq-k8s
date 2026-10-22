@@ -771,14 +771,22 @@ nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors
 {{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one gRPC route.
      Args: dict "root" $ "route" <key under gateway.timeouts>.
 
-     Renders nothing when gateway.timeouts.enabled is false or the route sets
-     none of the three fields, so callers can use `with` to decide whether the
+     The assistant keeps its API streaming timeout even when ordinary route
+     timeouts are disabled. Otherwise renders nothing when gateway.timeouts.enabled
+     is false or the route sets none of the three fields. Callers use `with` to
+     decide whether the
      block exists at all. Each field is emitted only when non-empty — an unset
      field leaves Envoy's own default in place, which is not the same as "0s"
      (0s means *disabled*, not *immediate*). */}}
 {{- define "hermetiq-core.routeTimeout" -}}
 {{- $timeouts := .root.Values.gateway.timeouts | default dict -}}
-{{- if $timeouts.enabled -}}
+{{- if and .root.Values.assistant.enabled (eq .route "apiGrpc") -}}
+timeout:
+  http:
+    requestTimeout: {{ printf "%ds" (int .root.Values.assistant.streamTimeoutSeconds) | quote }}
+    maxStreamDuration: "0s"
+    connectionIdleTimeout: {{ default "1h" $timeouts.apiGrpc.connectionIdleTimeout | quote }}
+{{- else if $timeouts.enabled -}}
 {{- $route := index $timeouts .route | default dict -}}
 {{- if or $route.requestTimeout $route.maxStreamDuration $route.connectionIdleTimeout -}}
 timeout:
@@ -800,3 +808,16 @@ timeout:
 {{- define "hermetiq-core.progressesPartitionMaintenanceName" -}}progresses-partition-maintenance{{- end -}}
 {{- define "hermetiq-core.targetTrendsShortName" -}}target-trends-refresh-short{{- end -}}
 {{- define "hermetiq-core.targetTrendsLongName" -}}target-trends-refresh-long{{- end -}}
+
+{{- define "hermetiq-core.assistantPolicyName" -}}
+{{- default "bep-aichat-policy" .Values.assistant.policy.existingConfigMap -}}
+{{- end -}}
+{{- define "hermetiq-core.rbeAccessPolicyName" -}}
+{{- default "bep-rbe-access-policy" .Values.rbe.accessPolicy.existingConfigMap -}}
+{{- end -}}
+{{- define "hermetiq-core.assistantPolicyChecksum" -}}
+{{- dict "name" (include "hermetiq-core.assistantPolicyName" .) "key" .Values.assistant.policy.configMapKey "data" .Values.assistant.policy.data "externalChecksum" .Values.assistant.policy.rolloutChecksum | toJson | sha256sum -}}
+{{- end -}}
+{{- define "hermetiq-core.rbeAccessPolicyChecksum" -}}
+{{- dict "name" (include "hermetiq-core.rbeAccessPolicyName" .) "key" .Values.rbe.accessPolicy.configMapKey "projects" .Values.rbe.accessPolicy.projects "externalChecksum" .Values.rbe.accessPolicy.rolloutChecksum | toJson | sha256sum -}}
+{{- end -}}

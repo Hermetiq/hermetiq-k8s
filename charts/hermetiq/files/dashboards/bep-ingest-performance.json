@@ -4930,7 +4930,7 @@
       {
         "current": {
           "text": "VictoriaMetrics",
-          "value": "P4169E866C3094E38"
+          "value": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
         "includeAll": false,
         "label": "Data source",

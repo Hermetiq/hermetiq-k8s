@@ -33,6 +33,12 @@ spec:
         {{- end }}
         kubectl.kubernetes.io/default-container: api
         hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
+        {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
+        hermetiq.com/assistant-policy-checksum: {{ include "hermetiq-core.assistantPolicyChecksum" . }}
+        {{- end }}
+        {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+        hermetiq.com/rbe-access-policy-checksum: {{ include "hermetiq-core.rbeAccessPolicyChecksum" . }}
+        {{- end }}
         hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
         {{- if not .Values.postgres.password.existingSecret }}
         checksum/postgres-secret: {{ dict "key" .Values.postgres.password.existingSecretKey "value" .Values.postgres.password.value | toJson | sha256sum }}
@@ -79,6 +85,26 @@ spec:
             items:
               - key: {{ .Values.promqlQueries.configMapKey | quote }}
                 path: promql.json
+        {{- if .Values.assistant.enabled }}
+        - name: prompt-runtime-tmp
+          emptyDir: {}
+        {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
+        - name: assistant-policy
+          configMap:
+            name: {{ include "hermetiq-core.assistantPolicyName" . }}
+            items:
+              - key: {{ .Values.assistant.policy.configMapKey | quote }}
+                path: policy.json
+        {{- end }}
+        {{- end }}
+        {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+        - name: rbe-access-policy
+          configMap:
+            name: {{ include "hermetiq-core.rbeAccessPolicyName" . }}
+            items:
+              - key: {{ .Values.rbe.accessPolicy.configMapKey | quote }}
+                path: policy.json
+        {{- end }}
         # File-mount (not env) so the kubelet's ~1m Secret refresh enables
         # license hot reload. Always mounted with optional: true so a trial
         # install picks up the Secret when it is created later (paid-key
@@ -191,6 +217,29 @@ spec:
             {{- if not (hasKey .Values.api.env "MCP_EXPOSE_USER_IDENTITIES") }}
             - name: MCP_EXPOSE_USER_IDENTITIES
               value: {{ .Values.api.mcpExposeUserIdentities | quote }}
+            {{- end }}
+            {{- if .Values.assistant.enabled }}
+            - name: AICHAT_DEFAULT_PROVIDER
+              value: claude
+            - name: ANTHROPIC_BACKEND
+              value: direct
+            - name: ANTHROPIC_DEFAULT_MODEL
+              value: {{ .Values.assistant.anthropic.model | quote }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.anthropic.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.anthropic.apiKey.existingSecretKey | quote }}
+            - name: PROMPT_RUNTIME_ADDR
+              value: 127.0.0.1:50097
+            {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
+            - name: AICHAT_POLICY_CONFIG
+              value: /etc/hermetiq/aichat/policy.json
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+            - name: RBE_ACCESS_POLICY_CONFIG
+              value: /etc/hermetiq/rbe-access/policy.json
             {{- end }}
             - name: MCP_ENABLED
               value: "true"
@@ -438,6 +487,16 @@ spec:
             - name: promql-config
               mountPath: /config/promql
               readOnly: true
+            {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
+            - name: assistant-policy
+              mountPath: /etc/hermetiq/aichat
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+            - name: rbe-access-policy
+              mountPath: /etc/hermetiq/rbe-access
+              readOnly: true
+            {{- end }}
             - name: license-key
               mountPath: /config/license
               readOnly: true
@@ -470,3 +529,47 @@ spec:
             successThreshold: 1
           securityContext:
             {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+
+        {{- if .Values.assistant.enabled }}
+        - name: prompt-runtime
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.promptRuntime" "repository" .Values.images.promptRuntime.repository "tag" .Values.images.promptRuntime.tag "digest" .Values.images.promptRuntime.digest) }}
+          imagePullPolicy: {{ .Values.images.promptRuntime.pullPolicy }}
+          env:
+{{- with .Values.assistant.promptRuntime.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: PROMPTRT_LISTEN
+              value: 127.0.0.1:50097
+            - name: DSPY_CACHEDIR
+              value: /tmp/dspy-cache
+            - name: BBP_LM_BACKEND
+              value: anthropic
+            - name: PROMPTRT_DEFAULT_MODEL
+              value: {{ .Values.assistant.anthropic.model | quote }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.anthropic.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.anthropic.apiKey.existingSecretKey | quote }}
+          volumeMounts:
+            - name: prompt-runtime-tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.assistant.promptRuntime.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: [bbp, health]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: [bbp, health]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- end }}

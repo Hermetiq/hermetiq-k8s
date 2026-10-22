@@ -6,14 +6,18 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.5
-appVersion: "0.9.4"
+version: 0.9.6
+appVersion: "0.9.5"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: added
+      description: "Add optional Anthropic-backed Barn Owl with its prompt-runtime sidecar and on-prem RBE Infrastructure access"
+    - kind: changed
+      description: "Synchronize portable PromQL and Grafana assets and update application images to v0.9.5"
     - kind: changed
       description: "Add ISCC and FSAC metrics to existing buildbarn dashboards"
 keywords:

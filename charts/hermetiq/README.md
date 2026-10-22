@@ -4,11 +4,15 @@
 to explore Hermetiq and Managed Buildbarn before setting up a Kubernetes
 deployment.
 
-This README is the operator reference packaged with the Hermetiq `0.9.4`
+This README is the operator reference packaged with the Hermetiq `0.9.6`
 chart. It covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for
 the full-stack deployment order and shared services used by the other charts.
+
+OCI installation examples retain the published chart `0.9.5`. The assistant
+and on-prem RBE settings require chart `0.9.6`; use the local chart development
+instructions until that chart and application `v0.9.5` images are published.
 
 ## Contents
 
@@ -60,6 +64,9 @@ the full-stack deployment order and shared services used by the other charts.
     - [Cache TTL configuration](#cache-ttl-configuration)
     - [PromQL query configuration](#promql-query-configuration)
   - [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools)
+  - [Barn Owl assistant](#barn-owl-assistant)
+  - [On-prem RBE Infrastructure](#on-prem-rbe-infrastructure)
+  - [BB Config Editor](#bb-config-editor)
   - [Stream configuration](#stream-configuration)
   - [Cost integration](#cost-integration)
   - [Cache-event analytics](#cache-event-analytics)
@@ -74,6 +81,7 @@ the full-stack deployment order and shared services used by the other charts.
     - [Temporary image overrides](#temporary-image-overrides)
     - [Rotate Secrets](#rotate-secrets)
   - [Local chart development](#local-chart-development)
+    - [Synchronize PromQL and dashboards](#synchronize-promql-and-dashboards)
   - [License](#license)
 
 ## Chart scope
@@ -83,6 +91,7 @@ This chart installs Hermetiq core services and supporting resources, including:
 - API and BEP publisher Deployments
 - one subscriber Deployment per NATS stream partition
 - dashboard Deployment with optional oauth2-proxy sidecar
+- optional Barn Owl prompt-runtime sidecar in the API Deployment
 - schema bootstrap Job and maintenance CronJobs
 - Services, HPA, ServiceAccount/RBAC, ConfigMaps, Secrets
 - optional Gateway API `GRPCRoute`/`HTTPRoute`, GKE HTTPRoute-only Gateway, Contour `HTTPProxy`, or classic `Ingress` resources
@@ -429,6 +438,11 @@ merge policies of the same kind targeting the same route at the same level: it
 applies the oldest and marks the rest `Overridden=True`. Set
 `gateway.timeouts.enabled=false` to omit chart-managed timeout policy while
 leaving health checks enabled.
+
+Enabling `assistant.enabled` applies `assistant.streamTimeoutSeconds` (660 by
+default) to API gRPC streaming so a ten-minute Barn Owl turn can finish. This
+assistant setting takes precedence over the API timeout above; see
+[Barn Owl assistant](#barn-owl-assistant) for the other routing providers.
 
 ### Tuning the downstream leg for high-RTT clients
 
@@ -1112,6 +1126,160 @@ rules.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
 
+### Barn Owl assistant
+
+Chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime
+sidecar. Keep the API, dashboard, and prompt-runtime on the matching **v0.9.5**
+customer release. These image pins require that release to have been published;
+changing chart values does not publish images. For a private mirror, use
+`images.promptRuntime.repository`, `tag`, and `digest` together with the usual
+registry and pull-secret settings. The runtime image is currently built for
+`linux/amd64`; schedule API pods on that architecture in mixed-architecture
+clusters, for example with `api.nodeSelector: {kubernetes.io/arch: amd64}`.
+
+The API and runtime need outbound HTTPS access to Anthropic. Create the same
+namespace-local Secret they will both reference, using a file containing only
+the API key:
+
+```bash
+kubectl -n hermetiq create secret generic claude-api-key \
+  --from-file=ANTHROPIC_API_KEY=/secure/path/anthropic-api-key
+```
+
+Add this to your values file:
+
+```yaml
+assistant:
+  enabled: true
+  anthropic:
+    model: claude-opus-5
+    apiKey:
+      existingSecret: claude-api-key
+      existingSecretKey: ANTHROPIC_API_KEY
+  streamTimeoutSeconds: 660
+```
+
+`assistant.enabled` defaults to `false`. When enabled, the chart configures
+ordinary API chat and runtime-backed prompts with the same Anthropic model and
+Secret. Credentials stay in the API pod; they are never sent to the browser.
+The runtime listens on `127.0.0.1:50097` inside that pod and has no Service or
+external route. It delegates tool execution to the API, which retains the
+caller's project authorization. BB Config Editor is not required for build,
+invocation, or RBE investigations.
+
+Runtime resource defaults are requests of `100m` CPU / `400Mi` memory and limits
+of one CPU / `1Gi` memory. Customize them under
+`assistant.promptRuntime.resources`; additional scalar environment settings go
+under `assistant.promptRuntime.env`. The container retains the chart's security
+context and gets a writable `/tmp` for import caches. Health probes execute
+`bbp health` because a kubelet network probe cannot reach its loopback listener.
+Keep the API pod termination grace at least 90 seconds for its shutdown drain.
+
+The embedded assistant limits, pricing, and policy defaults remain in effect.
+In particular, the embedded enforcement mode starts in `shadow`; an operator
+who wants enforced budgets can provide this overlay:
+
+```yaml
+assistant:
+  policy:
+    data:
+      enforcement:
+        mode: enforce
+        clientOverrides: reject
+```
+
+Alternatively, use `assistant.policy.existingConfigMap` with
+`configMapKey: policy.json` and a `rolloutChecksum` version or hash. Inline
+`data` and an existing ConfigMap are mutually exclusive. Managed policy changes
+roll API pods automatically; update `rolloutChecksum` for an externally managed
+policy. The chart does not enable cloud Jev model routing or require a Jev key.
+
+The assistant's 660-second streaming timeout allows the default ten-minute
+turn deadline plus headroom. It applies to the API gRPC route for Envoy Gateway,
+Contour, and nginx ingress, and to the API Service's GKE backend policy. GKE
+shares that Service policy across API ports, including REST and MCP. Publisher
+timeouts are unchanged. Raise the streaming timeout when raising the assistant
+turn deadline, and check any external load balancer's total response timeout.
+
+After upgrading, verify both the ordinary chat provider and a built-in prompt:
+
+```bash
+kubectl -n hermetiq rollout status deployment/grpc-api
+kubectl -n hermetiq exec deployment/grpc-api -c prompt-runtime -- bbp health
+kubectl -n hermetiq logs deployment/grpc-api -c prompt-runtime --tail=100
+kubectl -n hermetiq logs deployment/grpc-api -c api --tail=100
+```
+
+Sign in to the dashboard, ask Barn Owl a build question, and run a catalog
+prompt with real prerequisites. A healthy runtime proves process connectivity;
+a completed model-backed turn verifies the credential and provider. For a
+missing Secret, check its namespace and key. For image pull failures, check the
+release/mirror tag and architecture. For turns cut off near five minutes,
+inspect the effective route and external load-balancer timeouts. Rotate the
+API-key Secret and restart the API Deployment so both containers read it again.
+
+### On-prem RBE Infrastructure
+
+RBE Infrastructure is separately opt-in and can run without paid assistant
+calls. Enable it for explicit **project IDs**, matching the IDs in Hermetiq;
+the policy keys are not Kubernetes namespace names:
+
+```yaml
+rbe:
+  enabled: true
+  accessPolicy:
+    projects:
+      "0":
+        enabled: true
+        minimum_role: viewer
+rbac:
+  rules:
+    rbeFleet: true
+victoriaMetrics:
+  metricsEnabled: true
+  projectLabelEnabled: true
+  projectLabel: namespace
+```
+
+The example uses `bootstrap.projectId: "0"`. Every project still passes the
+server's access policy and role checks. `minimum_role` accepts `viewer`,
+`builder`, or `admin`; authenticated on-prem readers without stored membership
+have viewer access. An administrator cannot bypass a disabled project rule.
+The page and all live assistant/MCP infrastructure reads share this policy.
+
+An external policy can instead be selected using
+`rbe.accessPolicy.existingConfigMap`, `configMapKey`, and `rolloutChecksum`.
+Its JSON is `{"version":1,"projects":{"0":{"enabled":true,"minimum_role":"viewer"}}}`.
+Do not also set inline `projects`. RBE policy can be mounted independently of
+assistant enablement; changing managed policy rolls API pods automatically.
+
+Configure the VictoriaMetrics read endpoint with `victoriaMetrics.baseUrl`.
+RBE metrics and namespace-scoped assistant evidence require
+`victoriaMetrics.projectLabelEnabled: true` and `projectLabel: namespace`;
+unscoped metrics are reported as unavailable. The project's saved Buildbarn
+namespace must match the metrics' `namespace` label
+and the Kubernetes resources being inspected. For a new install,
+`bootstrap.projectNamespace` defaults to the release namespace; verify the
+project settings when upgrading an existing database. VictoriaLogs and OpenCost
+remain optional, configured through their existing values.
+
+The existing workload, Pod, ConfigMap, and RbeWorker reads remain necessary.
+`rbac.rules.rbeFleet` adds only namespaced `get/list` access to ReplicaSets,
+KEDA ScaledObjects, and HorizontalPodAutoscalers. For Buildbarn in a different
+namespace, grant the API ServiceAccount equivalent reads there. No node,
+`pods/exec`, or infrastructure-write grants are added. Missing grants are
+reported as unavailable or not permitted.
+
+Verify that an allowed project shows RBE Infrastructure and its fleet data;
+then verify a disabled project or insufficient role is denied. Enable
+`assistant.enabled` as well to use Barn Owl from the page and worker pools.
+
+### BB Config Editor
+
+BB Config Editor is deferred from this chart release. Its Git-backed bbconfig
+service and isolated Jsonnet evaluator are not installed by enabling Barn Owl
+or RBE Infrastructure.
+
 ### Stream configuration
 
 The chart renders `files/config/nats_streams.json` into the
@@ -1406,6 +1574,32 @@ Before installing locally, review the repository's
 [shared chart conventions](https://github.com/Hermetiq/hermetiq-k8s#shared-chart-conventions)
 for private registries, digest pinning, common metadata, `extraObjects`, and
 templated pass-through values.
+
+#### Synchronize PromQL and dashboards
+
+The companion `cloud-native` repository owns the PromQL defaults and shared
+Grafana dashboards. With the repositories checked out as siblings, run its
+sync script from any working directory:
+
+```bash
+/path/to/cloud-native/scripts/sync-helm-assets.sh --dry-run
+/path/to/cloud-native/scripts/sync-helm-assets.sh
+/path/to/cloud-native/scripts/sync-helm-assets.sh --check
+```
+
+Use `--chart-dir /path/to/hermetiq-k8s/charts/hermetiq` for a different layout.
+`--dry-run` shows pending changes without changing chart files. `--check`
+returns a nonzero status when managed assets differ. The script requires
+Python 3 and rsync, validates and stages the source JSON, and copies with
+checksum comparison so repeated runs leave unchanged files untouched.
+
+The managed set is `bep-nats/config/promql_default.json` and the twelve shared
+dashboards: BEP ingest, Hermetiq Demo, JetStream, NATS, query performance, SQL
+performance, and six Buildbarn dashboards. The script preserves Helm's
+datasource, namespace, and project substitutions and repairs undeclared
+datasource references. Adding another dashboard requires an explicit manifest
+and portability review. Helm's Dragonfly dashboard, NATS stream settings,
+cache TTL settings, and other unmanaged files are preserved.
 
 ### License
 

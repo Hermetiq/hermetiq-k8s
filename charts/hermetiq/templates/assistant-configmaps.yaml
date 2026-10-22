@@ -1,0 +1,25 @@
+{{- if and .Values.assistant.enabled .Values.assistant.policy.data (not .Values.assistant.policy.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.assistantPolicyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.assistant.policy.configMapKey | quote }}: |-
+    {{- .Values.assistant.policy.data | toPrettyJson | nindent 4 }}
+---
+{{- end }}
+{{- if and .Values.rbe.accessPolicy.projects (not .Values.rbe.accessPolicy.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermetiq-core.rbeAccessPolicyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+data:
+  {{ .Values.rbe.accessPolicy.configMapKey | quote }}: |-
+    {{- dict "version" 1 "projects" .Values.rbe.accessPolicy.projects | toPrettyJson | nindent 4 }}
+{{- end }}

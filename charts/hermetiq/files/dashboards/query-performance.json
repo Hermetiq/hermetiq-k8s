@@ -378,8 +378,8 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "cfead157-3c8b-4d42-8155-29443c634950",
-          "value": "cfead157-3c8b-4d42-8155-29443c634950"
+          "text": "__HERMETIQ_PROJECT_ID__",
+          "value": "__HERMETIQ_PROJECT_ID__"
         },
         "definition": "label_values(project_id)",
         "label": "Project ID",

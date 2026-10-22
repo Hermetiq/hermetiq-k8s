@@ -1,0 +1,133 @@
+suite: optional assistant and prompt runtime
+templates:
+  - templates/deployment-api.yaml
+  - templates/assistant-configmaps.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: leaves the assistant off without credentials by default
+    template: templates/deployment-api.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "ANTHROPIC_API_KEY")]
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "prompt-runtime-tmp")]
+  - it: requires a customer managed API key Secret when enabled
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: assistant.anthropic.apiKey.existingSecret is required when assistant.enabled=true
+  - it: keeps runtime private and uses matching model and Secret references
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.model: test-model
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.anthropic.apiKey.existingSecretKey: api-key
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROMPT_RUNTIME_ADDR")].value
+          value: 127.0.0.1:50097
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "PROMPTRT_LISTEN")].value
+          value: 127.0.0.1:50097
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "PROMPTRT_DEFAULT_MODEL")].value
+          value: test-model
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "ANTHROPIC_DEFAULT_MODEL")].value
+          value: test-model
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "ANTHROPIC_API_KEY")].valueFrom.secretKeyRef
+          value: {name: llm-key, key: api-key}
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "ANTHROPIC_API_KEY")].valueFrom.secretKeyRef
+          value: {name: llm-key, key: api-key}
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].ports
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AICHAT_POLICY_CONFIG")]
+  - it: provides writable scratch space while retaining the restricted runtime
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].volumeMounts
+          value: [{name: prompt-runtime-tmp, mountPath: /tmp}]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].readinessProbe.exec.command
+          value: [bbp, health]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].resources.limits.memory
+          value: 1Gi
+  - it: honors registry and digest image overrides
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      global.imageRegistry: registry.example.com
+      images.promptRuntime.digest: sha256:1234
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].image
+          value: registry.example.com/hermetiq-cloud/hermetiq-public/prompt-runtime:v0.9.5@sha256:1234
+  - it: renders an optional inline overlay and a rollout checksum
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.policy.data:
+        enforcement: {mode: enforce, clientOverrides: reject}
+    asserts:
+      - matchRegex:
+          path: data["policy.json"]
+          pattern: '"mode": "enforce"'
+        template: templates/assistant-configmaps.yaml
+      - matchRegex:
+          path: spec.template.metadata.annotations["hermetiq.com/assistant-policy-checksum"]
+          pattern: '^[a-f0-9]{64}$'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AICHAT_POLICY_CONFIG")].value
+          value: /etc/hermetiq/aichat/policy.json
+        template: templates/deployment-api.yaml
+  - it: mounts an external assistant policy under a stable filename
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.policy.existingConfigMap: external-policy
+      assistant.policy.configMapKey: custom.json
+      assistant.policy.rolloutChecksum: revision-2
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "assistant-policy")].configMap
+          value:
+            name: external-policy
+            items: [{key: custom.json, path: policy.json}]
+  - it: rejects ambiguous assistant policy sources
+    template: templates/validate.yaml
+    set:
+      assistant.policy.existingConfigMap: external-policy
+      assistant.policy.data: {version: 1}
+    asserts:
+      - failedTemplate:
+          errorMessage: assistant.policy.data and assistant.policy.existingConfigMap are mutually exclusive
+  - it: rejects overrides of the runtime network boundary
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.promptRuntime.env.PROMPTRT_LISTEN: 0.0.0.0:50097
+    asserts:
+      - failedTemplate:
+          errorMessage: assistant.promptRuntime.env must not set chart-managed PROMPTRT_LISTEN

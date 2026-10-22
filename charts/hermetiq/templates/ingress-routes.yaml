@@ -56,8 +56,13 @@ metadata:
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
     {{- end }}
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    {{- if .Values.assistant.enabled }}
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.assistant.streamTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.assistant.streamTimeoutSeconds | quote }}
+    {{- else }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
     nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+    {{- end }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
     {{- if .Values.ingress.cors.enabled }}
     {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}

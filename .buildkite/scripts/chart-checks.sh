@@ -91,4 +91,9 @@ else
   echo "(no ${DIR}/tests — skipping; add suites under ${DIR}/tests/ to enable)"
 fi
 
+if [[ "${CHART}" == "hermetiq" && -x "${DIR}/tests/schema_validation_test.sh" ]]; then
+  echo "+++ :test_tube: assistant and RBE values schema"
+  "${DIR}/tests/schema_validation_test.sh"
+fi
+
 echo "+++ :white_check_mark: ${CHART} validation passed"
