@@ -46,6 +46,141 @@ the starter value `bep-nats-pub.hermetiq.svc.cluster.local:50091` matches
 `bbcal.address` in `custom-values/buildbarn-values.yaml`. Adjust platform
 properties and runner images for your workloads.
 
+## Shared worker tuning
+
+The worker manifests carry the shared production tuning. Use an environment
+overlay to override those defaults. Namespaces, service addresses,
+node-pool selectors, taints, local disk paths, private images, and custom
+platform identities remain environment-specific; optional pools remain opt-in.
+
+| Pool | Concurrency | Queue target per replica | Minimum / maximum replicas |
+|---|---:|---:|---:|
+| Ubuntu 22.04 | 11 | 11 | 0 / 20 |
+| Ubuntu 24.04 | 16 | 8 | 1 / 8 |
+| Codex | 9 | 9 | 0 / 20 |
+| Envoy | 11 | 11 | 0 / 20 |
+| Size class small | 24 | 16 | 1 / 20 |
+| Size class large | 12 | 8 | 1 / 20 |
+| Testcontainers (DinD) | 4 | 2 | 1 / 6 |
+| Drake | 11 | 11 | 0 / 20 |
+
+The queue target is `spec.autoscaling.prometheus.threshold`. Several pools
+intentionally target fewer tasks than their execution concurrency. Scale-up
+policies use 30-second periods, with pool-specific step sizes and scale-down
+behavior; Envoy uses a five-minute query window. The Sysbox example retains
+its separate concurrency-2 configuration. Set the warm pools' minimum to zero
+in your overlay when using the [scale-up-from-zero setup](#scale-up-from-zero).
+
+## Scale-up from zero
+
+Declare every zero-capable worker platform in the Buildbarn chart's
+`scheduler.predeclaredPlatformQueues`. The scheduler can then accept actions
+for that platform before any workers have registered, giving KEDA queued work
+to react to. These logical queues remain available with no workers and are
+recreated when the scheduler starts.
+
+Without a declaration, a platform is unknown after a cold scheduler start;
+an existing queue is also removed after `scheduler.platformQueueWithNoWorkersTimeout`
+(900 seconds by default) without workers. Matching actions are rejected before
+they contribute to the queue-depth metric. KEDA sees zero work, so its scaler
+failure fallback does not wake the pool.
+
+Add declarations to your **Buildbarn Helm values**, alongside the installed
+worker pools. This example covers size-class workers, Codex, Envoy,
+Testcontainers, and an Ubuntu 24.04 CI platform:
+
+```yaml
+scheduler:
+  predeclaredPlatformQueues:
+    - platform:
+        - { name: pool, value: sizeclass }
+      sizeClasses: [1, 2]
+    - platform:
+        - { name: Arch, value: amd64 }
+        - { name: OSFamily, value: Linux }
+        - { name: container-image, value: "docker://docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70" }
+      sizeClasses: [0]
+    - platform:
+        - { name: container-image, value: "docker://gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43" }
+        - { name: dockerAddCapabilities, value: "SYS_PTRACE,NET_RAW,NET_ADMIN" }
+        - { name: dockerNetwork, value: standard }
+        - { name: dockerPrivileged, value: "True" }
+      sizeClasses: [0]
+    - platform:
+        - { name: pool, value: testcontainers }
+      sizeClasses: [0]
+    - platform:
+        - { name: env, value: ubuntu2404-62d572b92f9f }
+        - { name: pool, value: hmq-ci }
+      sizeClasses: [0]
+```
+
+Install the optional `sizeclass` and `testcontainers` components through your
+[environment overlay](#environment-overlays) for those declarations. Enable
+`storage.persistence.iscc.enabled` and `scheduler.sizeClassAnalysis.enabled`
+for feedback-driven routing between the two size classes, following the
+[ISCC runbook](../../docs/iscc-size-classes.md). The
+`hmq-ci` entry assumes an overlay changes `worker-ubuntu24-04` to advertise
+exactly these properties:
+
+```yaml
+spec:
+  config:
+    generated:
+      platformProperties:
+        - { name: env, value: ubuntu2404-62d572b92f9f }
+        - { name: pool, value: hmq-ci }
+```
+
+The standard Ubuntu 24.04 example advertises
+`container-image=docker://ghcr.io/catthehacker/ubuntu:act-24.04`. If you retain
+that platform, declare its `container-image` queue instead. Add declarations
+for every other installed pool that may reach zero, including the standard
+Ubuntu 22.04 pool. Helm replaces list values, so later values files must carry
+the complete queue list you want to retain.
+
+Match declarations to the worker configuration:
+
+- Copy the complete `spec.config.generated.platformProperties`, preserving
+  case and exact values, sorted by property name and then value. Match the
+  platform requested by Bazel after any scheduler action routing. The runner
+  image alone does not define the advertised platform.
+- Use `sizeClasses: [0]` for a single-class pool whose
+  `spec.config.generated.sizeClass` is omitted or zero. Multiple classes share
+  the same platform and declare their increasing positive classes, such as
+  `[1, 2]`. The largest class must support the workloads retried from smaller
+  classes. See the [ISCC runbook](../../docs/iscc-size-classes.md).
+- Starter generated workers register with an empty instance-name prefix.
+  Omit `instanceNamePrefix` from their queue declarations and leave
+  `spec.autoscaling.prometheus.instanceNamePrefix` empty. Changing the metric
+  query prefix alone does not change worker registration.
+
+For each pool that should scale down to zero, set these fields on its
+`RbeWorker`, retaining its Prometheus endpoint, metric threshold, and other
+pool-specific settings:
+
+```yaml
+spec:
+  replicas: 0
+  autoscaling:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: 20
+```
+
+The worker operator creates the Deployment and KEDA ScaledObject. Its queue
+query must reach the scheduler metrics for the worker's namespace, platform,
+instance prefix, and size class. Keep scheduler scraping and the Buildbarn
+recording rules running while worker pools are at zero. The chart's
+`keda.frontend` settings control frontend replicas independently.
+
+Verify the rendered scheduler declarations against the rendered RbeWorkers
+before upgrading. On an idle test pool, submit a small action that misses the
+action cache, then watch queued work, desired replicas, and ready workers.
+Allow for metric collection and KEDA polling, node provisioning, image pulls,
+and worker registration. A predeclared queue supplies the scheduling identity;
+the nodes must still satisfy the [pod scheduling requirements](#pod-scheduling).
+
 ## Pod scheduling
 
 Review scheduling before applying any pool. KEDA can request worker replicas,
@@ -97,9 +232,9 @@ again: the node reports a high major page-fault rate (for example, the
 node-exporter `NodeMemoryMajorPagesFaults` alert), and the worker container
 reads several times more from disk than it writes.
 
-The examples give the worker container 9Gi (4Gi in the concurrency-2
-Testcontainers pools) and take that memory from the runner, so no Pod requests
-more memory than before. When you resize a pool:
+The examples give the worker container 9Gi, or 4Gi for Ubuntu 24.04 and the
+Testcontainers pools, alongside each runner's separate memory budget. When you
+resize a pool:
 
 - Lower the runner only after comparing its peak working set
   (`container_memory_working_set_bytes{container="runner"}`) with its limit.

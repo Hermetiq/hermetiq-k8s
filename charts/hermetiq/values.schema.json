@@ -90,6 +90,10 @@
             "stytch"
           ],
           "description": "Identity provider for every core that serves gRPC. Required by the process at startup; \"jwks\" for on-prem."
+        },
+        "victoriaLogsEnabled": {
+          "type": "boolean",
+          "description": "Enable VictoriaLogs-backed MCP tools and dashboard RBE Kubernetes Events."
         }
       }
     },
@@ -592,7 +596,10 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["cluster", "namespace"]
+          "enum": [
+            "cluster",
+            "namespace"
+          ]
         },
         "rules": {
           "type": "object",
@@ -601,6 +608,9 @@
               "type": "boolean"
             },
             "licenseState": {
+              "type": "boolean"
+            },
+            "rbeFleet": {
               "type": "boolean"
             }
           }
@@ -843,6 +853,142 @@
         },
         "rolloutChecksum": {
           "type": "string"
+        }
+      }
+    },
+    "assistant": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "streamTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "anthropic": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "apiKey": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        },
+        "promptRuntime": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "jev": {
+          "type": "object",
+          "description": "Optional Jev credentials for model routing configured by the assistant policy.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "apiKey": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "type": "string"
+                }
+              }
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "rbe": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "accessPolicy": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            },
+            "projects": {
+              "type": "object",
+              "propertyNames": {
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled",
+                  "minimum_role"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "minimum_role": {
+                    "type": "string",
+                    "enum": [
+                      "viewer",
+                      "builder",
+                      "admin"
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

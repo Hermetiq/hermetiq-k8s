@@ -1,0 +1,130 @@
+suite: independent RBE page and live evidence access
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-dashboard.yaml
+  - templates/rbe-access-policy-configmap.yaml
+  - templates/rbac.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: hides the RBE page by default
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "false"
+  - it: requires an explicit access policy for the RBE page
+    template: templates/validate.yaml
+    set:
+      rbe.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: rbe.enabled=true requires explicit rbe.accessPolicy.projects or rbe.accessPolicy.existingConfigMap
+  - it: enables RBE without an LLM and mounts the exact project policy
+    set:
+      rbe.enabled: true
+      rbe.accessPolicy.projects:
+        "0": {enabled: true, minimum_role: viewer}
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "true"
+        template: templates/deployment-dashboard.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")]
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "RBE_ACCESS_POLICY_CONFIG")].value
+          value: /etc/hermetiq/rbe-access/policy.json
+        template: templates/deployment-api.yaml
+      - matchRegex:
+          path: data["policy.json"]
+          pattern: '"version": 1'
+        template: templates/rbe-access-policy-configmap.yaml
+      - matchRegex:
+          path: data["policy.json"]
+          pattern: '"minimum_role": "viewer"'
+        template: templates/rbe-access-policy-configmap.yaml
+  - it: permits a live MCP policy while keeping the RBE page hidden
+    template: templates/deployment-api.yaml
+    set:
+      rbe.accessPolicy.existingConfigMap: external-rbe-policy
+      rbe.accessPolicy.configMapKey: access.json
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "rbe-access-policy")].configMap
+          value:
+            name: external-rbe-policy
+            items: [{key: access.json, path: policy.json}]
+      - matchRegex:
+          path: spec.template.metadata.annotations["hermetiq.com/rbe-access-policy-checksum"]
+          pattern: '^[a-f0-9]{64}$'
+  - it: adds only namespaced fleet read permissions when opted in
+    template: templates/rbac.yaml
+    set:
+      rbac.rules.rbeFleet: true
+    documentIndex: 0
+    asserts:
+      - isKind: {of: Role}
+      - contains:
+          path: rules
+          content: {apiGroups: [apps], resources: [replicasets], verbs: [get, list]}
+      - contains:
+          path: rules
+          content: {apiGroups: [keda.sh], resources: [scaledobjects], verbs: [get, list]}
+      - contains:
+          path: rules
+          content: {apiGroups: [autoscaling], resources: [horizontalpodautoscalers], verbs: [get, list]}
+  - it: omits fleet read permissions by default
+    template: templates/rbac.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: rules
+          content: {apiGroups: [apps], resources: [replicasets], verbs: [get, list]}
+      - notContains:
+          path: rules
+          content: {apiGroups: [keda.sh], resources: [scaledobjects], verbs: [get, list]}
+      - notContains:
+          path: rules
+          content: {apiGroups: [autoscaling], resources: [horizontalpodautoscalers], verbs: [get, list]}
+  - it: scopes cluster-mode fleet reads to the release namespace
+    template: templates/rbac.yaml
+    set:
+      rbac.mode: cluster
+      rbac.rules.rbeFleet: true
+    asserts:
+      - isKind: {of: ClusterRole}
+        documentIndex: 0
+      - contains:
+          path: rules
+          content: {apiGroups: [keda.sh], resources: [scaledobjects], verbs: [get, list]}
+        documentIndex: 0
+      - isKind: {of: RoleBinding}
+        documentIndex: 1
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+        documentIndex: 1
+      - equal:
+          path: roleRef
+          value: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: RELEASE-NAME-cert-crud}
+        documentIndex: 1
+  - it: rejects a policy path override in the API environment
+    template: templates/validate.yaml
+    set:
+      rbe.accessPolicy.projects:
+        "0": {enabled: true, minimum_role: viewer}
+      api.env.RBE_ACCESS_POLICY_CONFIG: /tmp/policy.json
+    asserts:
+      - failedTemplate:
+          errorMessage: api.env must not set RBE_ACCESS_POLICY_CONFIG when rbe.accessPolicy is configured
+  - it: requires a ConfigMap key for an RBE access policy
+    template: templates/validate.yaml
+    set:
+      rbe.accessPolicy.existingConfigMap: external-rbe-policy
+      rbe.accessPolicy.configMapKey: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: rbe.accessPolicy.configMapKey is required when an RBE access policy is configured

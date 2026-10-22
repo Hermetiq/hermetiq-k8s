@@ -107,7 +107,12 @@ spec:
       loadBalancerPolicy:
         strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
       timeoutPolicy:
+        {{- if .Values.assistant.enabled }}
+        response: {{ include "hermetiq-core.assistantTimeout" (dict "root" . "value" .Values.contour.httpProxy.responseTimeout) | quote }}
+        idle: {{ printf "%ds" (int .Values.assistant.streamTimeoutSeconds) | quote }}
+        {{- else }}
         response: {{ .Values.contour.httpProxy.responseTimeout | quote }}
+        {{- end }}
   virtualhost:
     fqdn: {{ include "hermetiq-core.apiGrpcHost" . }}
     {{- if .Values.contour.cors.enabled }}
