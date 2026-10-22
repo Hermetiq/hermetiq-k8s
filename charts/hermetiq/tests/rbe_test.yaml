@@ -2,7 +2,7 @@ suite: independent RBE page and live evidence access
 templates:
   - templates/deployment-api.yaml
   - templates/deployment-dashboard.yaml
-  - templates/assistant-configmaps.yaml
+  - templates/rbe-access-policy-configmap.yaml
   - templates/rbac.yaml
   - templates/validate.yaml
 values:
@@ -41,11 +41,11 @@ tests:
       - matchRegex:
           path: data["policy.json"]
           pattern: '"version": 1'
-        template: templates/assistant-configmaps.yaml
+        template: templates/rbe-access-policy-configmap.yaml
       - matchRegex:
           path: data["policy.json"]
           pattern: '"minimum_role": "viewer"'
-        template: templates/assistant-configmaps.yaml
+        template: templates/rbe-access-policy-configmap.yaml
   - it: permits a live MCP policy while keeping the RBE page hidden
     template: templates/deployment-api.yaml
     set:
@@ -86,3 +86,45 @@ tests:
       - notContains:
           path: rules
           content: {apiGroups: [keda.sh], resources: [scaledobjects], verbs: [get, list]}
+      - notContains:
+          path: rules
+          content: {apiGroups: [autoscaling], resources: [horizontalpodautoscalers], verbs: [get, list]}
+  - it: scopes cluster-mode fleet reads to the release namespace
+    template: templates/rbac.yaml
+    set:
+      rbac.mode: cluster
+      rbac.rules.rbeFleet: true
+    asserts:
+      - isKind: {of: ClusterRole}
+        documentIndex: 0
+      - contains:
+          path: rules
+          content: {apiGroups: [keda.sh], resources: [scaledobjects], verbs: [get, list]}
+        documentIndex: 0
+      - isKind: {of: RoleBinding}
+        documentIndex: 1
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+        documentIndex: 1
+      - equal:
+          path: roleRef
+          value: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: RELEASE-NAME-cert-crud}
+        documentIndex: 1
+  - it: rejects a policy path override in the API environment
+    template: templates/validate.yaml
+    set:
+      rbe.accessPolicy.projects:
+        "0": {enabled: true, minimum_role: viewer}
+      api.env.RBE_ACCESS_POLICY_CONFIG: /tmp/policy.json
+    asserts:
+      - failedTemplate:
+          errorMessage: api.env must not set RBE_ACCESS_POLICY_CONFIG when rbe.accessPolicy is configured
+  - it: requires a ConfigMap key for an RBE access policy
+    template: templates/validate.yaml
+    set:
+      rbe.accessPolicy.existingConfigMap: external-rbe-policy
+      rbe.accessPolicy.configMapKey: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: rbe.accessPolicy.configMapKey is required when an RBE access policy is configured

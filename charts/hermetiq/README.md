@@ -64,7 +64,8 @@ instructions until that chart and application `v0.9.5` images are published.
     - [Cache TTL configuration](#cache-ttl-configuration)
     - [PromQL query configuration](#promql-query-configuration)
   - [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools)
-  - [Barn Owl assistant](#barn-owl-assistant)
+  - [Barn Owl AI Assistant](#barn-owl-assistant)
+    - [Optional JEV model routing](#optional-jev-model-routing)
   - [On-prem RBE Infrastructure](#on-prem-rbe-infrastructure)
   - [BB Config Editor](#bb-config-editor)
   - [Stream configuration](#stream-configuration)
@@ -442,7 +443,7 @@ leaving health checks enabled.
 Enabling `assistant.enabled` applies `assistant.streamTimeoutSeconds` (660 by
 default) to API gRPC streaming so a ten-minute Barn Owl turn can finish. This
 assistant setting takes precedence over the API timeout above; see
-[Barn Owl assistant](#barn-owl-assistant) for the other routing providers.
+[Barn Owl AI Assistant](#barn-owl-assistant) for the other routing providers.
 
 ### Tuning the downstream leg for high-RTT clients
 
@@ -1009,6 +1010,32 @@ Do not use expressions in `hosts.*`, which several templates consume verbatim.
 
 ### Dashboard configuration
 
+The chart sets dashboard feature flags explicitly for on-prem installations:
+
+| Feature | Chart setting | Default |
+| --- | --- | --- |
+| Barn Owl | `assistant.enabled` | Disabled |
+| RBE Infrastructure | `rbe.enabled` plus an explicit project access policy | Disabled |
+| BB Config Editor | Unavailable in this chart | Disabled |
+
+These settings render `REACT_APP_ENABLE_ASSISTANT`,
+`REACT_APP_ENABLE_RBE_UI`, and `REACT_APP_ENABLE_BB_CONFIG` respectively. The
+BB Config flag is always `false`; this chart does not deploy the editor's
+backend services. Do not override these variables in `dashboard.env`; Helm
+rejects conflicting entries. Other dashboard environment settings remain
+available through that map.
+
+Use an updated dashboard image containing the runtime handling for these
+flags. Changing chart values with an older image does not add that behavior;
+the new on-prem assistant and editor defaults require the matching dashboard
+application release.
+
+`rbac.rules.rbeFleet` grants the API Kubernetes reads for fleet ownership and
+scaler information. It does not enable the RBE page. `rbe.enabled` controls
+page visibility and requires the project's access policy; it does not grant
+Kubernetes permissions. RBE Infrastructure can run with
+`assistant.enabled: false`; granting fleet reads alone leaves it hidden.
+
 #### Quickstart customization
 
 The dashboard Quickstart page renders Bazel remote caching instructions from
@@ -1126,16 +1153,10 @@ rules.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
 
-### Barn Owl assistant
+### Barn Owl AI Assistant
 
-Chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime
-sidecar. Keep the API, dashboard, and prompt-runtime on the matching **v0.9.5**
-customer release. These image pins require that release to have been published;
-changing chart values does not publish images. For a private mirror, use
-`images.promptRuntime.repository`, `tag`, and `digest` together with the usual
-registry and pull-secret settings. The runtime image is currently built for
-`linux/amd64`; schedule API pods on that architecture in mixed-architecture
-clusters, for example with `api.nodeSelector: {kubernetes.io/arch: amd64}`.
+Barn Owl is Hermetiq's AI Agent that optimizes your Bazel and Buildbarn builds; 
+chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime sidecar.
 
 The API and runtime need outbound HTTPS access to Anthropic. Create the same
 namespace-local Secret they will both reference, using a file containing only
@@ -1159,8 +1180,9 @@ assistant:
   streamTimeoutSeconds: 660
 ```
 
-`assistant.enabled` defaults to `false`. When enabled, the chart configures
-ordinary API chat and runtime-backed prompts with the same Anthropic model and
+`assistant.enabled` defaults to `false` and controls both the dashboard's
+Barn Owl visibility and its backend/runtime configuration. When enabled, the
+chart configures ordinary API chat and runtime-backed prompts with the same Anthropic model and
 Secret. Credentials stay in the API pod; they are never sent to the browser.
 The runtime listens on `127.0.0.1:50097` inside that pod and has no Service or
 external route. It delegates tool execution to the API, which retains the
@@ -1192,7 +1214,8 @@ Alternatively, use `assistant.policy.existingConfigMap` with
 `configMapKey: policy.json` and a `rolloutChecksum` version or hash. Inline
 `data` and an existing ConfigMap are mutually exclusive. Managed policy changes
 roll API pods automatically; update `rolloutChecksum` for an externally managed
-policy. The chart does not enable cloud Jev model routing or require a Jev key.
+policy. JEV model routing is optional and configured separately below; the
+default setup needs only the Anthropic credential.
 
 The assistant's 660-second streaming timeout allows the default ten-minute
 turn deadline plus headroom. It applies to the API gRPC route for Envoy Gateway,
@@ -1217,6 +1240,75 @@ missing Secret, check its namespace and key. For image pull failures, check the
 release/mirror tag and architecture. For turns cut off near five minutes,
 inspect the effective route and external load-balancer timeouts. Rotate the
 API-key Secret and restart the API Deployment so both containers read it again.
+
+#### Optional JEV model routing
+
+JEV can classify a freeform turn and select a model tier. It is disabled by
+default. The existing API handles classification; prompt-runtime, the browser,
+publisher, and subscribers do not receive the JEV key.
+
+Create an operator-managed Secret in the release namespace:
+
+```bash
+kubectl -n hermetiq create secret generic jev-api-key \
+  --from-file=JEV_API_KEY=/secure/path/jev-api-key
+```
+
+Add these settings alongside the Anthropic configuration above. This example
+observes routing decisions for RBE chat while retaining its usual model:
+
+```yaml
+assistant:
+  jev:
+    enabled: true
+    baseUrl: https://api.typesafe.ai
+    apiKey:
+      existingSecret: jev-api-key
+      existingSecretKey: JEV_API_KEY
+    rolloutChecksum: "key-version-1"
+  policy:
+    data:
+      agents:
+        rbe:
+          modelRouting:
+            mode: shadow
+            router: jev
+            jevModel: jev-1.13.0
+            timeout: 800ms
+            minConfidence: 0.5
+            fallbackTier: complex
+            tiers:
+              simple:
+                model: claude-haiku-4-5
+              complex:
+                model: claude-opus-5
+                effort: high
+```
+
+`assistant.enabled` and the Anthropic Secret must also be configured. The
+`assistant.jev` values supply credentials and the endpoint; an active
+`modelRouting` block in the assistant policy makes classifier calls. Use
+`mode: enforce` to apply the selected tier, or `shadow` to record classification
+while keeping the usual model. Routing can be configured independently for
+the `rbe`, `invocation`, `project`, and `configset` agents. Model tiers and
+pricing must be supported by the application version being deployed.
+
+The same routing policy can be supplied through
+`assistant.policy.existingConfigMap` instead of inline `data`. A policy that
+enables routing also needs the JEV credential at API startup. The chart does
+not activate or copy the cloud policy automatically.
+
+Allow API egress to the configured JEV endpoint. Keep `baseUrl` at the API root;
+the client appends `/v1/systemone`. Classification receives the redacted latest
+user message, excluding conversation history, server instructions, tool
+results, and injected page context. Selected catalog prompts and DSPy program
+turns retain their existing execution path and bypass JEV.
+
+Classifier errors, timeouts, low confidence, or an open circuit use
+`fallbackTier` when routing is enforced. Change `assistant.jev.rolloutChecksum`
+after rotating the Secret so API pods restart with the new key. Changes to the
+Secret reference or endpoint also roll the API pods; inline policy changes
+use the existing assistant-policy checksum.
 
 ### On-prem RBE Infrastructure
 
@@ -1265,7 +1357,9 @@ remain optional, configured through their existing values.
 
 The existing workload, Pod, ConfigMap, and RbeWorker reads remain necessary.
 `rbac.rules.rbeFleet` adds only namespaced `get/list` access to ReplicaSets,
-KEDA ScaledObjects, and HorizontalPodAutoscalers. For Buildbarn in a different
+KEDA ScaledObjects, and HorizontalPodAutoscalers. This permission setting is
+independent of `rbe.enabled`; it cannot enable the page or bypass its project
+access policy. For Buildbarn in a different
 namespace, grant the API ServiceAccount equivalent reads there. No node,
 `pods/exec`, or infrastructure-write grants are added. Missing grants are
 reported as unavailable or not permitted.

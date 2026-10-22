@@ -108,7 +108,7 @@ spec:
         strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
       timeoutPolicy:
         {{- if .Values.assistant.enabled }}
-        response: {{ printf "%ds" (int .Values.assistant.streamTimeoutSeconds) | quote }}
+        response: {{ include "hermetiq-core.assistantTimeout" (dict "root" . "value" .Values.contour.httpProxy.responseTimeout) | quote }}
         idle: {{ printf "%ds" (int .Values.assistant.streamTimeoutSeconds) | quote }}
         {{- else }}
         response: {{ .Values.contour.httpProxy.responseTimeout | quote }}

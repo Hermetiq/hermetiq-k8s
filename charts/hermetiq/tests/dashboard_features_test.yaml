@@ -1,0 +1,101 @@
+suite: explicit on-prem dashboard feature flags
+templates:
+  - templates/deployment-dashboard.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: hides the assistant editor and RBE page by default
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_ASSISTANT")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_BB_CONFIG")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "false"
+  - it: exposes Barn Owl only when its backend is enabled and keeps the editor off
+    template: templates/deployment-dashboard.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: anthropic-key
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_ASSISTANT")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_BB_CONFIG")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "false"
+  - it: keeps Barn Owl disabled even when credentials have already been configured
+    template: templates/deployment-dashboard.yaml
+    set:
+      assistant.enabled: false
+      assistant.anthropic.apiKey.existingSecret: anthropic-key
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_ASSISTANT")].value
+          value: "false"
+  - it: exposes the RBE page independently of assistant and optional fleet grants
+    template: templates/deployment-dashboard.yaml
+    set:
+      rbe.enabled: true
+      rbe.accessPolicy.projects:
+        "0": {enabled: true, minimum_role: viewer}
+      rbac.rules.rbeFleet: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_ASSISTANT")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_BB_CONFIG")].value
+          value: "false"
+  - it: granting fleet reads alone cannot enable RBE page visibility
+    template: templates/deployment-dashboard.yaml
+    set:
+      rbe.enabled: false
+      rbac.rules.rbeFleet: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "false"
+  - it: preserves unrelated dashboard environment settings
+    template: templates/deployment-dashboard.yaml
+    set:
+      dashboard.env.CUSTOM_SETTING: custom-value
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "CUSTOM_SETTING")].value
+          value: custom-value
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_ASSISTANT")].value
+          value: "false"
+  - it: rejects duplicate assistant feature environment overrides
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_ENABLE_ASSISTANT: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: dashboard.env must not set REACT_APP_ENABLE_ASSISTANT; use assistant.enabled
+  - it: rejects duplicate RBE feature environment overrides
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_ENABLE_RBE_UI: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: dashboard.env must not set REACT_APP_ENABLE_RBE_UI; use rbe.enabled
+  - it: rejects an unsupported editor feature environment override
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_ENABLE_BB_CONFIG: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: dashboard.env must not set REACT_APP_ENABLE_BB_CONFIG; this chart does not deploy BB Config Editor

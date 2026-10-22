@@ -47,6 +47,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Frontend Autoscaling](#frontend-autoscaling)
 - [Remote Asset API](#remote-asset-api)
 - [bb-portal](#bb-portal)
+- [Scheduler](#scheduler)
 - [Worker And Runner](#worker-and-runner)
 - [Worker Autoscaling](#worker-autoscaling)
 - [Testcontainers Worker Fleets](#testcontainers-worker-fleets)
@@ -1561,6 +1562,41 @@ sidecar and cannot pollute cache-event analytics.
 `configOverrides."portal.jsonnet"` replaces the generated config wholesale if
 you need settings the values do not expose.
 
+## Scheduler
+
+Declare every platform queue whose workers may scale to zero under
+`scheduler.predeclaredPlatformQueues`. These logical queues remain present
+with zero workers and are created when the scheduler starts. Without a
+declaration, an unregistered platform is rejected with `No workers exist`;
+queues learned from workers disappear after
+`scheduler.platformQueueWithNoWorkersTimeout` (900 seconds by default). Rejected
+actions never produce the queue signal KEDA needs to start a worker.
+
+```yaml
+scheduler:
+  predeclaredPlatformQueues:
+    - instanceNamePrefix: ""
+      platform:
+        - name: container-image
+          value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+      sizeClasses: [0]
+```
+
+Match the complete platform to the pool's
+`spec.config.generated.platformProperties`, sorted by name then value, and match
+`sizeClasses` to `spec.config.generated.sizeClass`. A single class can use `[0]`;
+multiple classes, such as `[1, 2]`, must be positive and increasing, with the
+largest capable of running actions retried from smaller classes. All classes
+in a group advertise the same platform.
+
+The queue's `instanceNamePrefix` must match the worker's registration and
+`spec.autoscaling.prometheus.instanceNamePrefix`. Starter generated workers use
+the empty prefix, which accepts every client instance name; changing the
+Prometheus setting alone does not change worker registration.
+
+See the [scale-up-from-zero guide](../../custom-values/rbeworkers/README.md#scale-up-from-zero)
+for matching worker examples, KEDA settings, and verification.
+
 ## Worker And Runner
 
 The Buildbarn chart does not create worker Deployments or KEDA worker
@@ -1589,6 +1625,8 @@ platform properties, such as `container-image` or `pool`.
 Configure worker autoscaling under `spec.autoscaling` on each `RbeWorker`. The
 operator creates and maintains the worker Deployment and KEDA `ScaledObject`.
 The Buildbarn chart's `keda.frontend` values control only frontend autoscaling.
+For pools with `minReplicas: 0`, configure the matching [scheduler queues](#scheduler)
+before relying on scale-up from zero.
 
 The chart still renders `worker-vmpodscrape` when `vmPodScrapes.enabled=true`.
 Keep the `app=worker` label on operator-managed pods, or update your own scrape

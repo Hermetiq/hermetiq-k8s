@@ -182,6 +182,25 @@
 {{- if and .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap -}}
 {{- fail "rbe.accessPolicy.projects and rbe.accessPolicy.existingConfigMap are mutually exclusive" -}}
 {{- end -}}
+{{- if .Values.assistant.jev.enabled -}}
+  {{- if not .Values.assistant.enabled -}}
+  {{- fail "assistant.jev.enabled requires assistant.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim .Values.assistant.jev.apiKey.existingSecret) -}}
+  {{- fail "assistant.jev.apiKey.existingSecret is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim .Values.assistant.jev.apiKey.existingSecretKey) -}}
+  {{- fail "assistant.jev.apiKey.existingSecretKey is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim .Values.assistant.jev.baseUrl) -}}
+  {{- fail "assistant.jev.baseUrl is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- range $key := list "JEV_API_KEY" "JEV_API_KEY_FILE" "JEV_BASE_URL" -}}
+    {{- if hasKey $.Values.api.env $key -}}
+    {{- fail (printf "api.env must not set %s when assistant.jev.enabled=true; use assistant.jev settings" $key) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- if .Values.assistant.enabled -}}
   {{- if not (trim .Values.assistant.anthropic.apiKey.existingSecret) -}}
   {{- fail "assistant.anthropic.apiKey.existingSecret is required when assistant.enabled=true" -}}
@@ -215,5 +234,12 @@
   {{- end -}}
   {{- if hasKey .Values.api.env "RBE_ACCESS_POLICY_CONFIG" -}}
   {{- fail "api.env must not set RBE_ACCESS_POLICY_CONFIG when rbe.accessPolicy is configured" -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $dashboardFeatureSettings := dict "REACT_APP_ENABLE_ASSISTANT" "use assistant.enabled" "REACT_APP_ENABLE_RBE_UI" "use rbe.enabled" "REACT_APP_ENABLE_BB_CONFIG" "this chart does not deploy BB Config Editor" -}}
+{{- range $key, $setting := $dashboardFeatureSettings -}}
+  {{- if hasKey $.Values.dashboard.env $key -}}
+  {{- fail (printf "dashboard.env must not set %s; %s" $key $setting) -}}
   {{- end -}}
 {{- end -}}

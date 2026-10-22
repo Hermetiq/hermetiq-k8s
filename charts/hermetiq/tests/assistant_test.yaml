@@ -1,7 +1,7 @@
 suite: optional assistant and prompt runtime
 templates:
   - templates/deployment-api.yaml
-  - templates/assistant-configmaps.yaml
+  - templates/assistant-policy-configmap.yaml
   - templates/validate.yaml
 values:
   - ../ci-values/ci.yaml
@@ -91,7 +91,7 @@ tests:
       - matchRegex:
           path: data["policy.json"]
           pattern: '"mode": "enforce"'
-        template: templates/assistant-configmaps.yaml
+        template: templates/assistant-policy-configmap.yaml
       - matchRegex:
           path: spec.template.metadata.annotations["hermetiq.com/assistant-policy-checksum"]
           pattern: '^[a-f0-9]{64}$'
@@ -131,3 +131,52 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: assistant.promptRuntime.env must not set chart-managed PROMPTRT_LISTEN
+  - it: passes additional scalar settings to the runtime
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.promptRuntime.env.PROMPTRT_LOG_LEVEL: debug
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "PROMPTRT_LOG_LEVEL")].value
+          value: debug
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROMPTRT_LOG_LEVEL")]
+  - it: rejects an API key override in the API environment
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      api.env.ANTHROPIC_API_KEY: inline-key
+    asserts:
+      - failedTemplate:
+          errorMessage: api.env must not set ANTHROPIC_API_KEY when assistant.enabled=true; use assistant settings
+  - it: rejects a runtime address override in the API environment
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      api.env.PROMPT_RUNTIME_ADDR: 10.0.0.1:50097
+    asserts:
+      - failedTemplate:
+          errorMessage: api.env must not set PROMPT_RUNTIME_ADDR when assistant.enabled=true; use assistant settings
+  - it: rejects a policy path override in the API environment
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      api.env.AICHAT_POLICY_CONFIG: /tmp/policy.json
+    asserts:
+      - failedTemplate:
+          errorMessage: api.env must not set AICHAT_POLICY_CONFIG when assistant.enabled=true; use assistant settings
+  - it: requires a ConfigMap key for an assistant policy
+    template: templates/validate.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      assistant.policy.existingConfigMap: external-policy
+      assistant.policy.configMapKey: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: assistant.policy.configMapKey is required when an assistant policy is configured

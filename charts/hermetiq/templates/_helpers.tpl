@@ -771,21 +771,27 @@ nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors
 {{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one gRPC route.
      Args: dict "root" $ "route" <key under gateway.timeouts>.
 
-     The assistant keeps its API streaming timeout even when ordinary route
-     timeouts are disabled. Otherwise renders nothing when gateway.timeouts.enabled
-     is false or the route sets none of the three fields. Callers use `with` to
-     decide whether the
-     block exists at all. Each field is emitted only when non-empty — an unset
-     field leaves Envoy's own default in place, which is not the same as "0s"
-     (0s means *disabled*, not *immediate*). */}}
+     With the assistant enabled, the API route always gets a block, even when
+     ordinary route timeouts are disabled, and its request and stream limits are
+     raised to at least assistant.streamTimeoutSeconds. Otherwise renders nothing
+     when gateway.timeouts.enabled is false or the route sets none of the three
+     fields. Callers use `with` to decide whether the block exists at all. Each
+     field is emitted only when non-empty — an unset field leaves Envoy's own
+     default in place, which is not the same as "0s" (0s means *disabled*, not
+     *immediate*). */}}
 {{- define "hermetiq-core.routeTimeout" -}}
 {{- $timeouts := .root.Values.gateway.timeouts | default dict -}}
 {{- if and .root.Values.assistant.enabled (eq .route "apiGrpc") -}}
+{{- $route := dict -}}
+{{- if $timeouts.enabled -}}
+{{- $route = index $timeouts .route | default dict -}}
+{{- end -}}
+{{- $apiGrpc := index $timeouts "apiGrpc" | default dict -}}
 timeout:
   http:
-    requestTimeout: {{ printf "%ds" (int .root.Values.assistant.streamTimeoutSeconds) | quote }}
-    maxStreamDuration: "0s"
-    connectionIdleTimeout: {{ default "1h" $timeouts.apiGrpc.connectionIdleTimeout | quote }}
+    requestTimeout: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.requestTimeout) | quote }}
+    maxStreamDuration: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.maxStreamDuration "unset" "0s") | quote }}
+    connectionIdleTimeout: {{ default "1h" $apiGrpc.connectionIdleTimeout | quote }}
 {{- else if $timeouts.enabled -}}
 {{- $route := index $timeouts .route | default dict -}}
 {{- if or $route.requestTimeout $route.maxStreamDuration $route.connectionIdleTimeout -}}
@@ -804,6 +810,50 @@ timeout:
 {{- end -}}
 {{- end -}}
 
+{{/* Milliseconds in a duration such as "300s", "5m", "1h30m" or "250ms".
+     Prints -1 for an unbounded value — "0", "0s", "infinity" or
+     "infinite" — because Envoy Gateway and Contour read a zero timeout as
+     disabled. */}}
+{{- define "hermetiq-core.durationMillis" -}}
+{{- $d := . | toString | trim | lower -}}
+{{- if has $d (list "0" "infinity" "infinite") -}}
+-1
+{{- else if not (regexMatch "^([0-9]+(\\.[0-9]+)?(h|ms|m|s))+$" $d) -}}
+{{- fail (printf "cannot parse timeout %q: use a duration such as 300s, 5m or 1h" $d) -}}
+{{- else -}}
+{{- $unitMillis := dict "h" 3600000.0 "m" 60000.0 "s" 1000.0 "ms" 1.0 -}}
+{{- $millis := 0.0 -}}
+{{- range $part := regexFindAll "[0-9]+(\\.[0-9]+)?(h|ms|m|s)" $d -1 -}}
+{{- $number := regexFind "^[0-9.]+" $part -}}
+{{- $millis = addf $millis (mulf (float64 $number) (index $unitMillis (trimPrefix $number $part))) -}}
+{{- end -}}
+{{- if eq $millis 0.0 -}}-1{{- else -}}{{ $millis | int }}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* A duration timeout on a route that carries Barn Owl streams. Keeps the
+     configured value when it is unbounded or at least
+     assistant.streamTimeoutSeconds, and otherwise raises it to that. An unset
+     value prints .unset, which defaults to the stream timeout.
+     Args: dict "root" $ "value" <duration> ["unset" <duration>]. */}}
+{{- define "hermetiq-core.assistantTimeout" -}}
+{{- $stream := int .root.Values.assistant.streamTimeoutSeconds -}}
+{{- $value := toString (default "" .value) | trim -}}
+{{- if not $value -}}
+{{- default (printf "%ds" $stream) .unset -}}
+{{- else -}}
+{{- $millis := include "hermetiq-core.durationMillis" $value | atoi -}}
+{{- if or (lt $millis 0) (ge $millis (mul $stream 1000)) -}}{{ $value }}{{- else -}}{{ printf "%ds" $stream }}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The larger of a whole-second timeout and assistant.streamTimeoutSeconds,
+     for providers with no unbounded setting (nginx ingress, GKE backends).
+     Args: dict "root" $ "value" <seconds>. */}}
+{{- define "hermetiq-core.assistantTimeoutSeconds" -}}
+{{- max (int .value) (int .root.Values.assistant.streamTimeoutSeconds) -}}
+{{- end -}}
+
 {{- define "hermetiq-core.partitionMaintenanceName" -}}partition-maintenance{{- end -}}
 {{- define "hermetiq-core.progressesPartitionMaintenanceName" -}}progresses-partition-maintenance{{- end -}}
 {{- define "hermetiq-core.targetTrendsShortName" -}}target-trends-refresh-short{{- end -}}
@@ -811,6 +861,9 @@ timeout:
 
 {{- define "hermetiq-core.assistantPolicyName" -}}
 {{- default "bep-aichat-policy" .Values.assistant.policy.existingConfigMap -}}
+{{- end -}}
+{{- define "hermetiq-core.jevConfigChecksum" -}}
+{{- dict "baseUrl" .Values.assistant.jev.baseUrl "secretName" .Values.assistant.jev.apiKey.existingSecret "secretKey" .Values.assistant.jev.apiKey.existingSecretKey "rolloutChecksum" .Values.assistant.jev.rolloutChecksum | toJson | sha256sum -}}
 {{- end -}}
 {{- define "hermetiq-core.rbeAccessPolicyName" -}}
 {{- default "bep-rbe-access-policy" .Values.rbe.accessPolicy.existingConfigMap -}}

@@ -925,9 +925,21 @@ assistant:
     apiKey:
       existingSecret: ""
       existingSecretKey: ANTHROPIC_API_KEY
+  jev:
+    # Optional classifier credentials for per-agent policy modelRouting.
+    # Supplying credentials alone does not activate routing; configure it in
+    # assistant.policy.data or the selected external policy ConfigMap.
+    enabled: false
+    baseUrl: https://api.typesafe.ai
+    apiKey:
+      existingSecret: ""
+      existingSecretKey: JEV_API_KEY
+    # Change this when rotating the external Secret to restart the API pod.
+    rolloutChecksum: ""
   policy:
-    # Optional JSON overlay over the binary's embedded AI policy. The cloud
-    # policy is intentionally not used: it requires a separate Jev service.
+    # Optional JSON overlay over the binary's embedded AI policy, including
+    # per-agent modelRouting when JEV is configured. No cloud overlay is
+    # activated automatically.
     data: {}
     existingConfigMap: ""
     configMapKey: policy.json

@@ -910,6 +910,32 @@
               "type": "object"
             }
           }
+        },
+        "jev": {
+          "type": "object",
+          "description": "Optional Jev credentials for model routing configured by the assistant policy.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "apiKey": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "type": "string"
+                }
+              }
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            }
+          }
         }
       }
     },

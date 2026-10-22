@@ -33,6 +33,9 @@ spec:
         {{- end }}
         kubectl.kubernetes.io/default-container: api
         hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
+        {{- if .Values.assistant.jev.enabled }}
+        hermetiq.com/jev-config-checksum: {{ include "hermetiq-core.jevConfigChecksum" . }}
+        {{- end }}
         {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
         hermetiq.com/assistant-policy-checksum: {{ include "hermetiq-core.assistantPolicyChecksum" . }}
         {{- end }}
@@ -232,6 +235,15 @@ spec:
                   key: {{ .Values.assistant.anthropic.apiKey.existingSecretKey | quote }}
             - name: PROMPT_RUNTIME_ADDR
               value: 127.0.0.1:50097
+            {{- if .Values.assistant.jev.enabled }}
+            - name: JEV_BASE_URL
+              value: {{ .Values.assistant.jev.baseUrl | quote }}
+            - name: JEV_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.jev.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.jev.apiKey.existingSecretKey | quote }}
+            {{- end }}
             {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
             - name: AICHAT_POLICY_CONFIG
               value: /etc/hermetiq/aichat/policy.json

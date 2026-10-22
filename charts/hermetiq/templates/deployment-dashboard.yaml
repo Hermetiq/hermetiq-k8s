@@ -171,6 +171,10 @@ spec:
               value: "false"
             - name: REACT_APP_COST_INTEGRATION_ENABLED
               value: {{ .Values.app.costReportTickerEnabled | default false | quote }}
+            - name: REACT_APP_ENABLE_ASSISTANT
+              value: {{ .Values.assistant.enabled | quote }}
+            - name: REACT_APP_ENABLE_BB_CONFIG
+              value: "false"
             - name: REACT_APP_ENABLE_RBE_UI
               value: {{ .Values.rbe.enabled | quote }}
             - name: REACT_APP_ON_PREM

@@ -91,9 +91,12 @@ else
   echo "(no ${DIR}/tests — skipping; add suites under ${DIR}/tests/ to enable)"
 fi
 
-if [[ "${CHART}" == "hermetiq" && -x "${DIR}/tests/schema_validation_test.sh" ]]; then
-  echo "+++ :test_tube: assistant and RBE values schema"
-  "${DIR}/tests/schema_validation_test.sh"
-fi
+# Render-level checks that helm-unittest cannot express (schema rejections,
+# comparisons between two renders).
+for script in "${DIR}"/tests/*_test.sh; do
+  [[ -x "${script}" ]] || continue
+  echo "+++ :test_tube: $(basename "${script}")"
+  "${script}"
+done
 
 echo "+++ :white_check_mark: ${CHART} validation passed"

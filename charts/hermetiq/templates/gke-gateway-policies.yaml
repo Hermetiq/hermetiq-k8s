@@ -37,6 +37,10 @@ spec:
 {{- if .Values.gateway.gke.backendPolicy.enabled }}
 {{- $grpcServices := list (include "hermetiq-core.publisherName" .) (include "hermetiq-core.apiName" .) -}}
 {{- range $svc := uniq $grpcServices }}
+{{- $timeoutSec := $.Values.gateway.gke.backendPolicy.timeoutSec }}
+{{- if and $.Values.assistant.enabled (eq $svc (include "hermetiq-core.apiName" $)) }}
+{{- $timeoutSec = include "hermetiq-core.assistantTimeoutSeconds" (dict "root" $ "value" $timeoutSec) }}
+{{- end }}
 apiVersion: networking.gke.io/v1
 kind: GCPBackendPolicy
 metadata:
@@ -46,7 +50,7 @@ metadata:
     {{- include "hermetiq-core.labels" $ | nindent 4 }}
 spec:
   default:
-    timeoutSec: {{ if and $.Values.assistant.enabled (eq $svc (include "hermetiq-core.apiName" $)) }}{{ $.Values.assistant.streamTimeoutSeconds }}{{ else }}{{ $.Values.gateway.gke.backendPolicy.timeoutSec }}{{ end }}
+    timeoutSec: {{ $timeoutSec }}
   targetRef:
     group: ""
     kind: Service

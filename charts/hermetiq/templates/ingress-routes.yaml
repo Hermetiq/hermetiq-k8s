@@ -57,8 +57,8 @@ metadata:
     {{- end }}
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
     {{- if .Values.assistant.enabled }}
-    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.assistant.streamTimeoutSeconds | quote }}
-    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.assistant.streamTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ include "hermetiq-core.assistantTimeoutSeconds" (dict "root" . "value" .Values.ingress.grpc.proxyReadTimeoutSeconds) | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ include "hermetiq-core.assistantTimeoutSeconds" (dict "root" . "value" .Values.ingress.grpc.proxySendTimeoutSeconds) | quote }}
     {{- else }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
     nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
