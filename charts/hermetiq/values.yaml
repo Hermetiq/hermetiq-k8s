@@ -131,12 +131,12 @@ app:
   # sidecar on the Buildbarn frontend. Off by default; enable it once the
   # sidecar publishes cache events to this chart's NATS.
   cacheEventsEnabled: false
-  # VictoriaLogs-backed MCP tools are hidden by default for on-prem installs
-  # that do not deploy VictoriaLogs. Set true when VL is available.
+  # VictoriaLogs-backed MCP tools and dashboard RBE Kubernetes Events are
+  # hidden by default for on-prem installs. Set true when VL is available.
   victoriaLogsEnabled: false
   # OpenCost-backed cost report ticker is disabled by default for on-prem
   # installs because OpenCost is optional external infrastructure. This also
-  # controls whether the dashboard exposes cost reporting and pricing fields.
+  # controls dashboard cost reporting and RBE allocation/pricing fields.
   costReportTickerEnabled: false
   # OpenCost API base URL used when costReportTickerEnabled is true.
   openCostUrl: ""

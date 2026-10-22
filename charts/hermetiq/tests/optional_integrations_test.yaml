@@ -1,0 +1,55 @@
+suite: optional dashboard cost and VictoriaLogs integrations
+templates:
+  - templates/deployment-dashboard.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: disables both optional integrations by default
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_VICTORIA_LOGS")].value
+          value: "false"
+  - it: enables VictoriaLogs independently of costs
+    template: templates/deployment-dashboard.yaml
+    set:
+      app.victoriaLogsEnabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_VICTORIA_LOGS")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
+          value: "false"
+  - it: enables costs independently of VictoriaLogs and RBE visibility
+    template: templates/deployment-dashboard.yaml
+    set:
+      app.costReportTickerEnabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_COST_INTEGRATION_ENABLED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_VICTORIA_LOGS")].value
+          value: "false"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_ENABLE_RBE_UI")].value
+          value: "false"
+  - it: rejects conflicting VictoriaLogs environment settings
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_ENABLE_VICTORIA_LOGS: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: dashboard.env must not set REACT_APP_ENABLE_VICTORIA_LOGS; use app.victoriaLogsEnabled
+  - it: rejects conflicting cost integration environment settings
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_COST_INTEGRATION_ENABLED: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: dashboard.env must not set REACT_APP_COST_INTEGRATION_ENABLED; use app.costReportTickerEnabled

@@ -14,6 +14,8 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Hide RBE cost and Kubernetes Events views when their optional integrations are disabled"
     - kind: added
       description: "Support optional JEV classifier credentials for Barn Owl model routing"
     - kind: added

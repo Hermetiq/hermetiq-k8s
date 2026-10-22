@@ -1025,6 +1025,16 @@ backend services. Do not override these variables in `dashboard.env`; Helm
 rejects conflicting entries. Other dashboard environment settings remain
 available through that map.
 
+RBE cost allocation is controlled by `app.costReportTickerEnabled`
+(`REACT_APP_COST_INTEGRATION_ENABLED`); Kubernetes Events are controlled by
+`app.victoriaLogsEnabled` (`REACT_APP_ENABLE_VICTORIA_LOGS`). Both default to
+`false` for chart installs. Enable each integration only when its source is
+configured. Disabled integrations make no cost/event requests and hide their
+RBE tabs, links, and allocation/pricing columns. Current Kubernetes fleet,
+scheduler, pod and node snapshots and core metrics remain available without
+OpenCost or VictoriaLogs. These flags are also managed by the chart and cannot
+be overridden in `dashboard.env`.
+
 Use an updated dashboard image containing the runtime handling for these
 flags. Changing chart values with an older image does not add that behavior;
 the new on-prem assistant and editor defaults require the matching dashboard
@@ -1152,6 +1162,26 @@ for a self-managed, single-tenant Buildbarn whose metrics do not follow those
 rules.
 
 Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
+Set `api.env.VL_BASE_URL` to its HTTP API endpoint and keep
+`victoriaMetrics.metricsEnabled=true` for the shared metrics/log client.
+For example, to add event history independently of OpenCost:
+
+```yaml
+app:
+  victoriaLogsEnabled: true
+  costReportTickerEnabled: false
+api:
+  env:
+    VL_BASE_URL: http://victorialogs.observability.svc.cluster.local:9428
+victoriaMetrics:
+  metricsEnabled: true
+  baseUrl: http://vmselect.observability.svc.cluster.local:8481/select/0/prometheus
+```
+
+These services are supplied by the operator. Without VictoriaLogs, Barn Owl
+keeps core metrics and Kubernetes evidence and identifies event history as
+unavailable. An enabled source that fails is reported as incomplete coverage;
+it does not establish that there were no events or incidents.
 
 ### Barn Owl AI Assistant
 
@@ -1404,7 +1434,7 @@ file and change them only with ingest, NATS, and database telemetry in view.
 ### Cost integration
 
 `app.costReportTickerEnabled` is the single switch for OpenCost-backed cost
-reporting. It defaults to `false`, which disables the API cost report ticker
+reporting. It defaults to `false`, which disables OpenCost reads and the API cost report ticker
 and hides Cost Reporting, pricing cards, cost columns, and cost datasets in the
 dashboard while leaving remote execution timing and action analytics enabled.
 Set it to `true` only when the backend can reach the OpenCost API configured by

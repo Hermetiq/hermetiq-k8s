@@ -90,6 +90,10 @@
             "stytch"
           ],
           "description": "Identity provider for every core that serves gRPC. Required by the process at startup; \"jwks\" for on-prem."
+        },
+        "victoriaLogsEnabled": {
+          "type": "boolean",
+          "description": "Enable VictoriaLogs-backed MCP tools and dashboard RBE Kubernetes Events."
         }
       }
     },

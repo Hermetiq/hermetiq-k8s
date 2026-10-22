@@ -237,7 +237,7 @@
   {{- end -}}
 {{- end -}}
 
-{{- $dashboardFeatureSettings := dict "REACT_APP_ENABLE_ASSISTANT" "use assistant.enabled" "REACT_APP_ENABLE_RBE_UI" "use rbe.enabled" "REACT_APP_ENABLE_BB_CONFIG" "this chart does not deploy BB Config Editor" -}}
+{{- $dashboardFeatureSettings := dict "REACT_APP_COST_INTEGRATION_ENABLED" "use app.costReportTickerEnabled" "REACT_APP_ENABLE_VICTORIA_LOGS" "use app.victoriaLogsEnabled" "REACT_APP_ENABLE_ASSISTANT" "use assistant.enabled" "REACT_APP_ENABLE_RBE_UI" "use rbe.enabled" "REACT_APP_ENABLE_BB_CONFIG" "this chart does not deploy BB Config Editor" -}}
 {{- range $key, $setting := $dashboardFeatureSettings -}}
   {{- if hasKey $.Values.dashboard.env $key -}}
   {{- fail (printf "dashboard.env must not set %s; %s" $key $setting) -}}
