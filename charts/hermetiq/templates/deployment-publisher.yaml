@@ -193,6 +193,10 @@ spec:
                   key: {{ .Values.redis.password.existingSecretKey }}
             - name: METRICS_ENABLED
               value: "false"
+            - name: VICTORIA_LOGS_ENABLED
+              value: "false"
+            - name: COST_REPORT_TICKER_ENABLED
+              value: "false"
             {{- if .Values.app.buildIdMode }}
             - name: APP_BUILD_ID_MODE
               value: {{ .Values.app.buildIdMode | quote }}

@@ -186,13 +186,13 @@
   {{- if not .Values.assistant.enabled -}}
   {{- fail "assistant.jev.enabled requires assistant.enabled=true" -}}
   {{- end -}}
-  {{- if not (trim .Values.assistant.jev.apiKey.existingSecret) -}}
+  {{- if not (trim (default "" .Values.assistant.jev.apiKey.existingSecret)) -}}
   {{- fail "assistant.jev.apiKey.existingSecret is required when assistant.jev.enabled=true" -}}
   {{- end -}}
-  {{- if not (trim .Values.assistant.jev.apiKey.existingSecretKey) -}}
+  {{- if not (trim (default "" .Values.assistant.jev.apiKey.existingSecretKey)) -}}
   {{- fail "assistant.jev.apiKey.existingSecretKey is required when assistant.jev.enabled=true" -}}
   {{- end -}}
-  {{- if not (trim .Values.assistant.jev.baseUrl) -}}
+  {{- if not (trim (default "" .Values.assistant.jev.baseUrl)) -}}
   {{- fail "assistant.jev.baseUrl is required when assistant.jev.enabled=true" -}}
   {{- end -}}
   {{- range $key := list "JEV_API_KEY" "JEV_API_KEY_FILE" "JEV_BASE_URL" -}}
@@ -202,13 +202,13 @@
   {{- end -}}
 {{- end -}}
 {{- if .Values.assistant.enabled -}}
-  {{- if not (trim .Values.assistant.anthropic.apiKey.existingSecret) -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.apiKey.existingSecret)) -}}
   {{- fail "assistant.anthropic.apiKey.existingSecret is required when assistant.enabled=true" -}}
   {{- end -}}
-  {{- if not (trim .Values.assistant.anthropic.apiKey.existingSecretKey) -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.apiKey.existingSecretKey)) -}}
   {{- fail "assistant.anthropic.apiKey.existingSecretKey is required when assistant.enabled=true" -}}
   {{- end -}}
-  {{- if not (trim .Values.assistant.anthropic.model) -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.model)) -}}
   {{- fail "assistant.anthropic.model is required when assistant.enabled=true" -}}
   {{- end -}}
   {{- if and (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) (not .Values.assistant.policy.configMapKey) -}}
@@ -234,6 +234,16 @@
   {{- end -}}
   {{- if hasKey .Values.api.env "RBE_ACCESS_POLICY_CONFIG" -}}
   {{- fail "api.env must not set RBE_ACCESS_POLICY_CONFIG when rbe.accessPolicy is configured" -}}
+  {{- end -}}
+{{- end -}}
+{{- if and .Values.app.costReportTickerEnabled (not (trim (default "" .Values.app.openCostUrl))) -}}
+{{- fail "app.openCostUrl is required when app.costReportTickerEnabled=true" -}}
+{{- end -}}
+
+{{- $apiFeatureSettings := dict "COST_REPORT_TICKER_ENABLED" "use app.costReportTickerEnabled" "OPEN_COST_URL" "use app.openCostUrl" "VICTORIA_LOGS_ENABLED" "use app.victoriaLogsEnabled" -}}
+{{- range $key, $setting := $apiFeatureSettings -}}
+  {{- if hasKey $.Values.api.env $key -}}
+  {{- fail (printf "api.env must not set %s; %s" $key $setting) -}}
   {{- end -}}
 {{- end -}}
 

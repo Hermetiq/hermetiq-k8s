@@ -33,7 +33,7 @@ spec:
         {{- end }}
         kubectl.kubernetes.io/default-container: api
         hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
-        {{- if .Values.assistant.jev.enabled }}
+        {{- if and .Values.assistant.enabled .Values.assistant.jev.enabled }}
         hermetiq.com/jev-config-checksum: {{ include "hermetiq-core.jevConfigChecksum" . }}
         {{- end }}
         {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
