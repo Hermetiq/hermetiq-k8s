@@ -1,6 +1,8 @@
 suite: oauth2-proxy web-ui ConfigMap rendering
 templates:
   - templates/configmaps.yaml
+  - templates/secrets.yaml
+  - templates/deployment-grafana-oauth2-proxy.yaml
 values:
   - ../ci-values/ci.yaml
 set:
@@ -11,6 +13,7 @@ tests:
   # Gating the ConfigMap on dashboard.oauth2Proxy alone left the Grafana pod in
   # CreateContainerConfigError whenever only the Grafana proxy was enabled.
   - it: renders the ConfigMap when only the Grafana oauth2-proxy is enabled
+    template: templates/configmaps.yaml
     set:
       dashboard.oauth2Proxy.enabled: false
       grafana.oauth2Proxy.enabled: true
@@ -23,6 +26,7 @@ tests:
           of: ConfigMap
 
   - it: renders the ConfigMap when only the dashboard oauth2-proxy is enabled
+    template: templates/configmaps.yaml
     set:
       dashboard.oauth2Proxy.enabled: true
       grafana.oauth2Proxy.enabled: false
@@ -34,6 +38,7 @@ tests:
           of: ConfigMap
 
   - it: renders the ConfigMap when both oauth2-proxies are enabled
+    template: templates/configmaps.yaml
     set:
       dashboard.oauth2Proxy.enabled: true
       grafana.oauth2Proxy.enabled: true
@@ -46,6 +51,7 @@ tests:
           of: ConfigMap
 
   - it: omits the ConfigMap when neither oauth2-proxy consumes it
+    template: templates/configmaps.yaml
     set:
       dashboard.oauth2Proxy.enabled: false
       grafana.oauth2Proxy.enabled: false
@@ -55,6 +61,7 @@ tests:
           pattern: ^oauth2-proxy-config-web-ui$
 
   - it: omits the ConfigMap when the Grafana route is disabled and the dashboard proxy is off
+    template: templates/configmaps.yaml
     set:
       dashboard.oauth2Proxy.enabled: false
       grafana.oauth2Proxy.enabled: true
@@ -63,3 +70,39 @@ tests:
       - notMatchRegex:
           path: metadata.name
           pattern: ^oauth2-proxy-config-web-ui$
+
+  - it: renders the client Secret and rollout checksums when only the Grafana oauth2-proxy is enabled
+    set:
+      dashboard.oauth2Proxy.enabled: false
+      dashboard.oauth2Proxy.client.existingSecret: ""
+      dashboard.oauth2Proxy.client.clientId: grafana-id
+      dashboard.oauth2Proxy.client.clientSecret: grafana-secret
+      dashboard.oauth2Proxy.client.cookieSecret: grafana-cookie
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: true
+    asserts:
+      - isKind:
+          of: Secret
+        template: templates/secrets.yaml
+        documentSelector:
+          path: metadata.name
+          value: oauth2-proxy-client
+      - isNotEmpty:
+          path: spec.template.metadata.annotations["hermetiq.com/oauth2-proxy-config-checksum"]
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - isNotEmpty:
+          path: spec.template.metadata.annotations["hermetiq.com/oauth2-proxy-secret-checksum"]
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name == "OAUTH2_PROXY_SKIP_AUTH_ROUTES")].value
+          value: ""
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment

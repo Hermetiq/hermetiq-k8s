@@ -71,8 +71,9 @@ bootstrap:
   # Additional environment variables for the schema bootstrap Job.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for the schema bootstrap Job. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for the schema bootstrap Job. Defaults to false (CIS 5.1.6: dbadmin does
+  # not talk to the Kubernetes API). Set null to inherit the ServiceAccount default.
+  automountServiceAccountToken: false
   activeDeadlineSeconds: 7200
   resources:
     requests:
@@ -373,8 +374,8 @@ grafana:
     # Additional environment variables for the Grafana oauth2-proxy deployment.
     env: {}
     # Set to true/false to override serviceAccount.automountServiceAccountToken
-    # for the Grafana oauth2-proxy pod. null preserves the ServiceAccount default.
-    automountServiceAccountToken: null
+    # for the Grafana oauth2-proxy pod. Defaults to false (CIS 5.1.6).
+    automountServiceAccountToken: false
     podDisruptionBudget:
       enabled: false
       maxUnavailable: 1
@@ -761,8 +762,8 @@ partitionMaintenance:
   # Additional environment variables for the partition maintenance CronJob.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for this CronJob. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for this CronJob. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -782,8 +783,8 @@ progressesPartitionMaintenance:
   # Additional environment variables for the progresses partition maintenance CronJob.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for this CronJob. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for this CronJob. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -804,8 +805,8 @@ targetTrendsRefresh:
   # Additional environment variables for target trends refresh CronJobs.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for these CronJobs. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for these CronJobs. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -897,6 +898,26 @@ security:
     allowPrivilegeEscalation: false
     dropCapabilities:
       - ALL
+
+# Optional Kubernetes NetworkPolicies (CIS Kubernetes Benchmark 5.3.2).
+# Disabled by default so existing clusters without a NetworkPolicy-capable CNI
+# or with custom cross-namespace routing are unaffected on upgrade.
+# When enabled, restricts pod ingress to each component's active service ports
+# (for example, blocking direct PodIP:3000 access to web-ui when oauth2-proxy
+# fronts it on port 8888, blocking direct PodIP:50091 access to bep-nats-pub
+# when grpc-auth-proxy fronts it on port 50081, and denying all ingress to
+# batch Jobs and CronJobs).
+networkPolicy:
+  enabled: false
+  # Optional list of NetworkPolicyPeer entries allowed to reach service ports
+  # on grpc-api, bep-nats-pub, web-ui, and grafana-oauth2-proxy. Leave empty to
+  # allow ingress to those service ports from any source while still blocking
+  # unexposed container ports.
+  ingressFrom: []
+  # Optional list of NetworkPolicyPeer entries allowed to scrape /metrics and
+  # health endpoints on port 8008 (grpc-api, bep-nats-pub, bep-nats-sub-*).
+  # Leave empty to allow port 8008 from any in-cluster source.
+  metricsFrom: []
 
 k8sNodeScheduling:
   nodeSelector:
@@ -1192,8 +1213,8 @@ dashboard:
   nodeSelector: null
   tolerations: null
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for the dashboard pod. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for the dashboard pod. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   appPort: 3000
   # Bazel --remote_cache URL shown on the dashboard Quickstart page. Leave
   # empty to derive the normal on-prem Buildbarn frontend endpoint

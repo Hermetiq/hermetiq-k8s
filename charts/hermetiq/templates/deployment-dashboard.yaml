@@ -10,6 +10,8 @@ metadata:
     app: {{ include "hermetiq-core.dashboardName" . }}
 spec:
   replicas: {{ .Values.dashboard.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: {{ include "hermetiq-core.dashboardName" . }}
@@ -47,13 +49,17 @@ spec:
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.dashboard) | nindent 6 }}
       volumes:
         - name: dashboard-html
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         - name: dashboard-nginx-cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         - name: dashboard-nginx-run
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 16Mi
         - name: dashboard-tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
         - name: dashboard-quickstart-config
           configMap:
@@ -87,23 +93,7 @@ spec:
             - name: dashboard-html
               mountPath: /workdir/html
           securityContext:
-            allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
-            privileged: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: {{ .Values.dashboard.security.runAsNonRoot }}
-            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsUser) }}
-            runAsUser: {{ .Values.dashboard.security.runAsUser }}
-            {{- end }}
-            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsGroup) }}
-            runAsGroup: {{ .Values.dashboard.security.runAsGroup }}
-            {{- end }}
-            {{- if .Values.dashboard.security.dropCapabilities }}
-            capabilities:
-              drop:
-                {{- range .Values.dashboard.security.dropCapabilities }}
-                - {{ . | quote }}
-                {{- end }}
-            {{- end }}
+            {{- include "hermetiq-core.dashboardContainerSecurityContext" . | nindent 12 }}
       containers:
         {{- if .Values.dashboard.oauth2Proxy.enabled }}
         - name: oauth2-proxy

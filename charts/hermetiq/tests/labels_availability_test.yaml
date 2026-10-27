@@ -96,6 +96,12 @@ tests:
       - equal:
           path: spec.template.metadata.labels["hermetiq.com/stream-partition"]
           value: "0"
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 1
 
   - it: enables api and publisher disruption budgets by default
     template: templates/pdb.yaml

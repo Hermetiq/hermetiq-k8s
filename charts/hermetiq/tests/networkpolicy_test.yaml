@@ -1,0 +1,65 @@
+suite: network policies
+templates:
+  - templates/networkpolicy.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: renders no NetworkPolicies by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: restricts web-ui ingress to oauth2-proxy port 8888 when dashboard oauth2Proxy is enabled
+    set:
+      networkPolicy.enabled: true
+      dashboard.oauth2Proxy.enabled: true
+      dashboard.oauth2Proxy.client.existingSecret: dashboard-oauth
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8888
+        documentSelector:
+          path: metadata.name
+          value: web-ui
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 50091
+        documentSelector:
+          path: metadata.name
+          value: bep-nats-pub
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8008
+        documentSelector:
+          path: metadata.name
+          value: bep-nats-sub
+      - notExists:
+          path: spec.ingress
+        documentSelector:
+          path: metadata.name
+          value: hermetiq-batch-deny-ingress
+
+  - it: restricts publisher ingress to auth-proxy port 50081 when publisher authProxy is enabled
+    set:
+      networkPolicy.enabled: true
+      publisher.jwks.enabled: false
+      publisher.authProxy.staticForwardedUser: build-bot@example.com
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 50081
+        documentSelector:
+          path: metadata.name
+          value: bep-nats-pub
+
+  - it: allows web-ui appPort when dashboard oauth2Proxy is disabled
+    set:
+      networkPolicy.enabled: true
+      dashboard.oauth2Proxy.enabled: false
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 3000
+        documentSelector:
+          path: metadata.name
+          value: web-ui

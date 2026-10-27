@@ -92,7 +92,7 @@ data:
      ConfigMap through a non-optional envFrom, so render it whenever either one
      is enabled. Gating it on dashboard.oauth2Proxy alone left the Grafana pod in
      CreateContainerConfigError when only the Grafana proxy was on. */}}
-{{- if or .Values.dashboard.oauth2Proxy.enabled (and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled) }}
+{{- if eq (include "hermetiq-core.oauth2ProxyUsed" .) "true" }}
 ---
 apiVersion: v1
 kind: ConfigMap

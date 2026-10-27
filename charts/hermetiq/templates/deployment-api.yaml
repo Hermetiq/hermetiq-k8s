@@ -75,7 +75,8 @@ spec:
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.api) | nindent 6 }}
       volumes:
         - name: download-dir
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi
         - name: cache-ttl-config
           configMap:
             name: {{ include "hermetiq-core.cacheTtlConfigName" . }}
@@ -90,7 +91,8 @@ spec:
                 path: promql.json
         {{- if .Values.assistant.enabled }}
         - name: prompt-runtime-tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
         - name: assistant-policy
           configMap:
@@ -125,78 +127,7 @@ spec:
             secretName: {{ required "otel.mtls.secretName is required when otel.mtls.enabled=true" .Values.otel.mtls.secretName }}
         {{- end }}
       containers:
-        - name: grpc-auth-proxy
-          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.authProxy" "repository" .Values.images.authProxy.repository "tag" .Values.images.authProxy.tag "digest" .Values.images.authProxy.digest) }}
-          imagePullPolicy: {{ .Values.images.authProxy.pullPolicy }}
-          ports:
-            - containerPort: 50081
-              protocol: TCP
-          env:
-{{- with .Values.api.authProxy.env }}
-{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
-{{- end }}
-            - name: DEBUG
-              value: {{ .Values.api.authProxy.debug | quote }}
-            - name: GRPC_PORT
-              value: "50081"
-            - name: PROXY_PORT
-              value: "50091"
-            {{- if .Values.api.jwt.enabled }}
-            - name: JWT_AUTH_ENABLED
-              value: "true"
-            {{- end }}
-            {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
-            - name: JWT_JWKS_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.apiJwtIssuer" .) }}
-            - name: JWT_ISSUER
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if .Values.api.jwt.audience }}
-            - name: JWT_AUDIENCE
-              value: {{ .Values.api.jwt.audience | quote }}
-            {{- else if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled }}
-            - name: JWT_AUDIENCE
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
-                  key: OAUTH2_PROXY_CLIENT_ID
-            {{- end }}
-            {{- if .Values.api.jwt.groupsClaim }}
-            - name: JWT_GROUPS_CLAIM
-              value: {{ .Values.api.jwt.groupsClaim | quote }}
-            {{- end }}
-            {{- if .Values.api.jwt.nameClaim }}
-            - name: JWT_NAME_CLAIM
-              value: {{ .Values.api.jwt.nameClaim | quote }}
-            {{- end }}
-            {{- if .Values.publisher.hermetiqAdminGroup }}
-            - name: HERMETIQ_ADMIN_GROUP
-              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.adminEmails" .) }}
-            - name: ADMIN_EMAIL_ALLOWLIST
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
-            # When set, the auth-proxy answers gRPC-web CORS preflight itself
-            # (in addition to translating gRPC-web ↔ gRPC). Useful when the
-            # upstream ingress controller can't answer preflight — e.g. GKE
-            # Gateway with H2C BackendService dropping non-gRPC traffic.
-            - name: CORS_ALLOWED_ORIGINS
-              value: {{ . | quote }}
-            {{- end }}
-          resources:
-            {{- toYaml .Values.api.resources.authProxy | nindent 12 }}
-          {{- if .Values.api.authProxy.probes.enabled }}
-          livenessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.liveness) | nindent 12 }}
-          readinessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.readiness) | nindent 12 }}
-          {{- end }}
-          securityContext:
-            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- include "hermetiq-core.grpcAuthProxyContainer" (dict "root" . "authProxy" .Values.api.authProxy "resources" .Values.api.resources.authProxy "roleEnv" (include "hermetiq-core.apiAuthProxyRoleEnv" .)) | nindent 8 }}
         - name: api
           image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.api" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.apiTag "digest" .Values.images.bepNats.apiDigest) }}
           imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}

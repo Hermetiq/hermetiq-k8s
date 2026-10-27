@@ -392,6 +392,12 @@
             },
             "bbcalGrpc": {
               "$ref": "#/definitions/routeTimeout"
+            },
+            "apiWeb": {
+              "$ref": "#/definitions/routeTimeout"
+            },
+            "mcp": {
+              "$ref": "#/definitions/routeTimeout"
             }
           }
         }
@@ -620,13 +626,34 @@
     "security": {
       "type": "object"
     },
-    "k8sNodeScheduling": {
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "metricsFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "scheduling": {
       "type": [
         "object",
         "null"
       ]
     },
-    "scheduling": {
+    "k8sNodeScheduling": {
       "type": [
         "object",
         "null"

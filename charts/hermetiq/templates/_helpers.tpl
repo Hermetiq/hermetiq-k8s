@@ -473,6 +473,23 @@ grafana-oauth2-proxy
 {{- if eq (lower (toString .Values.grafana.oauth2Proxy.enabled)) "true" -}}true{{- end -}}
 {{- end -}}
 
+{{/* Whether any workload consumes the shared oauth2-proxy ConfigMap and client
+     Secret (either the dashboard oauth2-proxy sidecar or the standalone Grafana
+     oauth2-proxy when the Grafana Gateway route is enabled). */}}
+{{- define "hermetiq-core.oauth2ProxyUsed" -}}
+{{- if or .Values.dashboard.oauth2Proxy.enabled (and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled) -}}true{{- end -}}
+{{- end -}}
+
+{{/* Whether to render the inline oauth2-proxy client Secret (and its checksum).
+     Rendered when existingSecret is empty and either:
+     - dashboard.oauth2Proxy.enabled is true, or
+     - standalone grafana.oauth2Proxy is used and inline client credentials are provided.
+     This preserves backwards compatibility for existing values files that set
+     dashboard.oauth2Proxy.enabled=false without configuring client credentials. */}}
+{{- define "hermetiq-core.oauth2ProxyInlineSecretEnabled" -}}
+{{- if and (not .Values.dashboard.oauth2Proxy.client.existingSecret) (or .Values.dashboard.oauth2Proxy.enabled (and (eq (include "hermetiq-core.oauth2ProxyUsed" .) "true") (or .Values.dashboard.oauth2Proxy.client.clientId .Values.dashboard.oauth2Proxy.client.clientSecret .Values.dashboard.oauth2Proxy.client.cookieSecret))) -}}true{{- end -}}
+{{- end -}}
+
 {{/* Service the Grafana route forwards to. Swaps to the standalone
      oauth2-proxy when grafana.oauth2Proxy.enabled is true. */}}
 {{- define "hermetiq-core.grafanaUpstreamService" -}}
@@ -858,6 +875,178 @@ timeout:
 {{- define "hermetiq-core.progressesPartitionMaintenanceName" -}}progresses-partition-maintenance{{- end -}}
 {{- define "hermetiq-core.targetTrendsShortName" -}}target-trends-refresh-short{{- end -}}
 {{- define "hermetiq-core.targetTrendsLongName" -}}target-trends-refresh-long{{- end -}}
+
+{{/* Shared CronJob definition for /app/dbadmin maintenance and refresh jobs.
+     Args: dict "root" $ "name" <string> "schedule" <string> "workload" <map> "args" <list>. */}}
+{{- define "hermetiq-core.dbadminCronJob" -}}
+{{- $root := .root -}}
+{{- $workload := .workload -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "hermetiq-core.namespace" $root }}
+  labels:
+    {{- include "hermetiq-core.labels" $root | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "maintenance") | nindent 4 }}
+spec:
+  schedule: {{ .schedule | quote }}
+  {{- if $workload.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ $workload.startingDeadlineSeconds }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      {{- if $workload.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ $workload.activeDeadlineSeconds }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "hermetiq-core.podLabels" (dict "root" $root "component" "maintenance") | nindent 12 }}
+            {{- include "hermetiq-core.workloadIdentityLabels" $root | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "hermetiq-core.serviceAccountName" $root }}
+          {{- include "hermetiq-core.automountServiceAccountToken" $workload | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "hermetiq-core.podSecurityContext" $root | nindent 12 }}
+          {{- with include "hermetiq-core.imagePullSecrets" $root }}
+{{ . | nindent 10 }}
+          {{- end }}
+          {{- include "hermetiq-core.podScheduling" (dict "root" $root "workload" $workload) | nindent 10 }}
+          containers:
+            - name: {{ .name }}
+              image: {{ include "hermetiq-core.image" (dict "root" $root "name" "images.bepNats.bootstrap" "repository" $root.Values.images.bepNats.repository "tag" $root.Values.images.bepNats.bootstrapTag "digest" $root.Values.images.bepNats.bootstrapDigest) }}
+              imagePullPolicy: {{ $root.Values.images.bepNats.pullPolicy }}
+              securityContext:
+                {{- include "hermetiq-core.containerSecurityContext" $root | nindent 16 }}
+              command:
+                - /app/dbadmin
+              args:
+              {{- range .args }}
+                - {{ . }}
+              {{- end }}
+              env:
+{{- with $workload.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $root "env" .) | trim | nindent 16 }}
+{{- end }}
+                - name: APP_ENVIRONMENT
+                  value: {{ $root.Values.app.environment | quote }}
+                - name: DB_HOSTNAME
+                  value: {{ required "postgres.host is required" $root.Values.postgres.host | quote }}
+                - name: DB_PORT
+                  value: {{ required "postgres.port is required" $root.Values.postgres.port | quote }}
+                - name: DB_NAME
+                  value: {{ required "postgres.database is required" $root.Values.postgres.database | quote }}
+                - name: DB_USER
+                  value: {{ required "postgres.user is required" $root.Values.postgres.user | quote }}
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "hermetiq-core.postgresSecretName" $root }}
+                      key: {{ $root.Values.postgres.password.existingSecretKey }}
+                - name: PGSSLMODE
+                  value: {{ $root.Values.postgres.sslMode | quote }}
+              resources:
+                {{- toYaml $workload.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+{{- end -}}
+
+{{- define "hermetiq-core.apiAuthProxyRoleEnv" -}}
+{{- if .Values.api.jwt.enabled }}
+- name: JWT_AUTH_ENABLED
+  value: "true"
+{{- end }}
+{{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
+- name: JWT_JWKS_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with (include "hermetiq-core.apiJwtIssuer" .) }}
+- name: JWT_ISSUER
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.api.jwt.audience }}
+- name: JWT_AUDIENCE
+  value: {{ .Values.api.jwt.audience | quote }}
+{{- else if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled }}
+- name: JWT_AUDIENCE
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
+      key: OAUTH2_PROXY_CLIENT_ID
+{{- end }}
+{{- if .Values.api.jwt.groupsClaim }}
+- name: JWT_GROUPS_CLAIM
+  value: {{ .Values.api.jwt.groupsClaim | quote }}
+{{- end }}
+{{- if .Values.api.jwt.nameClaim }}
+- name: JWT_NAME_CLAIM
+  value: {{ .Values.api.jwt.nameClaim | quote }}
+{{- end }}
+{{- if .Values.publisher.hermetiqAdminGroup }}
+- name: HERMETIQ_ADMIN_GROUP
+  value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
+{{- end }}
+{{- with (include "hermetiq-core.adminEmails" .) }}
+- name: ADMIN_EMAIL_ALLOWLIST
+  value: {{ . | quote }}
+{{- end }}
+{{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
+- name: CORS_ALLOWED_ORIGINS
+  value: {{ . | quote }}
+{{- end }}
+{{- end -}}
+
+{{- define "hermetiq-core.publisherAuthProxyRoleEnv" -}}
+- name: STATIC_FORWARDED_USER
+  value: {{ trim .Values.publisher.authProxy.staticForwardedUser | quote }}
+{{- end -}}
+
+{{/* Shared grpc-auth-proxy sidecar container spec.
+     Args: dict "root" $ "authProxy" <map> "resources" <map> "roleEnv" <string>. */}}
+{{- define "hermetiq-core.grpcAuthProxyContainer" -}}
+{{- $root := .root -}}
+{{- $authProxy := .authProxy -}}
+- name: grpc-auth-proxy
+  image: {{ include "hermetiq-core.image" (dict "root" $root "name" "images.authProxy" "repository" $root.Values.images.authProxy.repository "tag" $root.Values.images.authProxy.tag "digest" $root.Values.images.authProxy.digest) }}
+  imagePullPolicy: {{ $root.Values.images.authProxy.pullPolicy }}
+  ports:
+    - containerPort: 50081
+      protocol: TCP
+  env:
+{{- with $authProxy.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $root "env" .) | trim | nindent 4 }}
+{{- end }}
+    - name: DEBUG
+      value: {{ $authProxy.debug | quote }}
+    - name: GRPC_PORT
+      value: "50081"
+    - name: PROXY_PORT
+      value: "50091"
+{{- with .roleEnv }}
+{{ . | trim | nindent 4 }}
+{{- end }}
+  resources:
+    {{- toYaml .resources | nindent 4 }}
+  {{- if $authProxy.probes.enabled }}
+  livenessProbe:
+    {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" $authProxy.probes.liveness) | nindent 4 }}
+  readinessProbe:
+    {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" $authProxy.probes.readiness) | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "hermetiq-core.containerSecurityContext" $root | nindent 4 }}
+{{- end -}}
 
 {{- define "hermetiq-core.assistantPolicyName" -}}
 {{- default "bep-aichat-policy" .Values.assistant.policy.existingConfigMap -}}

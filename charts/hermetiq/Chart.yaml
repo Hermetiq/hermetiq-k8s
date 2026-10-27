@@ -14,6 +14,10 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: security
+      description: "Bind the schema bootstrap Job to the chart ServiceAccount, disable default ServiceAccount token mounting on non-API workloads, clear inherited skip-auth routes on Grafana oauth2-proxy, strip x-forwarded-client-cert on all Gateway gRPC routes, and add optional NetworkPolicies"
+    - kind: fixed
+      description: "Preserve Gateway route timeouts when active health checks are disabled, prevent duplicate partition consumers during subscriber rollouts, bound emptyDir volumes, and render oauth2-proxy Secrets and checksums for standalone Grafana auth"
     - kind: fixed
       description: "Hide RBE cost and Kubernetes Events views when their optional integrations are disabled"
     - kind: added

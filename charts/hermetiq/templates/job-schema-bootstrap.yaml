@@ -44,7 +44,9 @@ spec:
     metadata:
       labels:
         {{- include "hermetiq-core.podLabels" (dict "root" . "component" "bootstrap") | nindent 8 }}
+        {{- include "hermetiq-core.workloadIdentityLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
       restartPolicy: Never
       {{- include "hermetiq-core.automountServiceAccountToken" .Values.bootstrap | nindent 6 }}
       securityContext:
@@ -124,4 +126,5 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
