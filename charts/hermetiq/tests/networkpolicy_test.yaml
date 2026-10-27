@@ -63,3 +63,74 @@ tests:
         documentSelector:
           path: metadata.name
           value: web-ui
+
+  # The Service's gRPC ports target grpc-auth-proxy (50081); the api
+  # container's own listener stays unreachable from other pods.
+  - it: admits grpc-api only on its Service target ports
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - {protocol: TCP, port: 50081}
+            - {protocol: TCP, port: 5150}
+        documentSelector:
+          path: metadata.name
+          value: grpc-api
+      - equal:
+          path: spec.ingress[1].ports
+          value:
+            - {protocol: TCP, port: 8008}
+        documentSelector:
+          path: metadata.name
+          value: grpc-api
+      - notExists:
+          path: spec.ingress[1].from
+        documentSelector:
+          path: metadata.name
+          value: grpc-api
+
+  # grpc-api's REST API (Service port 80) and its /metrics share 8008, so
+  # setting metricsFrom must not cut off ingress callers.
+  - it: admits ingress callers and scrapers on grpc-api's shared 8008 port
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingressFrom:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: envoy-gateway-system}
+      networkPolicy.metricsFrom:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+    asserts:
+      - equal:
+          path: spec.ingress[1].from
+          value:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: envoy-gateway-system}
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: monitoring}
+        documentSelector:
+          path: metadata.name
+          value: grpc-api
+      - equal:
+          path: spec.ingress[1].from
+          value:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: monitoring}
+        documentSelector:
+          path: metadata.name
+          value: bep-nats-pub
+
+  - it: keeps grpc-api's REST port open when only metricsFrom is set
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.metricsFrom:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+    asserts:
+      - notExists:
+          path: spec.ingress[1].from
+        documentSelector:
+          path: metadata.name
+          value: grpc-api

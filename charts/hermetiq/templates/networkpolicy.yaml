@@ -14,23 +14,25 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    {{- /* The Service's gRPC ports target grpc-auth-proxy on 50081, so the api
+         container's own 50091 is left closed. */}}
     - ports:
         - protocol: TCP
           port: 50081
-        - protocol: TCP
-          port: 50091
         - protocol: TCP
           port: 5150
       {{- with .Values.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- /* 8008 serves both the REST API (Service port 80) and /metrics, so it
+         admits ingress callers and scrapers alike. */}}
     - ports:
         - protocol: TCP
           port: 8008
-      {{- with (default .Values.networkPolicy.ingressFrom .Values.networkPolicy.metricsFrom) }}
+      {{- with .Values.networkPolicy.ingressFrom }}
       from:
-        {{- toYaml . | nindent 8 }}
+        {{- concat . ($.Values.networkPolicy.metricsFrom | default list) | toYaml | nindent 8 }}
       {{- end }}
 ---
 apiVersion: networking.k8s.io/v1

@@ -15,9 +15,11 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
     - kind: security
-      description: "Bind the schema bootstrap Job to the chart ServiceAccount, disable default ServiceAccount token mounting on non-API workloads, clear inherited skip-auth routes on Grafana oauth2-proxy, strip x-forwarded-client-cert on all Gateway gRPC routes, and add optional NetworkPolicies"
+      description: "Bind the schema bootstrap Job to the chart ServiceAccount (except the first install's pre-install hook, which runs before it exists), disable default ServiceAccount token mounting on non-API workloads, clear inherited skip-auth routes on Grafana oauth2-proxy, strip x-forwarded-client-cert on all Gateway gRPC routes, and add optional NetworkPolicies"
     - kind: fixed
-      description: "Preserve Gateway route timeouts when active health checks are disabled, prevent duplicate partition consumers during subscriber rollouts, bound emptyDir volumes, and render oauth2-proxy Secrets and checksums for standalone Grafana auth"
+      description: "Preserve Gateway route timeouts when active health checks are disabled, prevent duplicate partition consumers during subscriber rollouts, bound emptyDir volumes (api.downloadDirSizeLimit sizes the API's artifact-download volume), and render oauth2-proxy Secrets and checksums for standalone Grafana auth"
+    - kind: changed
+      description: "Reject chart-managed feature settings in api.env (COST_REPORT_TICKER_ENABLED, OPEN_COST_URL, VICTORIA_LOGS_ENABLED) and dashboard.env (REACT_APP_COST_INTEGRATION_ENABLED, REACT_APP_ENABLE_VICTORIA_LOGS, REACT_APP_ENABLE_ASSISTANT, REACT_APP_ENABLE_RBE_UI, REACT_APP_ENABLE_BB_CONFIG); move them to app.*, assistant.enabled, or rbe.enabled before upgrading"
     - kind: fixed
       description: "Hide RBE cost and Kubernetes Events views when their optional integrations are disabled"
     - kind: added

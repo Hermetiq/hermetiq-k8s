@@ -75,8 +75,12 @@ spec:
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.api) | nindent 6 }}
       volumes:
         - name: download-dir
+          {{- with .Values.api.downloadDirSizeLimit }}
           emptyDir:
-            sizeLimit: 1Gi
+            sizeLimit: {{ . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
         - name: cache-ttl-config
           configMap:
             name: {{ include "hermetiq-core.cacheTtlConfigName" . }}

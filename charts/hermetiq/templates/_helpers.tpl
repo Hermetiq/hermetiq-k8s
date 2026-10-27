@@ -1002,6 +1002,10 @@ spec:
   value: {{ . | quote }}
 {{- end }}
 {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
+{{- /* When set, the auth-proxy answers gRPC-web CORS preflight itself (in
+     addition to translating gRPC-web <-> gRPC). Useful when the upstream
+     ingress controller can't answer preflight, e.g. GKE Gateway with an H2C
+     BackendService dropping non-gRPC traffic. */}}
 - name: CORS_ALLOWED_ORIGINS
   value: {{ . | quote }}
 {{- end }}

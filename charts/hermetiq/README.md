@@ -850,17 +850,46 @@ dashboard:
 
 #### Network policies
 
-The chart renders no NetworkPolicy by default. To lock the release down, add
-policies through `extraObjects` or alongside the release.
+The chart renders no NetworkPolicy by default. Set `networkPolicy.enabled=true`
+to add ingress-only policies that admit each component's Service target ports
+and nothing else: grpc-api on `50081` (gRPC and gRPC-web), `8008` (REST and
+metrics), and `5150` (MCP); bep-nats-pub on `50081` behind grpc-auth-proxy or
+`50091` without it; subscribers on `8008` (metrics); the dashboard on `8888`
+behind oauth2-proxy or its app port without it; and the Grafana proxy on
+`8888`. Bootstrap and maintenance Jobs accept no ingress.
 
-Select pods by `app.kubernetes.io/component`: `api`, `publisher`, `subscriber`,
-`dashboard`, `grafana-auth-proxy`, `maintenance`, or `bootstrap`.
+```yaml
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: buildbarn
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+```
 
-Callers to allow:
+An empty `ingressFrom` admits any source on those ports. When you restrict it,
+include every caller:
 - your ingress controller or Gateway, which reaches the API, publisher,
   dashboard, and Grafana proxy
 - Buildbarn worker pods, which send completed-action logs to the publisher's
-  gRPC port (`:50091`)
+  gRPC Service port (`:50091`)
+
+`metricsFrom` restricts port `8008` on the publisher and subscribers; leave it
+empty to admit any source. grpc-api also serves its REST API on `8008`, so
+there the port admits `ingressFrom` plus `metricsFrom`, and any source while
+`ingressFrom` is empty.
+
+For egress rules or other selectors, add policies through `extraObjects` or
+alongside the release. Select pods by `app.kubernetes.io/component`: `api`,
+`publisher`, `subscriber`, `dashboard`, `grafana-auth-proxy`, `maintenance`, or
+`bootstrap`.
 
 Egress needs to reach:
 - PostgreSQL, DragonflyDB, NATS, and the OTLP collector
@@ -931,8 +960,17 @@ publisher:
 API and publisher token access is required for licensing and the optional
 workload-discovery features. Subscribers need a token only when lease-based
 coordination is enabled. Maintenance jobs and dashboard-related workloads do
-not need a token unless an environment-specific integration uses the
+not need a token, so the dashboard, Grafana proxy, schema bootstrap Job, and
+maintenance CronJobs default to `automountServiceAccountToken: false`. Set the
+workload's value to `true`, or `null` to inherit the shared setting, if an
+environment-specific integration (such as a Vault agent sidecar) uses the
 Kubernetes API.
+
+The schema bootstrap Job runs as the chart ServiceAccount, except for the
+first install's hook: a `pre-install` hook runs before the chart creates that
+ServiceAccount, so that one run uses the namespace's `default` ServiceAccount
+(with no token mounted). Set `serviceAccount.create=false` with a pre-created
+ServiceAccount to bind it on install as well.
 
 Review every rule under `rbac.rules`:
 

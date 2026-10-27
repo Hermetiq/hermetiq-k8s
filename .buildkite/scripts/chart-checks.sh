@@ -94,9 +94,9 @@ fi
 # Render-level checks that helm-unittest cannot express (schema rejections,
 # comparisons between two renders).
 for script in "${DIR}"/tests/*_test.sh; do
-  [[ -x "${script}" ]] || continue
+  [[ -e "${script}" ]] || continue
   echo "+++ :test_tube: $(basename "${script}")"
-  "${script}"
+  bash "${script}"
 done
 
 echo "+++ :white_check_mark: ${CHART} validation passed"

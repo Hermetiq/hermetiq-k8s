@@ -912,11 +912,15 @@ networkPolicy:
   # Optional list of NetworkPolicyPeer entries allowed to reach service ports
   # on grpc-api, bep-nats-pub, web-ui, and grafana-oauth2-proxy. Leave empty to
   # allow ingress to those service ports from any source while still blocking
-  # unexposed container ports.
+  # unexposed container ports. Besides your Gateway or ingress controller,
+  # include the Buildbarn worker pods: they send completed-action logs to
+  # bep-nats-pub.
   ingressFrom: []
   # Optional list of NetworkPolicyPeer entries allowed to scrape /metrics and
   # health endpoints on port 8008 (grpc-api, bep-nats-pub, bep-nats-sub-*).
-  # Leave empty to allow port 8008 from any in-cluster source.
+  # Leave empty to allow port 8008 from any in-cluster source. grpc-api also
+  # serves its REST API on 8008, so there it admits ingressFrom plus these
+  # peers, and is open to any source while ingressFrom is empty.
   metricsFrom: []
 
 k8sNodeScheduling:
@@ -1001,6 +1005,12 @@ api:
   # Defaults to the selected routing provider's web CORS origins, which in
   # turn default to the dashboard URL. Comma-separated Origin values.
   corsAllowedOrigins: ""
+  # sizeLimit of the emptyDir where the REST API assembles a target's output
+  # files into a .tgz before streaming it to the browser. Archives of
+  # concurrent downloads share it, and exceeding it evicts the whole API pod,
+  # so keep it above the largest expected target output. Empty leaves it
+  # unbounded (node ephemeral storage).
+  downloadDirSizeLimit: 10Gi
   # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
   nodeSelector: null
   tolerations: null

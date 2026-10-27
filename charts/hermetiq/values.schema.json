@@ -669,6 +669,10 @@
           "type": "object",
           "description": "Additional scalar environment variables for the API core. With app.grpcAuthUserProvider=jwks and api.jwt.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here."
         },
+        "downloadDirSizeLimit": {
+          "type": "string",
+          "description": "sizeLimit of the API's artifact-download emptyDir; empty leaves it unbounded."
+        },
         "automountServiceAccountToken": {
           "type": [
             "boolean",
