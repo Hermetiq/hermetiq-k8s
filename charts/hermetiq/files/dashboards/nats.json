@@ -130,7 +130,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_cpu",
           "intervalFactor": 2,
@@ -232,7 +232,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_mem",
           "intervalFactor": 2,
@@ -345,7 +345,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_in_bytes",
           "intervalFactor": 2,
@@ -445,7 +445,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_in_msgs",
           "intervalFactor": 2,
@@ -545,7 +545,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_out_bytes",
           "intervalFactor": 2,
@@ -645,7 +645,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_out_msgs",
           "intervalFactor": 2,
@@ -761,7 +761,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_connections",
           "intervalFactor": 1,
@@ -864,7 +864,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_subscriptions",
           "hide": false,
@@ -968,7 +968,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS__NATS-PROMETHEUS}"
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
           "expr": "nats_varz_slow_consumers",
           "intervalFactor": 1,

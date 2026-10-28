@@ -24,6 +24,14 @@ To opt into persistence:
 - other filesystem stores: set `keyLocationMap.type: blockDevice`
 - raw block stores: set `blockDevice.keyLocationMap: file`
 
+Barn Owl's `store_not_persistent` advisory identifies storage-tier stores whose
+contents are discarded on restart, even if their blocks are on a durable
+volume. Persistence requires both a disk-backed key-location map and the
+generated Buildbarn `persistent` configuration with a durable state directory.
+Use the chart settings above to opt in per store. Rebuilding a store after
+restart can be intentional; changing its key-location map layout flushes it
+once before subsequent restarts preserve its contents.
+
 Persistent stores sync state at most every 5 minutes. A crash can lose the newest few minutes of writes, which show up as normal cache misses and are re-uploaded. A clean shutdown performs two full block-device syncs plus a state write. If a large network-attached disk cannot finish inside the pod grace period, shutdown falls back to the crash behavior. That is usually harmless, but raise `storage.terminationGracePeriodSeconds` if clean flushes matter for your deployment.
 
 | Configuration | Pod restart on same node | Rescheduled to another node | Backing disk/PV lost |

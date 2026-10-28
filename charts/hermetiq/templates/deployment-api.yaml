@@ -33,6 +33,15 @@ spec:
         {{- end }}
         kubectl.kubernetes.io/default-container: api
         hermetiq.com/runtime-config-checksum: {{ printf "%s%s" (include "hermetiq-core.cacheTtlConfigChecksum" .) (include "hermetiq-core.promqlConfigChecksum" .) | sha256sum }}
+        {{- if and .Values.assistant.enabled .Values.assistant.jev.enabled }}
+        hermetiq.com/jev-config-checksum: {{ include "hermetiq-core.jevConfigChecksum" . }}
+        {{- end }}
+        {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
+        hermetiq.com/assistant-policy-checksum: {{ include "hermetiq-core.assistantPolicyChecksum" . }}
+        {{- end }}
+        {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+        hermetiq.com/rbe-access-policy-checksum: {{ include "hermetiq-core.rbeAccessPolicyChecksum" . }}
+        {{- end }}
         hermetiq.com/shared-env-checksum: {{ include "hermetiq-core.sharedEnvChecksum" . }}
         {{- if not .Values.postgres.password.existingSecret }}
         checksum/postgres-secret: {{ dict "key" .Values.postgres.password.existingSecretKey "value" .Values.postgres.password.value | toJson | sha256sum }}
@@ -66,7 +75,12 @@ spec:
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.api) | nindent 6 }}
       volumes:
         - name: download-dir
+          {{- with .Values.api.downloadDirSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ . }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: cache-ttl-config
           configMap:
             name: {{ include "hermetiq-core.cacheTtlConfigName" . }}
@@ -79,6 +93,27 @@ spec:
             items:
               - key: {{ .Values.promqlQueries.configMapKey | quote }}
                 path: promql.json
+        {{- if .Values.assistant.enabled }}
+        - name: prompt-runtime-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
+        - name: assistant-policy
+          configMap:
+            name: {{ include "hermetiq-core.assistantPolicyName" . }}
+            items:
+              - key: {{ .Values.assistant.policy.configMapKey | quote }}
+                path: policy.json
+        {{- end }}
+        {{- end }}
+        {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+        - name: rbe-access-policy
+          configMap:
+            name: {{ include "hermetiq-core.rbeAccessPolicyName" . }}
+            items:
+              - key: {{ .Values.rbe.accessPolicy.configMapKey | quote }}
+                path: policy.json
+        {{- end }}
         # File-mount (not env) so the kubelet's ~1m Secret refresh enables
         # license hot reload. Always mounted with optional: true so a trial
         # install picks up the Secret when it is created later (paid-key
@@ -96,78 +131,7 @@ spec:
             secretName: {{ required "otel.mtls.secretName is required when otel.mtls.enabled=true" .Values.otel.mtls.secretName }}
         {{- end }}
       containers:
-        - name: grpc-auth-proxy
-          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.authProxy" "repository" .Values.images.authProxy.repository "tag" .Values.images.authProxy.tag "digest" .Values.images.authProxy.digest) }}
-          imagePullPolicy: {{ .Values.images.authProxy.pullPolicy }}
-          ports:
-            - containerPort: 50081
-              protocol: TCP
-          env:
-{{- with .Values.api.authProxy.env }}
-{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
-{{- end }}
-            - name: DEBUG
-              value: {{ .Values.api.authProxy.debug | quote }}
-            - name: GRPC_PORT
-              value: "50081"
-            - name: PROXY_PORT
-              value: "50091"
-            {{- if .Values.api.jwt.enabled }}
-            - name: JWT_AUTH_ENABLED
-              value: "true"
-            {{- end }}
-            {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
-            - name: JWT_JWKS_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.apiJwtIssuer" .) }}
-            - name: JWT_ISSUER
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if .Values.api.jwt.audience }}
-            - name: JWT_AUDIENCE
-              value: {{ .Values.api.jwt.audience | quote }}
-            {{- else if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled }}
-            - name: JWT_AUDIENCE
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hermetiq-core.oauth2ProxySecretName" . }}
-                  key: OAUTH2_PROXY_CLIENT_ID
-            {{- end }}
-            {{- if .Values.api.jwt.groupsClaim }}
-            - name: JWT_GROUPS_CLAIM
-              value: {{ .Values.api.jwt.groupsClaim | quote }}
-            {{- end }}
-            {{- if .Values.api.jwt.nameClaim }}
-            - name: JWT_NAME_CLAIM
-              value: {{ .Values.api.jwt.nameClaim | quote }}
-            {{- end }}
-            {{- if .Values.publisher.hermetiqAdminGroup }}
-            - name: HERMETIQ_ADMIN_GROUP
-              value: {{ .Values.publisher.hermetiqAdminGroup | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.adminEmails" .) }}
-            - name: ADMIN_EMAIL_ALLOWLIST
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
-            # When set, the auth-proxy answers gRPC-web CORS preflight itself
-            # (in addition to translating gRPC-web ↔ gRPC). Useful when the
-            # upstream ingress controller can't answer preflight — e.g. GKE
-            # Gateway with H2C BackendService dropping non-gRPC traffic.
-            - name: CORS_ALLOWED_ORIGINS
-              value: {{ . | quote }}
-            {{- end }}
-          resources:
-            {{- toYaml .Values.api.resources.authProxy | nindent 12 }}
-          {{- if .Values.api.authProxy.probes.enabled }}
-          livenessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.liveness) | nindent 12 }}
-          readinessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.api.authProxy.probes.readiness) | nindent 12 }}
-          {{- end }}
-          securityContext:
-            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- include "hermetiq-core.grpcAuthProxyContainer" (dict "root" . "authProxy" .Values.api.authProxy "resources" .Values.api.resources.authProxy "roleEnv" (include "hermetiq-core.apiAuthProxyRoleEnv" .)) | nindent 8 }}
         - name: api
           image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.api" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.apiTag "digest" .Values.images.bepNats.apiDigest) }}
           imagePullPolicy: {{ .Values.images.bepNats.pullPolicy }}
@@ -191,6 +155,38 @@ spec:
             {{- if not (hasKey .Values.api.env "MCP_EXPOSE_USER_IDENTITIES") }}
             - name: MCP_EXPOSE_USER_IDENTITIES
               value: {{ .Values.api.mcpExposeUserIdentities | quote }}
+            {{- end }}
+            {{- if .Values.assistant.enabled }}
+            - name: AICHAT_DEFAULT_PROVIDER
+              value: claude
+            - name: ANTHROPIC_BACKEND
+              value: direct
+            - name: ANTHROPIC_DEFAULT_MODEL
+              value: {{ .Values.assistant.anthropic.model | quote }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.anthropic.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.anthropic.apiKey.existingSecretKey | quote }}
+            - name: PROMPT_RUNTIME_ADDR
+              value: 127.0.0.1:50097
+            {{- if .Values.assistant.jev.enabled }}
+            - name: JEV_BASE_URL
+              value: {{ .Values.assistant.jev.baseUrl | quote }}
+            - name: JEV_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.jev.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.jev.apiKey.existingSecretKey | quote }}
+            {{- end }}
+            {{- if or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap }}
+            - name: AICHAT_POLICY_CONFIG
+              value: /etc/hermetiq/aichat/policy.json
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+            - name: RBE_ACCESS_POLICY_CONFIG
+              value: /etc/hermetiq/rbe-access/policy.json
             {{- end }}
             - name: MCP_ENABLED
               value: "true"
@@ -438,6 +434,16 @@ spec:
             - name: promql-config
               mountPath: /config/promql
               readOnly: true
+            {{- if and .Values.assistant.enabled (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) }}
+            - name: assistant-policy
+              mountPath: /etc/hermetiq/aichat
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap }}
+            - name: rbe-access-policy
+              mountPath: /etc/hermetiq/rbe-access
+              readOnly: true
+            {{- end }}
             - name: license-key
               mountPath: /config/license
               readOnly: true
@@ -470,3 +476,47 @@ spec:
             successThreshold: 1
           securityContext:
             {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+
+        {{- if .Values.assistant.enabled }}
+        - name: prompt-runtime
+          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.promptRuntime" "repository" .Values.images.promptRuntime.repository "tag" .Values.images.promptRuntime.tag "digest" .Values.images.promptRuntime.digest) }}
+          imagePullPolicy: {{ .Values.images.promptRuntime.pullPolicy }}
+          env:
+{{- with .Values.assistant.promptRuntime.env }}
+{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+            - name: PROMPTRT_LISTEN
+              value: 127.0.0.1:50097
+            - name: DSPY_CACHEDIR
+              value: /tmp/dspy-cache
+            - name: BBP_LM_BACKEND
+              value: anthropic
+            - name: PROMPTRT_DEFAULT_MODEL
+              value: {{ .Values.assistant.anthropic.model | quote }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.anthropic.apiKey.existingSecret | quote }}
+                  key: {{ .Values.assistant.anthropic.apiKey.existingSecretKey | quote }}
+          volumeMounts:
+            - name: prompt-runtime-tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.assistant.promptRuntime.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: [bbp, health]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: [bbp, health]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- end }}

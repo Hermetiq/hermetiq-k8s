@@ -56,6 +56,21 @@ spec:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
       metricName: worker_ubuntu22_04_active_or_queued_tasks
       threshold: "11" # matches concurrency
+    advanced:
+      horizontalPodAutoscalerConfig:
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: 0
+            selectPolicy: Max
+            policies:
+              - {type: Pods, value: 8, periodSeconds: 30}
+              - {type: Percent, value: 100, periodSeconds: 30}
+          scaleDown:
+            stabilizationWindowSeconds: 450
+            selectPolicy: Min
+            policies:
+              - {type: Percent, value: 50, periodSeconds: 60}
+              - {type: Pods, value: 2, periodSeconds: 60}
     # Optional scheduled warm-up window. KEDA treats cron triggers as a replica
     # floor during the window, then lets the Prometheus trigger scale normally.
     # cron:

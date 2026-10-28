@@ -10,6 +10,8 @@ metadata:
     app: {{ include "hermetiq-core.dashboardName" . }}
 spec:
   replicas: {{ .Values.dashboard.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: {{ include "hermetiq-core.dashboardName" . }}
@@ -46,14 +48,20 @@ spec:
       {{- end }}
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.dashboard) | nindent 6 }}
       volumes:
+        # Holds the init container's copy of the image's built web UI, about
+        # 60 MB with source maps, so leave room for the bundle to grow.
         - name: dashboard-html
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
         - name: dashboard-nginx-cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         - name: dashboard-nginx-run
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 16Mi
         - name: dashboard-tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
         {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}
         - name: dashboard-quickstart-config
           configMap:
@@ -87,23 +95,7 @@ spec:
             - name: dashboard-html
               mountPath: /workdir/html
           securityContext:
-            allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
-            privileged: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: {{ .Values.dashboard.security.runAsNonRoot }}
-            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsUser) }}
-            runAsUser: {{ .Values.dashboard.security.runAsUser }}
-            {{- end }}
-            {{- if not (kindIs "invalid" .Values.dashboard.security.runAsGroup) }}
-            runAsGroup: {{ .Values.dashboard.security.runAsGroup }}
-            {{- end }}
-            {{- if .Values.dashboard.security.dropCapabilities }}
-            capabilities:
-              drop:
-                {{- range .Values.dashboard.security.dropCapabilities }}
-                - {{ . | quote }}
-                {{- end }}
-            {{- end }}
+            {{- include "hermetiq-core.dashboardContainerSecurityContext" . | nindent 12 }}
       containers:
         {{- if .Values.dashboard.oauth2Proxy.enabled }}
         - name: oauth2-proxy
@@ -171,6 +163,14 @@ spec:
               value: "false"
             - name: REACT_APP_COST_INTEGRATION_ENABLED
               value: {{ .Values.app.costReportTickerEnabled | default false | quote }}
+            - name: REACT_APP_ENABLE_VICTORIA_LOGS
+              value: {{ .Values.app.victoriaLogsEnabled | default false | quote }}
+            - name: REACT_APP_ENABLE_ASSISTANT
+              value: {{ .Values.assistant.enabled | default false | quote }}
+            - name: REACT_APP_ENABLE_BB_CONFIG
+              value: "false"
+            - name: REACT_APP_ENABLE_RBE_UI
+              value: {{ .Values.rbe.enabled | default false | quote }}
             - name: REACT_APP_ON_PREM
               value: "true"
             - name: REACT_APP_HMQ_METRICS_DASHBOARD_URL

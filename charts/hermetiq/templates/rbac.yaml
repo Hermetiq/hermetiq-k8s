@@ -55,6 +55,19 @@ rules:
       - get
       - list
   {{- end }}
+  {{- if .Values.rbac.rules.rbeFleet }}
+  # RBE fleet ownership and effective scaling. The binding scopes these
+  # read-only grants to the release namespace, including in cluster mode.
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+  - apiGroups: [keda.sh]
+    resources: [scaledobjects]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  {{- end }}
   {{- if .Values.rbac.rules.configMaps }}
   - apiGroups:
       - ""

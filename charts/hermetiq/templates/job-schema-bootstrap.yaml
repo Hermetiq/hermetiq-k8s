@@ -12,6 +12,10 @@ kind: Job
      with "field is immutable" trying to patch the existing Job. Suffix the name
      with the revision so each upgrade creates a fresh Job instead. */}}
 {{- $jobName := ternary "database-schema-bootstrap" (printf "database-schema-bootstrap-%d" (int .Release.Revision)) .Values.bootstrap.hook.enabled }}
+{{/* A pre-install hook runs before the chart creates its ServiceAccount, and
+     the ServiceAccount admission plugin rejects Pods that name a missing one,
+     so the first install's hook Job falls back to the namespace default. */}}
+{{- $bindServiceAccount := or (not .Values.bootstrap.hook.enabled) (not .Values.serviceAccount.create) (not .Release.IsInstall) }}
 metadata:
   name: {{ $jobName }}
   namespace: {{ include "hermetiq-core.namespace" . }}
@@ -44,7 +48,13 @@ spec:
     metadata:
       labels:
         {{- include "hermetiq-core.podLabels" (dict "root" . "component" "bootstrap") | nindent 8 }}
+        {{- if $bindServiceAccount }}
+        {{- include "hermetiq-core.workloadIdentityLabels" . | nindent 8 }}
+        {{- end }}
     spec:
+      {{- if $bindServiceAccount }}
+      serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
+      {{- end }}
       restartPolicy: Never
       {{- include "hermetiq-core.automountServiceAccountToken" .Values.bootstrap | nindent 6 }}
       securityContext:
@@ -124,4 +134,5 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi

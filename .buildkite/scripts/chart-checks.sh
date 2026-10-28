@@ -91,4 +91,12 @@ else
   echo "(no ${DIR}/tests — skipping; add suites under ${DIR}/tests/ to enable)"
 fi
 
+# Render-level checks that helm-unittest cannot express (schema rejections,
+# comparisons between two renders).
+for script in "${DIR}"/tests/*_test.sh; do
+  [[ -e "${script}" ]] || continue
+  echo "+++ :test_tube: $(basename "${script}")"
+  bash "${script}"
+done
+
 echo "+++ :white_check_mark: ${CHART} validation passed"

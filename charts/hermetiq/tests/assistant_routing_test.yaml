@@ -1,0 +1,227 @@
+suite: assistant streaming timeout across routing providers
+templates:
+  - templates/gateway-routes.yaml
+  - templates/contour-routes.yaml
+  - templates/ingress-routes.yaml
+  - templates/gke-gateway-policies.yaml
+values:
+  - ../ci-values/ci.yaml
+set:
+  assistant.enabled: true
+  assistant.anthropic.apiKey.existingSecret: llm-key
+  assistant.streamTimeoutSeconds: 720
+  gateway.name: test-gateway
+tests:
+  - it: extends only the API route in its existing Envoy health policy
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 720s
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: 0s
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 300s
+        documentSelector:
+          path: metadata.name
+          value: api-web-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 0s
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc-health-check
+  - it: prevents a short controller timeout even when ordinary timeout policies are disabled
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.enabled: false
+      gateway.healthChecks.enabled: false
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 720s
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+  - it: extends the Contour API route without changing publisher response limits
+    template: templates/contour-routes.yaml
+    set:
+      routing.provider: contour
+      contour.certManager.enabled: false
+    asserts:
+      - equal:
+          path: spec.routes[0].timeoutPolicy
+          value: {response: 720s, idle: 720s}
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: spec.routes[0].timeoutPolicy.response
+          value: 300s
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+  - it: extends nginx read and send limits on API gRPC only
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"]
+          value: "720"
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-send-timeout"]
+          value: "720"
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"]
+          value: "300"
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+  - it: extends GKE shared API backend while retaining the publisher timeout
+    template: templates/gke-gateway-policies.yaml
+    set:
+      routing.provider: gateway-httproute-only
+    asserts:
+      - equal:
+          path: spec.default.timeoutSec
+          value: 720
+        documentSelector:
+          path: metadata.name
+          value: bp-grpc-api
+      - equal:
+          path: spec.default.timeoutSec
+          value: 300
+        documentSelector:
+          path: metadata.name
+          value: bp-bep-nats-pub
+  - it: keeps a longer Envoy request timeout and raises a shorter stream cap
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.apiGrpc.requestTimeout: 1h30m
+      gateway.timeouts.apiGrpc.maxStreamDuration: 60s
+    asserts:
+      - equal:
+          path: spec.timeout.http
+          value: {requestTimeout: 1h30m, maxStreamDuration: 720s, connectionIdleTimeout: 1h}
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+  - it: keeps disabled Envoy limits disabled
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.apiGrpc.requestTimeout: 0s
+      gateway.timeouts.apiGrpc.maxStreamDuration: 2h
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 0s
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.maxStreamDuration
+          value: 2h
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+  - it: raises an Envoy timeout that falls short by less than a second
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.apiGrpc.requestTimeout: 11m59s999ms
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 720s
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+  - it: keeps an Envoy timeout equal to the stream timeout
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.apiGrpc.requestTimeout: 12m
+    asserts:
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 12m
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc-health-check
+  - it: keeps an unbounded Contour response timeout
+    template: templates/contour-routes.yaml
+    set:
+      routing.provider: contour
+      contour.certManager.enabled: false
+      contour.httpProxy.responseTimeout: infinity
+    asserts:
+      - equal:
+          path: spec.routes[0].timeoutPolicy
+          value: {response: infinity, idle: 720s}
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+  - it: keeps a longer Contour response timeout
+    template: templates/contour-routes.yaml
+    set:
+      routing.provider: contour
+      contour.certManager.enabled: false
+      contour.httpProxy.responseTimeout: 1h
+    asserts:
+      - equal:
+          path: spec.routes[0].timeoutPolicy.response
+          value: 1h
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+  - it: keeps longer nginx limits and raises shorter ones independently
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+      ingress.grpc.proxyReadTimeoutSeconds: "3600"
+      ingress.grpc.proxySendTimeoutSeconds: "60"
+    asserts:
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"]
+          value: "3600"
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/proxy-send-timeout"]
+          value: "720"
+        documentSelector:
+          path: metadata.name
+          value: api-cloud-grpc
+  - it: keeps a longer GKE backend timeout on the API Service
+    template: templates/gke-gateway-policies.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.gke.backendPolicy.timeoutSec: 3600
+    asserts:
+      - equal:
+          path: spec.default.timeoutSec
+          value: 3600
+        documentSelector:
+          path: metadata.name
+          value: bp-grpc-api

@@ -19,11 +19,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: {{ include "hermetiq-core.publisherName" . }}
           port: 50091
     {{- else }}
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
         - name: {{ include "hermetiq-core.publisherName" . }}
           port: 50091
     {{- end }}
@@ -95,11 +105,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: {{ include "hermetiq-core.publisherName" . }}
           port: 50091
     {{- else }}
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
         - name: {{ include "hermetiq-core.publisherName" . }}
           port: 50091
     {{- end }}
@@ -274,7 +294,7 @@ spec:
   {{- . | nindent 2 }}
   {{- end }}
 {{- end }}
-{{- if and (not $httpRouteOnly) $hcEnabled }}
+{{- if and (not $httpRouteOnly) (or $hcEnabled $apiWebTimeout) }}
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
@@ -291,12 +311,16 @@ spec:
   {{- with $apiWebTimeout }}
   {{- . | nindent 2 }}
   {{- end }}
+  {{- if $hcEnabled }}
   healthCheck:
     active:
       type: HTTP
       http:
         path: /ready
         method: GET
+  {{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) (or $hcEnabled $mcpTimeout) }}
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
@@ -313,12 +337,14 @@ spec:
   {{- with $mcpTimeout }}
   {{- . | nindent 2 }}
   {{- end }}
+  {{- if $hcEnabled }}
   healthCheck:
     active:
       type: HTTP
       http:
         path: /.well-known/oauth-protected-resource
         method: GET
+  {{- end }}
 {{- end }}
 {{- if and (not $httpRouteOnly) .Values.gateway.cors.enabled }}
 ---
