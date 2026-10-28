@@ -39,6 +39,10 @@ metadata:
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -172,10 +176,10 @@ metadata:
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
   annotations:
-    {{- with .Values.commonAnnotations }}
     {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:

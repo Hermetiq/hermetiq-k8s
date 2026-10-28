@@ -63,6 +63,10 @@ metadata:
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "buildbarn.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

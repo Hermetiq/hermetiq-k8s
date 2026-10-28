@@ -152,6 +152,13 @@
 {{- if and .Values.scheduler.sizeClassAnalysis.enabled (not .Values.storage.persistence.iscc.enabled) -}}
 {{- fail "scheduler.sizeClassAnalysis.enabled=true requires storage.persistence.iscc.enabled=true" -}}
 {{- end -}}
+{{- if and .Values.frontend.readCache.enabled (not .Values.frontend.readCache.volume.hostPath.enabled) .Values.frontend.readCache.volume.emptyDir.sizeLimit -}}
+{{- $rcLimitMi := int (include "buildbarn.storageSizeMi" (dict "name" "frontend.readCache.volume.emptyDir.sizeLimit" "value" .Values.frontend.readCache.volume.emptyDir.sizeLimit)) -}}
+{{- $rcBlocksMi := mul (int .Values.frontend.readCache.blocksSizeGi) 1024 -}}
+{{- if ge $rcBlocksMi $rcLimitMi -}}
+{{- fail (printf "frontend.readCache.blocksSizeGi (%dGi = %dMi) must be smaller than frontend.readCache.volume.emptyDir.sizeLimit (%s = %dMi) to leave headroom for metadata and prevent kubelet from evicting the frontend pod" (int .Values.frontend.readCache.blocksSizeGi) $rcBlocksMi .Values.frontend.readCache.volume.emptyDir.sizeLimit $rcLimitMi) -}}
+{{- end -}}
+{{- end -}}
 {{- $are := .Values.config.actionCache.actionResultExpiring -}}
 {{- if $are.enabled -}}
 {{- if not $are.minimumValidity -}}
@@ -277,7 +284,7 @@
      talking to itself on upgrade, so name the file rather than let it fail at
      runtime. */}}
 {{- range $name, $_ := $.Values.configOverrides -}}
-{{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet") -}}
+{{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "scheduler.jsonnet" "portal.jsonnet") -}}
 {{- fail (printf "configOverrides[%q] replaces a file that carries one half of an in-cluster mTLS hop, and an override is spliced in verbatim without templating — security.grpcMtls would configure the other half only, leaving that hop broken. Add the tls block to your override and remove this file from the check, or turn security.grpcMtls off" $name) -}}
 {{- end -}}
 {{- end -}}

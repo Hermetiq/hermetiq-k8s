@@ -84,3 +84,20 @@ spec:
       app: remote-asset
 ---
 {{- end }}
+{{- if and .Values.portal.enabled .Values.portal.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bb-portal
+  namespace: {{ include "buildbarn.namespace" . }}
+  labels:
+    {{- include "buildbarn.labels" . | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" "portal") | nindent 4 }}
+spec:
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  maxUnavailable: {{ .Values.portal.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app: bb-portal
+---
+{{- end }}

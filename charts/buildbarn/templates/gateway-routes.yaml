@@ -66,11 +66,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: frontend-grpc
           port: 8980
     {{- else }}
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
         - name: frontend-grpc
           port: 8980
     {{- end }}
@@ -145,11 +155,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: bb-portal
           port: 8082
     {{- else }}
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
         - name: bb-portal
           port: 8082
     {{- end }}
@@ -201,11 +221,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: remote-asset-grpc
           port: {{ .Values.remoteAsset.port }}
     {{- else }}
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
+      backendRefs:
         - name: remote-asset-grpc
           port: {{ .Values.remoteAsset.port }}
     {{- end }}

@@ -9,6 +9,8 @@ metadata:
     {{- include "buildbarn.componentLabel" (dict "component" "portal") | nindent 4 }}
 spec:
   replicas: {{ .Values.portal.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: bb-portal
@@ -19,8 +21,8 @@ spec:
         app: bb-portal
         kubernetes_service: bb-portal
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "portal.jsonnet")) }}
     spec:
@@ -100,5 +102,6 @@ spec:
               - key: portal.jsonnet
                 path: portal.jsonnet
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.portal.tmpDirSizeLimit }}
 {{- end }}

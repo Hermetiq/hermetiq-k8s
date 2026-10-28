@@ -10,6 +10,8 @@ spec:
   {{- if not (and .Values.keda.enabled .Values.keda.frontend.enabled) }}
   replicas: {{ .Values.frontend.replicas }}
   {{- end }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: frontend
@@ -20,8 +22,8 @@ spec:
         app: frontend
         kubernetes_service: frontend
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "frontend.jsonnet")) }}
     spec:

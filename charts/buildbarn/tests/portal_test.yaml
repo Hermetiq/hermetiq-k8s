@@ -87,7 +87,8 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: tmp
-            emptyDir: {}
+            emptyDir:
+              sizeLimit: 1Gi
 
   - it: serves the embedded frontend rather than proxying one
     template: templates/configmaps.yaml

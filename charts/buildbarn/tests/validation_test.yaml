@@ -313,6 +313,25 @@ tests:
       - failedTemplate:
           errorPattern: "spliced in verbatim without templating"
 
+  - it: rejects mTLS alongside a scheduler.jsonnet override
+    set:
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: pem
+      configOverrides:
+        scheduler.jsonnet: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: "spliced in verbatim without templating"
+
+  - it: rejects frontend.readCache.blocksSizeGi >= emptyDir.sizeLimit
+    set:
+      frontend.readCache.enabled: true
+      frontend.readCache.blocksSizeGi: 30
+      frontend.readCache.volume.emptyDir.sizeLimit: 2560Mi
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.readCache.blocksSizeGi .* must be smaller than frontend.readCache.volume.emptyDir.sizeLimit"
+
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

@@ -19,8 +19,8 @@ spec:
         app: storage
         kubernetes_service: storage
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "storage.jsonnet")) }}
     spec:
@@ -32,9 +32,7 @@ spec:
       {{- if .Values.storage.podAntiAffinity.enabled }}
       {{- include "buildbarn.requiredPodAntiAffinity" (dict "app" "storage") | nindent 6 }}
       {{- end }}
-      {{- if or (include "buildbarn.storage.anyFsPrep" .) (include "buildbarn.storage.anyBlock" .) }}
       {{- include "buildbarn.storage.podSecurityContext" . | nindent 6 }}
-      {{- end }}
       {{- if or (include "buildbarn.storage.anyFsPrep" .) (and (include "buildbarn.storage.anyBlock" .) (eq .Values.storage.persistence.blockDevice.deviceAccess "chownInit")) }}
       initContainers:
         {{- if (include "buildbarn.storage.anyFsPrep" .) }}
@@ -103,19 +101,13 @@ spec:
             # a non-privileged pod cannot open a hostPath-backed block device.
             privileged: true
             allowPrivilegeEscalation: true
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
+            readOnlyRootFilesystem: {{ .Values.security.container.readOnlyRootFilesystem }}
+            runAsNonRoot: {{ .Values.security.pod.runAsNonRoot }}
+            {{- if not (kindIs "invalid" .Values.security.pod.runAsUser) }}
+            runAsUser: {{ .Values.security.pod.runAsUser }}
+            {{- end }}
             {{- else }}
-            allowPrivilegeEscalation: false
-            privileged: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            runAsGroup: 65534
-            capabilities:
-              drop:
-                - ALL
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
             {{- end }}
           volumeMounts:
             {{- if .Values.storage.mtlsClientCert.enabled }}

@@ -9,6 +9,8 @@ metadata:
     {{- include "buildbarn.componentLabel" (dict "component" "remote-asset") | nindent 4 }}
 spec:
   replicas: {{ .Values.remoteAsset.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: remote-asset
@@ -19,8 +21,8 @@ spec:
         app: remote-asset
         kubernetes_service: remote-asset
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "asset.jsonnet")) }}
     spec:
@@ -80,5 +82,6 @@ spec:
               - key: asset.jsonnet
                 path: asset.jsonnet
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.remoteAsset.tmpDirSizeLimit }}
 {{- end }}

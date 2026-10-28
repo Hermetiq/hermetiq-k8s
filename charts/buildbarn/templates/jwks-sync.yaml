@@ -144,7 +144,13 @@ spec:
         metadata:
           labels:
             {{- include "buildbarn.podLabels" (dict "root" . "component" "jwks-sync") | nindent 12 }}
+          annotations:
+            {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+            {{- include "buildbarn.podAnnotations" $ | nindent 12 }}
+            {{- end }}
+            checksum/config: {{ printf "%s|%s|%s|%s" $url $ns $cmName $cmKey | sha256sum }}
         spec:
+          {{- include "buildbarn.imagePullSecrets" . | nindent 10 }}
           serviceAccountName: {{ $saName }}
           {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 10 }}
           restartPolicy: Never
@@ -163,14 +169,17 @@ spec:
                 - name: config
                   mountPath: /etc/jwks-sync
                   readOnly: true
+          {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 10 }}
           volumes:
             - name: config
               configMap:
                 name: {{ $configCMName }}
 {{- if .Values.frontend.jwks.sync.initialSyncEnabled }}
 ---
-# One-shot sync that runs on helm install/upgrade so the JWKS ConfigMap is
-# populated before the frontend rolls out. Uses helm hooks so it's idempotent.
+# One-shot sync that runs as a post-install/post-upgrade hook so the JWKS
+# ConfigMap is populated immediately after release resources are applied (the
+# pre-install/pre-upgrade seed ConfigMap above satisfies the frontend volume
+# mount during rollout).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -201,7 +210,13 @@ spec:
     metadata:
       labels:
         {{- include "buildbarn.podLabels" (dict "root" . "component" "jwks-sync") | nindent 8 }}
+      annotations:
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ printf "%s|%s|%s|%s" $url $ns $cmName $cmKey | sha256sum }}
     spec:
+      {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ $saName }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 6 }}
       # Never (vs. OnFailure) so each backoffLimit retry produces a fresh
@@ -223,6 +238,7 @@ spec:
             - name: config
               mountPath: /etc/jwks-sync
               readOnly: true
+      {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.frontend.jwks.sync) | nindent 6 }}
       volumes:
         - name: config
           configMap:
