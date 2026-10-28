@@ -122,9 +122,11 @@ app:
   rawBepExportBucket: ""
   ghEnvDir: ""
   mcpProtoIntelToolsEnabled: true
-  # Detailed cache-event analytics require the Hermetiq grpc-cache-proxy
-  # sidecar on the Buildbarn frontend. Off by default; enable it once the
-  # sidecar publishes cache events to this chart's NATS.
+  # Turns on the cache-event queries and MCP tools (CACHE_EVENTS_ENABLED on
+  # the API). It does not control ingestion: subscribers store events while
+  # cache.enabled is true in the NATS stream config, for projects with Action
+  # Cache Hit Tracker on. Off by default; enable it once the Buildbarn chart's
+  # grpc-cache-proxy sidecar publishes cache events to this chart's NATS.
   cacheEventsEnabled: false
   # VictoriaLogs-backed MCP tools are hidden by default for on-prem installs
   # that do not deploy VictoriaLogs. Set true when VL is available.

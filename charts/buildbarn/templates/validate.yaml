@@ -234,6 +234,11 @@
 {{- if and .Values.frontend.grpcCacheProxy.natsUrl (not .Values.frontend.grpcCacheProxy.cacheEvents.subjectPrefix) -}}
 {{- fail "frontend.grpcCacheProxy.cacheEvents.subjectPrefix is required when frontend.grpcCacheProxy.natsUrl is set" -}}
 {{- end -}}
+{{/* Backstop for --skip-schema-validation, where the schema enum does not run.
+     The proxy would fall back to "on" with only a log line. */}}
+{{- if not (has (toString .Values.frontend.grpcCacheProxy.cacheEvents.trackingMode) (list "on" "off" "header")) -}}
+{{- fail "frontend.grpcCacheProxy.cacheEvents.trackingMode must be one of: on, off, header (quoted, since YAML reads a bare on/off as a boolean)" -}}
+{{- end -}}
 {{- if and .Values.frontend.grpcCacheProxy.enforceAuth (or (not .Values.frontend.grpcCacheProxy.stytch.apiHost) (not .Values.frontend.grpcCacheProxy.stytch.existingSecret)) -}}
 {{- fail "frontend.grpcCacheProxy.stytch.apiHost and frontend.grpcCacheProxy.stytch.existingSecret are required when frontend.grpcCacheProxy.enforceAuth=true" -}}
 {{- end -}}

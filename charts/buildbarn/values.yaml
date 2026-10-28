@@ -886,13 +886,23 @@ frontend:
     # values for NATS credentials, nkeys, or TLS.
     natsUrl: ""
     cacheEvents:
-      # Subject prefix for published cache events (e.g. prod_cache). Required
-      # when natsUrl is set.
+      # Subject prefix for published cache events. Required when natsUrl is
+      # set, and MUST equal the Hermetiq chart's cache.subjectPrefix in its
+      # NATS stream config (packaged default: cache). It also names the
+      # tracking policy bucket the sidecar reads (<prefix>_tracking_policy).
       subjectPrefix: ""
       # MUST equal the bep-nats stream partition count (the hermetiq chart's
       # app.streamPartitionCount / STREAM_PARTITION_COUNT). Events published to
       # a shard nothing consumes are silently discarded.
       numShards: 1
+      # Which Action Cache lookups are captured (CACHE_HIT_TRACKING_MODE). A
+      # project's Action Cache Hit Tracker setting applies in every mode.
+      #   "on"     - every lookup
+      #   "header" - only invocations that send the opt-in header, e.g.
+      #              --remote_cache_header=x-hermetiq-track-cache-hits=1
+      #   "off"    - none
+      # Quote the value: YAML reads a bare on/off as a boolean.
+      trackingMode: "on"
     # Applied to both the sidecar's server and its upstream connection to the
     # frontend, and floored at config.maximumMessageSizeBytes: a smaller limit
     # here would reject Buildbarn responses with ResourceExhausted. A very large

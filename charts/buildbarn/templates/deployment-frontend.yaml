@@ -78,6 +78,8 @@ spec:
               value: {{ $proxy.cacheEvents.numShards | quote }}
             - name: CACHE_EVENT_SUBJECT_PREFIX
               value: {{ $proxy.cacheEvents.subjectPrefix | quote }}
+            - name: CACHE_HIT_TRACKING_MODE
+              value: {{ $proxy.cacheEvents.trackingMode | quote }}
             {{- end }}
             {{- if and (not $proxy.otel.endpoint) .Values.tracing.enabled .Values.tracing.nodeLocal.enabled }}
             - name: K8S_LOCAL_NODE_IP

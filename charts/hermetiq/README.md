@@ -1161,14 +1161,38 @@ use the grant, or disable this rule if RbeWorker discovery is not needed.
 
 ### Cache-event analytics
 
-`app.cacheEventsEnabled` sets `CACHE_EVENTS_ENABLED` on the API and defaults
-to `false`. Set it to `true` only when the Buildbarn frontend runs the Hermetiq
-grpc-cache-proxy sidecar and that sidecar publishes Action Cache hit and miss
-events to the NATS this chart uses. The sidecar's `cacheEvents.numShards` must
-equal `app.streamPartitionCount`, because events published to a shard subject
-nothing consumes are discarded. Then enable **Action Cache Hit Tracker** in the
-project's settings. Sidecar configuration lives in the Buildbarn chart
-reference.
+Cache events come from the Buildbarn chart's grpc-cache-proxy sidecar, which
+publishes Action Cache hits and misses to the NATS this chart uses. For them to
+be stored and shown:
+
+- The sidecar's `cacheEvents.numShards` must equal `app.streamPartitionCount`,
+  and its `cacheEvents.subjectPrefix` must equal `cache.subjectPrefix` in the
+  NATS stream config (`cache` in the packaged file). Events published to
+  subjects nothing consumes are discarded.
+- **Action Cache Hit Tracker** must be on in the project's settings. It decides
+  whether the project's events are stored at all. New projects start with it
+  on.
+- `app.cacheEventsEnabled: true` turns on the cache-event queries and MCP tools
+  by setting `CACHE_EVENTS_ENABLED` on the API. It defaults to `false` and does
+  not affect ingestion, which follows `cache.enabled` in the stream config
+  (`true` in the packaged file).
+
+The publisher keeps each project's Action Cache Hit Tracker setting in a
+JetStream KV bucket named `<cache.subjectPrefix>_tracking_policy`, so the
+sidecar can stop sending a disabled project's events before they reach NATS.
+The publisher creates the bucket on first start with file storage and the
+cache stream's replica count (`1` in the packaged file). To change either, add
+a `policyBucket` block to `cache` in your stream config:
+
+```json
+"cache": {
+  "policyBucket": { "storage": "file", "replicas": 3 }
+}
+```
+
+As with the streams, an existing bucket keeps its settings, and replicas above
+1 need a clustered NATS. Sidecar configuration, including per-invocation
+opt-in, lives in the Buildbarn chart reference.
 
 ### Kubernetes workload discovery
 

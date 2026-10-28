@@ -456,9 +456,10 @@ depend on cluster configuration:
   Buildbarn workers through `publisher.trustedCalCidrs`; see
   [gRPC authentication](charts/hermetiq/README.md#grpc-authentication) in the
   Hermetiq reference.
-- **Action Cache Hit Tracker** needs the grpc-cache-proxy sidecar on the
-  Buildbarn frontend and `app.cacheEventsEnabled=true` in the Hermetiq chart;
-  see the
+- **Action Cache Hit Tracker** decides whether the project's cache events are
+  recorded; turning it off stops recording within seconds. Recording needs the
+  grpc-cache-proxy sidecar on the Buildbarn frontend, and the cache views need
+  `app.cacheEventsEnabled=true` in the Hermetiq chart; see the
   [sidecar section](charts/buildbarn/README.md#hermetiq-grpc-cache-proxy-sidecar)
   of the Buildbarn reference.
 - **Store compressed invocation logs in cloud object storage** needs workload

@@ -29,6 +29,8 @@ annotations:
       description: "Strip x-forwarded-client-cert on Gateway gRPC routes, reset OAUTH2_PROXY_SKIP_AUTH_ROUTES on browser oauth2-proxy, default serviceAccount.automountServiceAccountToken to false, and honor security.pod/security.container across storage and oauth2-proxy"
     - kind: fixed
       description: "Validate frontend.readCache.blocksSizeGi against emptyDir.sizeLimit, include scheduler.jsonnet in mTLS configOverrides guard, wire jwks-sync scheduling/imagePullSecrets/deadlines, and bound /tmp emptyDir volumes"
+    - kind: added
+      description: "Add frontend.grpcCacheProxy.cacheEvents.trackingMode (on, header or off; default on) to choose which Action Cache lookups the grpc-cache-proxy sidecar captures"
 keywords:
   - buildbarn
   - remote-execution
