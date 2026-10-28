@@ -68,7 +68,8 @@ spec:
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.publisher) | nindent 6 }}
       volumes:
         - name: download-dir
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi
         - name: nats-stream-config
           configMap:
             name: {{ include "hermetiq-core.natsStreamConfigName" . }}
@@ -98,34 +99,7 @@ spec:
         {{- end }}
       containers:
         {{- if eq (include "hermetiq-core.publisherAuthProxyEnabled" .) "true" }}
-        - name: grpc-auth-proxy
-          image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.authProxy" "repository" .Values.images.authProxy.repository "tag" .Values.images.authProxy.tag "digest" .Values.images.authProxy.digest) }}
-          imagePullPolicy: {{ .Values.images.authProxy.pullPolicy }}
-          ports:
-            - containerPort: 50081
-              protocol: TCP
-          env:
-{{- with .Values.publisher.authProxy.env }}
-{{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
-{{- end }}
-            - name: DEBUG
-              value: {{ .Values.publisher.authProxy.debug | quote }}
-            - name: GRPC_PORT
-              value: "50081"
-            - name: PROXY_PORT
-              value: "50091"
-            - name: STATIC_FORWARDED_USER
-              value: {{ trim .Values.publisher.authProxy.staticForwardedUser | quote }}
-          resources:
-            {{- toYaml .Values.publisher.authProxy.resources | nindent 12 }}
-          {{- if .Values.publisher.authProxy.probes.enabled }}
-          livenessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.publisher.authProxy.probes.liveness) | nindent 12 }}
-          readinessProbe:
-            {{- include "hermetiq-core.tcpProbe" (dict "port" 50081 "settings" .Values.publisher.authProxy.probes.readiness) | nindent 12 }}
-          {{- end }}
-          securityContext:
-            {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
+        {{- include "hermetiq-core.grpcAuthProxyContainer" (dict "root" . "authProxy" .Values.publisher.authProxy "resources" .Values.publisher.authProxy.resources "roleEnv" (include "hermetiq-core.publisherAuthProxyRoleEnv" .)) | nindent 8 }}
         {{- end }}
         - name: bep-nats
           image: {{ include "hermetiq-core.image" (dict "root" . "name" "images.bepNats.pub" "repository" .Values.images.bepNats.repository "tag" .Values.images.bepNats.pubTag "digest" .Values.images.bepNats.pubDigest) }}
@@ -192,6 +166,10 @@ spec:
                   name: {{ include "hermetiq-core.redisSecretName" . }}
                   key: {{ .Values.redis.password.existingSecretKey }}
             - name: METRICS_ENABLED
+              value: "false"
+            - name: VICTORIA_LOGS_ENABLED
+              value: "false"
+            - name: COST_REPORT_TICKER_ENABLED
               value: "false"
             {{- if .Values.app.buildIdMode }}
             - name: APP_BUILD_ID_MODE

@@ -10,6 +10,8 @@ metadata:
     app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
 spec:
   replicas: {{ .Values.grafana.oauth2Proxy.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
@@ -18,16 +20,14 @@ spec:
       labels:
         {{- include "hermetiq-core.podLabels" (dict "root" . "component" "grafana-auth-proxy") | nindent 8 }}
         app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
-      {{- if .Values.dashboard.oauth2Proxy.enabled }}
       annotations:
         {{- with .Values.commonAnnotations }}
         {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
         {{- end }}
         hermetiq.com/oauth2-proxy-config-checksum: {{ include "hermetiq-core.oauth2ProxyConfigChecksum" . }}
-        {{- if not .Values.dashboard.oauth2Proxy.client.existingSecret }}
+        {{- if eq (include "hermetiq-core.oauth2ProxyInlineSecretEnabled" .) "true" }}
         hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
         {{- end }}
-      {{- end }}
     spec:
       serviceAccountName: {{ include "hermetiq-core.serviceAccountName" . }}
       {{- include "hermetiq-core.automountServiceAccountToken" .Values.grafana.oauth2Proxy | nindent 6 }}
@@ -54,6 +54,13 @@ spec:
 {{- with .Values.grafana.oauth2Proxy.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+            {{- if not (hasKey (default (dict) .Values.grafana.oauth2Proxy.env) "OAUTH2_PROXY_SKIP_AUTH_ROUTES") }}
+            # Clear the dashboard-specific skip-auth regexes inherited from
+            # oauth2-proxy-config-web-ui (such as GET=^/login$) so Grafana's
+            # native login route cannot bypass OAuth2 authentication.
+            - name: OAUTH2_PROXY_SKIP_AUTH_ROUTES
+              value: ""
+            {{- end }}
             - name: OAUTH2_PROXY_HTTP_ADDRESS
               value: "0.0.0.0:8888"
             - name: OAUTH2_PROXY_REDIRECT_URL
@@ -91,6 +98,10 @@ metadata:
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

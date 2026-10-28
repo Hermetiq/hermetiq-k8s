@@ -9,20 +9,37 @@ kind: RbeWorker
 metadata:
   name: worker-testcontainers
 spec:
-  replicas: 0
+  # Warm floor of one. Declare a scheduler queue for pool=testcontainers before
+  # lowering it to zero; see "Scale-up from zero" in the README.
+  replicas: 1
   autoscaling:
     enabled: true
-    minReplicas: 0
-    maxReplicas: 10
+    minReplicas: 1
+    maxReplicas: 6
     pollingIntervalSeconds: 30
     cooldownPeriodSeconds: 450
     fallback:
       failureThreshold: 3
-      replicas: 0
+      replicas: 1
     prometheus:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
       metricName: worker_testcontainers_active_or_queued_tasks
-      threshold: "2"
+      threshold: "2" # intentionally below concurrency
+    advanced:
+      horizontalPodAutoscalerConfig:
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: 0
+            selectPolicy: Max
+            policies:
+              - {type: Pods, value: 8, periodSeconds: 30}
+              - {type: Percent, value: 100, periodSeconds: 30}
+          scaleDown:
+            stabilizationWindowSeconds: 450
+            selectPolicy: Min
+            policies:
+              - {type: Percent, value: 50, periodSeconds: 60}
+              - {type: Pods, value: 2, periodSeconds: 60}
   config:
     generated:
       commonConfigMapName: buildbarn-worker-config
@@ -30,7 +47,7 @@ spec:
       platformProperties:
         - name: pool
           value: testcontainers
-      concurrency: 2
+      concurrency: 4
       inputDownloadConcurrency: 4
       outputUploadConcurrency: 4
       environmentVariables: {}

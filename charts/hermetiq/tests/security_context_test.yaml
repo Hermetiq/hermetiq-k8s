@@ -123,7 +123,8 @@ tests:
           path: spec.jobTemplate.spec.template.spec.volumes
           content:
             name: tmp
-            emptyDir: {}
+            emptyDir:
+              sizeLimit: 64Mi
         template: templates/cronjobs.yaml
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -135,13 +136,21 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: tmp
-            emptyDir: {}
+            emptyDir:
+              sizeLimit: 64Mi
         template: templates/job-schema-bootstrap.yaml
       - contains:
           path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts
           content:
             name: dashboard-tmp
             mountPath: /tmp
+        template: templates/deployment-dashboard.yaml
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: dashboard-tmp
+            emptyDir:
+              sizeLimit: 64Mi
         template: templates/deployment-dashboard.yaml
 
   - it: requests CPU for the API's grpc-auth-proxy sidecar
@@ -178,3 +187,70 @@ tests:
           path: spec.template.spec.securityContext.runAsNonRoot
           value: true
         template: templates/deployment-api.yaml
+
+  - it: binds the schema bootstrap Job to the chart ServiceAccount and disables token automount on non-K8s-API workloads (CIS 5.1.5 / 5.1.6)
+    release:
+      upgrade: true
+    set:
+      azureWorkloadIdentity.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: bep-nats
+        template: templates/job-schema-bootstrap.yaml
+      - equal:
+          path: spec.template.metadata.labels["azure.workload.identity/use"]
+          value: "true"
+        template: templates/job-schema-bootstrap.yaml
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/job-schema-bootstrap.yaml
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/deployment-dashboard.yaml
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/cronjobs.yaml
+
+  # The pre-install hook runs before the chart's ServiceAccount exists; naming
+  # it would leave the Job unable to create its Pod and fail the install.
+  - it: leaves the first install's bootstrap hook on the default ServiceAccount
+    template: templates/job-schema-bootstrap.yaml
+    set:
+      azureWorkloadIdentity.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.serviceAccountName
+      - notExists:
+          path: spec.template.metadata.labels["azure.workload.identity/use"]
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: binds the bootstrap hook on install when the ServiceAccount is managed outside the chart
+    template: templates/job-schema-bootstrap.yaml
+    set:
+      serviceAccount.create: false
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: bep-nats
+
+  - it: binds a non-hook bootstrap Job on install because it is created with the ServiceAccount
+    template: templates/job-schema-bootstrap.yaml
+    set:
+      bootstrap.hook.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: bep-nats

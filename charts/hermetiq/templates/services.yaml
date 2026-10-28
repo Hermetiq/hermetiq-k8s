@@ -1,3 +1,4 @@
+{{- $isContour := eq (include "hermetiq-core.routingProvider" .) "contour" -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,12 +7,14 @@ metadata:
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
-  {{- if eq (include "hermetiq-core.routingProvider" .) "contour" }}
+  {{- if or $isContour .Values.commonAnnotations }}
   annotations:
     {{- with .Values.commonAnnotations }}
     {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
     {{- end }}
+    {{- if $isContour }}
     projectcontour.io/upstream-protocol.h2c: "50091"
+    {{- end }}
   {{- end }}
 spec:
   type: ClusterIP
@@ -51,12 +54,14 @@ metadata:
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
-  {{- if eq (include "hermetiq-core.routingProvider" .) "contour" }}
+  {{- if or $isContour .Values.commonAnnotations }}
   annotations:
     {{- with .Values.commonAnnotations }}
     {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
     {{- end }}
+    {{- if $isContour }}
     projectcontour.io/upstream-protocol.h2c: "50091"
+    {{- end }}
   {{- end }}
 spec:
   type: ClusterIP
@@ -77,6 +82,10 @@ metadata:
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

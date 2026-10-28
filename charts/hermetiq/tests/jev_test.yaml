@@ -1,0 +1,205 @@
+suite: optional Jev model routing credentials
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+  - templates/assistant-policy-configmap.yaml
+  - templates/secrets.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: adds no Jev credential dependency or rollout annotation by default
+    template: templates/deployment-api.yaml
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["hermetiq.com/jev-config-checksum"]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_API_KEY")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_BASE_URL")]
+  - it: leaves Jev off when only the assistant is enabled
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: anthropic-key
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["hermetiq.com/jev-config-checksum"]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_API_KEY")]
+  - it: injects the existing Secret and endpoint into the API core only
+    set: &enabledJev
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: anthropic-key
+      assistant.jev.enabled: true
+      assistant.jev.apiKey.existingSecret: jev-key
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_API_KEY")].valueFrom.secretKeyRef
+          value: {name: jev-key, key: JEV_API_KEY}
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_BASE_URL")].value
+          value: https://api.typesafe.ai
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_API_KEY_FILE")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AICHAT_POLICY_CONFIG")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "JEV_API_KEY")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "JEV_BASE_URL")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "JEV_API_KEY")]
+        template: templates/deployment-api.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "JEV_API_KEY")]
+        template: templates/deployment-publisher.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "JEV_API_KEY")]
+        template: templates/deployment-subscribers.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "JEV_BASE_URL")]
+        template: templates/deployment-publisher.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "JEV_BASE_URL")]
+        template: templates/deployment-subscribers.yaml
+  - it: supports a custom endpoint and Secret key without copying the Secret
+    set:
+      <<: *enabledJev
+      assistant.jev.baseUrl: https://jev.internal.example.com
+      assistant.jev.apiKey.existingSecretKey: token
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_BASE_URL")].value
+          value: https://jev.internal.example.com
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_API_KEY")].valueFrom.secretKeyRef
+          value: {name: jev-key, key: token}
+        template: templates/deployment-api.yaml
+      - hasDocuments:
+          count: 1
+        template: templates/secrets.yaml
+      - equal:
+          path: metadata.name
+          value: dragonfly-auth
+        template: templates/secrets.yaml
+  - it: keeps inline assistant policy independent of Jev credentials
+    template: templates/assistant-policy-configmap.yaml
+    set:
+      <<: *enabledJev
+      assistant.policy.data:
+        enforcement: {mode: enforce, clientOverrides: reject}
+        agents:
+          rbe:
+            modelRouting:
+              mode: shadow
+              router: jev
+              timeout: 800ms
+              minConfidence: 0.5
+              fallbackTier: complex
+              tiers:
+                simple: {model: claude-haiku-4-5}
+                complex: {model: claude-opus-5, effort: high}
+    asserts:
+      - matchRegex:
+          path: data["policy.json"]
+          pattern: '"mode": "enforce"'
+      - matchRegex:
+          path: data["policy.json"]
+          pattern: '"router": "jev"'
+  - it: preserves an externally managed model routing policy
+    template: templates/deployment-api.yaml
+    set:
+      <<: *enabledJev
+      assistant.policy.existingConfigMap: routing-policy
+      assistant.policy.configMapKey: routing.json
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "assistant-policy")].configMap
+          value:
+            name: routing-policy
+            items: [{key: routing.json, path: policy.json}]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AICHAT_POLICY_CONFIG")].value
+          value: /etc/hermetiq/aichat/policy.json
+  - it: requires the assistant when Jev is enabled
+    template: templates/validate.yaml
+    set:
+      assistant.jev.enabled: true
+      assistant.jev.apiKey.existingSecret: jev-key
+    asserts:
+      - failedTemplate:
+          errorPattern: 'assistant.enabled'
+  - it: requires a nonblank existing Secret name
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      assistant.jev.apiKey.existingSecret: " "
+    asserts:
+      - failedTemplate:
+          errorPattern: 'assistant.jev.apiKey.existingSecret'
+  - it: requires a nonblank Secret key
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      assistant.jev.apiKey.existingSecretKey: " "
+    asserts:
+      - failedTemplate:
+          errorPattern: 'assistant.jev.apiKey.existingSecretKey'
+  - it: requires a nonblank endpoint
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      assistant.jev.baseUrl: " "
+    asserts:
+      - failedTemplate:
+          errorPattern: 'assistant.jev.baseUrl'
+  - it: rejects a duplicate Jev credential variable
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      api.env.JEV_API_KEY: duplicate
+    asserts:
+      - failedTemplate:
+          errorPattern: 'JEV_API_KEY'
+  - it: rejects a duplicate Jev credential file variable
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      api.env.JEV_API_KEY_FILE: /config/key
+    asserts:
+      - failedTemplate:
+          errorPattern: 'JEV_API_KEY_FILE'
+  - it: rejects a duplicate Jev endpoint variable
+    template: templates/validate.yaml
+    set:
+      <<: *enabledJev
+      api.env.JEV_BASE_URL: https://duplicate.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: 'JEV_BASE_URL'
+  - it: preserves existing custom Jev environment when chart integration is disabled
+    template: templates/deployment-api.yaml
+    set:
+      api.env.JEV_BASE_URL: https://custom.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "JEV_BASE_URL")].value
+          value: https://custom.example.com
+  # tests/rollout_checksum_test.sh checks which changes roll the API.
+  - it: stamps the Jev configuration rollout checksum
+    template: templates/deployment-api.yaml
+    set:
+      <<: *enabledJev
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["hermetiq.com/jev-config-checksum"]
+          pattern: '^[a-f0-9]{64}$'

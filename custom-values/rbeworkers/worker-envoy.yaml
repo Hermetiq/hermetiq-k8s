@@ -63,7 +63,7 @@ spec:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
       metricName: worker_envoy_active_or_queued_tasks
       threshold: "11" # matches concurrency
-      queryWindow: 1m # set to 5m for PROD / longer-lived environments
+      queryWindow: 5m
     pollingIntervalSeconds: 10
     advanced:
       horizontalPodAutoscalerConfig:
@@ -72,8 +72,8 @@ spec:
             stabilizationWindowSeconds: 0
             selectPolicy: Max
             policies:
-              - {type: Pods, value: 8, periodSeconds: 15}
-              - {type: Percent, value: 100, periodSeconds: 15}
+              - {type: Pods, value: 8, periodSeconds: 30}
+              - {type: Percent, value: 100, periodSeconds: 30}
           scaleDown:
             stabilizationWindowSeconds: 900
             selectPolicy: Min

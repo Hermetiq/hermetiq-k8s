@@ -175,3 +175,81 @@
 {{- fail (printf "api.mcpResourceUrl must be the MCP origin, e.g. https://mcp.example.com (got %q): the server derives the /mcp resource from it, so a path here produces .../mcp/mcp metadata. Leave it unset and point MCP clients and the IdP API identifier at https://<mcp host>/mcp" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{- if and .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap -}}
+{{- fail "assistant.policy.data and assistant.policy.existingConfigMap are mutually exclusive" -}}
+{{- end -}}
+{{- if and .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap -}}
+{{- fail "rbe.accessPolicy.projects and rbe.accessPolicy.existingConfigMap are mutually exclusive" -}}
+{{- end -}}
+{{- if .Values.assistant.jev.enabled -}}
+  {{- if not .Values.assistant.enabled -}}
+  {{- fail "assistant.jev.enabled requires assistant.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim (default "" .Values.assistant.jev.apiKey.existingSecret)) -}}
+  {{- fail "assistant.jev.apiKey.existingSecret is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim (default "" .Values.assistant.jev.apiKey.existingSecretKey)) -}}
+  {{- fail "assistant.jev.apiKey.existingSecretKey is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim (default "" .Values.assistant.jev.baseUrl)) -}}
+  {{- fail "assistant.jev.baseUrl is required when assistant.jev.enabled=true" -}}
+  {{- end -}}
+  {{- range $key := list "JEV_API_KEY" "JEV_API_KEY_FILE" "JEV_BASE_URL" -}}
+    {{- if hasKey $.Values.api.env $key -}}
+    {{- fail (printf "api.env must not set %s when assistant.jev.enabled=true; use assistant.jev settings" $key) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if .Values.assistant.enabled -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.apiKey.existingSecret)) -}}
+  {{- fail "assistant.anthropic.apiKey.existingSecret is required when assistant.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.apiKey.existingSecretKey)) -}}
+  {{- fail "assistant.anthropic.apiKey.existingSecretKey is required when assistant.enabled=true" -}}
+  {{- end -}}
+  {{- if not (trim (default "" .Values.assistant.anthropic.model)) -}}
+  {{- fail "assistant.anthropic.model is required when assistant.enabled=true" -}}
+  {{- end -}}
+  {{- if and (or .Values.assistant.policy.data .Values.assistant.policy.existingConfigMap) (not .Values.assistant.policy.configMapKey) -}}
+  {{- fail "assistant.policy.configMapKey is required when an assistant policy is configured" -}}
+  {{- end -}}
+  {{- range $key := list "AICHAT_DEFAULT_PROVIDER" "ANTHROPIC_BACKEND" "ANTHROPIC_DEFAULT_MODEL" "ANTHROPIC_API_KEY" "PROMPT_RUNTIME_ADDR" "AICHAT_POLICY_CONFIG" -}}
+    {{- if hasKey $.Values.api.env $key -}}
+    {{- fail (printf "api.env must not set %s when assistant.enabled=true; use assistant settings" $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- range $key := list "PROMPTRT_LISTEN" "DSPY_CACHEDIR" "BBP_LM_BACKEND" "PROMPTRT_DEFAULT_MODEL" "ANTHROPIC_API_KEY" -}}
+    {{- if hasKey $.Values.assistant.promptRuntime.env $key -}}
+    {{- fail (printf "assistant.promptRuntime.env must not set chart-managed %s" $key) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if and .Values.rbe.enabled (not (or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap)) -}}
+{{- fail "rbe.enabled=true requires explicit rbe.accessPolicy.projects or rbe.accessPolicy.existingConfigMap" -}}
+{{- end -}}
+{{- if or .Values.rbe.accessPolicy.projects .Values.rbe.accessPolicy.existingConfigMap -}}
+  {{- if not .Values.rbe.accessPolicy.configMapKey -}}
+  {{- fail "rbe.accessPolicy.configMapKey is required when an RBE access policy is configured" -}}
+  {{- end -}}
+  {{- if hasKey .Values.api.env "RBE_ACCESS_POLICY_CONFIG" -}}
+  {{- fail "api.env must not set RBE_ACCESS_POLICY_CONFIG when rbe.accessPolicy is configured" -}}
+  {{- end -}}
+{{- end -}}
+{{- if and .Values.app.costReportTickerEnabled (not (trim (default "" .Values.app.openCostUrl))) -}}
+{{- fail "app.openCostUrl is required when app.costReportTickerEnabled=true" -}}
+{{- end -}}
+
+{{- $apiFeatureSettings := dict "COST_REPORT_TICKER_ENABLED" "use app.costReportTickerEnabled" "OPEN_COST_URL" "use app.openCostUrl" "VICTORIA_LOGS_ENABLED" "use app.victoriaLogsEnabled" -}}
+{{- range $key, $setting := $apiFeatureSettings -}}
+  {{- if hasKey $.Values.api.env $key -}}
+  {{- fail (printf "api.env must not set %s; %s" $key $setting) -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $dashboardFeatureSettings := dict "REACT_APP_COST_INTEGRATION_ENABLED" "use app.costReportTickerEnabled" "REACT_APP_ENABLE_VICTORIA_LOGS" "use app.victoriaLogsEnabled" "REACT_APP_ENABLE_ASSISTANT" "use assistant.enabled" "REACT_APP_ENABLE_RBE_UI" "use rbe.enabled" "REACT_APP_ENABLE_BB_CONFIG" "this chart does not deploy BB Config Editor" -}}
+{{- range $key, $setting := $dashboardFeatureSettings -}}
+  {{- if hasKey $.Values.dashboard.env $key -}}
+  {{- fail (printf "dashboard.env must not set %s; %s" $key $setting) -}}
+  {{- end -}}
+{{- end -}}

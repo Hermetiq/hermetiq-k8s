@@ -86,3 +86,27 @@ tests:
       - equal:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "OPEN_COST_URL")].value
           value: http://opencost.opencost.svc.cluster.local:9003
+
+  # The REST API writes whole target-output archives here; exceeding the
+  # limit evicts the pod, so it is sized for artifacts and overridable.
+  - it: bounds the artifact download volume with an overridable limit
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "download-dir")].emptyDir
+          value: {sizeLimit: 10Gi}
+
+  - it: sizes the artifact download volume from api.downloadDirSizeLimit
+    set:
+      api.downloadDirSizeLimit: 40Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "download-dir")].emptyDir
+          value: {sizeLimit: 40Gi}
+
+  - it: leaves the artifact download volume unbounded when the limit is empty
+    set:
+      api.downloadDirSizeLimit: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "download-dir")].emptyDir
+          value: {}

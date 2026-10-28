@@ -1,0 +1,167 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hermetiq-core.apiName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "hermetiq-core.apiName" . }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- /* The Service's gRPC ports target grpc-auth-proxy on 50081, so the api
+         container's own 50091 is left closed. */}}
+    - ports:
+        - protocol: TCP
+          port: 50081
+        - protocol: TCP
+          port: 5150
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- /* 8008 serves both the REST API (Service port 80) and /metrics, so it
+         admits ingress callers and scrapers alike. */}}
+    - ports:
+        - protocol: TCP
+          port: 8008
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- concat . ($.Values.networkPolicy.metricsFrom | default list) | toYaml | nindent 8 }}
+      {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hermetiq-core.publisherName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "hermetiq-core.publisherName" . }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          {{- if eq (include "hermetiq-core.publisherAuthProxyEnabled" .) "true" }}
+          port: 50081
+          {{- else }}
+          port: 50091
+          {{- end }}
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    - ports:
+        - protocol: TCP
+          port: 8008
+      {{- with .Values.networkPolicy.metricsFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- if gt (int .Values.subscriber.replicas) 0 }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bep-nats-sub
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "subscriber") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app-mode: bep-nats-sub
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8008
+      {{- with .Values.networkPolicy.metricsFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hermetiq-core.dashboardName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "dashboard") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "hermetiq-core.dashboardName" . }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          {{- if .Values.dashboard.oauth2Proxy.enabled }}
+          port: 8888
+          {{- else }}
+          port: {{ int .Values.dashboard.appPort }}
+          {{- end }}
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "grafana-auth-proxy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8888
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermetiq-batch-deny-ingress
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "maintenance") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - bootstrap
+          - maintenance
+  policyTypes:
+    - Ingress
+{{- end }}

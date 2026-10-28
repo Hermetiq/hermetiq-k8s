@@ -116,7 +116,7 @@ tests:
           path: metadata.name
           value: api-cloud-grpc-health-check
 
-  - it: still renders timeouts for the gRPC routes when health checks are off
+  - it: still renders timeouts for the gRPC and HTTP routes when health checks are off
     set:
       routing.provider: gateway
       gateway.name: test-gateway
@@ -142,6 +142,28 @@ tests:
         documentSelector:
           path: metadata.name
           value: bep-cloud-grpc-health-check
+      - notExists:
+          path: spec.healthCheck
+        documentSelector:
+          path: metadata.name
+          value: api-web-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "300s"
+        documentSelector:
+          path: metadata.name
+          value: api-web-health-check
+      - notExists:
+          path: spec.healthCheck
+        documentSelector:
+          path: metadata.name
+          value: mcp-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: "300s"
+        documentSelector:
+          path: metadata.name
+          value: mcp-health-check
 
   - it: renders no BackendTrafficPolicy when both features are disabled
     set:

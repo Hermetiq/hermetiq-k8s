@@ -90,6 +90,10 @@
             "stytch"
           ],
           "description": "Identity provider for every core that serves gRPC. Required by the process at startup; \"jwks\" for on-prem."
+        },
+        "victoriaLogsEnabled": {
+          "type": "boolean",
+          "description": "Enable VictoriaLogs-backed MCP tools and dashboard RBE Kubernetes Events."
         }
       }
     },
@@ -388,6 +392,12 @@
             },
             "bbcalGrpc": {
               "$ref": "#/definitions/routeTimeout"
+            },
+            "apiWeb": {
+              "$ref": "#/definitions/routeTimeout"
+            },
+            "mcp": {
+              "$ref": "#/definitions/routeTimeout"
             }
           }
         }
@@ -592,7 +602,10 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["cluster", "namespace"]
+          "enum": [
+            "cluster",
+            "namespace"
+          ]
         },
         "rules": {
           "type": "object",
@@ -602,6 +615,9 @@
             },
             "licenseState": {
               "type": "boolean"
+            },
+            "rbeFleet": {
+              "type": "boolean"
             }
           }
         }
@@ -610,13 +626,34 @@
     "security": {
       "type": "object"
     },
-    "k8sNodeScheduling": {
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "metricsFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "scheduling": {
       "type": [
         "object",
         "null"
       ]
     },
-    "scheduling": {
+    "k8sNodeScheduling": {
       "type": [
         "object",
         "null"
@@ -631,6 +668,10 @@
         "env": {
           "type": "object",
           "description": "Additional scalar environment variables for the API core. With app.grpcAuthUserProvider=jwks and api.jwt.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here."
+        },
+        "downloadDirSizeLimit": {
+          "type": "string",
+          "description": "sizeLimit of the API's artifact-download emptyDir; empty leaves it unbounded."
         },
         "automountServiceAccountToken": {
           "type": [
@@ -843,6 +884,142 @@
         },
         "rolloutChecksum": {
           "type": "string"
+        }
+      }
+    },
+    "assistant": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "streamTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "anthropic": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "apiKey": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        },
+        "promptRuntime": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "jev": {
+          "type": "object",
+          "description": "Optional Jev credentials for model routing configured by the assistant policy.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "apiKey": {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "type": "string"
+                }
+              }
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "rbe": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "accessPolicy": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": {
+              "type": "string"
+            },
+            "configMapKey": {
+              "type": "string"
+            },
+            "rolloutChecksum": {
+              "type": "string"
+            },
+            "projects": {
+              "type": "object",
+              "propertyNames": {
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled",
+                  "minimum_role"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "minimum_role": {
+                    "type": "string",
+                    "enum": [
+                      "viewer",
+                      "builder",
+                      "admin"
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

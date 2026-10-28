@@ -22,22 +22,27 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.4"
+    apiTag: "v0.9.5"
     apiDigest: ""
-    pubTag: "v0.9.4"
+    pubTag: "v0.9.5"
     pubDigest: ""
-    subTag: "v0.9.4"
+    subTag: "v0.9.5"
     subDigest: ""
-    bootstrapTag: "v0.9.4"
+    bootstrapTag: "v0.9.5"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.4"
+    tag: "v0.9.5"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.4"
+    tag: "v0.9.5"
+    digest: ""
+    pullPolicy: IfNotPresent
+  promptRuntime:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
+    tag: "v0.9.5"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
@@ -66,8 +71,9 @@ bootstrap:
   # Additional environment variables for the schema bootstrap Job.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for the schema bootstrap Job. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for the schema bootstrap Job. Defaults to false (CIS 5.1.6: dbadmin does
+  # not talk to the Kubernetes API). Set null to inherit the ServiceAccount default.
+  automountServiceAccountToken: false
   activeDeadlineSeconds: 7200
   resources:
     requests:
@@ -128,12 +134,12 @@ app:
   # Cache Hit Tracker on. Off by default; enable it once the Buildbarn chart's
   # grpc-cache-proxy sidecar publishes cache events to this chart's NATS.
   cacheEventsEnabled: false
-  # VictoriaLogs-backed MCP tools are hidden by default for on-prem installs
-  # that do not deploy VictoriaLogs. Set true when VL is available.
+  # VictoriaLogs-backed MCP tools and dashboard RBE Kubernetes Events are
+  # hidden by default for on-prem installs. Set true when VL is available.
   victoriaLogsEnabled: false
   # OpenCost-backed cost report ticker is disabled by default for on-prem
   # installs because OpenCost is optional external infrastructure. This also
-  # controls whether the dashboard exposes cost reporting and pricing fields.
+  # controls dashboard cost reporting and RBE allocation/pricing fields.
   costReportTickerEnabled: false
   # OpenCost API base URL used when costReportTickerEnabled is true.
   openCostUrl: ""
@@ -370,8 +376,8 @@ grafana:
     # Additional environment variables for the Grafana oauth2-proxy deployment.
     env: {}
     # Set to true/false to override serviceAccount.automountServiceAccountToken
-    # for the Grafana oauth2-proxy pod. null preserves the ServiceAccount default.
-    automountServiceAccountToken: null
+    # for the Grafana oauth2-proxy pod. Defaults to false (CIS 5.1.6).
+    automountServiceAccountToken: false
     podDisruptionBudget:
       enabled: false
       maxUnavailable: 1
@@ -758,8 +764,8 @@ partitionMaintenance:
   # Additional environment variables for the partition maintenance CronJob.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for this CronJob. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for this CronJob. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -779,8 +785,8 @@ progressesPartitionMaintenance:
   # Additional environment variables for the progresses partition maintenance CronJob.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for this CronJob. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for this CronJob. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -801,8 +807,8 @@ targetTrendsRefresh:
   # Additional environment variables for target trends refresh CronJobs.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for these CronJobs. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for these CronJobs. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   startingDeadlineSeconds: 600
   activeDeadlineSeconds: 21600
   resources:
@@ -871,6 +877,9 @@ rbac:
     # grace). Write verbs are scoped to that one Secret by resourceNames;
     # create cannot be name-scoped in Kubernetes RBAC.
     licenseState: true
+    # Read-only ReplicaSets, KEDA ScaledObjects, and HPAs for RBE fleet
+    # ownership and effective scaler state. Limited to the release namespace.
+    rbeFleet: false
 
 # Applied to every pod and container the chart renders. Together they meet the
 # CIS Kubernetes Benchmark v2.0.1 and Pod Security Standards "restricted";
@@ -892,6 +901,30 @@ security:
     dropCapabilities:
       - ALL
 
+# Optional Kubernetes NetworkPolicies (CIS Kubernetes Benchmark 5.3.2).
+# Disabled by default so existing clusters without a NetworkPolicy-capable CNI
+# or with custom cross-namespace routing are unaffected on upgrade.
+# When enabled, restricts pod ingress to each component's active service ports
+# (for example, blocking direct PodIP:3000 access to web-ui when oauth2-proxy
+# fronts it on port 8888, blocking direct PodIP:50091 access to bep-nats-pub
+# when grpc-auth-proxy fronts it on port 50081, and denying all ingress to
+# batch Jobs and CronJobs).
+networkPolicy:
+  enabled: false
+  # Optional list of NetworkPolicyPeer entries allowed to reach service ports
+  # on grpc-api, bep-nats-pub, web-ui, and grafana-oauth2-proxy. Leave empty to
+  # allow ingress to those service ports from any source while still blocking
+  # unexposed container ports. Besides your Gateway or ingress controller,
+  # include the Buildbarn worker pods: they send completed-action logs to
+  # bep-nats-pub.
+  ingressFrom: []
+  # Optional list of NetworkPolicyPeer entries allowed to scrape /metrics and
+  # health endpoints on port 8008 (grpc-api, bep-nats-pub, bep-nats-sub-*).
+  # Leave empty to allow port 8008 from any in-cluster source. grpc-api also
+  # serves its REST API on 8008, so there it admits ingressFrom plus these
+  # peers, and is open to any source while ingressFrom is empty.
+  metricsFrom: []
+
 k8sNodeScheduling:
   nodeSelector:
     kubernetes.io/arch: amd64
@@ -906,6 +939,63 @@ autoscaling:
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: 80
 
+# Barn Owl uses the API's existing authentication and project authorization.
+# Opt in with an Anthropic API key stored in a customer-managed Secret.
+assistant:
+  enabled: false
+  # Must exceed the AI policy's turn.maxDuration (embedded default: 10m).
+  # Overrides only the API gRPC route while enabled. GKE applies its timeout
+  # to the shared API Service, including its REST/MCP ports.
+  streamTimeoutSeconds: 660
+  anthropic:
+    model: claude-opus-5
+    apiKey:
+      existingSecret: ""
+      existingSecretKey: ANTHROPIC_API_KEY
+  jev:
+    # Optional classifier credentials for per-agent policy modelRouting.
+    # Supplying credentials alone does not activate routing; configure it in
+    # assistant.policy.data or the selected external policy ConfigMap.
+    enabled: false
+    baseUrl: https://api.typesafe.ai
+    apiKey:
+      existingSecret: ""
+      existingSecretKey: JEV_API_KEY
+    # Change this when rotating the external Secret to restart the API pod.
+    rolloutChecksum: ""
+  policy:
+    # Optional JSON overlay over the binary's embedded AI policy, including
+    # per-agent modelRouting when JEV is configured. No cloud overlay is
+    # activated automatically.
+    data: {}
+    existingConfigMap: ""
+    configMapKey: policy.json
+    rolloutChecksum: ""
+  promptRuntime:
+    # Additional scalar environment variables. Connection, cache, provider,
+    # model, and API-key variables are managed by the chart.
+    env: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# The RBE infrastructure page and live-evidence access are independent of LLM
+# credentials. Policy entries also authorize live readers on the public MCP
+# endpoint. Keys must be project IDs, not Kubernetes namespace names.
+rbe:
+  enabled: false
+  accessPolicy:
+    # Explicit per-project access is required when the RBE page is enabled.
+    # Example: {"0": {enabled: true, minimum_role: viewer}}
+    projects: {}
+    existingConfigMap: ""
+    configMapKey: policy.json
+    rolloutChecksum: ""
+
 api:
   replicas: 4
   # Additional environment variables for the API deployment.
@@ -917,6 +1007,12 @@ api:
   # Defaults to the selected routing provider's web CORS origins, which in
   # turn default to the dashboard URL. Comma-separated Origin values.
   corsAllowedOrigins: ""
+  # sizeLimit of the emptyDir where the REST API assembles a target's output
+  # files into a .tgz before streaming it to the browser. Archives of
+  # concurrent downloads share it, and exceeding it evicts the whole API pod,
+  # so keep it above the largest expected target output. Empty leaves it
+  # unbounded (node ephemeral storage).
+  downloadDirSizeLimit: 10Gi
   # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
   nodeSelector: null
   tolerations: null
@@ -1129,8 +1225,8 @@ dashboard:
   nodeSelector: null
   tolerations: null
   # Set to true/false to override serviceAccount.automountServiceAccountToken
-  # for the dashboard pod. null preserves the ServiceAccount default.
-  automountServiceAccountToken: null
+  # for the dashboard pod. Defaults to false (CIS 5.1.6).
+  automountServiceAccountToken: false
   appPort: 3000
   # Bazel --remote_cache URL shown on the dashboard Quickstart page. Leave
   # empty to derive the normal on-prem Buildbarn frontend endpoint
