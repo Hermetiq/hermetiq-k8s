@@ -8,6 +8,8 @@ metadata:
     {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
 spec:
   replicas: {{ .Values.scheduler.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: scheduler
@@ -20,8 +22,8 @@ spec:
         instance: ubuntu22-04
         kubernetes_service: scheduler-ubuntu22-04
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "scheduler.jsonnet")) }}
     spec:

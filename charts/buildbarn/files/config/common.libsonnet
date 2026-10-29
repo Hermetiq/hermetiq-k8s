@@ -166,8 +166,8 @@ local completenessCheckedActionCache = {
         authenticationPolicy: { allow: {} },
       }],
       enablePrometheus: true,
-      enablePprof: true,
-      enableActiveSpans: true,
+      enablePprof: {{ .Values.config.diagnostics.enablePprof }},
+      enableActiveSpans: {{ .Values.config.diagnostics.enableActiveSpans }},
     },
   },
 }

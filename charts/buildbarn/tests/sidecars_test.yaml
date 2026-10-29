@@ -56,6 +56,11 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
+            name: CACHE_HIT_TRACKING_MODE
+            value: "on"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
             name: PROXY_PORT
             value: "8980"
       - contains:
@@ -147,6 +152,25 @@ tests:
           content:
             name: CACHE_EVENT_NUM_SHARDS
           any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_HIT_TRACKING_MODE
+          any: true
+
+  - it: passes the tracking mode to the sidecar
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.natsUrl: nats://n:4222
+      frontend.grpcCacheProxy.cacheEvents.subjectPrefix: p
+      frontend.grpcCacheProxy.cacheEvents.trackingMode: header
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CACHE_HIT_TRACKING_MODE
+            value: header
 
   - it: gives the sidecar gRPC health probes
     template: templates/deployment-frontend.yaml

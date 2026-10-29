@@ -8,6 +8,8 @@ metadata:
     {{- include "buildbarn.componentLabel" (dict "component" "browser") | nindent 4 }}
 spec:
   replicas: {{ .Values.browser.replicas }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: browser
@@ -18,8 +20,8 @@ spec:
         app: browser
         kubernetes_service: browser
       annotations:
-        {{- with .Values.commonAnnotations }}
-        {{- include "buildbarn.commonAnnotations" $ | nindent 8 }}
+        {{- if or .Values.commonAnnotations .Values.podAnnotations }}
+        {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "browser.jsonnet")) }}
         {{- if and .Values.browser.oauth2Proxy.enabled (not .Values.browser.oauth2Proxy.existingConfigMap) }}
@@ -53,9 +55,20 @@ spec:
               value: {{ printf "%s/oauth2/callback" (include "buildbarn.browserUrl" .) | quote }}
             - name: OAUTH2_PROXY_UPSTREAMS
               value: "http://127.0.0.1:7984"
+            {{- $hasSkipAuthRoutes := false -}}
+            {{- range .Values.browser.oauth2Proxy.env -}}
+            {{- if eq .name "OAUTH2_PROXY_SKIP_AUTH_ROUTES" -}}{{- $hasSkipAuthRoutes = true -}}{{- end -}}
+            {{- end -}}
+            {{- if not $hasSkipAuthRoutes }}
+            - name: OAUTH2_PROXY_SKIP_AUTH_ROUTES
+              value: ""
+            {{- end }}
             {{- if .Values.browser.oauth2Proxy.cookieDomains }}
             - name: OAUTH2_PROXY_COOKIE_DOMAINS
               value: {{ join "," .Values.browser.oauth2Proxy.cookieDomains | quote }}
+            {{- end }}
+            {{- with .Values.browser.oauth2Proxy.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
             - name: proxy
@@ -80,12 +93,16 @@ spec:
             failureThreshold: 3
             successThreshold: 1
           securityContext:
-            allowPrivilegeEscalation: false
+            allowPrivilegeEscalation: {{ .Values.security.container.allowPrivilegeEscalation }}
             privileged: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
+            readOnlyRootFilesystem: {{ .Values.security.container.readOnlyRootFilesystem }}
+            runAsNonRoot: {{ .Values.security.pod.runAsNonRoot }}
+            {{- if not (kindIs "invalid" .Values.security.pod.runAsUser) }}
             runAsUser: 1000
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.security.pod.runAsGroup) }}
             runAsGroup: 2000
+            {{- end }}
             capabilities:
               drop:
                 - "ALL"

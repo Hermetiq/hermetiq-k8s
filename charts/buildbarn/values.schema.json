@@ -9,10 +9,12 @@
     "commonLabels": { "type": "object" },
     "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
     "commonAnnotations": { "type": "object" },
+    "podAnnotations": { "type": "object" },
     "extraObjects": { "type": "array" },
     "standardLabels": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "configOverrides": { "type": "object" },
+    "config": { "type": "object" },
     "images": { "type": "object" },
     "secrets": { "type": "object" },
     "hosts": { "type": "object" },
@@ -97,6 +99,17 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" }
+          }
+        },
+        "grpcCacheProxy": {
+          "type": "object",
+          "properties": {
+            "cacheEvents": {
+              "type": "object",
+              "properties": {
+                "trackingMode": { "type": "string", "enum": ["on", "off", "header"] }
+              }
+            }
           }
         }
       }

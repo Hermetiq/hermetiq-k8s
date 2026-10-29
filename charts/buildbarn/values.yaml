@@ -15,6 +15,7 @@ commonLabels: {}
 # rolls workloads.
 podLabels: {}
 commonAnnotations: {}
+podAnnotations: {}
 extraObjects: []
 
 standardLabels:
@@ -23,7 +24,7 @@ standardLabels:
 serviceAccount:
   # Set to true/false to apply a pod-level ServiceAccount token mount default
   # across chart workloads. Leave null to preserve Kubernetes/default-SA behavior.
-  automountServiceAccountToken: null
+  automountServiceAccountToken: false
 
 # Per-file overrides for the jsonnet configs in charts/buildbarn/files/config/.
 # Keys MUST match a filename present in that directory; an unknown key fails
@@ -50,6 +51,12 @@ config:
   # remote asset). Large unary payloads (BatchUpdateBlobs, Tree messages) must
   # fit under this limit; streaming ByteStream traffic is unaffected.
   maximumMessageSizeBytes: 10485760 # 10 MiB
+  diagnostics:
+    # Serve /debug/pprof/* and active-span inspection on the unauthenticated
+    # :9980 diagnostics HTTP server. Set to false to expose only /metrics and
+    # /-/healthy on :9980.
+    enablePprof: true
+    enableActiveSpans: true
   actionCache:
     # Hide ActionResults whose ExecutedActionMetadata.worker_completed_timestamp
     # is older than minimumValidity (+ jitter), so every target is rebuilt
@@ -345,8 +352,7 @@ storage:
     limits:
       cpu: 500m
       memory: 128Mi
-  env:
-    BB_PPROF_ENABLED: "false"
+  env: {}
 #    GOMEMLIMIT: 15GiB
 #    GOMAXPROCS: "7"
   # Key-location-map (KLM) capacity guard.
@@ -725,13 +731,16 @@ frontend:
       # mounting enabled even when serviceAccount.automountServiceAccountToken=false.
       automountServiceAccountToken: true
       # Optional CronJob/Job guardrails. Leave null to preserve existing behavior.
-      startingDeadlineSeconds: null
+      startingDeadlineSeconds: 600
       job:
-        activeDeadlineSeconds: null
+        activeDeadlineSeconds: 300
         ttlSecondsAfterFinished: null
       initialJob:
-        activeDeadlineSeconds: null
+        activeDeadlineSeconds: 300
         ttlSecondsAfterFinished: null
+      # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
+      nodeSelector: null
+      tolerations: null
       image:
         repository: ghcr.io/buildbarn/sync-jwks-to-configmap
         tag: "20260908T142448Z-db62041"
@@ -877,13 +886,23 @@ frontend:
     # values for NATS credentials, nkeys, or TLS.
     natsUrl: ""
     cacheEvents:
-      # Subject prefix for published cache events (e.g. prod_cache). Required
-      # when natsUrl is set.
+      # Subject prefix for published cache events. Required when natsUrl is
+      # set, and MUST equal the Hermetiq chart's cache.subjectPrefix in its
+      # NATS stream config (packaged default: cache). It also names the
+      # tracking policy bucket the sidecar reads (<prefix>_tracking_policy).
       subjectPrefix: ""
       # MUST equal the bep-nats stream partition count (the hermetiq chart's
       # app.streamPartitionCount / STREAM_PARTITION_COUNT). Events published to
       # a shard nothing consumes are silently discarded.
       numShards: 1
+      # Which Action Cache lookups are captured (CACHE_HIT_TRACKING_MODE). A
+      # project's Action Cache Hit Tracker setting applies in every mode.
+      #   "on"     - every lookup
+      #   "header" - only invocations that send the opt-in header, e.g.
+      #              --remote_cache_header=x-hermetiq-track-cache-hits=1
+      #   "off"    - none
+      # Quote the value: YAML reads a bare on/off as a boolean.
+      trackingMode: "on"
     # Applied to both the sidecar's server and its upstream connection to the
     # frontend, and floored at config.maximumMessageSizeBytes: a smaller limit
     # here would reject Buildbarn responses with ResourceExhausted. A very large
@@ -1170,6 +1189,8 @@ browser:
       limits:
         cpu: 500m
         memory: 256Mi
+    # Extra environment variables appended to the oauth2-proxy container.
+    env: []
   # Extension hook: extra containers appended verbatim to the browser pod
   # (rendered through tpl). Use together with service.targetPortOverride to
   # front the browser with a custom auth/proxy sidecar the chart does not
@@ -1226,6 +1247,7 @@ remoteAsset:
   podDisruptionBudget:
     enabled: false
     maxUnavailable: 1
+  tmpDirSizeLimit: 1Gi
 
 portal:
   # bb-portal build-event dashboard. A single Deployment serves everything: the
@@ -1339,6 +1361,10 @@ portal:
   # Set nodeSelector or tolerations here to override top-level k8sNodeScheduling.
   nodeSelector: null
   tolerations: null
+  tmpDirSizeLimit: 1Gi
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
 
 keda:
   enabled: true

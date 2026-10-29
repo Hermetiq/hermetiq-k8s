@@ -80,6 +80,15 @@ affinity:
 {{- end -}}
 {{- end -}}
 
+{{- define "buildbarn.podAnnotations" -}}
+{{- with .Values.commonAnnotations }}
+{{- include "buildbarn.tplvalues.render" (dict "value" . "context" $) }}
+{{- end }}
+{{- with .Values.podAnnotations }}
+{{- include "buildbarn.tplvalues.render" (dict "value" . "context" $) }}
+{{- end }}
+{{- end -}}
+
 {{- define "buildbarn.rewriteImageRepository" -}}
 {{- $repo := .repository -}}
 {{- $registry := trimSuffix "/" (default "" .registry) -}}
@@ -176,6 +185,9 @@ OAUTH2_PROXY_BACKEND_LOGOUT_URL: {{ .Values.browser.oauth2Proxy.backendLogoutUrl
 {{- end }}
 {{- if .Values.browser.oauth2Proxy.validateUrl }}
 OAUTH2_PROXY_VALIDATE_URL: {{ .Values.browser.oauth2Proxy.validateUrl | quote }}
+{{- end }}
+{{- if .Values.browser.oauth2Proxy.whitelistDomain }}
+OAUTH2_PROXY_WHITELIST_DOMAINS: {{ .Values.browser.oauth2Proxy.whitelistDomain | quote }}
 {{- end }}
 {{- end -}}
 {{- define "buildbarn.oauth2ProxySecretName" -}}
@@ -649,15 +661,7 @@ capabilities:
     - FOWNER
     - DAC_OVERRIDE
 {{- else }}
-allowPrivilegeEscalation: false
-privileged: false
-readOnlyRootFilesystem: true
-runAsNonRoot: true
-runAsUser: 65534
-runAsGroup: 65534
-capabilities:
-  drop:
-    - ALL
+{{- include "buildbarn.containerSecurityContext" . }}
 {{- end }}
 {{- end -}}
 
@@ -710,13 +714,20 @@ capabilities:
 
 {{/* Pod securityContext for storage volumes and raw device group access. Column 0. */}}
 {{- define "buildbarn.storage.podSecurityContext" -}}
+{{- $pod := .Values.security.pod -}}
 {{- $bd := .Values.storage.persistence.blockDevice }}
 securityContext:
-  runAsNonRoot: true
-  runAsUser: 65534
-  runAsGroup: 65534
+  runAsNonRoot: {{ $pod.runAsNonRoot }}
+  {{- if not (kindIs "invalid" $pod.runAsUser) }}
+  runAsUser: {{ $pod.runAsUser }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $pod.runAsGroup) }}
+  runAsGroup: {{ $pod.runAsGroup }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $bd.fsGroup) }}
   fsGroup: {{ $bd.fsGroup }}
   fsGroupChangePolicy: OnRootMismatch
+  {{- end }}
   {{- if (include "buildbarn.storage.anyBlock" .) }}
   {{- with $bd.supplementalGroups }}
   supplementalGroups:
@@ -724,7 +735,7 @@ securityContext:
   {{- end }}
   {{- end }}
   seccompProfile:
-    type: RuntimeDefault
+    type: {{ $pod.seccompProfile.type }}
 {{- end -}}
 
 {{/* Privileged-lite init container that chowns raw device nodes (deviceAccess=chownInit). Column 0. */}}

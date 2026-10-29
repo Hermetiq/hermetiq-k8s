@@ -148,12 +148,15 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: tmp
-            emptyDir: {}
+            emptyDir:
+              sizeLimit: 1Gi
 
   - it: omits UIDs set to null so OpenShift can assign them
     set:
       security.pod.runAsUser: null
       security.pod.runAsGroup: null
+      browser.oauth2Proxy.enabled: true
+      browser.oauth2Proxy.oidcIssuerUrl: https://issuer.example.com
     asserts:
       - notExists:
           path: spec.template.spec.securityContext.runAsUser
@@ -164,6 +167,21 @@ tests:
       - notExists:
           path: spec.template.spec.containers[?(@.name == "frontend")].securityContext.runAsUser
         template: templates/deployment-frontend.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+        template: templates/statefulset-storage.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.runAsGroup
+        template: templates/statefulset-storage.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "storage")].securityContext.runAsUser
+        template: templates/statefulset-storage.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].securityContext.runAsUser
+        template: templates/deployment-browser.yaml
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].securityContext.runAsGroup
+        template: templates/deployment-browser.yaml
       - equal:
           path: spec.template.spec.securityContext.runAsNonRoot
           value: true

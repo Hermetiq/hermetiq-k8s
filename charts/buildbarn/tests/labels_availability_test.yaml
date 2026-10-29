@@ -5,6 +5,10 @@ templates:
   - templates/deployment-frontend.yaml
   - templates/statefulset-storage.yaml
   - templates/pdb.yaml
+  - templates/jwks-sync.yaml
+  - templates/deployment-browser.yaml
+  - templates/configmaps.yaml
+  - templates/gateway-routes.yaml
 tests:
   - it: gives frontend stable labels and preferred pod anti-affinity
     template: templates/deployment-frontend.yaml
@@ -141,3 +145,108 @@ tests:
     asserts:
       - notExists:
           path: spec.template.spec.affinity
+
+  - it: disables ServiceAccount token automount by default except on jwks-sync
+    set:
+      frontend.jwks.enabled: true
+      frontend.jwks.sync.enabled: true
+      frontend.jwks.sync.url: https://issuer.example.com/.well-known/jwks.json
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/deployment-frontend.yaml
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+        template: templates/statefulset-storage.yaml
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: true
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+
+  - it: renders podAnnotations on workloads and strips x-forwarded-client-cert on Gateway gRPC routes
+    set:
+      podAnnotations:
+        example.com/pod-only: "true"
+      portal.enabled: true
+      portal.podDisruptionBudget.enabled: true
+      remoteAsset.enabled: true
+      routing.provider: gateway
+      gateway.enabled: true
+      gateway.name: hermetiq-gateway
+      browser.oauth2Proxy.enabled: true
+      browser.oauth2Proxy.existingConfigMap: ""
+      browser.oauth2Proxy.oidcIssuerUrl: https://issuer.example.com
+      browser.oauth2Proxy.whitelistDomain: .example.com
+      imagePullSecrets:
+        - name: regcred
+      frontend.jwks.enabled: true
+      frontend.jwks.sync.enabled: true
+      frontend.jwks.sync.url: https://issuer.example.com/.well-known/jwks.json
+      frontend.jwks.sync.nodeSelector:
+        pool: system
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["example.com/pod-only"]
+          value: "true"
+        template: templates/deployment-frontend.yaml
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.annotations["example.com/pod-only"]
+          value: "true"
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.imagePullSecrets
+          content:
+            name: regcred
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.nodeSelector.pool
+          value: system
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - equal:
+          path: spec.startingDeadlineSeconds
+          value: 600
+        template: templates/jwks-sync.yaml
+        documentSelector:
+          path: kind
+          value: CronJob
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+        template: templates/pdb.yaml
+        documentSelector:
+          path: metadata.name
+          value: bb-portal
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env
+          content:
+            name: OAUTH2_PROXY_SKIP_AUTH_ROUTES
+            value: ""
+        template: templates/deployment-browser.yaml
+      - equal:
+          path: data.OAUTH2_PROXY_WHITELIST_DOMAINS
+          value: .example.com
+        template: templates/configmaps.yaml
+        documentSelector:
+          path: metadata.name
+          value: oauth2-proxy-config-browser
+      - contains:
+          path: spec.rules[0].filters[0].requestHeaderModifier.remove
+          content: x-forwarded-client-cert
+        template: templates/gateway-routes.yaml
+        documentSelector:
+          path: metadata.name
+          value: frontend-bb-cloud-grpc

@@ -61,6 +61,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Verification](#verification)
 - [Hermetiq grpc-cache-proxy sidecar](#hermetiq-grpc-cache-proxy-sidecar)
   - [How lookups are classified](#how-lookups-are-classified)
+  - [Which builds are captured](#which-builds-are-captured)
   - [Project attribution](#project-attribution)
   - [Hermetiq side](#hermetiq-side)
   - [Verify the sidecar](#verify-the-sidecar)
@@ -2007,8 +2008,8 @@ frontend:
     enabled: true
     natsUrl: nats://nats.nats-system.svc:4222
     cacheEvents:
-      subjectPrefix: prod_cache
-      numShards: 1
+      subjectPrefix: cache # the Hermetiq chart's cache.subjectPrefix
+      numShards: 9 # the Hermetiq chart's app.streamPartitionCount
 ```
 
 When enabled, the `frontend-grpc` Service keeps port `8980` but its
@@ -2039,6 +2040,12 @@ it; use `otel.endpoint` with a collector that does not require mTLS.
 `cacheEvents.numShards` **must** equal the bep-nats stream partition count on the
 Hermetiq side. Events published to a shard subject nothing consumes are silently
 discarded.
+
+`cacheEvents.subjectPrefix` **must** equal `cache.subjectPrefix` in the Hermetiq
+chart's NATS stream config, which is `cache` in the packaged file. A different
+prefix sends events to subjects nothing consumes. The prefix also names the
+tracking policy bucket the sidecar reads (see
+[Which builds are captured](#which-builds-are-captured)).
 
 `maxMessageSizeBytes` (default 64Mi) applies to both the sidecar's server and its
 connection to the frontend, and is floored at `config.maximumMessageSizeBytes` so
@@ -2118,6 +2125,51 @@ when you replace `frontend.jsonnet` through `configOverrides`:
 - **`actionResultExpiring` is safe.** Expired entries return `NotFound` and are
   recorded as misses, matching what Bazel sees.
 
+### Which builds are captured
+
+Two settings decide whether a lookup becomes a cache event, and both must
+allow it:
+
+- **The project's Action Cache Hit Tracker setting** in Hermetiq Project
+  Settings. When it is off, the sidecar stops publishing that project's lookups,
+  and Hermetiq discards any that were already on their way.
+- **`cacheEvents.trackingMode`**, which sets `CACHE_HIT_TRACKING_MODE`:
+
+  | Value | Captured |
+  | --- | --- |
+  | `"on"` (default) | every lookup |
+  | `"header"` | only invocations that send the opt-in header |
+  | `"off"` | none |
+
+  Quote the value. YAML reads a bare `on` or `off` as a boolean, which the chart
+  rejects.
+
+In `header` mode, opt an invocation in with Bazel's `--remote_cache_header`:
+
+```bash
+bazel build //... --remote_cache_header=x-hermetiq-track-cache-hits=1
+```
+
+To opt in every build, add it to `.bazelrc`:
+
+```text
+build --remote_cache_header=x-hermetiq-track-cache-hits=1
+```
+
+An invocation's hits and misses are always captured together or not at all. A
+sample filtered by outcome would bias every hit rate computed from it.
+
+The sidecar learns each project's setting from the JetStream KV bucket
+`<cacheEvents.subjectPrefix>_tracking_policy` (with characters a bucket name
+cannot hold replaced by `_`). The Hermetiq publisher creates the bucket,
+updates a project within seconds of a settings change, and resyncs every
+project each minute. The sidecar keeps its own copy, so a lookup never waits on
+NATS for a policy decision. It never fails closed: until it has read the bucket,
+and for any project the bucket does not list, it captures as before, and
+Hermetiq still discards events for projects with the setting off. A setting
+change reaches builds already running, so a build in progress at the time is
+captured only in part.
+
 ### Project attribution
 
 Attribution to a Hermetiq project comes from the request, not from Buildbarn.
@@ -2140,8 +2192,9 @@ reads Bazel's request metadata directly off the incoming request.
 
 Enabling the sidecar collects the events; the Hermetiq chart consumes them. Set
 `app.cacheEventsEnabled: true` there, keep the sidecar's `cacheEvents.numShards`
-equal to the Hermetiq chart's `app.streamPartitionCount`, and enable
-**Action Cache Hit Tracker** in the project's settings.
+equal to the Hermetiq chart's `app.streamPartitionCount` and its
+`cacheEvents.subjectPrefix` equal to the Hermetiq chart's `cache.subjectPrefix`,
+and enable **Action Cache Hit Tracker** in the project's settings.
 
 ### Verify the sidecar
 
@@ -2159,6 +2212,26 @@ discarded because NATS was unreachable or slow; cache traffic itself is never
 blocked by the event path, so a nonzero `dropped` costs analytics, never
 builds. Then run a build and confirm the events appear in the Hermetiq
 dashboard's cache analytics or through the Hermetiq MCP server.
+
+The summary also reports the tracking policy:
+
+- `policy` is `loaded` once the sidecar has read the policy bucket, and
+  `unavailable` before that or while the bucket does not exist.
+- `policyAge` is the time since the Hermetiq publisher last resynced the
+  bucket, normally under a minute. A growing value means the publisher has
+  stopped updating it.
+- `policySkipped` counts lookups not published because their project has
+  Action Cache Hit Tracker off. `skipped` counts lookups left out by
+  `trackingMode`.
+
+The same signals are exported as the `hermetiq_cache_policy_loaded`,
+`hermetiq_cache_policy_age_seconds`, and
+`hermetiq_cache_events_policy_skipped_total` metrics. To see the setting the
+sidecar has for one project, use the NATS CLI:
+
+```bash
+nats kv get cache_tracking_policy project.<project-id>
+```
 
 ## License
 
