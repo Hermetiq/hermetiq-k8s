@@ -45,8 +45,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.7
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.7
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.8
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.8
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -64,7 +64,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.7 \
+  --version 0.3.8 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -113,12 +113,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.7;
+file and wait for Kubernetes to establish it. This example uses release 0.3.8;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.7/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.8/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
