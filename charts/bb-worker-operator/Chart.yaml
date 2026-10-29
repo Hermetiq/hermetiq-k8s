@@ -6,27 +6,27 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.7
-appVersion: "v0.3.7"
+version: 0.3.8
+appVersion: "v0.3.9"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.7. Upgrading rolls every worker pool that uses the built-in generated config once"
+      description: "Use bb-worker-operator v0.3.9"
+    - kind: added
+      description: "RbeWorker can set the scheduler address and default/maximum execution timeouts for generated worker configs"
+    - kind: added
+      description: "RbeWorker can customize the worker Deployment (strategy, minReadySeconds, revisionHistoryLimit, progressDeadlineSeconds), container probes and lifecycle hooks, and pod DNS settings, host aliases and process namespace sharing"
+    - kind: added
+      description: "More KEDA Prometheus autoscaling options: activationThreshold, authenticationRef, useCachedMetrics and extraMetadata"
+    - kind: added
+      description: "RbeWorker gains the short name rbew and extra columns in kubectl get -o wide"
     - kind: fixed
-      description: "Report RbeWorker Ready from the Deployment's replica target, so an autoscaled pool with no available pods is no longer Ready"
-    - kind: fixed
-      description: "Reconcile an RbeWorker when its common or files ConfigMap is created or edited, so a late ConfigMap unblocks the pool and edits roll out right away"
-    - kind: fixed
-      description: "Generated KEDA queue queries watch the pool's spec.config.generated.sizeClass queue. A nonzero prometheus.sizeClass still overrides it"
-    - kind: fixed
-      description: "Sort generated platform properties by name and value, which bb_scheduler requires before it accepts a worker"
-    - kind: fixed
-      description: "Let bb_runner finish in-flight actions when a pod terminates (stopGracefully in the generated runner config). A custom worker-common.libsonnet must set it itself"
+      description: "FUSE cleanup sidecar now unmounts the build directory on its termination signal instead of preStop, so running actions keep their files while the pod shuts down"
     - kind: changed
-      description: "Document that scaling to zero (minReplicas or idleReplicas 0) needs a matching bb_scheduler predeclaredPlatformQueues entry"
+      description: "Invalid RbeWorker specs (config paths, mount paths, docker socket path, timeouts) are rejected with a clear status message instead of producing a broken pool"
     - kind: changed
-      description: "Default worker pods to a 60s termination grace period (was 30s) so in-flight actions can drain. RbeWorkers that set spec.pod.terminationGracePeriodSeconds keep their value"
+      description: "Operator logs now use production JSON format, and the leader releases its lease on shutdown for faster failover"
 keywords:
   - buildbarn
   - bazel

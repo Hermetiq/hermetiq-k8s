@@ -6,31 +6,31 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.5
+version: 0.9.6
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: removed
-      description: "Remove chart-managed workers; use RbeWorker pools"
     - kind: added
-      description: "Roll pods when managed ConfigMaps or Secrets change"
+      description: "Add frontend.grpcCacheProxy.cacheEvents.trackingMode (on, header or off; default on) to choose which Action Cache lookups the cache proxy captures. Projects with Action Cache Hit Tracker turned off are skipped"
     - kind: changed
-      description: "Set ALPN on Gateway traffic policy and allow unhealthy pod eviction"
-    - kind: changed
-      description: "namespaceOverride defaults to the Helm release namespace"
-    - kind: changed
-      description: "Meet the CIS Kubernetes Benchmark v2.0.1 securityContext set and PSS restricted on every pod: seccomp RuntimeDefault and runAsGroup everywhere, explicit privileged: false, and a full securityContext for remote-asset and jwks-sync. Configure it under security.pod and security.container"
-    - kind: added
-      description: "Add an optional scheduler NetworkPolicy (scheduler.networkPolicy) admitting only the frontend, bb-portal, workers, and listed peers on its gRPC ports"
-    - kind: changed
-      description: "Set requests and limits on every container: storage init containers use the new storage.initResources, and grpc-cache-proxy gets a CPU limit"
+      description: "Use grpc-cache-proxy v0.9.5. cacheEvents.subjectPrefix must match the Hermetiq chart's cache.subjectPrefix"
     - kind: security
-      description: "Strip x-forwarded-client-cert on Gateway gRPC routes, reset OAUTH2_PROXY_SKIP_AUTH_ROUTES on browser oauth2-proxy, default serviceAccount.automountServiceAccountToken to false, and honor security.pod/security.container across storage and oauth2-proxy"
-    - kind: fixed
-      description: "Validate frontend.readCache.blocksSizeGi against emptyDir.sizeLimit, include scheduler.jsonnet in mTLS configOverrides guard, wire jwks-sync scheduling/imagePullSecrets/deadlines, and bound /tmp emptyDir volumes"
+      description: "Strip x-forwarded-client-cert on Gateway gRPC routes, and stop the browser oauth2-proxy from skipping auth on any route by default"
+    - kind: security
+      description: "Default serviceAccount.automountServiceAccountToken to false, and apply security.pod and security.container to storage and oauth2-proxy containers"
     - kind: added
-      description: "Add frontend.grpcCacheProxy.cacheEvents.trackingMode (on, header or off; default on) to choose which Action Cache lookups the grpc-cache-proxy sidecar captures"
+      description: "Add config.diagnostics.enablePprof and enableActiveSpans to turn off the pprof and active-span debug endpoints"
+    - kind: added
+      description: "Add podAnnotations, browser.oauth2Proxy.env, nodeSelector and tolerations for the JWKS sync, and an optional bb-portal PodDisruptionBudget (portal.podDisruptionBudget)"
+    - kind: fixed
+      description: "Fail early when frontend.readCache.blocksSizeGi does not fit in the emptyDir sizeLimit, and include scheduler.jsonnet in the mTLS configOverrides check"
+    - kind: fixed
+      description: "JWKS sync now honors imagePullSecrets and scheduling settings and has job deadlines. commonAnnotations now apply to Services and ingress Certificates"
+    - kind: changed
+      description: "Bound /tmp emptyDir volumes (remoteAsset.tmpDirSizeLimit) and set progress deadlines and revision history limits on Deployments"
+    - kind: changed
+      description: "Document scale-to-zero worker pools: declare their platforms under scheduler.predeclaredPlatformQueues. Installation guide now covers choosing a StorageClass"
 keywords:
   - buildbarn
   - remote-execution
