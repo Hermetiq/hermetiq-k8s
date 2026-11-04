@@ -68,6 +68,15 @@ tests:
           path: spec.template.spec.containers[?(@.name == "prompt-runtime")].readinessProbe.exec.command
           value: [bbp, health]
       - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].startupProbe
+          value: {exec: {command: [bbp, health]}, periodSeconds: 30, timeoutSeconds: 30, failureThreshold: 20}
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].livenessProbe
+          value: {exec: {command: [bbp, health]}, periodSeconds: 60, timeoutSeconds: 30, failureThreshold: 6}
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].readinessProbe
+          value: {exec: {command: [bbp, health]}, periodSeconds: 30, timeoutSeconds: 30, failureThreshold: 3}
+      - equal:
           path: spec.template.spec.containers[?(@.name == "prompt-runtime")].resources.limits.memory
           value: 1Gi
   - it: honors registry and digest image overrides
