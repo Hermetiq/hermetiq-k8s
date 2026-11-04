@@ -1263,6 +1263,9 @@ of one CPU / `1Gi` memory. Customize them under
 under `assistant.promptRuntime.env`. The container retains the chart's security
 context and gets a writable `/tmp` for import caches. Health probes execute
 `bbp health` because a kubelet network probe cannot reach its loopback listener.
+The startup probe allows up to 10 minutes for initialization before restarting
+the sidecar; readiness and liveness start after it succeeds. Each probe allows
+30 seconds for the health command, including its Python imports.
 Keep the API pod termination grace at least 90 seconds for its shutdown drain.
 
 The embedded assistant limits, pricing, and policy defaults remain in effect.

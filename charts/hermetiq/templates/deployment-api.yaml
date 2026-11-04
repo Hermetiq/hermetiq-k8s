@@ -503,19 +503,23 @@ spec:
               mountPath: /tmp
           resources:
             {{- toYaml .Values.assistant.promptRuntime.resources | nindent 12 }}
+          startupProbe:
+            exec:
+              command: [bbp, health]
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 20
           livenessProbe:
             exec:
               command: [bbp, health]
-            initialDelaySeconds: 15
-            periodSeconds: 30
-            timeoutSeconds: 5
+            periodSeconds: 60
+            timeoutSeconds: 30
             failureThreshold: 6
           readinessProbe:
             exec:
               command: [bbp, health]
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            timeoutSeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 30
             failureThreshold: 3
           securityContext:
             {{- include "hermetiq-core.containerSecurityContext" . | nindent 12 }}
