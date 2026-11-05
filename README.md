@@ -487,7 +487,6 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
-| [`docs/buildbarn-helm-chart.md`](docs/buildbarn-helm-chart.md) | Buildbarn Helm chart install pointer (OCI + Artifact Hub) |
 
 ## Shared chart conventions
 
