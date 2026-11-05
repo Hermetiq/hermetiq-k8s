@@ -84,8 +84,6 @@ to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
 
 Hermetiq's **Buildbarn Helm chart** gives Bazel a shared remote cache and
 execution backend, with storage and worker pools sized for your workloads.
-Install with `helm upgrade --install buildbarn oci://ghcr.io/hermetiq/buildbarn --version 0.9.6`
-(see the [Buildbarn chart reference](charts/buildbarn/README.md)).
 
 - **Deploy a coordinated build backend.** One chart configures the frontend,
   scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping

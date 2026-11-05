@@ -2,21 +2,11 @@
 
 Production-ready **Buildbarn Helm chart** for Kubernetes: remote cache (CAS/AC),
 remote build execution (RBE), Buildbarn Browser, and optionally the Remote Asset
-API. This README is the detailed operator reference for chart internals.
+API. This README is the detailed operator reference for chart internals; also listed on [Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
 
-Install the published chart from OCI:
-
-```bash
-helm upgrade --install buildbarn oci://ghcr.io/hermetiq/buildbarn --version 0.9.6
-```
-
-Also listed on [Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
+Use the repository's [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the  supported full-stack deployment order and external dependencies.
 
 ![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
-
-Use the repository's
-[installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
-supported full-stack deployment order and external dependencies.
 
 For Buildbarn upstream background, see https://github.com/buildbarn.
 
