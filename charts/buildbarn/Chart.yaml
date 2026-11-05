@@ -1,6 +1,6 @@
 apiVersion: v2
 name: buildbarn
-description: Buildbarn remote cache, CAS, and RBE deployment
+description: Production-ready Buildbarn Helm chart for Kubernetes — remote cache (CAS/AC), remote build execution (RBE), and bb-browser/portal for Bazel and other REAPI clients. Maintained by Hermetiq.
 type: application
 home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
@@ -9,8 +9,11 @@ sources:
 version: 0.9.6
 appVersion: "20260908T142448Z"
 annotations:
+  artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Clarify Chart.yaml description, keywords, and Artifact Hub displayName so this package is discoverable as the Buildbarn Helm chart"
     - kind: added
       description: "Add frontend.grpcCacheProxy.cacheEvents.trackingMode (on, header or off; default on) to choose which Action Cache lookups the cache proxy captures. Projects with Action Cache Hit Tracker turned off are skipped"
     - kind: changed
@@ -33,9 +36,17 @@ annotations:
       description: "Document scale-to-zero worker pools: declare their platforms under scheduler.predeclaredPlatformQueues. Installation guide now covers choosing a StorageClass"
 keywords:
   - buildbarn
-  - remote-execution
+  - buildbarn-helm-chart
+  - helm-chart
   - bazel
-  - remote cache
+  - bazel-remote-cache
+  - remote-cache
+  - remote-execution
+  - rbe
+  - reapi
+  - cas
+  - kubernetes
+  - build-cache
 maintainers:
   - name: Hermetiq
     email: support@hermetiq.com
