@@ -27,6 +27,7 @@ keywords:
   - cas
   - kubernetes
   - build-cache
+  - chromium-siso
 maintainers:
   - name: Hermetiq
     email: support@hermetiq.com
