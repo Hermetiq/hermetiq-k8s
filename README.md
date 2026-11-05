@@ -1,6 +1,7 @@
 # Hermetiq on Kubernetes
 
-This repository is the source for Hermetiq's Kubernetes deployment artifacts:
+This repository is the source for Hermetiq's Kubernetes deployment artifacts,
+including the maintained **Buildbarn Helm chart** (`oci://ghcr.io/hermetiq/buildbarn`):
 
 - Helm charts for Hermetiq, Buildbarn, and Hermetiq's RBE worker operator
 - starter values for the charts and their external dependencies
@@ -81,8 +82,10 @@ to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
 
 ### Buildbarn chart
 
-Give Bazel a shared remote cache and execution backend, with storage and worker
-pools sized for your workloads.
+Hermetiq's **Buildbarn Helm chart** gives Bazel a shared remote cache and
+execution backend, with storage and worker pools sized for your workloads.
+Install with `helm upgrade --install buildbarn oci://ghcr.io/hermetiq/buildbarn --version 0.9.6`
+(see the [Buildbarn chart reference](charts/buildbarn/README.md)).
 
 - **Deploy a coordinated build backend.** One chart configures the frontend,
   scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping
@@ -484,6 +487,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
+| [`docs/buildbarn-helm-chart.md`](docs/buildbarn-helm-chart.md) | Buildbarn Helm chart install pointer (OCI + Artifact Hub) |
 
 ## Shared chart conventions
 
