@@ -1,14 +1,12 @@
 # Hermetiq Buildbarn Helm Chart
 
-This chart deploys the Buildbarn services used by Hermetiq for remote cache,
-remote execution, Buildbarn Browser, and optionally the Remote Asset API. It is
-the detailed reference for the chart internals.
+Production-ready **Buildbarn Helm chart** for Kubernetes: remote cache (CAS/AC),
+remote build execution (RBE), Buildbarn Browser, and optionally the Remote Asset
+API. This README is the detailed operator reference for chart internals; also listed on [Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
+
+Use the repository's [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the  supported full-stack deployment order and external dependencies.
 
 ![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
-
-Use the repository's
-[installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the
-supported full-stack deployment order and external dependencies.
 
 For Buildbarn upstream background, see https://github.com/buildbarn.
 
@@ -105,8 +103,8 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.6
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.6
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.7
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.7
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
@@ -122,7 +120,7 @@ install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.6 \
+  --version 0.9.7 \
   --values buildbarn-values.yaml
 ```
 
@@ -216,7 +214,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.6 \
+  --version 0.9.7 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -1908,7 +1906,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.6 \
+  --version 0.9.7 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```

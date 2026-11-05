@@ -1,6 +1,7 @@
 # Hermetiq on Kubernetes
 
-This repository is the source for Hermetiq's Kubernetes deployment artifacts:
+This repository is the source for Hermetiq's Kubernetes deployment artifacts,
+including the maintained **Buildbarn Helm chart** (`oci://ghcr.io/hermetiq/buildbarn`):
 
 - Helm charts for Hermetiq, Buildbarn, and Hermetiq's RBE worker operator
 - starter values for the charts and their external dependencies
@@ -81,8 +82,8 @@ to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
 
 ### Buildbarn chart
 
-Give Bazel a shared remote cache and execution backend, with storage and worker
-pools sized for your workloads.
+Hermetiq's **Buildbarn Helm chart** gives Bazel a shared remote cache and
+execution backend, with storage and worker pools sized for your workloads.
 
 - **Deploy a coordinated build backend.** One chart configures the frontend,
   scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping
@@ -201,7 +202,7 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.6` |             `0.9.5` |
-| Buildbarn |       `0.9.6` |  `20260908T142448Z` |
+| Buildbarn |       `0.9.7` |  `20260908T142448Z` |
 | BB Worker Operator |       `0.3.8` |            `v0.3.9` |
 
 The release PR updates the chart versions and README pins together. Tag the
