@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.6
+version: 0.9.7
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
@@ -14,26 +14,6 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "Clarify Chart.yaml description, keywords, and Artifact Hub displayName so this package is discoverable as the Buildbarn Helm chart"
-    - kind: added
-      description: "Add frontend.grpcCacheProxy.cacheEvents.trackingMode (on, header or off; default on) to choose which Action Cache lookups the cache proxy captures. Projects with Action Cache Hit Tracker turned off are skipped"
-    - kind: changed
-      description: "Use grpc-cache-proxy v0.9.5. cacheEvents.subjectPrefix must match the Hermetiq chart's cache.subjectPrefix"
-    - kind: security
-      description: "Strip x-forwarded-client-cert on Gateway gRPC routes, and stop the browser oauth2-proxy from skipping auth on any route by default"
-    - kind: security
-      description: "Default serviceAccount.automountServiceAccountToken to false, and apply security.pod and security.container to storage and oauth2-proxy containers"
-    - kind: added
-      description: "Add config.diagnostics.enablePprof and enableActiveSpans to turn off the pprof and active-span debug endpoints"
-    - kind: added
-      description: "Add podAnnotations, browser.oauth2Proxy.env, nodeSelector and tolerations for the JWKS sync, and an optional bb-portal PodDisruptionBudget (portal.podDisruptionBudget)"
-    - kind: fixed
-      description: "Fail early when frontend.readCache.blocksSizeGi does not fit in the emptyDir sizeLimit, and include scheduler.jsonnet in the mTLS configOverrides check"
-    - kind: fixed
-      description: "JWKS sync now honors imagePullSecrets and scheduling settings and has job deadlines. commonAnnotations now apply to Services and ingress Certificates"
-    - kind: changed
-      description: "Bound /tmp emptyDir volumes (remoteAsset.tmpDirSizeLimit) and set progress deadlines and revision history limits on Deployments"
-    - kind: changed
-      description: "Document scale-to-zero worker pools: declare their platforms under scheduler.predeclaredPlatformQueues. Installation guide now covers choosing a StorageClass"
 keywords:
   - buildbarn
   - buildbarn-helm-chart
