@@ -184,6 +184,16 @@ tests:
       - failedTemplate:
           errorMessage: storage.persistence.cas.blocksSizeGi (1000) must be smaller than storage.persistence.cas.size (1000Gi) to leave headroom for metadata
 
+  - it: rejects filesystem blocksSizeGi plus large on-disk KLM that overflows the PVC
+    set:
+      storage.persistence.mode: pvc
+      storage.persistence.cas.size: 1Ti
+      storage.persistence.cas.blocksSizeGi: 1020
+      storage.persistence.cas.keyLocationMapSizeMi: 7680
+    asserts:
+      - failedTemplate:
+          errorPattern: "storage.persistence.cas: blocksSizeGi \\(1020Gi\\) plus on-disk key-location map \\(7680Mi\\) leaves no room inside storage.persistence.cas.size \\(1Ti\\)"
+
   - it: rejects a zero actionResultExpiring jitter (bb-storage divides by it)
     set:
       config.actionCache.actionResultExpiring.enabled: true

@@ -107,19 +107,33 @@
 {{- fail (printf "storage.persistence.%s.emptyDir.sizeLimit is required when storage.persistence.mode=emptyDir — an unbounded emptyDir can fill the node and get the pod evicted" $store) -}}
 {{- end -}}
 {{- if ne $s.backend "blockDevice" -}}
-{{/* Compare blocksSizeGi against whatever actually bounds the volume: the PVC
-     request in mode=pvc, or emptyDir.sizeLimit in mode=emptyDir. In hostPath
-     mode nothing in the chart bounds it — the host device does — so `size` is
-     inert there and comparing against it would reject valid configs. */}}
+{{/* Compare blocksSizeGi (plus any on-disk key-location map) against whatever
+     actually bounds the volume: the PVC request in mode=pvc, or emptyDir.sizeLimit
+     in mode=emptyDir. In hostPath mode nothing in the chart bounds it — the host
+     device does — so `size` is inert there and comparing against it would reject
+     valid configs. */}}
+{{- $klmDiskMi := 0 -}}
+{{- if eq $store "cas" -}}
+{{- $klmDiskMi = int $s.keyLocationMapSizeMi -}}
+{{- else if eq $s.keyLocationMap.type "blockDevice" -}}
+{{- $klmDiskMi = int $s.keyLocationMap.sizeMi -}}
+{{- end -}}
+{{- $blocksMi := mul (int $s.blocksSizeGi) 1024 -}}
 {{- if eq $.Values.storage.persistence.mode "pvc" -}}
 {{- $storeSizeGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.size" $store) "value" $s.size) -}}
 {{- if ge (int $s.blocksSizeGi) (int $storeSizeGi) -}}
 {{- fail (printf "storage.persistence.%s.blocksSizeGi (%d) must be smaller than storage.persistence.%s.size (%s) to leave headroom for metadata" $store (int $s.blocksSizeGi) $store $s.size) -}}
 {{- end -}}
+{{- if ge (add $blocksMi $klmDiskMi) (mul (int $storeSizeGi) 1024) -}}
+{{- fail (printf "storage.persistence.%s: blocksSizeGi (%dGi) plus on-disk key-location map (%dMi) leaves no room inside storage.persistence.%s.size (%s) for persistent state and filesystem metadata" $store (int $s.blocksSizeGi) $klmDiskMi $store $s.size) -}}
+{{- end -}}
 {{- else if eq $.Values.storage.persistence.mode "emptyDir" -}}
 {{- $limitGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.emptyDir.sizeLimit" $store) "value" $s.emptyDir.sizeLimit) -}}
 {{- if ge (int $s.blocksSizeGi) (int $limitGi) -}}
 {{- fail (printf "storage.persistence.%s.blocksSizeGi (%d) must be smaller than storage.persistence.%s.emptyDir.sizeLimit (%s) to leave headroom for metadata" $store (int $s.blocksSizeGi) $store $s.emptyDir.sizeLimit) -}}
+{{- end -}}
+{{- if ge (add $blocksMi $klmDiskMi) (mul (int $limitGi) 1024) -}}
+{{- fail (printf "storage.persistence.%s: blocksSizeGi (%dGi) plus on-disk key-location map (%dMi) leaves no room inside storage.persistence.%s.emptyDir.sizeLimit (%s) for persistent state and filesystem metadata" $store (int $s.blocksSizeGi) $klmDiskMi $store $s.emptyDir.sizeLimit) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

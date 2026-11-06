@@ -139,7 +139,7 @@ images:
   # Released public image; no imagePullSecret is required.
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
-    tag: v0.9.5
+    tag: v0.9.6
     digest: ""
     pullPolicy: IfNotPresent
   # bb-portal build-event dashboard (portal.enabled). One image: the Go binary
@@ -820,8 +820,10 @@ frontend:
     keyLocationMapInMemoryEntries: 20971520
     # Total bytes across ALL blocks below, so block size is
     # blocksSizeGi / (old+current+new+spare). A blob larger than one block fails
-    # the build rather than just missing the cache. Must also stay below whatever
-    # bounds the volume (volume.emptyDir.sizeLimit); nothing validates that here.
+    # the build rather than just missing the cache. Must stay below whatever
+    # bounds the volume (validate.yaml checks blocksSizeGi < volume.emptyDir.sizeLimit
+    # when sizeLimit is set, but nothing validates keyLocationMapInMemoryEntries
+    # or max blob size against blocksSizeGi here).
     blocksSizeGi: 250
     oldBlocks: 8
     currentBlocks: 24

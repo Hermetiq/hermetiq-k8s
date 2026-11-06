@@ -32,7 +32,7 @@ Use the chart settings above to opt in per store. Rebuilding a store after
 restart can be intentional; changing its key-location map layout flushes it
 once before subsequent restarts preserve its contents.
 
-Persistent stores sync state at most every 5 minutes. A crash can lose the newest few minutes of writes, which show up as normal cache misses and are re-uploaded. A clean shutdown performs two full block-device syncs plus a state write. If a large network-attached disk cannot finish inside the pod grace period, shutdown falls back to the crash behavior. That is usually harmless, but raise `storage.terminationGracePeriodSeconds` if clean flushes matter for your deployment.
+Persistent stores sync state at most every 5 minutes. A crash can lose the newest few minutes of writes, which show up as normal cache misses and are re-uploaded. A clean shutdown performs two full block-device syncs plus a state write. If a large network-attached disk cannot finish inside the pod grace period (30 seconds by default), shutdown falls back to the crash behavior. That is usually harmless, but raise `storage.terminationGracePeriodSeconds` (for example to `120`–`180` seconds for 1–2 TiB volumes) if clean flushes matter for your deployment.
 
 | Configuration | Pod restart on same node | Rescheduled to another node | Backing disk/PV lost |
 |---|---|---|---|
@@ -57,7 +57,7 @@ Treat these as scheduled cache flushes:
 | `storage.replicas` increased by 1 | Roughly `1/N` of keys remap to the new shard; temporary miss-rate dip |
 | `storage.replicas` decreased by 1 | Removed shard's cache share is lost |
 | `mode` or `backend` switch | New empty volumes; old PVCs may be retained and orphaned |
-| Enabling `iscc` or `fsac` on `mode: pvc` | Adds a StatefulSet claim template; requires a StatefulSet recreate |
+| Enabling `iscc` or `fsac` on `mode: pvc` | Adds a StatefulSet claim template; requires a [StatefulSet recreate](#recreate-the-storage-statefulset) |
 
 Volatile stores do not lose anything extra from these changes because they already restart empty.
 
@@ -92,7 +92,7 @@ Any sustained nonzero rate means the map is too small or too crowded. Grow the m
 
 ### Resize a Store
 
-Plan the resize as a cache flush. Resize the key-location map in the same change, because block capacity and map capacity are coupled. For PVC-backed storage, confirm the StorageClass has `allowVolumeExpansion: true`; otherwise plan to recreate the StatefulSet and claims.
+Plan the resize as a cache flush. Resize the key-location map in the same change, because block capacity and map capacity are coupled. For PVC-backed storage, confirm the StorageClass has `allowVolumeExpansion: true` and expand each existing PVC first so its data is kept; the StatefulSet's `volumeClaimTemplates` still have to be updated to match, which needs the [Recreate the Storage StatefulSet](#recreate-the-storage-statefulset) steps. Without expansion, plan to recreate the StatefulSet and claims.
 
 After the change:
 
@@ -108,16 +108,48 @@ Change `storage.replicas` and run `helm upgrade`. The chart regenerates the rend
 
 ### Switch Storage Backend or Mode
 
-Switching from filesystem to raw block, PVC to hostPath, or one backend to another creates new empty storage. StatefulSet `volumeClaimTemplates` are effectively immutable, and old PVCs are retained by default. After the new storage pods are healthy and the cache is warming, delete the old orphaned claims deliberately so they stop billing.
+Switching from filesystem to raw block, PVC to hostPath, or one backend to another creates new empty storage. StatefulSet `volumeClaimTemplates` are immutable, so the switch needs a [StatefulSet recreate](#recreate-the-storage-statefulset), and old PVCs are retained by default. After the new storage pods are healthy and the cache is warming, delete the old orphaned claims deliberately so they stop billing.
 
 There is no built-in data migration between filesystem and raw block stores.
 
+### Recreate the Storage StatefulSet
+
+Kubernetes rejects any change to a StatefulSet's `volumeClaimTemplates`, so `helm upgrade` fails after you enable `iscc` or `fsac` on `mode: pvc`, switch a store's `backend`, or change a store's `size`. Existing PVCs are kept throughout; only the StatefulSet object is replaced.
+
+1. Run `helm upgrade` with the new values. It fails with `StatefulSet.apps "storage" is invalid: spec: Forbidden: updates to statefulset spec for fields other than ...`. Confirm that is the only error, then delete the StatefulSet while leaving its pods and PVCs running:
+
+   ```bash
+   kubectl delete statefulset storage --namespace hermetiq --cascade=orphan
+   ```
+
+2. Run the same `helm upgrade` again; it succeeds from the failed release. The recreated StatefulSet adopts the orphaned `storage-N` pods.
+
+3. Roll the pods one at a time so each is recreated against the new claim templates. Claims for newly enabled stores are provisioned as each pod restarts; existing claims are reused unchanged:
+
+   ```bash
+   kubectl rollout restart statefulset storage --namespace hermetiq
+   kubectl rollout status statefulset storage --namespace hermetiq
+   kubectl get pvc --namespace hermetiq
+   ```
+
+4. If the change created new volumes for an existing store (a `backend` or `size` change without in-place expansion), the previous claims are now orphaned. Delete them deliberately once the cache is warming so they stop billing.
+
 ### Invalidate Poisoned Action Results
 
-If you need to force rebuilds without flushing the CAS, wrap the AC in `actionResultExpiring` with a `configOverrides` jsonnet override and set `minimumTimestamp` to now. Older ActionResults are hidden at read time.
+If you need to force rebuilds without flushing the CAS, enable the chart's native `config.actionCache.actionResultExpiring` wrapper and set `minimumTimestamp` to the current UTC timestamp (a `configOverrides["common.libsonnet"]` override would also work, but it replaces the whole templated file, shard map and TLS blocks included, and the chart refuses it when `security.grpcMtls` is on):
 
-Set both `minimumValidity` and a nonzero `maximumValidityJitter`. An explicit `'0s'` jitter panics on the first AC hit, and an unset jitter fails startup.
+```yaml
+config:
+  actionCache:
+    actionResultExpiring:
+      enabled: true
+      minimumValidity: 2592000s      # 30d
+      maximumValidityJitter: 259200s # 3d — MUST be nonzero; bb-storage divides by it
+      minimumTimestamp: "2026-11-06T00:00:00Z" # hide ActionResults completed before this timestamp
+```
 
-For volatile deployments, restarting storage pods is simpler: it flushes AC and CAS together.
+Older ActionResults are hidden at read time. Set both `minimumValidity` and a nonzero `maximumValidityJitter`: an explicit `'0s'` jitter panics on the first AC hit, and an unset jitter fails startup (both are rejected by `templates/validate.yaml`).
+
+For volatile deployments, restarting storage pods is simpler: it flushes AC and CAS together. On large persistent shards, give `storage.terminationGracePeriodSeconds` enough headroom for a clean flush during rolling restarts; see [What Survives a Restart](#what-survives-a-restart).
 
 The cache is disposable by design. Every runbook above trades a temporary cold-build window for correctness. The durable part is the decision process: know whether each store is persistent, resize map and blocks together, and treat geometry changes as planned flushes.
