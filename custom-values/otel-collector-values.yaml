@@ -1,5 +1,5 @@
 # Starter overrides. Full chart defaults:
-# helm show values open-telemetry/opentelemetry-collector --version 0.153.0
+# helm show values open-telemetry/opentelemetry-collector --version 0.174.0
 fullnameOverride: otel-collector
 mode: deployment
 replicaCount: 2

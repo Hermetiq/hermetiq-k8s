@@ -53,7 +53,7 @@ local common = import 'common.libsonnet';
           spareBlocks: {{ .Values.storage.persistence.cas.spareBlocks }},
           {{- if .Values.storage.dataIntegrityValidationCache.enabled }}
           dataIntegrityValidationCache: {
-            cacheSize: {{ .Values.storage.dataIntegrityValidationCache.cacheSize }},
+            cacheSize: {{ int64 .Values.storage.dataIntegrityValidationCache.cacheSize }},
             cacheDuration: {{ .Values.storage.dataIntegrityValidationCache.cacheDuration | quote }},
             cacheReplacementPolicy: {{ .Values.storage.dataIntegrityValidationCache.cacheReplacementPolicy | quote }},
           },
@@ -130,7 +130,7 @@ local common = import 'common.libsonnet';
           spareBlocks: {{ .Values.storage.persistence.ac.spareBlocks }},
           {{- if .Values.storage.dataIntegrityValidationCache.enabled }}
           dataIntegrityValidationCache: {
-            cacheSize: {{ .Values.storage.dataIntegrityValidationCache.cacheSize }},
+            cacheSize: {{ int64 .Values.storage.dataIntegrityValidationCache.cacheSize }},
             cacheDuration: {{ .Values.storage.dataIntegrityValidationCache.cacheDuration | quote }},
             cacheReplacementPolicy: {{ .Values.storage.dataIntegrityValidationCache.cacheReplacementPolicy | quote }},
           },
@@ -211,7 +211,7 @@ local common = import 'common.libsonnet';
           spareBlocks: {{ .Values.storage.persistence.iscc.spareBlocks }},
           {{- if .Values.storage.dataIntegrityValidationCache.enabled }}
           dataIntegrityValidationCache: {
-            cacheSize: {{ .Values.storage.dataIntegrityValidationCache.cacheSize }},
+            cacheSize: {{ int64 .Values.storage.dataIntegrityValidationCache.cacheSize }},
             cacheDuration: {{ .Values.storage.dataIntegrityValidationCache.cacheDuration | quote }},
             cacheReplacementPolicy: {{ .Values.storage.dataIntegrityValidationCache.cacheReplacementPolicy | quote }},
           },
@@ -289,7 +289,7 @@ local common = import 'common.libsonnet';
           spareBlocks: {{ .Values.storage.persistence.fsac.spareBlocks }},
           {{- if .Values.storage.dataIntegrityValidationCache.enabled }}
           dataIntegrityValidationCache: {
-            cacheSize: {{ .Values.storage.dataIntegrityValidationCache.cacheSize }},
+            cacheSize: {{ int64 .Values.storage.dataIntegrityValidationCache.cacheSize }},
             cacheDuration: {{ .Values.storage.dataIntegrityValidationCache.cacheDuration | quote }},
             cacheReplacementPolicy: {{ .Values.storage.dataIntegrityValidationCache.cacheReplacementPolicy | quote }},
           },

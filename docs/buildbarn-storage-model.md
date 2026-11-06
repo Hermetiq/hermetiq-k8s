@@ -193,7 +193,7 @@ frontend:
       ephemeral-storage: 40Gi   # what sizeLimit allows, not what blocksSizeGi uses
 ```
 
-Two things follow from setting it. The scheduler stops co-locating replicas that cannot both fit, which is the spreading `preferred` anti-affinity does not guarantee. And node-level ephemeral-storage eviction ranks pods by usage relative to their request, so a pod with no request ranks worst — the read cache is the last pod you want evicted under disk pressure. Note also that nothing validates `blocksSizeGi` against the bounding volume here the way `storage.persistence` is checked, so keeping `blocksSizeGi` below `sizeLimit` is on you.
+Two things follow from setting it. The scheduler stops co-locating replicas that cannot both fit, which is the spreading `preferred` anti-affinity does not guarantee. And node-level ephemeral-storage eviction ranks pods by usage relative to their request, so a pod with no request ranks worst — the read cache is the last pod you want evicted under disk pressure. Note also that while `validate.yaml` checks `blocksSizeGi < volume.emptyDir.sizeLimit` when `sizeLimit` is set, nothing validates `keyLocationMapInMemoryEntries` or max blob size against `blocksSizeGi` on the frontend read cache, so sizing both is on you.
 
 Two more settings that are easy to copy wrongly from the storage tier:
 
@@ -210,36 +210,53 @@ Two more settings that are easy to copy wrongly from the storage tier:
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 
-## Worked Example: One Local-NVMe Shard
+## Worked Example 1: One Local-NVMe Shard (680 GiB)
 
-Suppose one cache-only shard has raw block devices and in-memory maps.
+Suppose one cache-only shard uses raw block devices carved by `partition_ephemeral_disks` and in-memory maps, as configured in `custom-values/buildbarn-values-local-ssd-block.yaml`.
 
 **1. Block geometry.** A 680 GiB CAS device with `3 + 8 + 30 + 3 = 44` total blocks gives a block size of about 15.5 GiB. That is also the largest storable blob. Usable capacity is `41/44`, or about 634 GiB.
 
-**2. Expected objects.** At a 35 KB average blob size, 634 GiB is roughly 19 million live CAS objects.
+**2. Expected objects.** At the chart's measured `17,408`-byte (`17.4 KiB`) average CAS blob size (`storage.keyLocationMapSizing.averageObjectSizeBytes.cas`), 634 GiB holds roughly **39.1 million** live CAS objects. Estimating with a larger average blob (say 35 KB) would halve that count and lead to a map at barely `1x`, which saturates as the disk fills and surfaces as `Lost inputs no longer available remotely` (Bazel exit 39).
 
-**3. Map entries.** The 2x floor gives:
+**3. Map entries.** Enforcing the `2x` floor (`storage.keyLocationMapSizing.validate: true`) gives `80,000,000` entries (`2.04x` ratio):
 
 ```yaml
 storage:
+  keyLocationMapSizing:
+    validate: true
   persistence:
     cas:
       backend: blockDevice
       blockDevice:
-        keyLocationMapInMemoryEntries: 40000000
+        size: 680Gi
+        keyLocationMap: inMemory
+        keyLocationMapInMemoryEntries: 80000000
 ```
 
-Use a higher multiplier if your measured average object size is smaller, if the workload has many tiny generated files, or if you see KLM saturation metrics after a few days.
-
-**4. Memory.** In-memory maps are eager heap:
+**4. Memory.** In-memory maps are reserved at startup and faulted into RSS as slots are touched:
 
 ```text
-CAS 40M entries * 64 B ~= 2.4 GiB
-AC  10M entries * 64 B ~= 0.6 GiB
-ISCC + FSAC 1M each    ~= 0.1 GiB
+CAS  80M entries * 64 B ~= 4.8 GiB
+AC   16M entries * 64 B ~= 1.0 GiB  (for an 8 GiB LV, 2.34x ratio)
+ISCC  8M entries * 64 B ~= 0.5 GiB  (for a 2 GiB LV)
+FSAC  8M entries * 64 B ~= 0.5 GiB  (for a 6 GiB LV)
 ```
 
-That is about 3.1 GiB before Go garbage collector headroom, gRPC buffers, and the rest of the process. A `storage.resources.requests.memory` of at least 6 GiB is a safer starting point for this example.
+That is about 6.7 GiB before Go garbage collector headroom, gRPC buffers, and in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and `limits.memory: 24Gi`.
+
+## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
+
+Suppose you are sizing a **10 TiB persistent CAS** across either **`10 shards × 1 TiB`** or **`5 shards × 2 TiB`**.
+
+**1. Usable capacity and object count per shard.**
+- **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~21.6 GiB`. At `17,408` B/blob, each shard holds **~54.6 million** CAS objects.
+- **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~43.2 GiB`. At `17,408` B/blob, each shard holds **~109.2 million** CAS objects.
+
+**2. Map entries.** At a `2.3x` ratio, a 1 TiB shard needs **~125.8M entries (`7,680 MiB` = `7.5 GiB`)** and a 2 TiB shard needs **~251.6M entries (`15,360 MiB` = `15 GiB`)**. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cas-keys.db` and checkpoints `persistent_state` every 300s, so the index survives restarts.
+
+**3. Memory.** Each lookup makes up to 16 random 64-byte probes into the mmap'd map, so it must stay resident in the page cache. Budget the total KLM size across all four stores plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards.
+
+**4. The other stores.** Scale AC to `20Gi–32Gi` per shard (`keyLocationMap` `sizeMi: 2688–4096`), ISCC to `1Gi–2Gi` blocks (`sizeMi: 256–512`), and FSAC to `8Gi–12Gi` (`sizeMi: 1024–1536`), all with persistent KLMs. Complete values for both shard layouts, plus frontend, scheduler, and gateway settings, are in the chart README's [Large-scale deployments](../charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards) section; shutdown and grace-period behaviour is covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md#what-survives-a-restart).
 
 **5. Verify with production traffic.** After a few days, check that blobs are not discarded before they are reused (for example, cache misses or `NOT_FOUND` errors for recently uploaded outputs, and AC hits failing completeness checks) and that the KLM dropped-put alert stays quiet. The eviction-age gauge (insertion age of the last removed block) is useful context, but it resets on restart and on its own proves neither that eviction happened nor that the cache is big enough. If either signal is wrong, resize the blocks and the map together.
 

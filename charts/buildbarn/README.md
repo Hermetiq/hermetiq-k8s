@@ -2,9 +2,17 @@
 
 Production-ready **Buildbarn Helm chart** for Kubernetes: remote cache (CAS/AC),
 remote build execution (RBE), Buildbarn Browser, and optionally the Remote Asset
-API. This README is the detailed operator reference for chart internals; also listed on [Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
+API. This README is the detailed operator reference for chart internals; the
+chart is also listed on
+[Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
 
-Use the repository's [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) for the  supported full-stack deployment order and external dependencies.
+Install the [Hermetiq](../hermetiq/README.md) and
+[bb-worker-operator](../bb-worker-operator/README.md) charts before this one.
+The starter values point Buildbarn Browser at the `oauth2-proxy-config-web-ui`
+ConfigMap and `oauth2-proxy-client` Secret that the Hermetiq install provides,
+and `RbeWorker` pools need the operator's CRD. The repository's
+[installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) gives the
+supported full-stack deployment order and external dependencies.
 
 ![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
 
@@ -14,6 +22,10 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 
 - [What The Chart Deploys](#what-the-chart-deploys)
 - [Install](#install)
+  - [Prerequisites checklist](#prerequisites-checklist)
+  - [Pre-install storage and scale decisions](#pre-install-storage-and-scale-decisions)
+  - [Co-installing with the Hermetiq chart](#co-installing-with-the-hermetiq-chart)
+  - [Deploying the chart](#deploying-the-chart)
 - [Service Topology](#service-topology)
 - [Jsonnet Config Model](#jsonnet-config-model)
 - [Per-File Jsonnet Overrides](#per-file-jsonnet-overrides)
@@ -29,6 +41,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Storage](#storage)
   - [Raw block-device storage](#raw-block-device-storage)
   - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
+  - [Large-scale deployments (10 TiB cache / 5–10 shards)](#large-scale-deployments-10-tib-cache--510-shards)
   - [DIY mirrored storage (advanced)](#diy-mirrored-storage-advanced)
 - [Browser SSO](#browser-sso)
   - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
@@ -93,6 +106,154 @@ render worker Deployments or worker KEDA `ScaledObject` resources.
 
 ## Install
 
+### Prerequisites checklist
+
+Confirm the following before running `helm upgrade --install`:
+
+- [ ] **Kubernetes cluster and node pools**
+  - Kubernetes `1.32+` with enough CPU, memory, and disk quota in the target
+    namespace.
+  - Dedicated **non-spot** nodes for `storage` pods. The default
+    `storage.podAntiAffinity.enabled: true` already requires one shard per
+    node, so a 5–10 shard deployment needs at least that many eligible nodes.
+  - Elastic Linux `amd64` worker node pool(s) sized for your
+    [`RbeWorker`](../../custom-values/rbeworkers/README.md) pods, with NVMe
+    scratch disk if workers use local CAS caches.
+- [ ] **Required cluster controllers and operators**
+  - **Routing controller** matching `routing.provider`: Envoy Gateway or
+    another GRPCRoute-capable Gateway API controller (`gateway`), GKE Gateway
+    (`gateway-httproute-only`), Contour (`contour`), or an Ingress controller
+    (`ingress`). Use `none` to bring your own routing.
+  - **cert-manager** (or pre-created TLS certificate Secrets) for terminating
+    TLS on `bb.<domainBase>` and `browser.<domainBase>`, plus
+    `rbe-web.<domainBase>` and `asset.<domainBase>` if you expose the scheduler
+    web UI or the Remote Asset API.
+  - **KEDA 2.x** if using `RbeWorker` autoscaling (including scale-from-zero)
+    or `keda.frontend` autoscaling.
+  - **Metrics backend** reachable at `keda.prometheusServerAddress`. The chart
+    renders `VMPodScrape` and `VMRule` resources by default
+    (`vmPodScrapes.enabled`, `vmRules.enabled`), so either install the
+    VictoriaMetrics Operator CRDs or set both to `false` and scrape with your
+    own Prometheus configuration. Add Kubernetes `metrics-server` if you enable
+    frontend CPU/memory KEDA triggers.
+  - **[`bb-worker-operator`](../bb-worker-operator/README.md)** and its
+    `RbeWorker` CRD, installed in the release namespace (`hermetiq` in this
+    guide) with the default `rbac.mode=cluster` or with `rbac.mode=namespace`
+    (see its [RBAC scope](../bb-worker-operator/README.md#rbac-scope)), so
+    `RbeWorker` resources reconcile after the chart installs.
+- [ ] **Target namespace and Pod Security Admission (PSA)**
+  - Create the target namespace (for example, `hermetiq`).
+  - Label it `pod-security.kubernetes.io/enforce=privileged` if you will run
+    FUSE-based `RbeWorker` pools (every starter worker in
+    `custom-values/rbeworkers/` uses a FUSE `virtualBuildDirectory`) or
+    `hostPath` raw-block storage (`mode: hostPath` with `backend: blockDevice`).
+    Raw-block PVCs with `blockDevice.deviceAccess: chownInit` need at least the
+    `baseline` level.
+    ```bash
+    kubectl create namespace hermetiq --dry-run=client -o yaml | kubectl apply -f -
+    kubectl label namespace hermetiq pod-security.kubernetes.io/enforce=privileged --overwrite
+    ```
+- [ ] **Storage provisioning and immutable PVC decisions (before first install)**
+  - **PVC storage (`mode: pvc`)**: run `kubectl get storageclass` and pick a
+    fast SSD StorageClass (for example `premium-rwo` or `hyperdisk-balanced` on
+    GKE, `gp3` on EKS). Decide on `storage.persistence.iscc.enabled` and
+    `storage.persistence.fsac.enabled` **before** the initial install (see
+    [Pre-install storage and scale decisions](#pre-install-storage-and-scale-decisions)).
+  - **Local NVMe raw block storage (`mode: hostPath`, `backend: blockDevice`)**:
+    provision the node pool with raw unformatted NVMe SSDs
+    (`--local-nvme-ssd-block` on GKE), deploy
+    [`custom-values/partition-ephemeral-disks-daemonset.yaml`](../../custom-values/partition-ephemeral-disks-daemonset.yaml),
+    and verify nodes carry the readiness label `hermetiq/ephemeral-lvm=ready`
+    before installing Buildbarn.
+  - **Key-location map (KLM) validation**: set
+    `storage.keyLocationMapSizing.validate: true` so Helm verifies at render
+    time that every store's KLM can index at least `2x` the objects its block
+    capacity can hold.
+- [ ] **DNS, TLS, OIDC, and registry Secrets**
+  - DNS records for `bb.<domainBase>` and `browser.<domainBase>` (plus
+    `rbe-web.` and `asset.` if enabled) pointing at your Gateway or Ingress
+    external IP.
+  - An image pull Secret (`imagePullSecrets` or `global.imagePullSecrets`)
+    only if you mirror the chart's images into a private registry. The default
+    images, including the Hermetiq `grpc-cache-proxy` sidecar, are public.
+  - The `oauth2-proxy-client` OIDC Secret (the same one the Hermetiq chart's
+    prerequisites create) and your IdP's JWKS URL if enabling
+    `browser.oauth2Proxy` and `frontend.jwks`.
+
+### Pre-install storage and scale decisions
+
+> [!IMPORTANT]
+> **Decide on `iscc`, `fsac`, backend type, and shard sizing before your first
+> `helm install` when using `mode: pvc`.**
+>
+> Kubernetes rejects changes to an existing StatefulSet's
+> `volumeClaimTemplates`. Enabling `storage.persistence.iscc.enabled: true` or
+> `storage.persistence.fsac.enabled: true`, switching between
+> `backend: filesystem` and `backend: blockDevice`, or changing a store's
+> `size` after the initial install makes `helm upgrade` fail until the
+> `storage` StatefulSet is recreated. Follow
+> [Recreate the Storage StatefulSet](../../docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset);
+> to grow an existing volume in place first, see
+> [Resize a Store](../../docs/buildbarn-storage-operations.md#resize-a-store).
+>
+> Every starter worker in
+> [`custom-values/rbeworkers/`](../../custom-values/rbeworkers/README.md)
+> enables `spec.config.generated.prefetching`, which requires
+> `storage.persistence.fsac.enabled: true` so `common.libsonnet` exports
+> `fileSystemAccessCache`. Keep `iscc.enabled: true` and `fsac.enabled: true`
+> (as in
+> [`custom-values/buildbarn-values.yaml`](../../custom-values/buildbarn-values.yaml))
+> unless you remove `prefetching` and size-class routing from your workers.
+
+Choose the starting configuration that matches your cluster and target scale:
+
+| Deployment profile | Recommended storage mode | Starter values / reference |
+|---|---|---|
+| **Standard durable PVC** (dev, staging, or moderate production) | `mode: pvc`, `backend: filesystem` (`premium-rwo`, `hyperdisk-balanced`, or `gp3`) | [`custom-values/buildbarn-values.yaml`](../../custom-values/buildbarn-values.yaml) |
+| **High-IOPS ephemeral Local NVMe** (1 to 10 shards on local NVMe LVs) | `mode: hostPath`, `backend: blockDevice` (`partition-ephemeral-disks` DaemonSet) | [`custom-values/buildbarn-values-local-ssd-block.yaml`](../../custom-values/buildbarn-values-local-ssd-block.yaml) |
+| **Large-scale 10 TiB cache** (5 × 2 TiB or 10 × 1 TiB shards) | `mode: pvc` (`backend: blockDevice` with `keyLocationMap: file`, or `backend: filesystem`) or multi-NVMe `hostPath` | See [Large-scale deployments (10 TiB cache / 5–10 shards)](#large-scale-deployments-10-tib-cache--510-shards) |
+
+### Co-installing with the Hermetiq chart
+
+When deploying Buildbarn in the same namespace and behind the same Gateway as
+the [`hermetiq`](../hermetiq/README.md) chart, check these cross-chart settings
+in `buildbarn-values.yaml` and `hermetiq-values.yaml`:
+
+1. **Browser sign-in reuses Hermetiq's oauth2-proxy resources.** The starter
+   values keep `browser.oauth2Proxy.existingConfigMap` at
+   `oauth2-proxy-config-web-ui` and `client.existingSecret` at
+   `oauth2-proxy-client`, both provided through the Hermetiq install, which is
+   why Hermetiq installs first. Set `existingConfigMap: ""` and
+   `oidcIssuerUrl` to render a Buildbarn-specific ConfigMap instead (see
+   [Browser SSO](#browser-sso)).
+2. **One `ClientTrafficPolicy` per Gateway listener.** Neither starter enables
+   `gateway.clientTrafficPolicy`. If you turn it on and both charts attach to
+   the shared `hermetiq-gateway`, enable it in one chart only: Envoy Gateway
+   accepts a single policy per listener and marks a second one
+   `Overridden=True`.
+3. **Predeclared platform queues for workers that idle to zero.** Starter
+   pools `worker-ubuntu22-04` and `worker-codex` start at `replicas: 0` with
+   `minReplicas: 0`; `worker-envoy` keeps `minReplicas: 4` but `idleReplicas: 0`
+   and also scales to zero. Every such platform must appear under
+   `scheduler.predeclaredPlatformQueues` in `buildbarn-values.yaml`, matching
+   the pool's `spec.config.generated.platformProperties` exactly (see
+   [Scheduler](#scheduler)); otherwise actions for that pool fail with
+   `No workers exist` instead of queueing and triggering KEDA.
+4. **`grpc-cache-proxy` NATS shard count.** When enabling
+   `frontend.grpcCacheProxy.enabled: true`, set
+   `frontend.grpcCacheProxy.cacheEvents.numShards` equal to
+   `app.streamPartitionCount` in `hermetiq-values.yaml` (the starter uses `4`),
+   and keep `cacheEvents.subjectPrefix` equal to `cache.subjectPrefix` in the
+   Hermetiq chart's packaged NATS stream config (`cache` by default).
+5. **Completed Action Logs (CAL) CIDR allowlist.** The starter `RbeWorker`
+   manifests stream Completed Action Logs to `bep-nats-pub:50091`
+   (`completedActionLoggerAddress`). The Hermetiq chart ships
+   `publisher.trustedCalCidrs` empty, which rejects every CAL stream, so set it
+   in `hermetiq-values.yaml` to your cluster's Pod CIDR (and Node CIDR if any
+   workers use `hostNetwork`).
+
+### Deploying the chart
+
 Start with the
 [Buildbarn starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/buildbarn-values.yaml),
 copied as described in the
@@ -103,8 +264,8 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.7
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.7
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.8
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.8
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
@@ -120,13 +281,13 @@ install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.7 \
+  --version 0.9.8 \
   --values buildbarn-values.yaml
 ```
 
 Check the [Buildbarn services](#verification), then follow the
 [RBE worker pool instructions](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
-to apply the worker manifests. Return to [Verification](#verification) to
+to apply the worker manifests using a Kustomize overlay (`kubectl apply --namespace hermetiq --kustomize rbeworkers`). Return to [Verification](#verification) to
 check those pools.
 
 Namespaced resources render into the release namespace (`--namespace`):
@@ -214,7 +375,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.7 \
+  --version 0.9.8 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -539,10 +700,10 @@ A `configOverrides` entry is spliced in verbatim with no templating, so a
 forked file carries none of the blocks above. Overriding one end of a hop while
 the other end starts demanding a client certificate is how a cluster stops
 talking to itself on upgrade, so the chart refuses the combination for
-`common.libsonnet`, `storage.jsonnet`, `frontend.jsonnet`, and `portal.jsonnet`
-rather than letting it fail at runtime. Add the `tls` blocks to your override,
-or leave `security.grpcMtls` off. Worker-specific Jsonnet is configured on the
-`RbeWorker` resource.
+`common.libsonnet`, `storage.jsonnet`, `frontend.jsonnet`, `scheduler.jsonnet`,
+and `portal.jsonnet` rather than letting it fail at runtime. Add the `tls`
+blocks to your override, or leave `security.grpcMtls` off. Worker-specific
+Jsonnet is configured on the `RbeWorker` resource.
 
 ## Storage
 
@@ -562,21 +723,32 @@ default:
 ```yaml
 storage:
   replicas: 5
+  keyLocationMapSizing:
+    validate: true
   persistence:
     mode: pvc
     cas:
       storageClassName: premium-rwo
       size: 1Ti
       blocksSizeGi: 900
+      keyLocationMapSizeMi: 7680
     ac:
       storageClassName: premium-rwo
       size: 20Gi
       blocksSizeGi: 10
+      keyLocationMap:
+        type: blockDevice
+        sizeMi: 2048
 ```
 
-`blocksSizeGi` must leave headroom for metadata, persistent state, and database
-files. Changing shard count or storage layout after builds have run can invalidate
-or strand cache data, so size these values carefully before production use.
+`blocksSizeGi` plus the on-disk key-location map (`keyLocationMapSizeMi` for
+the CAS, `keyLocationMap.sizeMi` for the other stores) must leave headroom
+inside `size` for `persistent_state` and filesystem metadata; the chart refuses
+to render when it does not. Enable `storage.keyLocationMapSizing.validate: true`
+so Helm also verifies that every store's key-location map can index at least
+`2x` the objects its block capacity can hold. Changing shard count or storage
+layout after builds have run can invalidate or strand cache data, so size these
+values carefully before production use.
 
 For maximum local I/O, you can opt into ephemeral NVMe-backed storage without
 PVCs. This is cache storage: Pod recreation, node drain, node repair, node loss,
@@ -719,10 +891,17 @@ full-zone loss. Use a regional disk for cross-zone HA.
 
 #### GKE example B — Local NVMe SSD via `partition_ephemeral_disks` (fastest, ephemeral)
 
-Buildbarn's `partition_ephemeral_disks` tool (a DaemonSet) stripes a node's local NVMe
-SSDs into an LVM2 volume group `ephemeral` and carves logical volumes, so pods can
-consume raw block devices with fine-grained sizes. Suggested split: CAS 97%, AC 1%,
-ISCC 1%, FSAC 1%. The storage pods then consume the LVs via `hostPath` block devices:
+Buildbarn's `partition_ephemeral_disks` tool, packaged here as the
+[`custom-values/partition-ephemeral-disks-daemonset.yaml`](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
+DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named
+`ephemeral` and carves logical volumes, so pods can consume raw block devices
+with fine-grained sizes. The DaemonSet uses **fixed sizes** for the
+metadata-heavy stores (`8G` AC, `2G` ISCC, `6G` FSAC) and gives the remaining
+space (`100%FREE`) to CAS. Avoid percentage splits such as `1%VG`: on multi-SSD
+nodes they over-allocate AC/ISCC/FSAC, and an in-memory key-location map sized
+for the small store then covers only a fraction of the device, so the map
+saturates long before the blocks fill. The storage pods consume the LVs via
+`hostPath` block devices:
 
 ```yaml
 storage:
@@ -786,6 +965,8 @@ PVC request, i.e. the LV size TopoLVM carves per replica):
 
 ```yaml
 storage:
+  keyLocationMapSizing:
+    validate: true
   nodeSelector:
     node-type: ssd-block               # your raw-block Local SSD pool
   persistence:
@@ -794,11 +975,12 @@ storage:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
-        size: 700Gi
+        size: 680Gi
         keyLocationMap: inMemory
-    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi } }
-    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi } }
-    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi } }
+        keyLocationMapInMemoryEntries: 80000000
+    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi, keyLocationMapInMemoryEntries: 16000000 } }
+    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 2Gi, keyLocationMapInMemoryEntries: 8000000 } }
+    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 6Gi, keyLocationMapInMemoryEntries: 8000000 } }
 ```
 
 Device-node *file* ownership is still handled by `deviceAccess` exactly as in Example A —
@@ -825,6 +1007,226 @@ sizes). Both are disabled by default.
 The chart validates these dependencies (e.g. `sizeClassAnalysis` requires
 `iscc.enabled`; a worker's `prefetching` requires `fsac.enabled` and its
 `virtualBuildDirectory`).
+
+### Large-scale deployments (10 TiB cache / 5–10 shards)
+
+When scaling `bb-storage` to a **10 TiB CAS** across **5 to 10 shards**
+(`5 × 2 TiB` or `10 × 1 TiB`), storage, memory, and ingress settings must scale
+together so the key-location map (KLM) does not saturate, lookups do not thrash
+the OS page cache, and rolling restarts keep the last few minutes of writes.
+
+Two profiles are shown below. **Option A** (raw-block PVC with a companion
+`-meta` PVC) fits when the StorageClass provisions `volumeMode: Block` volumes
+with high IOPS (Hyperdisk, io2, multi-NVMe) and you want the device sized
+exactly; it also keeps the KLM file on a separate, cheaper disk. **Option B**
+(filesystem PVC) works with any `ReadWriteOnce` StorageClass and is what the
+starter values use; the chart's headroom guard (`blocksSizeGi` plus the on-disk
+KLM must fit inside `size`) applies only to this profile. Both survive restarts
+because their KLMs live on disk.
+
+#### 1. Choosing `10 shards × 1 TiB` vs `5 shards × 2 TiB`
+
+| Dimension | `10 shards × 1 TiB` (~8.85 TiB usable CAS) | `5 shards × 2 TiB` (~8.85 TiB usable CAS) |
+|---|---|---|
+| **Per-shard disk & network I/O** | Spread across 10 pods/volumes; lower per-pod CPU and network bandwidth ceiling | Higher per-pod I/O; provision high-IOPS disks (e.g. Hyperdisk Balanced or multi-NVMe RAID-0) |
+| **Max storable single blob** (`usable / 41` data blocks) | ~21.6 GiB (with default `8+30+3+3 = 44` blocks) | ~43.2 GiB (with default `44` blocks) |
+| **Single-shard loss impact** | Losing 1 shard evicts **10%** of cached blobs | Losing 1 shard evicts **20%** of cached blobs |
+| **Nodes whose loss stalls uploads** (see note below) | Any 1 of 10 | Any 1 of 5 |
+| **Per-shard CAS KLM size** (at 17.4 KiB avg blob, `2.3x` ratio) | ~54.6M objects/shard -> **`7680 MiB` (`7.5 GiB`, ~125.8M entries)** | ~109.2M objects/shard -> **`15360 MiB` (`15 GiB`, ~251.6M entries)** |
+| **Recommended pod memory (`requests` / `limits`)** | `16Gi` / `24Gi` per storage pod | `28Gi` / `40Gi` per storage pod |
+
+> [!IMPORTANT]
+> **Dedicated non-spot node pool.** Without
+> [DIY mirroring](#diy-mirrored-storage-advanced) the sharded CAS is not
+> replicated, and `FindMissingBlobs` fans out to every shard and fails the whole
+> RPC if any one shard is unreachable, so a single unavailable shard stalls
+> uploads cluster-wide. Run `storage` pods on a dedicated non-spot node pool and
+> keep the default `storage.podAntiAffinity.enabled: true` (one shard per
+> node). The storage PodDisruptionBudget decides how node drains interact with
+> this; see
+> [Security And Availability Hardening](#security-and-availability-hardening).
+
+#### 2. Key-location map (KLM) strategy & RAM sizing at 1–2 TiB per shard
+
+At the measured `17,408`-byte average CAS blob size
+(`storage.keyLocationMapSizing.averageObjectSizeBytes.cas`), a `1 TiB` shard
+holds ~54.6M objects and a `2 TiB` shard holds ~109.2M objects. With
+`minimumRatio: 2` (and `2.2x–2.5x` recommended as hash-table displacement
+headroom), each shard's CAS KLM needs **`7.5 GiB` (1 TiB shard)** to
+**`15 GiB` (2 TiB shard)** of 64-byte slot records:
+
+- **Prefer a disk-backed KLM (`keyLocationMap: file` or `backend: filesystem`)
+  for 1–2 TiB persistent shards.** A `15 GiB` KLM in `inMemory` mode sits on
+  the Go heap, needs 32–48 GiB container limits, and **loses the whole shard
+  index on every pod restart**. With a file-backed KLM (`backend: blockDevice`
+  plus `blockDevice.keyLocationMap: file` on a companion `<store>-meta` PVC, or
+  `backend: filesystem`), `bb-storage` `mmap`s `cas-keys.db` and writes epoch
+  state to `persistent_state` every 300s, so cached blobs survive pod restarts
+  and upgrades.
+- **Size pod RAM so the mmap'd KLM stays resident in the page cache.** Every
+  `Get` and `FindMissingBlobs` lookup probes up to 16 random 64-byte slots in
+  the file. If the node cannot keep `cas-keys.db` in page cache, each lookup
+  becomes a random disk read. Rule of thumb: set
+  `storage.resources.requests.memory` to at least **the total KLM size across
+  CAS, AC, ISCC, and FSAC plus 6 GiB** (`16Gi` for `1 TiB` shards;
+  `28Gi–32Gi` for `2 TiB` shards).
+
+#### 3. Proportionate AC, ISCC, and FSAC sizing for a 10 TiB CAS
+
+A 10 TiB CAS retains build outputs across many repositories and branches for
+weeks. If the Action Cache stays at its ~10 GiB default (`ac.blocksSizeGi: 10`),
+`ActionResult` entries are evicted long before the CAS blobs they reference,
+turning warm CAS data into cache misses. Scale `ac`, `iscc`, and `fsac`
+alongside `cas`, and give all four stores a persistent KLM
+(`keyLocationMap.type: blockDevice` or `blockDevice.keyLocationMap: file`) so
+Action Cache hits also survive restarts. The ratios in the comments below are
+what `storage.keyLocationMapSizing.validate: true` computes for each store.
+
+**Option A: durable raw-block PVCs (`5 shards × 2 TiB`, `backend: blockDevice`,
+`keyLocationMap: file`)**
+
+```yaml
+storage:
+  replicas: 5
+  # A clean shutdown syncs the blocks device twice and writes persistent
+  # state; on a 2 TiB network volume that can exceed the 30s default.
+  terminationGracePeriodSeconds: 180
+  resources:
+    requests:
+      cpu: "4"
+      memory: 28Gi
+    limits:
+      cpu: "8"
+      memory: 40Gi
+  keyLocationMapSizing:
+    validate: true
+  persistence:
+    mode: pvc
+    blockDevice:
+      deviceAccess: chownInit
+    cas:
+      backend: blockDevice
+      blockDevice:
+        storageClassName: bb-block-hyperdisk
+        size: 2Ti
+        keyLocationMap: file
+        metadata:
+          storageClassName: premium-rwo
+          size: 20Gi
+          keyLocationMapSizeMi: 15360 # 15 GiB (~251.6M entries, 2.14x for 2 TiB)
+    ac:
+      backend: blockDevice
+      blockDevice:
+        storageClassName: bb-block-hyperdisk
+        size: 32Gi
+        keyLocationMap: file
+        metadata:
+          storageClassName: premium-rwo
+          size: 6Gi
+          keyLocationMapSizeMi: 4096  # 4 GiB (~67.1M entries, 2.45x for 32 GiB)
+    iscc:
+      enabled: true
+      backend: blockDevice
+      blockDevice:
+        storageClassName: bb-block-hyperdisk
+        size: 2Gi
+        keyLocationMap: file
+        metadata:
+          storageClassName: premium-rwo
+          size: 1Gi
+          keyLocationMapSizeMi: 512   # 512 MiB (~8.39M entries, 2.18x for 2 GiB)
+    fsac:
+      enabled: true
+      backend: blockDevice
+      blockDevice:
+        storageClassName: bb-block-hyperdisk
+        size: 12Gi
+        keyLocationMap: file
+        metadata:
+          storageClassName: premium-rwo
+          size: 2Gi
+          keyLocationMapSizeMi: 1536  # 1.5 GiB (~25.2M entries, 4.4x for 12 GiB)
+```
+
+For `10 shards × 1 TiB`, set `storage.replicas: 10`, `cas.blockDevice.size: 1Ti`,
+`cas.blockDevice.metadata.size: 12Gi`,
+`cas.blockDevice.metadata.keyLocationMapSizeMi: 7680` (2.14x), and
+`storage.resources.requests.memory: 16Gi` / `limits.memory: 24Gi`.
+
+**Option B: durable filesystem PVCs (`10 shards × 1 TiB`, `backend: filesystem`)**
+
+```yaml
+storage:
+  replicas: 10
+  terminationGracePeriodSeconds: 120
+  resources:
+    requests:
+      cpu: "4"
+      memory: 16Gi
+    limits:
+      cpu: "8"
+      memory: 24Gi
+  keyLocationMapSizing:
+    validate: true
+  persistence:
+    mode: pvc
+    cas:
+      storageClassName: premium-rwo
+      size: 1Ti
+      blocksSizeGi: 950          # leaves ~66.5 GiB for 7.5 GiB KLM + persistent_state + fs overhead
+      keyLocationMapSizeMi: 7680 # 7.5 GiB (~125.8M entries, 2.30x for 950 GiB blocks)
+    ac:
+      storageClassName: premium-rwo
+      size: 25Gi
+      blocksSizeGi: 20
+      keyLocationMap:
+        type: blockDevice
+        sizeMi: 2688             # 2.625 GiB (~44M entries, 2.57x for 20 GiB blocks)
+    iscc:
+      enabled: true
+      storageClassName: premium-rwo
+      size: 2Gi
+      blocksSizeGi: 1
+      keyLocationMap:
+        type: blockDevice
+        sizeMi: 256              # 256 MiB (~4.19M entries, 2.18x for 1 GiB blocks)
+    fsac:
+      enabled: true
+      storageClassName: premium-rwo
+      size: 10Gi
+      blocksSizeGi: 8
+      keyLocationMap:
+        type: blockDevice
+        sizeMi: 1024             # 1 GiB (~16.8M entries, 4.4x for 8 GiB blocks)
+```
+
+For `5 shards × 2 TiB` on `backend: filesystem`, set `storage.replicas: 5`,
+`cas.size: 2Ti`, `cas.blocksSizeGi: 1900`, `cas.keyLocationMapSizeMi: 15360`,
+and `storage.resources.requests.memory: 28Gi` / `limits.memory: 40Gi`.
+
+#### 4. Scaling Frontend, Scheduler, and Gateway alongside a 10 TiB cache
+
+- **Graceful storage shutdown (`storage.terminationGracePeriodSeconds: 120`–`180`)**:
+  a clean `bb-storage` shutdown syncs the blocks device twice and writes
+  `persistent_state`. On a 1–2 TiB network volume under load that can exceed
+  the 30s Kubernetes default, in which case the shard falls back to crash
+  recovery and loses up to the last 300s of writes as ordinary cache misses.
+  See [What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart).
+- **Frontend memory & read cache**: when `config.maximumMessageSizeBytes` is
+  raised (for example to `838860800` / 800 MiB), size
+  `frontend.resources.requests.memory: 6Gi` (`limits.memory: 12Gi`) across
+  `4+` replicas (`keda.frontend.minReplicaCount: 4`, `maxReplicaCount: 20`) so
+  concurrent large blobs and the `frontend.readCache` (`30Gi–64Gi` on local SSD
+  `emptyDir`) never OOMKill the frontend.
+- **Scheduler resources**: the chart default (`200m` CPU / `512Mi` memory) is
+  sized for small clusters. For large worker fleets and size-class analysis,
+  raise `scheduler.resources` to `requests: {cpu: 1000m, memory: 2Gi}` and
+  `limits: {cpu: 4000m, memory: 4Gi}`.
+- **Envoy Gateway circuit breakers**: Envoy Gateway's default circuit-breaker
+  budgets (`1024`) apply **per cluster**, not per frontend pod. Keep
+  `gateway.grpcRoutes.frontend.backendTrafficPolicy.circuitBreaker` enabled
+  (`maxConnections: 2048`, `maxPendingRequests: 8192`,
+  `maxParallelRequests: 8192`) and run 2+ Envoy Gateway proxy replicas.
 
 ### DIY mirrored storage (advanced)
 
@@ -952,7 +1354,7 @@ Buildbarn-specific oauth2-proxy ConfigMap. In that mode,
 `browser.oauth2Proxy.oidcIssuerUrl` is required.
 
 For production installs that render the Buildbarn-specific ConfigMap, review
-the insecure provider and TLS flags before exposing Browser:
+the insecure provider, header exposure, and TLS flags before exposing Browser:
 
 ```yaml
 browser:
@@ -962,6 +1364,12 @@ browser:
     insecureOidcSkipIssuerVerification: false
     sslInsecureSkipVerify: false
     showDebugOnError: false
+    # Keep false: with PASS_ACCESS_TOKEN=true, setXAuthRequest=true copies the
+    # OAuth access token into X-Auth-Request-Access-Token response headers.
+    setXAuthRequest: false
+    # Keep false: bb-browser routes do not filter by HTTP verb, so skipping
+    # auth on OPTIONS requests lets unauthenticated preflight requests through.
+    skipAuthPreflight: false
 ```
 
 If `browser.oauth2Proxy.client.existingSecret` is empty, the chart renders an
@@ -1157,9 +1565,12 @@ frontend:
     node-type: ssd16
 ```
 
-Nothing validates `blocksSizeGi` against the bounding volume for the read cache the
-way `storage.persistence` sizes are checked, so keep `blocksSizeGi` below
-`sizeLimit` yourself.
+When `frontend.readCache.volume.emptyDir.sizeLimit` is set, `validate.yaml`
+enforces `blocksSizeGi < sizeLimit`. However, `emptyDir.sizeLimit` is empty by
+default, and nothing in `validate.yaml` checks the read cache's
+`keyLocationMapInMemoryEntries` or max blob size against `blocksSizeGi`, so
+always set `emptyDir.sizeLimit`, match `resources.requests.ephemeral-storage`,
+and size `keyLocationMapInMemoryEntries` yourself.
 
 ### Sizing the key-location map
 
@@ -1624,8 +2035,9 @@ platform properties, such as `container-image` or `pool`.
 Configure worker autoscaling under `spec.autoscaling` on each `RbeWorker`. The
 operator creates and maintains the worker Deployment and KEDA `ScaledObject`.
 The Buildbarn chart's `keda.frontend` values control only frontend autoscaling.
-For pools with `minReplicas: 0`, configure the matching [scheduler queues](#scheduler)
-before relying on scale-up from zero.
+For pools that can scale to zero (`minReplicas: 0`, or `idleReplicas: 0`),
+configure the matching [scheduler queues](#scheduler) before relying on
+scale-up from zero.
 
 The chart still renders `worker-vmpodscrape` when `vmPodScrapes.enabled=true`.
 Keep the `app=worker` label on operator-managed pods, or update your own scrape
@@ -1768,11 +2180,21 @@ Workloads can override the global setting with their own
 `automountServiceAccountToken` value: `storage`, `frontend`, `scheduler`,
 `browser`, and `remoteAsset`.
 
-PodDisruptionBudgets are disabled by default so single-replica installs and
-node drains keep existing behavior. Enable them after replica counts are high
-enough for the selected availability policy.
+PodDisruptionBudgets are **enabled by default** (`maxUnavailable: 1`) for
+`storage` and `frontend`, and **disabled by default** (`enabled: false`) for
+`scheduler`, `browser`, `remoteAsset`, and `portal`.
 Every enabled PDB sets `unhealthyPodEvictionPolicy: AlwaysAllow`, allowing
 node drains to evict unready Pods while retaining the budget for healthy Pods.
+
+> [!NOTE]
+> **`storage.podDisruptionBudget` and write availability**: one unreachable
+> shard stalls uploads cluster-wide (see
+> [Large-scale deployments](#large-scale-deployments-10-tib-cache--510-shards)).
+> The default `maxUnavailable: 1` lets unattended node upgrades and drains
+> proceed at the cost of a brief upload interruption while the drained shard
+> restarts. To block voluntary drains during build hours, set
+> `storage.podDisruptionBudget.maxUnavailable: 0` and drain storage nodes in
+> maintenance windows.
 
 For example:
 
@@ -1780,7 +2202,7 @@ For example:
 storage:
   podDisruptionBudget:
     enabled: true
-    maxUnavailable: 1
+    maxUnavailable: 1 # or 0 to block voluntary node drains during build hours
 
 frontend:
   replicas: 2
@@ -1906,7 +2328,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.7 \
+  --version 0.9.8 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```

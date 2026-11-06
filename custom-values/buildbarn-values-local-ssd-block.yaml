@@ -19,14 +19,23 @@ storage:
     requests:
       cpu: 500m
       # In-memory key-location maps are RESERVED at startup and become resident
-      # as slots are touched. CAS 80M + AC 12M + ISCC 8M + FSAC 8M = 108M entries
-      # x 64 B = ~6.9 GiB fully populated; 12Gi covers that plus Go GC headroom
+      # as slots are touched. CAS 80M + AC 16M + ISCC 8M + FSAC 8M = 112M entries
+      # x 64 B = ~6.7 GiB fully populated; 12Gi covers that plus Go GC headroom
       # and large gRPC message buffers.
       #
-      # A 680Gi CAS is the point where `keyLocationMap: file` (the chart default
-      # for blockDevice) becomes the better trade: it moves this 5.1 GiB to disk
-      # AND makes the store survive restarts. It needs a metadata volume, which
-      # this LVM layout does not carve, so this overlay stays in-memory.
+      # A 680Gi CAS is the point where `keyLocationMap: file` (while `inMemory`
+      # is the chart default for blockDevice) becomes the better trade for larger
+      # shards: it moves the multi-GiB KLM to disk AND makes the store survive
+      # restarts. It needs a metadata volume, which this LVM layout does not
+      # carve, so this single-680Gi-shard overlay stays in-memory.
+      #
+      # Multi-NVMe / 10 TiB scale note: partition-ephemeral-disks-daemonset.yaml
+      # carves fixed 8G/2G/6G LVs for AC/ISCC/FSAC and gives 100%FREE to CAS. On
+      # nodes with 4x375 GB NVMe (~1350Gi CAS LV across 8 shards = ~10.5 TiB) or
+      # 8x375 GB NVMe (~2750Gi CAS LV across 4 shards = ~10.7 TiB), update
+      # cas.blockDevice.size below to match the real LV size and scale
+      # keyLocationMapInMemoryEntries (e.g. 160000000 for 1350Gi with 24Gi RAM
+      # request) or switch cas.blockDevice.keyLocationMap to `file`.
       memory: 12Gi
       # CAS/AC/ISCC/FSAC live on raw block devices; this only covers scratch.
       ephemeral-storage: 2Gi
@@ -66,9 +75,10 @@ storage:
       backend: blockDevice
       blockDevice:
         keyLocationMap: inMemory
-        # ~6.4 GiB usable / 1152 B per ActionResult = ~6M -> 2.0x.
-        keyLocationMapInMemoryEntries: 12000000
-        size: 7Gi
+        # Matches the 8G LV carved by partition-ephemeral-disks-daemonset.yaml.
+        # ~7.3 GiB usable / 1152 B per ActionResult = ~6.8M -> 2.34x at 16M.
+        keyLocationMapInMemoryEntries: 16000000
+        size: 8Gi
         hostPath:
           devicePath: /dev/ephemeral/ac
     # ISCC/FSAC devices are deliberately SMALL: they hold one tiny object per
@@ -148,8 +158,33 @@ scheduler:
   # writes to the ISCC store.
   sizeClassAnalysis:
     enabled: true
-  # Must match the worker-sizeclass-small/large RbeWorker manifests.
+  # Must match every RbeWorker pool that can scale to zero (minReplicas: 0 or
+  # idleReplicas: 0), including the starter pools in custom-values/rbeworkers/
+  # and optional size-class pools. Each platform must equal the pool's
+  # spec.config.generated.platformProperties exactly.
   predeclaredPlatformQueues:
+    - platform:
+        - name: container-image
+          value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+      sizeClasses: [0]
+    - platform:
+        - name: Arch
+          value: amd64
+        - name: OSFamily
+          value: Linux
+        - name: container-image
+          value: docker://docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70
+      sizeClasses: [0]
+    - platform:
+        - name: container-image
+          value: docker://gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43
+        - name: dockerAddCapabilities
+          value: SYS_PTRACE,NET_RAW,NET_ADMIN
+        - name: dockerNetwork
+          value: standard
+        - name: dockerPrivileged
+          value: "True"
+      sizeClasses: [0]
     - platform:
         - name: pool
           value: sizeclass

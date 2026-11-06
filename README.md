@@ -1,7 +1,6 @@
 # Hermetiq on Kubernetes
 
-This repository is the source for Hermetiq's Kubernetes deployment artifacts,
-including the maintained **Buildbarn Helm chart** (`oci://ghcr.io/hermetiq/buildbarn`):
+This repository is the source for Hermetiq's Kubernetes deployment artifacts:
 
 - Helm charts for Hermetiq, Buildbarn, and Hermetiq's RBE worker operator
 - starter values for the charts and their external dependencies
@@ -11,8 +10,7 @@ including the maintained **Buildbarn Helm chart** (`oci://ghcr.io/hermetiq/build
 The Helm charts, starter values, examples, and operational runbooks in this
 repository are licensed under Apache-2.0. The Hermetiq application container
 images deployed by the charts are commercial software distributed under the
-[Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md);
-see [License](#license).
+[Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md); see [License](#license).
 
 Customer installations should use the versioned OCI charts published at
 `oci://ghcr.io/hermetiq/`. The chart sources under [`charts/`](charts/) are for
@@ -202,7 +200,7 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.7` |             `0.9.6` |
-| Buildbarn |       `0.9.7` |  `20260908T142448Z` |
+| Buildbarn |       `0.9.8` |  `20260908T142448Z` |
 | BB Worker Operator |       `0.3.9` |           `v0.3.10` |
 
 The release PR updates the chart versions and README pins together. Tag the
@@ -398,8 +396,10 @@ steps.
 
 ### Install Buildbarn and worker pools
 
-Follow the [Buildbarn chart install instructions](charts/buildbarn/README.md#install),
-then the [RBE worker pool instructions](custom-values/rbeworkers/README.md)
+Follow the [Buildbarn chart prerequisites checklist and install instructions](charts/buildbarn/README.md#install)
+(including [large-scale 10 TiB / 5–10 shard sizing](charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards)
+and deciding on `iscc`/`fsac` before your first PVC-backed install), then follow
+the [RBE worker pool instructions](custom-values/rbeworkers/README.md)
 to apply and tailor the worker manifests.
 
 ## Verify the stack
@@ -517,21 +517,19 @@ When a new chart version is released:
 1. Read the `Chart.yaml` release metadata and GitHub release notes.
 2. Compare the new defaults with the version currently deployed.
 3. Back up PostgreSQL and assess whether Buildbarn storage changes imply a cold
-   cache.
+   cache. Enabling a new PVC-backed store (`iscc`, `fsac`) or changing a
+   store's `size` or `backend` also requires recreating the storage
+   StatefulSet; see the
+   [storage operations runbook](docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
-   After upgrading to operator 0.3.4, remove
-   `spec.autoscaling.prometheus.projectID` from every existing `RbeWorker`.
-   Buildbarn 0.9.4 no longer labels its metrics with `hermetiq_project_id`, so
-   drop `project.id` from Buildbarn values and leave the Hermetiq chart's
-   `victoriaMetrics.projectLabel` at `namespace`.
 5. Reuse the same custom values files and verify every rollout before continuing.
 
 Example defaults comparison:
 
 ```bash
 helm show values oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.2 > /tmp/hermetiq-old-values.yaml
+  --version 0.9.7 > /tmp/hermetiq-old-values.yaml
 helm show values oci://ghcr.io/hermetiq/hermetiq \
   --version '<new-version>' > /tmp/hermetiq-new-values.yaml
 diff -u /tmp/hermetiq-old-values.yaml /tmp/hermetiq-new-values.yaml

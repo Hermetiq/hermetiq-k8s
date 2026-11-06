@@ -21,10 +21,44 @@ routing:
 
 storage:
   # Per storage shard; tune these requests for your shard count and cache load.
+  # For 10 TiB deployments (e.g. 10 x 1 TiB or 5 x 2 TiB shards), also set
+  # terminationGracePeriodSeconds: 120 (or 180) and scale memory so the mmap'd
+  # key-location map stays resident in the OS page cache (16Gi for 1 TiB shards,
+  # 28Gi-32Gi for 2 TiB shards). See charts/buildbarn/README.md for 10 TiB profiles.
   resources:
     requests:
       cpu: 7100m
       memory: 16Gi
+  # Fail helm render if any store's key-location map cannot index at least 2x
+  # the objects its blocks volume can hold.
+  keyLocationMapSizing:
+    validate: true
+  persistence:
+    # Enable ISCC and FSAC before first install when using mode=pvc: StatefulSet
+    # volumeClaimTemplates are immutable after creation, and the starter
+    # RbeWorker manifests in custom-values/rbeworkers/ require FSAC for
+    # FUSE input prefetching. If you first installed with an older copy of this
+    # file that left them disabled, `helm upgrade` is rejected until you follow
+    # "Recreate the Storage StatefulSet" in docs/buildbarn-storage-operations.md
+    # (or keep both disabled).
+    iscc:
+      enabled: true
+    fsac:
+      enabled: true
+    # Example: scale to a 10 TiB persistent cache across 10 x 1 TiB shards
+    # (also set storage.replicas: 10 and storage.terminationGracePeriodSeconds: 120):
+    # cas:
+    #   storageClassName: premium-rwo
+    #   size: 1Ti
+    #   blocksSizeGi: 950
+    #   keyLocationMapSizeMi: 7680
+    # ac:
+    #   storageClassName: premium-rwo
+    #   size: 25Gi
+    #   blocksSizeGi: 20
+    #   keyLocationMap:
+    #     type: blockDevice
+    #     sizeMi: 2688
 
 images:
   # Hermetiq grpc-cache-proxy sidecar, used when frontend.grpcCacheProxy.enabled
@@ -37,6 +71,13 @@ images:
     pullPolicy: IfNotPresent
 
 frontend:
+  # Optional Hermetiq grpc-cache-proxy sidecar for Action Cache Hit Tracker:
+  # grpcCacheProxy:
+  #   enabled: true
+  #   natsUrl: nats://nats.hermetiq.svc:4222
+  #   cacheEvents:
+  #     subjectPrefix: cache
+  #     numShards: 4 # Must equal app.streamPartitionCount in hermetiq-values.yaml
   jwks:
     # Validate Bazel JWTs against your IdP. These must match the token's exact
     # issuer and audience; use the publisher audience if both share a token.
@@ -76,8 +117,60 @@ frontend:
 browser:
   oauth2Proxy:
     # Reuse the dashboard's OAuth2 ConfigMap and Secret from the Hermetiq chart
-    # to require sign-in before showing Buildbarn Browser.
+    # to require sign-in before showing Buildbarn Browser. The flags below only
+    # take effect when existingConfigMap is "" (chart-rendered ConfigMap); with
+    # the Hermetiq ConfigMap in use, harden that chart's oauth2-proxy values.
     enabled: true
+    # existingConfigMap: ""
+    # oidcIssuerUrl: https://<tenant>.auth0.com/
+    # insecureOidcAllowUnverifiedEmail: false
+    # insecureOidcSkipIssuerVerification: false
+    # sslInsecureSkipVerify: false
+    # showDebugOnError: false
+    # setXAuthRequest: false
+    # skipAuthPreflight: false
+
+scheduler:
+  # Requires storage.persistence.iscc.enabled=true above.
+  sizeClassAnalysis:
+    enabled: true
+  # Declare every platform queue whose RbeWorker pool can scale to zero
+  # (minReplicas: 0, or idleReplicas: 0), so builds queue and trigger KEDA
+  # instead of failing with "No workers exist". Each platform must equal the
+  # pool's spec.config.generated.platformProperties exactly; these mirror the
+  # starter manifests in custom-values/rbeworkers/, so re-check them after
+  # editing a worker's platformProperties.
+  predeclaredPlatformQueues:
+    # worker-ubuntu22-04.yaml (replicas: 0, minReplicas: 0)
+    - platform:
+        - name: container-image
+          value: docker://ghcr.io/catthehacker/ubuntu:act-22.04
+      sizeClasses: [0]
+    # worker-codex.yaml (replicas: 0, minReplicas: 0)
+    - platform:
+        - name: Arch
+          value: amd64
+        - name: OSFamily
+          value: Linux
+        - name: container-image
+          value: docker://docker.io/mbolin491/codex-bazel@sha256:0a8e56bfaa3b2e5279db0d3bb2d62b44ba5e5d63a37d97eb8790f49da570af70
+      sizeClasses: [0]
+    # worker-envoy.yaml (minReplicas: 4, idleReplicas: 0)
+    - platform:
+        - name: container-image
+          value: docker://gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43
+        - name: dockerAddCapabilities
+          value: SYS_PTRACE,NET_RAW,NET_ADMIN
+        - name: dockerNetwork
+          value: standard
+        - name: dockerPrivileged
+          value: "True"
+      sizeClasses: [0]
+    # Uncomment if applying custom-values/rbeworkers/optional/sizeclass:
+    # - platform:
+    #     - name: pool
+    #       value: sizeclass
+    #   sizeClasses: [1, 2]
 
 keda:
   frontend:
