@@ -301,13 +301,13 @@ namespace and should not be duplicated without explicit namespace scoping.
 
 #### Identity provider
 
-Use your organization's OIDC provider when available. For a small test
-installation, [Dex provides a Helm-based example](docs/dex-quickstart.md); see
-the [Dex documentation](https://dexidp.io/docs/) for its configuration and
-connectors.
+Use your organization's OIDC provider (such as Auth0, Okta, or Microsoft Entra
+ID) when available. For a test or evaluation deployment when a corporate IdP is
+not ready yet, create a free Auth0 developer tenant and follow the
+[Auth0 setup runbook](docs/mcp-auth0-runbook.md).
 
 For authenticated Bazel traffic as well as browser sign-in, prepare two OIDC
-applications:
+applications (plus Dynamic Client Registration for MCP clients):
 
 - A regular web application using Authorization Code flow for the dashboard.
   Register callback URLs for every enabled UI, for example
@@ -318,9 +318,7 @@ applications:
   traffic. Register the expected API audiences and authorize the client for
   those audiences.
 
-Create the shared dashboard OAuth Secret. If you used the Dex starter's
-`dex-bootstrap.sh`, it already created this Secret in `hermetiq`, so skip this
-command:
+Create the shared dashboard OAuth Secret:
 
 ```bash
 kubectl -n hermetiq create secret generic oauth2-proxy-client \

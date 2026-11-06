@@ -2,14 +2,21 @@
 config:
   cluster:
     enabled: true
+    # Hermetiq's packaged nats_streams.json sets replicas: 3 on BEP_BUILD_TOOL;
+    # keep at least 3 NATS servers or stream creation fails at subscriber startup.
+    replicas: 3
   jetstream:
     enabled: true
     fileStore:
       pvc:
+        # Scale to 100Gi-250Gi for high-volume 8-16 partition deployments.
         size: 30Gi
         storageClassName: premium-rwo
     memoryStore:
       enabled: true
+      # CACHE_EVENTS reserves 128 MiB per partition in memoryStore. Raise maxSize
+      # to 4Gi-8Gi (and container memory to 8Gi-16Gi) when app.streamPartitionCount >= 8.
+      maxSize: 1Gi
   merge:
     max_payload: << 16MB >>
 container:
@@ -20,6 +27,7 @@ container:
     requests:
       cpu: 1100m
       memory: 2Gi
+fullnameOverride: nats
 podTemplate:
   configChecksumAnnotation: true
 promExporter:

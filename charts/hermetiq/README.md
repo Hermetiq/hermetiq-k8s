@@ -14,6 +14,7 @@ the full-stack deployment order and shared services used by the other charts.
 
 - [Chart scope](#chart-scope)
 - [Install prerequisites](#install-prerequisites)
+  - [Prerequisites checklist](#prerequisites-checklist)
   - [PostgreSQL](#postgresql)
   - [NATS JetStream](#nats-jetstream)
   - [DragonflyDB](#dragonflydb)
@@ -44,6 +45,7 @@ the full-stack deployment order and shared services used by the other charts.
   - [Verification](#verification)
   - [Installation checkpoint](#installation-checkpoint)
 - [Advanced Topics](#advanced-topics)
+  - [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
   - [Progress log storage](#progress-log-storage)
     - [Retention and sizing](#retention-and-sizing)
   - [Scheduling, availability, and hardening](#scheduling-availability-and-hardening)
@@ -103,6 +105,36 @@ a Redis-compatible cache before installing this chart. Run the commands below
 from inside the copied values directory created in the repository's
 [prepare custom values](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values)
 step. Use your own namespace if it differs.
+
+### Prerequisites checklist
+
+Confirm the following are in place before running `helm install`:
+
+- [ ] **Kubernetes `1.32+` cluster and Helm `3.8+`** with capacity for `grpc-api`, `bep-nats-pub`, `bep-nats-sub-0..N-1` (one Deployment per stream partition), `web-ui`, and shared stateful services.
+- [ ] **PostgreSQL `16+` database with `pg_partman` enabled**:
+  - Dedicated database and login role created, with `CREATE EXTENSION IF NOT EXISTS pg_partman;` executed in that database by a privileged/admin user before install.
+  - Pre-created `postgres-db` Secret (`password` key) in the target namespace (required when `bootstrap.hook.enabled: true`, because Helm `pre-install` hooks run before chart-managed Secrets exist).
+- [ ] **3-node NATS JetStream cluster**:
+  - The chart's packaged `files/config/nats_streams.json` configures `"replicas": 3` on `BEP_BUILD_TOOL`. NATS must run as a **3+ server JetStream cluster** (`config.cluster.enabled: true`, `replicas: 3`, `max_payload: 16MB`), or you must supply a custom `nats.streamConfig.existingConfigMap` with `"replicas": 1` for single-node test setups (otherwise stream creation fails at subscriber startup and no events are ingested).
+- [ ] **DragonflyDB (or Redis) cache and `dragonfly-auth` Secret**:
+  - Pre-created `dragonfly-auth` Secret (`password` key) in the target namespace and a running DragonflyDB/Redis service (`--cache_mode=true --dbnum=4`).
+- [ ] **Gateway / Ingress controller, TLS certificate, and DNS (`*.<hosts.domainBase>`)**:
+  - A Gateway API controller with `GRPCRoute` support (Envoy Gateway recommended, or GKE Gateway), Contour `HTTPProxy`, or `ingress-nginx`.
+  - A TLS Secret (`tls.secretName`, e.g. `hermetiq-wildcard-tls`) or `cert-manager` `ClusterIssuer` covering `dashboard`, `api`, `api-web`, `bep`, and `mcp` (plus `grafana` and `bbcal` when enabled).
+- [ ] **OIDC Identity Provider (Auth0, Okta, Entra ID, etc.)**:
+  - **Interactive SSO client** for Dashboard, Grafana, and Buildbarn Browser, with redirect callbacks registered and `oauth2-proxy-client` Secret created (`client-id`, `client-secret`, `cookie-secret`).
+  - **BEP gRPC API / M2M client** with audience `https://bep.<hosts.domainBase>` (and Client Grant authorized) for Bazel `--bes_backend` tokens.
+  - **MCP API resource** registered with exact identifier `https://mcp.<hosts.domainBase>/mcp` (and Dynamic Client Registration / third-party client grant enabled for Claude Code, Cursor, Codex, etc.; see [`docs/mcp-auth0-runbook.md`](../../docs/mcp-auth0-runbook.md)).
+- [ ] **Licensing inputs and outbound HTTPS access (or air-gapped license Secret)**:
+  - Valid corporate email in `license.contactEmail` (non-`example.com`) and `license.agreement.accepted: true`.
+  - Kubernetes API access (`serviceAccount.automountServiceAccountToken: true` and `rbac.rules.licenseState: true`) so `grpc-api` and `bep-nats-pub` can read the release Namespace UID and write the `hermetiq-license-state` Secret.
+  - Outbound HTTPS (`:443`) from `grpc-api` and `bep-nats-pub` to `https://api.cloud-usc1.hermetiq.io` (trial issuance) and `https://api.keygen.sh` (validation), or a pre-created `hermetiq-license` Secret with `license.airGapped: true`.
+- [ ] **(Recommended for Production Scale) Cloud Object Storage + Workload Identity for BEP progress logs**:
+  - A GCS (`gs://`), S3 (`s3://`), or Azure Blob (`azblob://`) bucket in `app.rawBepExportBucket`, Workload Identity / IRSA bound to the `bep-nats` ServiceAccount, and a bucket lifecycle TTL rule on `<prefix>/progress/` (7–30 days).
+- [ ] **(When Co-Installing with Buildbarn)** Observability & worker CAL prerequisites:
+  - OpenTelemetry Collector reachable at `otel.endpoint` (full URL with scheme and port, e.g. `http://otel-collector.hermetiq.svc.cluster.local:4317`).
+  - VictoriaMetrics `vmselect` query URL set in `victoriaMetrics.baseUrl` (`/select/0/prometheus` path, **not** `vminsert`) with `victoriaMetrics.projectLabelEnabled: true` and `victoriaMetrics.projectLabel: namespace`.
+  - Cluster pod CIDR configured in `publisher.trustedCalCidrs` so Buildbarn workers can stream Completed Action Logs (CAL) to `bep-nats-pub:50091`.
 
 ### PostgreSQL
 
@@ -164,6 +196,14 @@ helm upgrade --install --namespace hermetiq nats nats/nats \
 Set `nats.url` to the reachable NATS service. Hermetiq creates its streams;
 see [NATS ingest and stream configuration](#nats-ingest-and-stream-configuration)
 for retention and partition settings.
+
+> ⚠ **3-node NATS cluster required by default:** The packaged
+> `files/config/nats_streams.json` sets `"replicas": 3` on `BEP_BUILD_TOOL`.
+> JetStream requires a clustered NATS deployment (`replicas: 3` or more) to
+> place a 3-replica stream. Pointing `nats.url` at a single-server NATS causes
+> stream creation to fail at subscriber startup so **no build events are
+> ingested**; for a single-server test setup, supply an external stream config
+> (`nats.streamConfig.existingConfigMap`) with `"replicas": 1`.
 
 ### DragonflyDB
 
@@ -458,11 +498,25 @@ with it.
 
 ## NATS ingest and stream configuration
 
-`app.streamPartitionCount` controls the number of subscriber Deployments and
-partitioned build-tool streams. Each subscriber replica owns one partition and
-preserves per-build ordering within that partition. Size the count before a
-large production rollout; changing it changes the stream and Deployment
-topology.
+`app.streamPartitionCount` controls the number of subscriber Deployments
+(`bep-nats-sub-0` through `bep-nats-sub-(N-1)`) and partitioned JetStream
+streams (`BEP_BUILD_TOOL_<i>`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`, and
+`ACTION_STREAM_<i>`). Each subscriber replica owns one partition (`fnv32a(invocation_id) % N`)
+and preserves per-build event ordering within that partition.
+
+- **Chart default vs. starter values:** `charts/hermetiq/values.yaml` defaults
+  `app.streamPartitionCount` to `9`, whereas `custom-values/hermetiq-values.yaml`
+  sets `app.streamPartitionCount: 4` to match `charts/buildbarn/values.yaml`'s
+  default `frontend.grpcCacheProxy.cacheEvents.numShards: 4`.
+- **Keep Buildbarn `numShards` equal:** When Buildbarn's `grpc-cache-proxy`
+  sidecar is enabled, `frontend.grpcCacheProxy.cacheEvents.numShards` **must**
+  equal `app.streamPartitionCount`; shards above `streamPartitionCount` have no
+  JetStream stream or subscriber and are dropped.
+- **Size before production rollout:** Changing `app.streamPartitionCount` alters
+  the stream and Deployment topology (scaling down leaves unconsumed messages on
+  higher-numbered streams). See
+  [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
+  for partition count and NATS memory/disk sizing at scale.
 
 ## Authentication and SSO
 
@@ -696,7 +750,8 @@ kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
 kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
 ```
 
-Check NATS and the license endpoint:
+Check NATS, the license endpoint, the persisted license-state Secret, and that
+`pg_partman` default catch-all partitions remain empty:
 
 ```bash
 kubectl -n hermetiq exec -it \
@@ -704,6 +759,7 @@ kubectl -n hermetiq exec -it \
     -o jsonpath='{.items[0].metadata.name}')" \
   -- nats stream report
 
+kubectl -n hermetiq get secret hermetiq-license-state
 kubectl -n hermetiq port-forward deployment/grpc-api 8008
 curl -fsS localhost:8008/api/v1/license/status
 ```
@@ -723,9 +779,11 @@ kubectl -n hermetiq get pods
 
 For the starter setup, expect `bep-nats-pub-*`, `bep-nats-sub-*`, `grpc-api-*`,
 and `web-ui-*` Pods to be `Running` with every container ready. If you installed
-the shared services here too, expect ready Pods for Dex, Dragonfly, KEDA, NATS
-JetStream, and VictoriaMetrics (including `vmstorage-*` and `vmselect-*`).
-The starter NATS StatefulSet has three Pods. Pods from completed Jobs, such as
+the shared services here too, expect ready Pods for Dragonfly, KEDA, NATS
+JetStream, OpenTelemetry Collector, and VictoriaMetrics (including `vmstorage-*`
+and `vmselect-*`).
+The starter NATS StatefulSet has three Pods (required for the default 3-replica
+`BEP_BUILD_TOOL` stream). Pods from completed Jobs, such as
 `database-schema-bootstrap-*` and a scheduled
 `progresses-partition-maintenance-*` run, show `Completed`; that is healthy.
 Pod suffixes, replica counts, and the services present depend on your values
@@ -743,6 +801,91 @@ end.
 
 The sections below cover optional tuning, hardening, operations, and chart
 development. Review them earlier when your environment requires a setting.
+
+### Large-scale deployments and high-throughput ingest
+
+For high-concurrency Bazel + RBE environments (thousands of builds per day,
+5–10+ Buildbarn storage shards, and large worker fleets), size the ingest
+pipeline, NATS JetStream, and PostgreSQL across six areas before go-live:
+
+1. **Offload BEP progress logs (`stdout`/`stderr`) to Cloud Object Storage (mandatory at scale):**
+   - By default, build `stdout`/`stderr` progress chunks are written as `BYTEA`
+     rows into PostgreSQL `public.progresses`. Under heavy CI concurrency,
+     progress rows account for 80–90% of PostgreSQL write throughput, WAL volume,
+     and disk I/O.
+   - Configure `app.rawBepExportBucket` (`gs://<bucket>/<prefix>`,
+     `s3://<bucket>/<prefix>`, or `azblob://<container>/<prefix>`), bind cloud
+     Workload Identity (`gcpWorkloadIdentity`, `azureWorkloadIdentity`, or AWS
+     IRSA on `serviceAccount`), enable *Store compressed invocation logs in cloud
+     object storage* in Project Settings, and configure a bucket lifecycle TTL
+     rule on `<prefix>/progress/` (see [Progress log storage](#progress-log-storage)).
+2. **Size `app.streamPartitionCount` and align Buildbarn `cacheEvents.numShards`:**
+   - Each partition `0..N-1` creates an independent set of JetStream streams
+     (`BEP_BUILD_TOOL_<i>`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`,
+     `ACTION_STREAM_<i>`) and a dedicated `bep-nats-sub-<i>` Deployment
+     (`subscriber.replicas: 1` per partition).
+   - Pick `app.streamPartitionCount` **before** production traffic starts
+     (scaling down later strands unconsumed messages on higher-numbered streams)
+     and set Buildbarn's `frontend.grpcCacheProxy.cacheEvents.numShards` to the
+     **exact same integer**:
+
+     | Deployment tier | Typical build volume | Buildbarn shards | Recommended `app.streamPartitionCount` (`== cacheEvents.numShards`) |
+     | :--- | :--- | :--- | :--- |
+     | **Starter / Small** | `<= 500` builds/day | 1–3 shards | `4` (`custom-values/hermetiq-values.yaml` default) |
+     | **Medium Production** | `500–5,000` builds/day | 3–5 shards | `8`–`9` (`charts/hermetiq/values.yaml` default is `9`) |
+     | **Large Scale (10 TiB+ RBE)** | `5,000–25,000+` builds/day | 5–10 shards | `12`–`16` |
+
+   - Keep `subscriber.replicas: 1` (each partition Deployment processes one
+     shard in order; `RollingUpdate` uses `maxSurge: 0, maxUnavailable: 1` to
+     avoid concurrent partition consumers) and raise `subscriber.resources` to
+     `cpu: 1–2`, `memory: 2Gi–4Gi` when enabling large batch coalescing.
+3. **Size NATS JetStream `memoryStore` and `fileStore` for high partition counts:**
+   - In the packaged `files/config/nats_streams.json`, each `CACHE_EVENTS_<i>`
+     partition uses `"storage": "memory"` with `"maxBytes": 134217728`
+     (**128 MiB per partition**), while `BEP_BUILD_TOOL_<i>` (`"replicas": 3`),
+     `ACTION_STREAM_<i>`, and `CACHE_ENRICH_<i>` use `"storage": "file"`.
+   - **Memory math trap:** At `12–16` partitions, `CACHE_EVENTS_0..15` alone can
+     reserve `1.5 GiB–2.0 GiB` of NATS `memoryStore`, exceeding the `1Gi`
+     `memoryStore.maxSize` and `2Gi` container limit in the starter
+     `custom-values/nats-values.yaml`.
+   - For `8–16` partitions, scale `nats-values.yaml` to:
+     - `config.jetstream.memoryStore.maxSize: 4Gi` (or `8Gi` at 16 partitions)
+     - `container.resources.requests/limits`: `cpu: 2000m–4000m`, `memory: 8Gi–16Gi`
+     - `config.jetstream.fileStore.pvc.size: 100Gi–250Gi` on low-latency SSD
+       (`premium-rwo` / `gp3`) so NATS can buffer 30 minutes of BEP and CAL
+       streams during PostgreSQL maintenance windows.
+4. **PostgreSQL sizing, `pg_partman` intervals, connection limits, and read replicas:**
+   - **First-bootstrap immutability:** `bootstrap.partitionInterval` (default
+     `6 hour`) and `bootstrap.retentionDays` (default `30`) seed
+     `public.part_config` **only on the initial bootstrap**. Changing them in
+     `values.yaml` later does not alter existing tables. With 15 time-partitioned
+     analytics tables, `6 hour` creates 60 child partitions per day (`1,800`
+     child tables over 30 days), which keeps active B-tree indexes compact in RAM
+     for high-write clusters. For 60–90+ day retention windows, either choose
+     `bootstrap.partitionInterval: 12 hour` (or `1 day`) before first install or
+     raise PostgreSQL `max_locks_per_transaction` (`>= 256–512`).
+   - **Connection pool math (`max_connections`):** Every `bep-nats-sub-<i>`,
+     `bep-nats-pub`, and `grpc-api` pod opens a PostgreSQL connection pool. With
+     `12–16` subscribers, `4–10` publishers, and `4–8` API pods, total active
+     connections exceed PostgreSQL's stock `max_connections = 100`. Configure
+     PostgreSQL with `max_connections >= 300–500` (and `8–16 vCPU`,
+     `32–64 GiB RAM`, SSD storage with `10,000+` write IOPS).
+   - **Read replica offloading (`postgres.readReplica.host`):** Point
+     `postgres.readReplica.host` at a read replica so expensive dashboard Trends
+     aggregations and MCP/Barn Owl analytical queries do not contend with
+     subscriber batch `INSERT`s on the primary writer.
+5. **Scale `bep-nats-pub` and `grpc-api`:**
+   - Enable `autoscaling.publisher.enabled: true` (e.g. `minReplicas: 4`,
+     `maxReplicas: 12`) so bursty CI BEP and Buildbarn worker CAL streams scale
+     horizontally.
+   - Keep `api.downloadDirSizeLimit` (default `10Gi` `emptyDir`) larger than the
+     biggest concurrent target output `.tgz` download so `grpc-api` pods are not
+     evicted for ephemeral-storage pressure.
+6. **Scale DragonflyDB / Redis when `app.cacheEventsEnabled: true`:**
+   - Cache-event enrichment (`CACHE_ENRICH`) caches digest metadata in
+     DragonflyDB/Redis. For 5–10 Buildbarn shards, raise DragonflyDB memory in
+     `dragonflydb-values.yaml` (or the `Dragonfly` CR) from `2000Mi` to
+     `4Gi–8Gi`.
 
 ### Progress log storage
 
@@ -827,8 +970,19 @@ Kubernetes Benchmark v2.0.1:
 - `readOnlyRootFilesystem: true`
 - all capabilities dropped
 
-Workloads that need scratch space get a `/tmp` emptyDir. The release therefore
-runs in a namespace labelled `pod-security.kubernetes.io/enforce: restricted`.
+Workloads that need scratch space get a `/tmp` emptyDir. Every Pod rendered by
+this chart therefore satisfies `pod-security.kubernetes.io/enforce: restricted`.
+
+> **Co-installing Buildbarn and `RbeWorker` pools in the same namespace:** While
+> all `hermetiq` chart Pods comply with `restricted`, FUSE-based `RbeWorker`
+> pods (`mount.mountType: fuse`) and `hostPath` raw-block storage pods require
+> `privileged` containers (and `mount.mountType: host` workers require
+> `baseline` unless `security.Hardened=true`). If you deploy `hermetiq`,
+> `buildbarn`, and FUSE `RbeWorker`s in a single shared `hermetiq` namespace,
+> label that shared namespace `pod-security.kubernetes.io/enforce: privileged`,
+> or deploy Buildbarn and its workers into a separate namespace referenced via
+> `bootstrap.projectNamespace` so the Hermetiq namespace can enforce
+> `restricted`.
 
 On OpenShift, let the `restricted-v2` SCC assign IDs from the namespace range:
 
@@ -1444,9 +1598,22 @@ or RBE Infrastructure.
 ### Stream configuration
 
 The chart renders `files/config/nats_streams.json` into the
-`bep-nats-stream-config` ConfigMap by default. To use an externally managed
-stream and consumer config, create a ConfigMap with your JSON and point the
-chart at it:
+`bep-nats-stream-config` ConfigMap by default.
+
+> ⚠ **Replica counts in the packaged `nats_streams.json`:** The packaged file
+> sets `"replicas": 3` on `bep.buildToolStream` (`BEP_BUILD_TOOL_<i>`) and
+> `"replicas": 1` on `FWD_STREAM`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`, and
+> `ACTION_STREAM_<i>`. Because `BEP_BUILD_TOOL_<i>` uses `"replicas": 3`,
+> JetStream requires a **3+ server NATS cluster** (`config.cluster.enabled: true`,
+> `replicas: 3`) or subscriber startup fails to create the stream and no build
+> events are ingested. For a single-server test NATS, override
+> `nats_streams.json` via `nats.streamConfig.existingConfigMap` with
+> `"replicas": 1`; for full NATS node-loss resilience on action and cache-enrich
+> streams in production, raise `action.stream.replicas` and
+> `cacheEnrich.stream.replicas` to `3` in your custom ConfigMap.
+
+To use an externally managed stream and consumer config, create a ConfigMap
+with your JSON and point the chart at it:
 
 ```yaml
 nats:
@@ -1494,7 +1661,9 @@ Cache events come from the Buildbarn chart's grpc-cache-proxy sidecar, which
 publishes Action Cache hits and misses to the NATS this chart uses. For them to
 be stored and shown:
 
-- The sidecar's `cacheEvents.numShards` must equal `app.streamPartitionCount`,
+- The sidecar's `cacheEvents.numShards` must equal `app.streamPartitionCount`
+  (`4` in `custom-values/hermetiq-values.yaml` and `charts/buildbarn/values.yaml`;
+  `9` in `charts/hermetiq/values.yaml`),
   and its `cacheEvents.subjectPrefix` must equal `cache.subjectPrefix` in the
   NATS stream config (`cache` in the packaged file). Events published to
   subjects nothing consumes are discarded.

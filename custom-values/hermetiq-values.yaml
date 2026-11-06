@@ -23,6 +23,10 @@ bootstrap:
   retentionDays: 30
   # Time covered by each new Postgres partition.
   partitionInterval: 6 hour
+  # Optional: auto-create the initial project and link Buildbarn Browser /
+  # Grafana URLs on first bootstrap:
+  # projectId: "0"
+  # projectName: "build-analytics"
 
 postgres:
   # PostgreSQL 16+ primary with pg_partman installed for this database.
@@ -35,6 +39,9 @@ postgres:
     # The bootstrap hook runs before normal chart-managed Secrets exist.
     existingSecret: "postgres-db"
     existingSecretKey: password
+  # Optional read replica for offloading dashboard Trends and MCP analytics:
+  # readReplica:
+  #   host: <db-read-replica-host>
 
 routing:
   # Use an existing Gateway and a controller that supports GRPCRoute.
@@ -43,6 +50,10 @@ routing:
 gateway:
   # Existing Gateway that should receive the chart's HTTPRoute/GRPCRoute.
   name: hermetiq-gateway
+  # Gateway-scoped HTTP/2 flow-control and stream tuning for both Hermetiq and
+  # Buildbarn routes. Enable here (preferred) and keep disabled in buildbarn-values.yaml.
+  clientTrafficPolicy:
+    enabled: true
 
 redis:
   # Redis-compatible cache; the DragonflyDB starter chart provides this DNS
@@ -65,6 +76,10 @@ otel:
 victoriaMetrics:
   # Enable MCP infrastructure-health tools that query Buildbarn metrics.
   metricsEnabled: true
+  # Scope Buildbarn recording-rule queries by the release namespace label
+  # (required for RBE Infrastructure page and Barn Owl namespace evidence).
+  projectLabelEnabled: true
+  projectLabel: namespace
   # VictoriaMetrics Prometheus-compatible READ endpoint (vmselect), including
   # its /select/<tenant>/prometheus path. This is not the vminsert endpoint.
   baseUrl: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
@@ -78,8 +93,19 @@ gcpWorkloadIdentity:
 
 app:
   # Number of partitioned BEP streams and subscriber Deployments. Pick this
-  # before a large rollout; changing it alters the ingest stream topology.
+  # before a large rollout (e.g. 8-16 for high-volume 5-10 shard RBE clusters);
+  # must equal frontend.grpcCacheProxy.cacheEvents.numShards in buildbarn-values.yaml.
   streamPartitionCount: 4
+  # Grant the Hermetiq admin role on sign-in so initial admins can open
+  # Project Settings and manage users:
+  adminEmails: []
+  #   - admin@your-company.com
+  # Enable Action Cache Hit Tracker queries and MCP cache-event tools:
+  cacheEventsEnabled: true
+  normalizeRepoUrls: true
+  # Recommended for production scale: offload BEP stdout/stderr progress chunks
+  # to cloud object storage (requires a bucket lifecycle TTL rule on <prefix>/progress/):
+  # rawBepExportBucket: gs://<bucket>/<prefix>
 
 oidc:
   # Shared OIDC issuer for API, publisher, and dashboard. Use the exact issuer
@@ -96,6 +122,10 @@ api:
         memory: 1000Mi
 
 publisher:
+  # REQUIRED when running Buildbarn RbeWorkers: set to your cluster pod CIDR
+  # (e.g. "10.244.0.0/16") so workers can stream Completed Action Logs (CAL)
+  # to bep-nats-pub:50091. Leaving this empty rejects all worker CAL calls.
+  trustedCalCidrs: ""
   # Example capacity for bep-nats-pub, which authenticates and publishes BEP.
   replicas: 2
   resources:
@@ -109,18 +139,37 @@ dashboard:
   # Quickstart's Bazel remote-cache URL derives as grpcs://bb.<hosts.domainBase>.
   # Override dashboard.remoteCacheUrl only if Buildbarn uses another host.
   oauth2Proxy:
-    # The chart already allows .<hosts.domainBase>. Replace TODO with an
-    # external redirect domain (such as the IdP), or remove this list.
-    whitelistDomains:
-      - "TODO"
-    # Optional IdP logout URL: replace TODO or remove this line. Without it,
-    # sign-out clears only the local cookie. For Auth0, allow the dashboard
-    # returnTo URL in the IdP first.
-    backendLogoutUrl: "TODO"
+    # .<hosts.domainBase> is auto-included when hosts.domainBase is set. Add
+    # external redirect domains here only when needed (e.g. [".auth0.com"]).
+    whitelistDomains: []
+    # Optional IdP logout URL. Without it, sign-out clears only the local
+    # cookie. Auth0 example (add returnTo to Auth0 Allowed Logout URLs first):
+    # backendLogoutUrl: https://<tenant>.auth0.com/v2/logout?client_id=<clientId>&returnTo=https://dashboard.helm.hermetiq.dev
+    backendLogoutUrl: ""
     client:
       # Secret with OAuth2 client credentials shared by dashboard and Browser.
       existingSecret: oauth2-proxy-client
 
+# Optional: enable the RBE Infrastructure page and live fleet evidence for project IDs:
+# rbe:
+#   enabled: true
+#   accessPolicy:
+#     projects:
+#       "0":
+#         enabled: true
+#         minimum_role: viewer
+
+# Optional: enable the Barn Owl AI assistant (requires an Anthropic API key Secret):
+# assistant:
+#   enabled: true
+#   anthropic:
+#     apiKey:
+#       existingSecret: anthropic-api
+#       existingSecretKey: ANTHROPIC_API_KEY
+
 rbac:
   enabled: true
   mode: namespace
+  # Set rbeFleet: true when enabling the RBE Infrastructure page above:
+  # rules:
+  #   rbeFleet: true
