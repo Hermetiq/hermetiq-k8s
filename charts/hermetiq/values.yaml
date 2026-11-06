@@ -22,27 +22,27 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.5"
+    apiTag: "v0.9.6"
     apiDigest: ""
-    pubTag: "v0.9.5"
+    pubTag: "v0.9.6"
     pubDigest: ""
-    subTag: "v0.9.5"
+    subTag: "v0.9.6"
     subDigest: ""
-    bootstrapTag: "v0.9.5"
+    bootstrapTag: "v0.9.6"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.5"
+    tag: "v0.9.6"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.5"
+    tag: "v0.9.6"
     digest: ""
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v0.9.5"
+    tag: "v0.9.6"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
@@ -1234,7 +1234,8 @@ dashboard:
   # when Buildbarn uses a separate domain or explicit hosts.frontendGrpc value.
   remoteCacheUrl: ""
   # Additional environment variables for the dashboard deployment.
-  env: {}
+  env:
+    REACT_APP_HERMETIQ_AI_PLUGIN_VERSION: "v0.9.12-beta"
   prepareDashboardHtml:
     # Additional environment variables for the dashboard HTML preparation init container.
     env: {}

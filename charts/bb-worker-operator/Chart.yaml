@@ -6,33 +6,24 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.8
-appVersion: "v0.3.9"
+version: 0.3.9
+appVersion: "v0.3.10"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.9"
-    - kind: added
-      description: "RbeWorker can set the scheduler address and default/maximum execution timeouts for generated worker configs"
-    - kind: added
-      description: "RbeWorker can customize the worker Deployment (strategy, minReadySeconds, revisionHistoryLimit, progressDeadlineSeconds), container probes and lifecycle hooks, and pod DNS settings, host aliases and process namespace sharing"
-    - kind: added
-      description: "More KEDA Prometheus autoscaling options: activationThreshold, authenticationRef, useCachedMetrics and extraMetadata"
-    - kind: added
-      description: "RbeWorker gains the short name rbew and extra columns in kubectl get -o wide"
+      description: "Use bb-worker-operator v0.3.10"
     - kind: fixed
-      description: "FUSE cleanup sidecar now unmounts the build directory on its termination signal instead of preStop, so running actions keep their files while the pod shuts down"
-    - kind: changed
-      description: "Invalid RbeWorker specs (config paths, mount paths, docker socket path, timeouts) are rejected with a clear status message instead of producing a broken pool"
-    - kind: changed
-      description: "Operator logs now use production JSON format, and the leader releases its lease on shutdown for faster failover"
+      description: "Custom pod labels on an RbeWorker can no longer override the operator's selector labels, which caused worker Deployment creation or updates to fail"
+    - kind: fixed
+      description: "Percent-encoded values in OTEL_RESOURCE_ATTRIBUTES are now decoded, matching standard OpenTelemetry behavior"
 keywords:
   - buildbarn
   - bazel
   - remote-execution
   - operator
-  - kubebuilder
+  - rbe
+  - toolchain
 maintainers:
   - name: Hermetiq
     email: support@hermetiq.com
