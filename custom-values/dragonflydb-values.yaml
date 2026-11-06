@@ -11,6 +11,7 @@ extraArgs:
   - --dbnum=4
   - --logtostdout=true
   - --proactor_threads=4 # more threads requires more memory
+fullnameOverride: dragonfly
 passwordFromSecret:
   enable: true
   existingSecret:
@@ -21,6 +22,8 @@ resources:
     memory: 2000Mi
   requests:
     memory: 2000Mi
+storage:
+  enabled: false
 podSecurityContext:
   fsGroup: 2000
 securityContext:
