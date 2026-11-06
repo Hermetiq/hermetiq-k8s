@@ -30,13 +30,15 @@ tests:
       frontend.grpcCacheProxy.enabled: true
       frontend.grpcCacheProxy.natsUrl: nats://nats.nats-system.svc:4222
       frontend.grpcCacheProxy.cacheEvents.subjectPrefix: dev_cache
+      # Pin the tag so default image bumps don't break this test.
+      images.grpcCacheProxy.tag: v1.2.3
     asserts:
       - equal:
           path: spec.template.spec.containers[0].name
           value: grpc-cache-proxy
       - equal:
           path: spec.template.spec.containers[0].image
-          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy:v0.9.5
+          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy:v1.2.3
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: IfNotPresent
