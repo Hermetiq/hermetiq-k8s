@@ -14,6 +14,9 @@ kubectl apply --namespace hermetiq --kustomize rbeworkers
 These manifests require operator 0.3.4 or later, which filters queue-depth
 queries by the worker's namespace. Existing `RbeWorker` manifests and overlays
 must drop `spec.autoscaling.prometheus.projectID` after the upgrade.
+The Envoy example also uses `spec.autoscaling.idleReplicas`; install a matching
+operator and CRD that support this field, as packaged by the current
+[operator chart](../../charts/bb-worker-operator/README.md#crd-lifecycle).
 
 ## Pools
 
@@ -58,18 +61,28 @@ platform identities remain environment-specific; optional pools remain opt-in.
 | Ubuntu 22.04 | 11 | 11 | 0 / 20 |
 | Ubuntu 24.04 | 16 | 8 | 1 / 8 |
 | Codex | 9 | 9 | 0 / 20 |
-| Envoy | 11 | 11 | 0 / 20 |
-| Size class small | 24 | 16 | 1 / 20 |
-| Size class large | 12 | 8 | 1 / 20 |
+| Envoy | 16 | 16 | 4 active, 0 idle / 14 |
+| Size class small | 24 | 16 | 3 / 20 |
+| Size class large | 12 | 8 | 2 / 20 |
 | Testcontainers (DinD) | 4 | 2 | 1 / 6 |
 | Drake | 11 | 11 | 0 / 20 |
 
 The queue target is `spec.autoscaling.prometheus.threshold`. Several pools
 intentionally target fewer tasks than their execution concurrency. Scale-up
 policies use 30-second periods, with pool-specific step sizes and scale-down
-behavior; Envoy uses a five-minute query window. The Sysbox example retains
-its separate concurrency-2 configuration. Set the warm pools' minimum to zero
-in your overlay when using the [scale-up-from-zero setup](#scale-up-from-zero).
+behavior; Envoy uses a one-minute query window and a 300-second scale-down
+hold before a single 100% step, inside its 450-second KEDA cooldown. The Sysbox
+example retains its separate concurrency-2 configuration. Set the warm pools'
+minimum to zero in your overlay when using the
+[scale-up-from-zero setup](#scale-up-from-zero).
+
+Envoy uses `minReplicas: 4` with `idleReplicas: 0`: KEDA activates four workers
+when work arrives and returns the pool to zero after its idle cooldown. Keep
+the positive active minimum when using `idleReplicas`. Its worker requests and
+limits are 2 CPU / 9Gi memory, and its runner requests and limits are
+12 CPU / 46Gi memory, for a combined 14 CPU / 55Gi per Pod. Size the nodes for
+these requests plus system overhead. The two size-class pools keep three small
+and two large workers warm; lower those minimums for smaller installations.
 
 ## Scale-up from zero
 

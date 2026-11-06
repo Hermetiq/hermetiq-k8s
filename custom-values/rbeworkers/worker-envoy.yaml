@@ -10,7 +10,7 @@ spec:
     generated:
       commonConfigMapName: buildbarn-worker-config
       completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
-      concurrency: 11
+      concurrency: 16
       inputDownloadConcurrency: 9
       outputUploadConcurrency: 11
       environmentVariables:
@@ -53,8 +53,11 @@ spec:
   replicas: 0
   autoscaling:
     enabled: true
-    minReplicas: 0
-    maxReplicas: 20
+    # Activate four workers immediately; return to zero when idle. Requires
+    # a predeclared scheduler queue; see "Scale-up from zero" in the README.
+    minReplicas: 4
+    idleReplicas: 0
+    maxReplicas: 14
     cooldownPeriodSeconds: 450
     fallback:
       failureThreshold: 3
@@ -62,8 +65,9 @@ spec:
     prometheus:
       serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
       metricName: worker_envoy_active_or_queued_tasks
-      threshold: "11" # matches concurrency
-      queryWindow: 5m
+      threshold: "16" # matches concurrency
+      # Respond to cold-build backlogs and drained queues without a 5m lag.
+      queryWindow: 1m
     pollingIntervalSeconds: 10
     advanced:
       horizontalPodAutoscalerConfig:
@@ -75,19 +79,21 @@ spec:
               - {type: Pods, value: 8, periodSeconds: 30}
               - {type: Percent, value: 100, periodSeconds: 30}
           scaleDown:
-            stabilizationWindowSeconds: 900
-            selectPolicy: Min
+            # Reach the active minimum before the 450s KEDA cooldown expires.
+            # This hold still rides out short pauses within a build.
+            stabilizationWindowSeconds: 300
+            selectPolicy: Max
             policies:
-              - {type: Pods, value: 2, periodSeconds: 60}
+              - {type: Percent, value: 100, periodSeconds: 60}
   runner:
     imagePullPolicy: IfNotPresent
     resources:
       requests:
-        cpu: 13000m
-        memory: 40Gi
+        cpu: 12000m
+        memory: 46Gi
       limits:
-        cpu: 13000m
-        memory: 40Gi
+        cpu: 12000m
+        memory: 46Gi
     securityContext:
       allowPrivilegeEscalation: true
       privileged: true
@@ -118,15 +124,15 @@ spec:
     # bb_worker memory-maps the operator's 16 GiB local CAS and the file pool,
     # and the kernel charges the page cache for those reads to this container. A
     # limit sized for bb_worker's heap alone sends those reads back to disk
-    # (high major page-fault rates, disk reads far above writes). The memory
-    # comes from the runner, so the Pod's total request does not grow.
+    # (high major page-fault rates, disk reads far above writes). Two worker
+    # cores reduce throttling while serving FUSE inputs for 16 action slots.
     resources:
       requests:
-        cpu: 1000m
+        cpu: 2000m
         memory: 9Gi
         ephemeral-storage: 42Gi
       limits:
-        cpu: 1000m
+        cpu: 2000m
         memory: 9Gi
         ephemeral-storage: 42Gi
     securityContext:

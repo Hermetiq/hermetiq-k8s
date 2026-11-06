@@ -4,15 +4,11 @@
 to explore Hermetiq and Managed Buildbarn before setting up a Kubernetes
 deployment.
 
-This README is the operator reference packaged with the Hermetiq `0.9.6`
+This README is the operator reference packaged with the Hermetiq `0.9.7`
 chart. It covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for
 the full-stack deployment order and shared services used by the other charts.
-
-OCI installation examples retain the published chart `0.9.5`. The assistant
-and on-prem RBE settings require chart `0.9.6`; use the local chart development
-instructions until that chart and application `v0.9.5` images are published.
 
 ## Contents
 
@@ -245,8 +241,8 @@ Inspect the exact packaged defaults and README before creating advanced
 overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.6
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.6
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.7
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.7
 ```
 
 ## Licensing and trials
@@ -664,7 +660,7 @@ Then install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.6 \
+  --version 0.9.7 \
   --values hermetiq-values.yaml
 ```
 

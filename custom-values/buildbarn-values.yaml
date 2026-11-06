@@ -26,6 +26,16 @@ storage:
       cpu: 7100m
       memory: 16Gi
 
+images:
+  # Hermetiq grpc-cache-proxy sidecar, used when frontend.grpcCacheProxy.enabled
+  # is true. Hermetiq releases bump this tag here, so a new proxy image does not
+  # need a Buildbarn chart release.
+  grpcCacheProxy:
+    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
+    tag: v0.9.6
+    digest: ""
+    pullPolicy: IfNotPresent
+
 frontend:
   jwks:
     # Validate Bazel JWTs against your IdP. These must match the token's exact

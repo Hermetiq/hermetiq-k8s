@@ -85,11 +85,13 @@ tests:
       assistant.enabled: true
       assistant.anthropic.apiKey.existingSecret: llm-key
       global.imageRegistry: registry.example.com
+      # Pin the tag so default image bumps don't break this test.
+      images.promptRuntime.tag: v1.2.3
       images.promptRuntime.digest: sha256:1234
     asserts:
       - equal:
           path: spec.template.spec.containers[?(@.name == "prompt-runtime")].image
-          value: registry.example.com/hermetiq-cloud/hermetiq-public/prompt-runtime:v0.9.5@sha256:1234
+          value: registry.example.com/hermetiq-cloud/hermetiq-public/prompt-runtime:v1.2.3@sha256:1234
   - it: renders an optional inline overlay and a rollout checksum
     set:
       assistant.enabled: true
