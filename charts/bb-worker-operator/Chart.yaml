@@ -6,17 +6,17 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.9
-appVersion: "v0.3.10"
+version: 0.3.10
+appVersion: "v0.3.11"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.10"
-    - kind: fixed
-      description: "Custom pod labels on an RbeWorker can no longer override the operator's selector labels, which caused worker Deployment creation or updates to fail"
-    - kind: fixed
-      description: "Percent-encoded values in OTEL_RESOURCE_ATTRIBUTES are now decoded, matching standard OpenTelemetry behavior"
+      description: "Use bb-worker-operator v0.3.11"
+    - kind: added
+      description: "spec.config.generated.nativeBuildDirectory sets the file-count and size limits of a native build directory's cache, which were fixed at 100000 files and 5 GiB"
+    - kind: changed
+      description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed"
 keywords:
   - buildbarn
   - bazel
