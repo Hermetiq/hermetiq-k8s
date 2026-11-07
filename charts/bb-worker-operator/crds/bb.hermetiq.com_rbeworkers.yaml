@@ -648,6 +648,32 @@ spec:
                           in generated worker Jsonnet (e.g. "3600s").
                         pattern: ^[0-9]+(\.[0-9]+)?s$
                         type: string
+                      nativeBuildDirectory:
+                        description: |-
+                          NativeBuildDirectory sizes the cache behind the native build directory
+                          that the operator renders whenever virtualBuildDirectory is omitted.
+                          bb_worker hardlinks every input file into the action's input root from
+                          this cache, so an input root with more files or bytes than the cache
+                          holds is downloaded again for every action. The controller rejects this
+                          block on a pool that sets virtualBuildDirectory.
+                        properties:
+                          maximumCacheFileCount:
+                            default: 100000
+                            description: MaximumCacheFileCount caps the number of
+                              files kept in the cache.
+                            format: int64
+                            minimum: 1
+                            type: integer
+                          maximumCacheSizeBytes:
+                            default: 5368709120
+                            description: |-
+                              MaximumCacheSizeBytes caps the total size of the files kept in the
+                              cache. The cache shares the worker volume with the build directory, so
+                              size that volume for this plus the outputs of concurrent actions.
+                            format: int64
+                            minimum: 1
+                            type: integer
+                        type: object
                       outputUploadConcurrency:
                         format: int32
                         minimum: 1
