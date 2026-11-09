@@ -452,6 +452,11 @@ spec:
                         maxProperties: 64
                         type: object
                       instanceNamePrefix:
+                        description: |-
+                          InstanceNamePrefix is the instance_name_prefix label of the queue the
+                          generated query watches. Leave it unset to follow
+                          spec.config.generated.instanceNamePrefix, the prefix the pool's workers
+                          register under.
                         type: string
                       metricName:
                         type: string
@@ -642,6 +647,21 @@ spec:
                         format: int32
                         minimum: 1
                         type: integer
+                      instanceNamePrefix:
+                        description: |-
+                          InstanceNamePrefix is the Buildbarn instance name prefix the pool's
+                          workers register under (bb_worker RunnerConfiguration
+                          instance_name_prefix). The workers then only receive operations whose
+                          instance name starts with this prefix, compared as whole "/"-separated
+                          components, so a pool can serve a single tenant's instance name. Empty
+                          (the default) serves every instance name.
+
+                          bb-scheduler needs a predeclaredPlatformQueues entry with the same
+                          prefix and platform for the pool to serve multiple size classes or to
+                          scale from zero. The generated KEDA query watches this prefix unless
+                          autoscaling.prometheus.instanceNamePrefix is set.
+                        pattern: ^([^/]+(/[^/]+)*)?$
+                        type: string
                       maximumExecutionTimeout:
                         description: |-
                           MaximumExecutionTimeout sets maximumExecutionTimeout on each runner entry
