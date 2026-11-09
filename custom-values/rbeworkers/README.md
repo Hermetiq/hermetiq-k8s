@@ -167,6 +167,39 @@ Match declarations to the worker configuration:
   Omit `instanceNamePrefix` from their queue declarations and leave
   `spec.autoscaling.prometheus.instanceNamePrefix` empty. Changing the metric
   query prefix alone does not change worker registration.
+- A private pool serves a single tenant. Set
+  `spec.config.generated.instanceNamePrefix` to the tenant's instance name,
+  the Hermetiq project ID its Bazel clients send as `--remote_instance_name`.
+  Its workers then register under that prefix and receive only that tenant's
+  actions. Declare the queue with the same `instanceNamePrefix`, platform, and
+  `sizeClasses`. The generated KEDA query picks up the worker's prefix, so
+  leave `spec.autoscaling.prometheus.instanceNamePrefix` empty.
+
+A private pool and its matching queue declaration:
+
+```yaml
+# RbeWorker
+spec:
+  config:
+    generated:
+      instanceNamePrefix: 3f6c1d2e-8b4a-4c7e-9a1d-5e2f7b9c0a14
+      platformProperties:
+        - { name: pool, value: private-linux-x86-64 }
+```
+
+```yaml
+# Buildbarn Helm values
+scheduler:
+  predeclaredPlatformQueues:
+    - instanceNamePrefix: 3f6c1d2e-8b4a-4c7e-9a1d-5e2f7b9c0a14
+      platform:
+        - { name: pool, value: private-linux-x86-64 }
+      sizeClasses: [0]
+```
+
+Pool names, platform values, and images appear in shared scheduler and worker
+metrics. Keep them neutral and leave customer names out of them; the instance
+name alone ties a private pool to its tenant.
 
 For each pool that should scale down to zero, set these fields on its
 `RbeWorker`, retaining its Prometheus endpoint, metric threshold, and other
