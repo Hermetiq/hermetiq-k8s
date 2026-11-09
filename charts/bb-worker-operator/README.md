@@ -45,8 +45,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.9
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.9
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.10
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.10
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -55,7 +55,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.9/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.10/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -64,7 +64,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.9 \
+  --version 0.3.10 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -113,12 +113,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.9;
+file and wait for Kubernetes to establish it. This example uses release 0.3.10;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.9/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.10/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
