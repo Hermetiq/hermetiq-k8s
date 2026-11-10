@@ -1,103 +1,117 @@
-# Chromium on Buildbarn with Hermetiq
+# chromium
 
 - repository: https://chromium.googlesource.com/chromium/src
 - latest tested revision: bbc7a3c29870e0a8b3a3ac31ae909a38ab3d6328 (159.0.8128.0)
-- build tool: Siso v1.6.7
 
-This tutorial builds Chromium on your own Buildbarn, shows each build in Hermetiq, and then makes it faster.
+## Siso Version
 
-![Siso on the developer machine sends work to the Buildbarn frontend, which uses storage and the scheduler; the scheduler feeds a small and a large worker pool; siso-bep and the workers report to Hermetiq](images/architecture.svg)
+Chromium builds with Siso, not Bazel. This example was tested with Siso
+v1.6.7, which depot_tools installs with the checkout. Follow Chromium's
+[Linux build instructions](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/linux/build_instructions.md)
+up to `fetch` to get a checkout.
 
-## What you need
+## Build Image
 
-- Buildbarn and Hermetiq installed from this repository.
-- Room for 40 worker nodes with 16 vCPUs and local SSD each. On GKE, the local SSD must back ephemeral storage (`--ephemeral-storage-local-ssd`).
-- A Linux workstation with a Chromium checkout. Follow Chromium's [Linux build instructions](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/linux/build_instructions.md) up to `fetch`.
+Chromium's remote actions run in Google's public `siso-chromium` image. This
+example deploys two worker pools for it on the same platform: a small pool that
+keeps one pod running, and a large pool for heavy actions that starts at zero.
+Buildbarn's size-class analysis decides which actions need the large pool. A
+new action tries the small pool first and moves to the large pool if it runs
+longer than `minimumExecutionTimeout`.
 
-The commands use the same placeholders as the [other examples](../envoy.md): `<your-domain>` is your installation's `hosts.domainBase`, `$INSTANCE_NAME` is your Hermetiq project ID, and `$CREDENTIAL_HELPER` is the path to your Hermetiq credential helper.
+The pools need 40 nodes at most, each with 16 vCPUs and local SSD. On GKE, the
+local SSD must back the nodes' ephemeral storage
+(`--ephemeral-storage-local-ssd`). Check your cloud quota, including local SSD.
 
-## 1. Add Chromium worker pools to Buildbarn
+Add the following to your Buildbarn values and upgrade the release. The same
+settings, with comments, are in [`buildbarn-values.yaml`](buildbarn-values.yaml).
+If you already have `predeclaredPlatformQueues`, add this entry to your list,
+because Helm replaces lists rather than merging them.
 
-1. **Turn on size classes.** Both pools serve the same platform, and Buildbarn decides which actions need the large one. A new action tries the small pool first and moves to the large pool if it runs longer than `minimumExecutionTimeout`. The ISCC store remembers where each action belongs, the predeclared queue keeps the Chromium platform available while the large pool is at zero, and the FSAC store backs the pools' input prefetching.
+```yaml
+storage:
+  persistence:
+    iscc:
+      enabled: true
+    fsac:
+      enabled: true
+scheduler:
+  sizeClassAnalysis:
+    enabled: true
+    pageRank:
+      minimumExecutionTimeout: 60s
+  predeclaredPlatformQueues:
+    - platform:
+        - {name: OSFamily, value: Linux}
+        - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
+      sizeClasses: [1, 4]
+```
 
-   Add this to your Buildbarn values and run `helm upgrade`. It's also in [`buildbarn-values.yaml`](buildbarn-values.yaml), with comments.
+Then add the pools in [`rbeworkers/`](rbeworkers/) to the kustomize overlay you
+apply your RbeWorkers with, and add your node pool's label to their
+`nodeSelector` the same way as for your other pools:
 
-   ```yaml
-   storage:
-     persistence:
-       iscc:
-         enabled: true   # remembers which actions need the large pool
-       fsac:
-         enabled: true   # needed by the pools' input prefetching
-   scheduler:
-     sizeClassAnalysis:
-       enabled: true
-       pageRank:
-         minimumExecutionTimeout: 60s
-     predeclaredPlatformQueues:
-       - platform:
-           - {name: OSFamily, value: Linux}
-           - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
-         sizeClasses: [1, 4]
-   ```
+```yaml
+resources:
+  - ../../path/to/custom-values/rbeworkers
+components:
+  - ../../path/to/examples/chromium-siso/rbeworkers
+```
 
-   If you already have `predeclaredPlatformQueues`, add this entry to your list: Helm replaces lists rather than merging them.
+```bash
+kubectl get rbeworkers -n hermetiq | grep chromium
+```
 
-2. **Add the worker pools.** The small pool keeps one pod up for everyday actions; the large pool takes the heavy ones and starts at zero. Add them to the kustomize overlay you apply your RbeWorkers with, and apply it:
+## Project Configuration
 
-   ```yaml
-   resources:
-     - ../../path/to/custom-values/rbeworkers
-   components:
-     - ../../path/to/examples/chromium-siso/rbeworkers
-   ```
+Point the checkout at your Buildbarn by adding these custom vars to the `src`
+solution in `.gclient`, then run `gclient runhooks`.
+[`client/backend.star`](client/backend.star) gives every remote action the
+same platform as the worker pools.
 
-   Your overlay's namespace and RbeWorker patches apply to these pools too. Add your 16-vCPU node pool's label to their `nodeSelector`, the same way as for your other pools.
+```python
+"custom_vars": {
+  "reapi_address": "bb.<your-domain>:443",
+  "reapi_instance": "$INSTANCE_NAME",
+  "reapi_backend_config_path": "/path/to/examples/chromium-siso/client/backend.star",
+},
+```
 
-3. **Check both pools are there:**
+Create an output directory with [`client/args.gn`](client/args.gn), a release
+build without symbols that uses remote execution:
 
-   ```bash
-   kubectl get rbeworkers -n <buildbarn-namespace> | grep chromium
-   ```
+```bash
+mkdir -p out/rbe
+cp /path/to/examples/chromium-siso/client/args.gn out/rbe/args.gn
+gn gen out/rbe
+```
 
-## 2. Point your Chromium checkout at Buildbarn
+### Hermetiq Configuration
 
-1. **Point Chromium at your Buildbarn.** Add these to the `src` solution in your `.gclient`, then run `gclient runhooks`:
+Replace the following placeholders with your Hermetiq account data.
 
-   ```python
-   "custom_vars": {
-     "reapi_address": "bb.<your-domain>:443",
-     "reapi_instance": "<your-project-id>",
-     "reapi_backend_config_path": "/path/to/examples/chromium-siso/client/backend.star",
-   },
-   ```
+- `$INSTANCE_NAME`: Your Project ID.
+- `$CREDENTIAL_HELPER`: Path to your credential helper executable.
+- `<your-domain>`: The `hosts.domainBase` you configured for the Hermetiq
+  and Buildbarn charts. These examples assume both charts share one base
+  domain, giving `bep.<your-domain>` (BEP), `bb.<your-domain>` (Buildbarn
+  frontend gRPC), and `dashboard.<your-domain>` (web UI).
 
-   [`client/backend.star`](client/backend.star) tells Siso which platform to ask for: Linux, in Chromium's public `siso-chromium` image, the same as the pools.
+Siso doesn't send Build Event Protocol events itself, so the build runs under
+[`siso-bep`](../../tools/siso-bep/), which reports it to Hermetiq the way Bazel
+does. Install it and check that Siso can authenticate:
 
-2. **Create the output directory** with remote execution on:
+```bash
+go install github.com/Hermetiq/hermetiq-k8s/tools/siso-bep@v0.1.0
+export SISO_CREDENTIAL_HELPER=$CREDENTIAL_HELPER
+third_party/siso/cipd/siso auth-check -reapi_address=bb.<your-domain>:443 -reapi_instance=$INSTANCE_NAME
+```
 
-   ```bash
-   mkdir -p out/rbe && cp /path/to/examples/chromium-siso/client/args.gn out/rbe/args.gn
-   gn gen out/rbe
-   ```
+### Build Targets
 
-   [`client/args.gn`](client/args.gn) is a release build without symbols: `use_remoteexec`, `use_siso`, `is_debug=false`, `symbol_level=0`.
-3. **Check Siso can log in:**
-
-   ```bash
-   export SISO_CREDENTIAL_HELPER=$CREDENTIAL_HELPER
-   third_party/siso/cipd/siso auth-check -reapi_address=bb.<your-domain>:443 -reapi_instance=$INSTANCE_NAME
-   ```
-
-4. **Install `siso-bep`**, which reports Siso builds to Hermetiq:
-
-   ```bash
-   go install github.com/Hermetiq/hermetiq-k8s/tools/siso-bep@v0.1.0
-   ```
-
-## 3. Build Chromium
-
-Run [`client/build.sh`](client/build.sh), or:
+The following command builds `chrome` with every step running remotely. The
+same command is in [`client/build.sh`](client/build.sh), and
+[`reference.md`](reference.md#build-flags) explains each flag.
 
 ```bash
 siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
@@ -110,23 +124,27 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
     chrome
 ```
 
-`siso-bep` prints a link to the build when it starts. [reference.md](reference.md#build-flags) explains the flags.
+`siso-bep` prints a link to the build in Hermetiq when it starts.
 
-## 4. Find the build in Hermetiq
+### Making It Faster
 
-Open the link. You get the same view as a Bazel build: what ran remotely, the timeline and critical path, and which worker ran each action.
+The cheapest changes come first:
 
-## 5. Make it faster, cheapest first
+1. Run every step remotely. It costs nothing and is the biggest win. Without
+   `default-remote` and `googlechrome`, thousands of steps run on the
+   workstation. The command above already includes both.
+2. Warm the pools before building. It costs idle node time. The large pool
+   takes several minutes to scale up from zero, and a cold build waits for it.
+   Raise its `minReplicas`, or keep it warm during working hours with a KEDA
+   cron window.
+3. Add nodes. It costs money. We stopped at 40 because of our cloud quota.
 
-1. **Run every step remotely.** Free, and the biggest win. Without `default-remote` and `googlechrome`, thousands of steps run on your workstation. The command above already has both.
-2. **Warm the pools before you build.** Costs some idle node time. The large pool takes several minutes to scale up from zero, and a cold build waits for it. Raise its `minReplicas`, or keep it warm during working hours with a KEDA cron window (see [reference.md](reference.md#the-pools)).
-3. **Add nodes.** Costs money. We stopped at 40 because of our cloud quota.
+To find what is limiting your own builds, open a slow build in Hermetiq and
+click **Ask Barn Owl**. On one of ours, it found the pool ramp-up without being
+told about the pools and recommended warming the large pool.
 
-To find your own bottleneck, open a slow build and click **Ask Barn Owl**. On one of ours, it found the pool ramp-up on its own and recommended warming the large pool.
-
-## What we tried, in order
-
-Each row is a cold build of `chrome`, with the remote cache off.
+What we tried, in order. Each row is a cold build of `chrome` with remote cache
+reads off.
 
 | Change | Build time |
 | --- | --- |
@@ -142,4 +160,11 @@ Each row is a cold build of `chrome`, with the remote cache off.
 | Warm the pools first | 16 min |
 | More actions per large pod | no faster |
 
-The last three rows are what this example ships. The local patch was faster for us, but Chromium doesn't include it, so the example leaves it out.
+The last three rows are what this example ships. The local patch was faster for
+us, but Chromium doesn't include it, so the example leaves it out.
+
+### Troubleshooting
+
+Common errors and their fixes are in
+[`reference.md`](reference.md#troubleshooting), along with the pool settings
+and Buildbarn's blob size limits.
