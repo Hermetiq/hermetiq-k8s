@@ -124,6 +124,7 @@ Define and manage Buildbarn worker pools as Kubernetes resources.
 | [`custom-values/`](custom-values/) | Starter overrides for the supported stack and its dependencies |
 | [`custom-values/rbeworkers/`](custom-values/rbeworkers/) | Sample `RbeWorker` pools to apply after Buildbarn |
 | [`examples/`](examples/) | Bazel integrations, runner images, and validation projects |
+| [`tools/siso-bep/`](tools/siso-bep/) | Reports Siso (Chromium) builds to Hermetiq as Build Event Protocol events |
 | [`docs/`](docs/) | Focused architecture and operational runbooks |
 
 The component READMEs are the canonical references for chart-specific values

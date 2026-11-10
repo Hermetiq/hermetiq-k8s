@@ -1,0 +1,34 @@
+name: siso-bep
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - tools/siso-bep/**
+      - .github/workflows/siso-bep.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/siso-bep/**
+      - .github/workflows/siso-bep.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/siso-bep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/siso-bep/go.mod
+          cache-dependency-path: tools/siso-bep/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go mod tidy -diff
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build -o /dev/null .
