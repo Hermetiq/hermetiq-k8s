@@ -15,32 +15,38 @@ up to `fetch` to get a checkout.
 Chromium's remote actions run in Google's public `siso-chromium` image. This
 example deploys two worker pools for it on the same platform: a small pool that
 keeps one pod running, and a large pool for heavy actions that starts at zero.
-Buildbarn's size-class analysis decides which actions need the large pool. A
-new action tries the small pool first and moves to the large pool if it runs
-longer than `minimumExecutionTimeout`.
 
 The pools need 40 nodes at most, each with 16 vCPUs and local SSD. On GKE, the
 local SSD must back the nodes' ephemeral storage
 (`--ephemeral-storage-local-ssd`). Check your cloud quota, including local SSD.
 
-Add the following to your Buildbarn values and upgrade the release. The same
-settings, with comments, are in [`buildbarn-values.yaml`](buildbarn-values.yaml).
-If you already have `predeclaredPlatformQueues`, add this entry to your list,
-because Helm replaces lists rather than merging them.
+Buildbarn needs four settings for the pools:
+
+- `iscc`: a store where the scheduler records which pool each action needs.
+- `fsac`: a store the workers use to prefetch each action's inputs.
+- `sizeClassAnalysis`: sends a new action to the small pool first. If it runs
+  longer than `minimumExecutionTimeout`, it moves to the large pool.
+- `predeclaredPlatformQueues`: lets builds start while the large pool is at
+  zero.
+
+Add them to your Buildbarn values and upgrade the release. They're also in
+[`buildbarn-values.yaml`](buildbarn-values.yaml). If you already have
+`predeclaredPlatformQueues`, add this entry to your list, because Helm replaces
+lists rather than merging them.
 
 ```yaml
 storage:
   persistence:
     iscc:
-      enabled: true  # where the scheduler records which pool each action needs
+      enabled: true
     fsac:
-      enabled: true  # the workers prefetch inputs using this
+      enabled: true
 scheduler:
   sizeClassAnalysis:
     enabled: true
     pageRank:
       minimumExecutionTimeout: 60s
-  predeclaredPlatformQueues:  # lets builds start while the large pool is at zero
+  predeclaredPlatformQueues:
     - platform:
         - {name: OSFamily, value: Linux}
         - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
