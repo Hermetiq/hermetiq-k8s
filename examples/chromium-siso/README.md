@@ -16,7 +16,7 @@ This tutorial builds Chromium on your own Buildbarn, shows each build in Hermeti
 
 The commands use the same placeholders as the [other examples](../envoy.md): `<your-domain>` is your installation's `hosts.domainBase`, `$INSTANCE_NAME` is your Hermetiq project ID, and `$CREDENTIAL_HELPER` is the path to your Hermetiq credential helper.
 
-## 1. Set up the cluster
+## 1. Add Chromium worker pools to Buildbarn
 
 1. **Turn on size classes.** Both pools serve the same platform, and Buildbarn decides which actions need the large one. A new action tries the small pool first and moves to the large pool if it runs longer than `minimumExecutionTimeout`. The ISCC store remembers where each action belongs, the predeclared queue keeps the Chromium platform available while the large pool is at zero, and the FSAC store backs the pools' input prefetching.
 
@@ -60,7 +60,7 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
    kubectl get rbeworkers -n <buildbarn-namespace> | grep chromium
    ```
 
-## 2. Set up your workstation
+## 2. Point your Chromium checkout at Buildbarn
 
 1. **Point Chromium at your Buildbarn.** Add these to the `src` solution in your `.gclient`, then run `gclient runhooks`:
 
@@ -112,7 +112,7 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 
 `siso-bep` prints a link to the build when it starts. [reference.md](reference.md#build-flags) explains the flags.
 
-## 4. See it in Hermetiq
+## 4. Find the build in Hermetiq
 
 Open the link. You get the same view as a Bazel build: what ran remotely, the timeline and critical path, and which worker ran each action.
 
