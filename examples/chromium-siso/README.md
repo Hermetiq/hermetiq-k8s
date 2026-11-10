@@ -32,15 +32,15 @@ because Helm replaces lists rather than merging them.
 storage:
   persistence:
     iscc:
-      enabled: true
+      enabled: true  # where the scheduler records which pool each action needs
     fsac:
-      enabled: true
+      enabled: true  # the workers prefetch inputs using this
 scheduler:
   sizeClassAnalysis:
     enabled: true
     pageRank:
       minimumExecutionTimeout: 60s
-  predeclaredPlatformQueues:
+  predeclaredPlatformQueues:  # lets builds start while the large pool is at zero
     - platform:
         - {name: OSFamily, value: Linux}
         - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
