@@ -18,7 +18,9 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
 
 ## 1. Set up the cluster
 
-1. Add this to your Buildbarn values and run `helm upgrade`. It's also in [`buildbarn-values.yaml`](buildbarn-values.yaml), with comments.
+1. **Turn on size classes.** Both pools serve the same platform, and Buildbarn decides which actions need the large one. A new action tries the small pool first and moves to the large pool if it runs longer than `minimumExecutionTimeout`. The ISCC store remembers where each action belongs, the predeclared queue keeps the Chromium platform available while the large pool is at zero, and the FSAC store backs the pools' input prefetching.
+
+   Add this to your Buildbarn values and run `helm upgrade`. It's also in [`buildbarn-values.yaml`](buildbarn-values.yaml), with comments.
 
    ```yaml
    storage:
@@ -39,9 +41,9 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
          sizeClasses: [1, 4]
    ```
 
-   New actions try the small pool first, and move to the large pool if they take longer than `minimumExecutionTimeout`. The predeclared queue keeps the Chromium platform available while the large pool is at zero. If you already have `predeclaredPlatformQueues`, add this entry to your list: Helm replaces lists rather than merging them.
+   If you already have `predeclaredPlatformQueues`, add this entry to your list: Helm replaces lists rather than merging them.
 
-2. Add the pools to the kustomize overlay you apply your RbeWorkers with, and apply it:
+2. **Add the worker pools.** The small pool keeps one pod up for everyday actions; the large pool takes the heavy ones and starts at zero. Add them to the kustomize overlay you apply your RbeWorkers with, and apply it:
 
    ```yaml
    resources:
@@ -52,17 +54,15 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
 
    Your overlay's namespace and RbeWorker patches apply to these pools too. Add your 16-vCPU node pool's label to their `nodeSelector`, the same way as for your other pools.
 
-3. Check both pools are there:
+3. **Check both pools are there:**
 
    ```bash
    kubectl get rbeworkers -n <buildbarn-namespace> | grep chromium
    ```
 
-   The small pool keeps one pod running. The large pool starts at zero and scales up when work arrives.
-
 ## 2. Set up your workstation
 
-1. Point Chromium at your Buildbarn. Add these to the `src` solution in your `.gclient`, then run `gclient runhooks`:
+1. **Point Chromium at your Buildbarn.** Add these to the `src` solution in your `.gclient`, then run `gclient runhooks`:
 
    ```python
    "custom_vars": {
@@ -74,7 +74,7 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
 
    [`client/backend.star`](client/backend.star) tells Siso which platform to ask for: Linux, in Chromium's public `siso-chromium` image, the same as the pools.
 
-2. Create the output directory with remote execution on:
+2. **Create the output directory** with remote execution on:
 
    ```bash
    mkdir -p out/rbe && cp /path/to/examples/chromium-siso/client/args.gn out/rbe/args.gn
@@ -82,14 +82,14 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
    ```
 
    [`client/args.gn`](client/args.gn) is a release build without symbols: `use_remoteexec`, `use_siso`, `is_debug=false`, `symbol_level=0`.
-3. Check Siso can log in:
+3. **Check Siso can log in:**
 
    ```bash
    export SISO_CREDENTIAL_HELPER=$CREDENTIAL_HELPER
    third_party/siso/cipd/siso auth-check -reapi_address=bb.<your-domain>:443 -reapi_instance=$INSTANCE_NAME
    ```
 
-4. Install `siso-bep`, which reports Siso builds to Hermetiq:
+4. **Install `siso-bep`**, which reports Siso builds to Hermetiq:
 
    ```bash
    go install github.com/Hermetiq/hermetiq-k8s/tools/siso-bep@v0.1.0
