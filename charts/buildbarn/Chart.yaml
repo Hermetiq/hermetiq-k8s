@@ -12,6 +12,8 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Record key-location map puts that lose to a newer record from put_iterations{outcome=IgnoredOlder}. bb-storage 20260908T142448Z-db62041 does not expose put_ignored_invalid_total, and it still uses buildbarn_blobstore_hashing_key_location_map_* (main renamed those to buildbarn_lossymap_hash_map_* after 677f49d41)."
     - kind: changed
       description: "Update the optional grpc-cache-proxy sidecar image to v0.9.6"
     - kind: fixed

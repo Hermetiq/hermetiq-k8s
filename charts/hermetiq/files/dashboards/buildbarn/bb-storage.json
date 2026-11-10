@@ -1155,10 +1155,10 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_older:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
           "format": "time_series",
           "intervalFactor": 2,
-          "legendFormat": "IgnoredInvalid",
+          "legendFormat": "IgnoredOlder",
           "refId": "A"
         },
         {
@@ -1166,7 +1166,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"ac\",outcome!=\"IgnoredOlder\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -1276,10 +1276,10 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_older:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
           "format": "time_series",
           "intervalFactor": 2,
-          "legendFormat": "IgnoredInvalid",
+          "legendFormat": "IgnoredOlder",
           "refId": "A"
         },
         {
@@ -1287,7 +1287,7 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\",outcome!=\"IgnoredOlder\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",

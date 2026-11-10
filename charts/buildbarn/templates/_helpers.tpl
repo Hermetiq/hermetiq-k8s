@@ -843,6 +843,8 @@ properties: [
     slow: common.blobstore.contentAddressableStorage,
     fast: {
       'local': {
+        // Flat fields, not the nested keyLocationMap message from bb-storage
+        // main after 677f49d41. Image 20260908T142448Z-db62041 rejects the nest.
         keyLocationMapInMemory: {
           entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
         },

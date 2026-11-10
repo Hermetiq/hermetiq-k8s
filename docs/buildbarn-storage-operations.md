@@ -78,7 +78,7 @@ buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
 buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
 ```
 
-Any sustained nonzero rate means the map is too small or too crowded. Grow the map. If it is in memory, grow the storage pod memory request at the same time. These counters reset on restart, so a quiet dashboard immediately after a deploy is not proof that the map is healthy.
+These are the counters exposed by `ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041`. A put that loses to a newer record is the histogram outcome `IgnoredOlder` on `buildbarn_blobstore_hashing_key_location_map_put_iterations`, not a `put_ignored_invalid` counter. bb-storage main after commit `677f49d41` renamed the family to `buildbarn_lossymap_hash_map_*`; the [storage model](buildbarn-storage-model.md#what-an-undersized-map-looks-like) records why this chart still uses the names above. Any sustained nonzero rate means the map is too small or too crowded. Grow the map. If it is in memory, grow the storage pod memory request at the same time. These counters reset on restart, so a quiet dashboard immediately after a deploy is not proof that the map is healthy.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|

@@ -817,6 +817,8 @@ frontend:
     # Raise blocksSizeGi without raising this and the map fills before the disk
     # does -- blobs on disk the index can no longer reach, visible as
     # buildbarn_blobstore_hashing_key_location_map_*_too_many_* going nonzero.
+    # Those are the names image 20260908T142448Z-db62041 exposes. bb-storage
+    # main after 677f49d41 renamed them to buildbarn_lossymap_hash_map_*.
     keyLocationMapInMemoryEntries: 20971520
     # Total bytes across ALL blocks below, so block size is
     # blocksSizeGi / (old+current+new+spare). A blob larger than one block fails

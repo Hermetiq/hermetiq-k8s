@@ -14,6 +14,8 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "bb-storage dashboard plots key-location map puts that lose to a newer record as IgnoredOlder, the histogram outcome bb-storage 20260908T142448Z-db62041 actually emits"
     - kind: changed
       description: "Update application images to v0.9.6"
     - kind: added

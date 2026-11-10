@@ -1,3 +1,9 @@
+// Key-location map fields in this file are the flat LocalBlobAccessConfiguration
+// fields accepted by bb-storage 20260908T142448Z-db62041
+// (keyLocationMapInMemory, keyLocationMapOnBlockDevice,
+// keyLocationMapMaximumGetAttempts, keyLocationMapMaximumPutAttempts).
+// bb-storage main after 677f49d41 nested them under keyLocationMap. Do not
+// nest them here until the storage image is bumped past that commit.
 local common = import 'common.libsonnet';
 
 {

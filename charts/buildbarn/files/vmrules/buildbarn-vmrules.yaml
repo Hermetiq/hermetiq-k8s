@@ -28,14 +28,25 @@ spec:
           expr: max(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (kubernetes_shard, namespace, storage_type)
         - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
           expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (kubernetes_shard, namespace, storage_type)
+        # Names below are what ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041
+        # registers (pkg/blobstore/local/hashing_key_location_map.go, label
+        # storage_type). bb-storage main after 677f49d41 renamed them to
+        # buildbarn_lossymap_hash_map_* and relabeled them "name". Do not
+        # switch these rules until the storage image is bumped past that commit.
         - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m
           expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_count[1m])) by (namespace, storage_type, outcome)
         - record: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m
           expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total[1m])) by (namespace, storage_type)
         - record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m
           expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket[1m])) by (namespace, le, storage_type)
-        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m
-          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid_total[1m])) by (namespace, storage_type)
+        # Put() that loses to a newer record already in the slot is the
+        # histogram outcome "IgnoredOlder", not a separate counter. bb-storage
+        # 20260908T142448Z-db62041 never registers
+        # buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid_total
+        # (the name inherited from bb-deployments' recording rules).
+        # https://github.com/buildbarn/bb-storage/blob/db620416646d7e96379779144a88660a5b7b0c46/pkg/blobstore/local/hashing_key_location_map.go#L35-L52
+        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_older:irate1m
+          expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_count{outcome="IgnoredOlder"}[1m])) by (namespace, storage_type)
         - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m
           expr: sum(irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_count[1m])) by (namespace, outcome, storage_type)
         - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m

@@ -110,7 +110,7 @@ Buildbarn's KLM is a fixed-size hash table. To avoid long probe loops, `Get()` a
 
 That failure mode is easy to misread. Disk usage can look healthy, writes may not return an error, and builds may report `NotFound` for blobs that were uploaded moments earlier.
 
-Trust these metrics:
+Trust these metrics. They are the names registered by the bb-storage image this chart deploys, `ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041` (commit `db620416646d7e96379779144a88660a5b7b0c46`):
 
 ```text
 buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
@@ -119,6 +119,10 @@ buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
 ```
 
 Any sustained nonzero rate means the map is too small for the live object count. Grow the map and, if it is in memory, grow the pod memory request with it. The chart ships an alert for dropped puts.
+
+A put that loses to a newer record already in the slot is not its own counter. It is the histogram outcome `IgnoredOlder` on `buildbarn_blobstore_hashing_key_location_map_put_iterations`. There is no series named `buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid_total`. The label on all of these series is `storage_type` (`cas`, `ac`, `iscc`, `fsac`).
+
+Those names are specific to this image. bb-storage main moved the hash table after the image was cut: commit [`677f49d41`](https://github.com/buildbarn/bb-storage/commit/677f49d41847194598d27ff90a3ca9b00d86a4ff) (2026-09-29, "Import lossymap from Bonanza") registers `buildbarn_lossymap_hash_map_put_too_many_iterations_total`, `buildbarn_lossymap_hash_map_put_iterations`, `buildbarn_lossymap_hash_map_get_too_many_attempts_total`, and `buildbarn_lossymap_hash_map_get_attempts`, with label `name` instead of `storage_type`. The same commit nested the flat configuration fields `keyLocationMapInMemory`, `keyLocationMapOnBlockDevice`, `keyLocationMapMaximumGetAttempts`, and `keyLocationMapMaximumPutAttempts` under a `keyLocationMap` message. This chart still emits the flat fields and the `buildbarn_blobstore_hashing_key_location_map_*` names, because that is what `20260908T142448Z-db62041` accepts and exposes. Do not switch the chart to the main names until the storage image moves past that commit.
 
 One implementation detail worth knowing: bb-storage rounds the effective record count down to a prime number for better hash distribution. You do not normally need to tune around that, but it explains why the usable entry count may be slightly below the number you requested.
 

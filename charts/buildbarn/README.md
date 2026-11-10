@@ -1600,10 +1600,24 @@ buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
 buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
 ```
 
+These are the counters registered by the storage image this chart deploys,
+`ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041`
+(`db620416646d7e96379779144a88660a5b7b0c46`). The series are labeled
+`storage_type`. bb-storage main after
+[677f49d41](https://github.com/buildbarn/bb-storage/commit/677f49d41847194598d27ff90a3ca9b00d86a4ff)
+(2026-09-29) renamed them to `buildbarn_lossymap_hash_map_*` and changed the
+label to `name`; keep the names above until the image is bumped. A put that
+loses to a newer record already in the slot is the histogram outcome
+`IgnoredOlder` on `buildbarn_blobstore_hashing_key_location_map_put_iterations`.
+There is no `..._put_ignored_invalid_total` counter.
+
 Any sustained nonzero rate means the map is too small for the live object count —
 go up a power of two. The probe budgets that produce it are rendered into the
-config as `keyLocationMapMaximumGetAttempts: 16` and
-`keyLocationMapMaximumPutAttempts: 64`.
+config as the flat fields `keyLocationMapMaximumGetAttempts: 16` and
+`keyLocationMapMaximumPutAttempts: 64`. That same main commit nested those
+fields, plus `keyLocationMapInMemory` and `keyLocationMapOnBlockDevice`, under
+`keyLocationMap`. This image still accepts the flat fields, which is what the
+chart emits.
 
 Then confirm the block clears your largest blob, scoping the histogram by **both**
 `pod` and `backend_type`. Every worker runs its own `readCaching` local CAS, so an
