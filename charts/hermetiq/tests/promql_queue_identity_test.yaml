@@ -1,0 +1,14 @@
+suite: scheduler queue identity in shipped PromQL
+templates:
+  - templates/configmaps.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: preserves the prefix when the packaged override aggregates executing actions
+    documentSelector:
+      path: metadata.name
+      value: bep-promql-config
+    asserts:
+      - matchRegex:
+          path: data["promql.json"]
+          pattern: '"schedulerPlatformExecutingPeak": "sum by \(instance_name_prefix, platform, size_class\)'

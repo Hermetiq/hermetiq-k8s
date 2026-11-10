@@ -1333,6 +1333,14 @@ Partial query overrides are supported. Unknown template placeholders and blank
 required queries fail API startup instead of silently returning incomplete
 diagnostics.
 
+Scheduler queue assessments join measurements on `(instance_name_prefix,
+platform, size_class)`. Overrides for executing peaks, saturated minutes, and
+completed actions must preserve all three labels; aggregating away the prefix
+combines shared and private queues and prevents private-pool capacity diagnosis.
+Deploy the prefix-preserving query configuration with the corresponding API
+update. These templates load at startup, so restart the API after an external
+ConfigMap update (or change `promqlQueries.rolloutChecksum`).
+
 
 ### Metrics-backed infrastructure tools
 
