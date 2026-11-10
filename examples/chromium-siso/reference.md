@@ -7,16 +7,16 @@ Details behind the [Chromium guide](README.md). For RbeWorker fields in general,
 | | Small | Large |
 | --- | --- | --- |
 | Size class | 1 | 4 |
-| Actions per pod (`spec.config.generated.concurrency`) | 24 | 12 |
+| Actions per pod (`spec.config.generated.concurrency`) | 24 | 9 |
 | Pods (`spec.autoscaling.minReplicas`–`maxReplicas`) | 1–12 | 0–28 |
 | Scale-up threshold (`spec.autoscaling.prometheus.threshold`) | 18 | 4 |
 | Runner / worker | 13 CPU, 32 GiB / 2 CPU, 9 GiB | same |
 
 - **Platform.** Both pools advertise `OSFamily=Linux` and the `siso-chromium` image, exactly as [`client/backend.star`](client/backend.star) requests. Buildbarn matches the whole property set, so a difference in either sends actions to a queue with no workers.
-- **Size classes.** The scheduler runs an action it hasn't seen on the small class first, and learns from how long it takes which actions belong on the large class (see [ISCC size classes](../../docs/iscc-size-classes.md)). Most of a Chromium build's actions stay on the small class, so keep it sized for them.
+- **Size classes.** The scheduler runs an action it hasn't seen on the small class first, with a short timeout (`minimumExecutionTimeout` in [`buildbarn-values.yaml`](buildbarn-values.yaml)). An action that runs past it is retried on the large class, and the scheduler remembers where each action belongs (see [ISCC size classes](../../docs/iscc-size-classes.md)).
 - **Actions per pod.** Large runs fewer, heavier actions. Raise `concurrency` on a pool when its slots are full but its CPU isn't, and add pods when work queues behind a pool whose CPU is busy. Barn Owl and the Hermetiq dashboard show both.
 - **Thresholds** sit below `concurrency`, so a pool adds pods before the ones it has are full. A new node takes minutes to arrive.
-- **Warm capacity.** Large scales to zero between builds to save money. A cold build that starts from zero waits a few minutes for nodes. Raise `minReplicas` before a build when that matters, or keep a floor during working hours with a KEDA cron window (see the commented `cron` block in [`worker-ubuntu24-04.yaml`](../../custom-values/rbeworkers/worker-ubuntu24-04.yaml)).
+- **Warm capacity.** Large scales to zero between builds to save money. A build that starts from zero waits for nodes: in this example's measurements the large pool took about 7 minutes to reach 28 pods. Raise `minReplicas` before a build when that matters, or keep a floor during working hours with a KEDA cron window (see the commented `cron` block in [`worker-ubuntu24-04.yaml`](../../custom-values/rbeworkers/worker-ubuntu24-04.yaml)).
 
 ## The frontend read cache
 

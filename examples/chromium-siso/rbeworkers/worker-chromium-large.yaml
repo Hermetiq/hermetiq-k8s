@@ -13,7 +13,7 @@ spec:
     generated:
       commonConfigMapName: buildbarn-worker-config
       completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
-      concurrency: 12
+      concurrency: 9
       inputDownloadConcurrency: 16
       outputUploadConcurrency: 16
       environmentVariables: {}
