@@ -4,13 +4,7 @@
 - latest tested revision: bbc7a3c29870e0a8b3a3ac31ae909a38ab3d6328 (159.0.8128.0)
 - build tool: Siso v1.6.7
 
-Chromium's `chrome` target is about 57,800 build steps, most of them C++ compiles, with link outputs of up to 715 MB. This example builds it remotely on a Buildbarn installed from this repository, reports every build to Hermetiq, and uses Barn Owl to find what limits the build and what to change.
-
-| | Before | After Barn Owl's recommendation |
-| --- | --- | --- |
-| Cold `chrome` build (median of 3) | 21m 18s | 16m 17s (24% faster) |
-
-Both columns use the same 40 nodes, the same pools and the same client settings. The only change is the one Barn Owl recommended in [section 6](#6-make-it-faster-with-barn-owl): keeping the pools warm.
+Chromium's `chrome` target is about 57,800 build steps, most of them C++ compiles, with link outputs of up to 715 MB. This example builds it remotely on a Buildbarn installed from this repository, shows each build in Hermetiq, and uses Barn Owl to find what's slowing it down. On 40 nodes, a cold build takes 16 minutes with the worker pools warm, down from 21 when they start from zero.
 
 ## Contents
 
@@ -19,7 +13,7 @@ Both columns use the same 40 nodes, the same pools and the same client settings.
 3. [Set up the cluster](#3-set-up-the-cluster)
 4. [Build Chromium](#4-build-chromium)
 5. [See the build in Hermetiq](#5-see-the-build-in-hermetiq)
-6. [Make it faster with Barn Owl](#6-make-it-faster-with-barn-owl)
+6. [Find what's slowing it down with Barn Owl](#6-find-whats-slowing-it-down-with-barn-owl)
 
 Field-by-field pool details, autoscaling and troubleshooting are in [reference.md](reference.md).
 
@@ -100,58 +94,34 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 | `--remote_jobs=800` | Keeps actions queued behind every slot. Set it above your total slots, which is 540 for these pools. |
 | `-output_local_strategy=greedy` | Downloads final outputs, such as the `chrome` binary, but not intermediate object files. |
 
-The cold builds measured in this example add `-re_cache_enable_read=false` and use a new output directory, so every step runs.
-
 ## 5. See the build in Hermetiq
 
-Every build shows up in Build History with its targets, remote actions, timeline and critical path, the same as a Bazel build. Four things make that work:
+`siso-bep` gives each Siso build the same record a Bazel build gets. Open it in Build History to see what ran remotely, the timeline and critical path, and which workers ran each action. [reference.md](reference.md#how-a-siso-build-reaches-hermetiq) explains how the pieces are tied together.
 
-1. **The build exists before Siso starts.** `siso-bep` creates the invocation in Hermetiq first, so nothing that arrives during the build is dropped.
-2. **One ID ties it together.** `siso-bep` passes its invocation ID to Siso as `--build_id`, and Siso sends it to Buildbarn on every remote action as the REAPI `tool_invocation_id`.
-3. **The build's own record.** When Siso finishes, `siso-bep` reads Siso's per-step metrics and sends:
-   - one target per GN target
-   - the remote, local and cache-hit counts
-   - the critical path
-   - a trace profile, uploaded to Buildbarn's CAS, which gives Hermetiq the per-action timeline
-4. **The workers' record.** Each worker reports every action it runs to Hermetiq's completed-action logger: which pod ran it, and how long it queued and executed. Hermetiq files it under the same invocation by `tool_invocation_id`.
+## 6. Find what's slowing it down with Barn Owl
 
-Where to look:
+Open a slow build in Build History, click **Ask Barn Owl**, and ask where the time went. For a cold build that took 20m 55s, we asked:
 
-- **What ran remotely?** Build History and the invocation overview: executions, remote executions and cache hits.
-- **Where did the time go?** The invocation timeline and critical path, from the uploaded profile.
-- **Which workers ran it?** Actions Executed: remote execution time per action type, input fetch and output upload, and parallelism over time.
+> Where did its time go, what limited it, and what should I change in the worker pools to make it faster?
 
-## 6. Make it faster with Barn Owl
+Barn Owl read the build, the scheduler's queues and the pools' scaling history, and answered:
 
-Start from the "before" build: the large pool runs 9 actions per pod and starts from zero. It took 20m 55s. Open the build in Build History, click **Ask Barn Owl**, and ask a plain question:
+> The build was execution-bound on a cold, shared remote fleet, and its single largest recoverable loss was the ~7-minute worker ramp-up at the start: the large Siso pool was at zero replicas when the build began and did not reach its 28-replica cap until ~17:22, roughly 7 minutes into a 20m55s build. Steady-state execution after that looked healthy.
 
-> Invocation `<id>` is a cold chrome build of Chromium that took 20m 55s on our Siso worker pools. Where did its time go, what limited it, and what should I change in the worker pools to make it faster?
+It also checked what wasn't limiting the build: inputs and outputs moved quickly, and the queue drained once the pool was full, so more pods wouldn't help. Its recommendation:
 
-Barn Owl reads the build, the scheduler's queues and the pools' scaling history, and links each claim to its evidence. On this build it found:
+> Raising the large pool's `minReplicas` above 0 (or pre-warming it before a known cold build) is the change most directly supported by this evidence, since the ramp-up gap is measured.
 
-- **Where the time went.** 54,605 of 57,786 actions ran remotely; C++ compiles were 78% of action time.
-- **What limited it.** Only the first 7 minutes, while the large pool scaled from zero to its 28 pods. Until then 0–177 actions were running while 775–800 waited, with a p95 queue wait of 163s. After that 355–540 ran at once and p95 queue wait fell to 15–40s.
-- **What didn't.** Input fetch p95 stayed under 0.15s and output upload p95 under 2.1s. A higher `maxReplicas` wasn't justified, because the queue drained once the pool was full.
-- **Recommendation.** Raise the large pool's `minReplicas` above 0, or warm it before a known cold build, and compare the ramp-up interval.
+With both pools warm, the same build takes 16m 17s. Set `minReplicas` in [`rbeworkers/worker-chromium-large.yaml`](rbeworkers/worker-chromium-large.yaml), or keep the pool warm only during working hours with a KEDA cron window (see [reference.md](reference.md#the-pools)). Warm pools cost node time while they sit idle.
 
-![Barn Owl's answer: the 7-minute ramp-up of the large pool was the one measured loss](images/barn-owl-answer.png)
+Most of the remaining time is at the end of the build. The critical path finishes with the `chrome` link, and 2–4 minutes of that goes to downloading the 715 MB binary to the workstation.
 
-![Barn Owl's recommendation: raise the large pool's minReplicas or warm it before a cold build](images/barn-owl-recommendation.png)
+You can ask the same questions from your own coding agent through Hermetiq's MCP server.
 
-Warming the pools is a change to `minReplicas` in [`rbeworkers/worker-chromium-large.yaml`](rbeworkers/worker-chromium-large.yaml), or a KEDA cron window (see [reference.md](reference.md#the-pools)). With both pools warm, the same build took 16m 17s, the median of three runs: 24% faster. Warm pools cost node time between builds, so keep them warm only when builds are expected.
+## How it was measured
 
-What's left is mostly the build's own shape. Hermetiq's critical path for the warm builds is about 12 minutes (11m 35s to 12m 43s), and it ends with the `chrome` link: about a minute of linking on a worker, then 2–4 minutes downloading the 715 MB binary to the workstation. More actions per pod didn't help: at 12 actions per large pod, large-pool pods used 10.4–11.6 of their 15 CPUs and small-pool pods 13.4–13.6, and the build took no less time than at 9.
+On 10 November 2026, at the Chromium revision above, from an 8-core Linux workstation, on 40 spot 16-vCPU nodes with local SSD (28 large, 12 small). Each build used a new output directory with remote cache reads off (`-re_cache_enable_read=false`), so every step ran. Three builds per setup:
 
-You can also ask the same questions from your own coding agent: connect it to Hermetiq's MCP server, and it can read the same build, cache and worker data next to your manifests and Siso flags.
-
-## How these numbers were measured
-
-Measured on 10 November 2026 with one Chromium commit, one 8-core Linux workstation as the client, and 40 spot 16-vCPU nodes with local SSD (28 large, 12 small). Every run was a cold build of `chrome`.
-
-| Runs | Pools | Times | Node-minutes |
-| --- | --- | --- | --- |
-| Before | large starting from zero after its nodes were removed | 20m 55s, 21m 18s, 23m 12s | 628, 655, 685 |
-| After | both warm | 15m 17s, 16m 17s, 16m 28s | 569, 634, 638 |
-| Large at 12 actions per pod | both warm | 15m 37s, 17m 21s | 610, 674 |
-
-The first two rows use the pools in [`rbeworkers/`](rbeworkers/), with the large pool at 9 actions per pod. Node-minutes add up the Siso worker pods running during the build, sampled every 30 seconds; they don't include the time warm pools spend idle between builds.
+- Pools starting from zero: 20m 55s, 21m 18s, 23m 12s.
+- Pools warm: 15m 17s, 16m 17s, 16m 28s.
+- Pools warm with 12 actions per large pod instead of 9: 15m 37s, 17m 21s. The third build didn't finish.

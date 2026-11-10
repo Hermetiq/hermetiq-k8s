@@ -30,6 +30,13 @@ Buildbarn's block-based stores can't hold a blob bigger than one block, and an o
 
 If you give `frontend.readCache` an `emptyDir` with a `sizeLimit`, set `frontend.resources.requests.ephemeral-storage` to match, or the kubelet can evict the frontend (see the chart README's Frontend Read Cache section).
 
+## How a Siso build reaches Hermetiq
+
+- **The build is created first.** `siso-bep` starts the invocation in Hermetiq before Siso runs, so records that arrive during the build have somewhere to go.
+- **One ID ties it together.** `siso-bep` passes its invocation ID to Siso as `--build_id`, and Siso sends it to Buildbarn with every remote action as the REAPI `tool_invocation_id`.
+- **Siso's record.** When Siso finishes, `siso-bep` reads its per-step metrics and sends one target per GN target, the remote, local and cache-hit counts, the critical path, and a trace profile (uploaded to Buildbarn's CAS) that gives Hermetiq the per-action timeline.
+- **The workers' record.** Each worker reports every action it runs to Hermetiq's completed-action logger, with the pod that ran it and how long it queued and executed. Hermetiq files it under the same invocation by `tool_invocation_id`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Check |
