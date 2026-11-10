@@ -18,20 +18,70 @@ The commands use the same placeholders as the [other examples](../envoy.md): `<y
 
 ## 1. Set up the cluster
 
-1. Merge [`buildbarn-values.yaml`](buildbarn-values.yaml) into your Buildbarn values and upgrade the release.
-2. Add [`rbeworkers/`](rbeworkers/) as a component to the overlay you apply your RbeWorkers with, and apply it.
+1. Add this to your Buildbarn values and run `helm upgrade`. It's also in [`buildbarn-values.yaml`](buildbarn-values.yaml), with comments.
+
+   ```yaml
+   storage:
+     persistence:
+       iscc:
+         enabled: true   # remembers which actions need the large pool
+       fsac:
+         enabled: true   # needed by the pools' input prefetching
+   scheduler:
+     sizeClassAnalysis:
+       enabled: true
+       pageRank:
+         minimumExecutionTimeout: 60s
+     predeclaredPlatformQueues:
+       - platform:
+           - {name: OSFamily, value: Linux}
+           - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
+         sizeClasses: [1, 4]
+   ```
+
+   New actions try the small pool first, and move to the large pool if they take longer than `minimumExecutionTimeout`. The predeclared queue keeps the Chromium platform available while the large pool is at zero. If you already have `predeclaredPlatformQueues`, add this entry to your list: Helm replaces lists rather than merging them.
+
+2. Add the pools to the kustomize overlay you apply your RbeWorkers with, and apply it:
+
+   ```yaml
+   resources:
+     - ../../path/to/custom-values/rbeworkers
+   components:
+     - ../../path/to/examples/chromium-siso/rbeworkers
+   ```
+
+   Your overlay's namespace and RbeWorker patches apply to these pools too. Add your 16-vCPU node pool's label to their `nodeSelector`, the same way as for your other pools.
+
 3. Check both pools are there:
 
    ```bash
    kubectl get rbeworkers -n <buildbarn-namespace> | grep chromium
    ```
 
-There are two pools: a small one that stays up, and a large one that starts at zero. Buildbarn learns which actions need the large one.
+   The small pool keeps one pod running. The large pool starts at zero and scales up when work arrives.
 
 ## 2. Set up your workstation
 
-1. Add the vars in [`client/gclient-custom-vars.txt`](client/gclient-custom-vars.txt) to your `.gclient`, then run `gclient runhooks`.
-2. Copy [`client/args.gn`](client/args.gn) to `out/rbe/args.gn` and run `gn gen out/rbe`.
+1. Point Chromium at your Buildbarn. Add these to the `src` solution in your `.gclient`, then run `gclient runhooks`:
+
+   ```python
+   "custom_vars": {
+     "reapi_address": "bb.<your-domain>:443",
+     "reapi_instance": "<your-project-id>",
+     "reapi_backend_config_path": "/path/to/examples/chromium-siso/client/backend.star",
+   },
+   ```
+
+   [`client/backend.star`](client/backend.star) tells Siso which platform to ask for: Linux, in Chromium's public `siso-chromium` image, the same as the pools.
+
+2. Create the output directory with remote execution on:
+
+   ```bash
+   mkdir -p out/rbe && cp /path/to/examples/chromium-siso/client/args.gn out/rbe/args.gn
+   gn gen out/rbe
+   ```
+
+   [`client/args.gn`](client/args.gn) is a release build without symbols: `use_remoteexec`, `use_siso`, `is_debug=false`, `symbol_level=0`.
 3. Check Siso can log in:
 
    ```bash
