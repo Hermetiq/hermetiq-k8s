@@ -136,46 +136,26 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 
 `siso-bep` prints a link to the build in Hermetiq when it starts.
 
-### Making It Faster
+### What We Tried
 
-Try these in order. Each one costs more than the one before.
+We made the build faster one change at a time, and timed a cold build of
+`chrome` after each change, with remote cache reads off so every step ran. Each
+attempt has its own page. The [summary](attempts/summary.md) ranks the changes
+by what they cost and what they saved.
 
-1. Send every step to Buildbarn. This costs nothing and helps the most.
-   Chromium's default Siso config runs thousands of steps on your workstation,
-   which then becomes the bottleneck. The `default-remote` and `googlechrome`
-   options in the command above send those steps to the worker pools.
-2. Start the large pool before you build. It scales down to zero between
-   builds and takes several minutes to scale back up, so a build that starts
-   while it's at zero waits for it. Set its `minReplicas` above zero, or keep
-   it running during working hours with a KEDA cron window. You pay for the
-   nodes while they sit idle.
-3. Add nodes. More nodes cost more money. We stopped at 40 because of our
-   cloud quota.
-
-To see what's slowing down your own builds, open a slow build in Hermetiq and
-click **Ask Barn Owl**. When we asked it about one of ours, it found that the
-build was waiting for the large pool to scale up, and recommended keeping that
-pool running.
-
-What we tried, in order. Each row is a cold build of `chrome` with remote cache
-reads off.
-
-| Change | Build time |
-| --- | --- |
-| Siso's defaults, 16 nodes | 46 min |
-| Up to 40 nodes, `--remote_jobs` 400 | 29 min |
-| Add `default-remote` | 29 min |
-| Keep links on the workstation (a local patch to Chromium's Siso config) | 23 min |
-| Add `googlechrome` | 18 min |
-| Double `--remote_jobs` to 800 | 17 min |
-| Warm the pools first | 12 min |
-| Shrink the small pool | slower |
-| Drop the patch: Chromium's own config, pools starting cold | 21 min |
-| Warm the pools first | 16 min |
-| More actions per large pod | no faster |
-
-The last three rows are what this example ships. The local patch was faster for
-us, but Chromium doesn't include it, so the example leaves it out.
+| # | Change | Build time |
+| --- | --- | --- |
+| 1 | [Siso's defaults on 16 nodes](attempts/01-siso-defaults.md) | 46 min |
+| 2 | [Up to 40 nodes](attempts/02-more-nodes.md) | 29 min |
+| 3 | [Add `default-remote`](attempts/03-default-remote.md) | 29 min |
+| 4 | [Keep links on the workstation](attempts/04-local-links.md) | 23 min |
+| 5 | [Add `googlechrome`](attempts/05-googlechrome.md) | 18 min |
+| 6 | [Double `--remote_jobs` to 800](attempts/06-remote-jobs.md) | 17 min |
+| 7 | [Warm the pools first](attempts/07-warm-pools.md) | 12 min |
+| 8 | [Shrink the small pool](attempts/08-smaller-small-pool.md) | slower |
+| 9 | [Drop the patch: Chromium's own config](attempts/09-chromium-config.md) | 21 min |
+| 10 | [Warm the pools first, again](attempts/10-warm-pools-again.md) | 16 min |
+| 11 | [More actions per large pod](attempts/11-more-actions-per-pod.md) | no faster |
 
 ### Troubleshooting
 
