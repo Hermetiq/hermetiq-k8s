@@ -18,6 +18,20 @@ Details behind the [Chromium guide](README.md). For RbeWorker fields in general,
 - **Thresholds** sit below `concurrency`, so a pool adds pods before the ones it has are full. A new node takes minutes to arrive.
 - **Warm capacity.** Large scales to zero between builds to save money. A build that starts from zero waits for nodes: in this example's measurements the large pool took about 7 minutes to reach 28 pods. Raise `minReplicas` before a build when that matters, or keep a floor during working hours with a KEDA cron window (see the commented `cron` block in [`worker-ubuntu24-04.yaml`](../../custom-values/rbeworkers/worker-ubuntu24-04.yaml)).
 
+## Build flags
+
+| Flag | Why |
+| --- | --- |
+| `googlechrome` | Sends generator steps remote: mojo, Rust, nasm, TypeScript, grit and others. Without it they run on your workstation. |
+| `default-remote` | Sends the remaining rules remote, including links. |
+| `remote-link` | Links on a worker. `default-remote` already does this; it's listed to make the intent explicit. |
+| `no-remote-timeout` | Removes Chromium's 2-minute remote timeout, which can expire while actions wait for a pool to scale up. |
+| `--strict_remote` | Never runs a remote step on your workstation, even as a fallback. |
+| `--remote_jobs=800` | Keeps work queued for every slot. Set it above your pools' total slots. |
+| `-output_local_strategy=greedy` | Downloads final outputs, such as the `chrome` binary, but not intermediate object files. |
+
+To measure a cold build, add `-re_cache_enable_read=false` and use a new output directory, so every step runs.
+
 ## Blob size limits
 
 Buildbarn's block-based stores can't hold a blob bigger than one block, and an output bigger than that fails the build. Block size is `blocksSizeGi / (oldBlocks + currentBlocks + newBlocks + spareBlocks)`. The chart's default CAS has blocks of about 21 GiB, but check any store you've made smaller, and `frontend.readCache` if you enable it. Chromium's largest outputs:
