@@ -53,18 +53,22 @@ scheduler:
       sizeClasses: [1, 4]
 ```
 
-Then add the pools in [`rbeworkers/`](rbeworkers/) to the kustomize overlay you
-apply your RbeWorkers with, and add your node pool's label to their
-`nodeSelector` the same way as for your other pools:
+Next, add the worker pools. [`rbeworkers/`](rbeworkers/) is a kustomize
+component, so it goes into the overlay you already use to apply your
+RbeWorkers. That way your overlay's namespace and settings apply to these pools
+too. In the overlay's `kustomization.yaml`, add:
 
 ```yaml
-resources:
-  - ../../path/to/custom-values/rbeworkers
 components:
-  - ../../path/to/examples/chromium-siso/rbeworkers
+  - <path-to-hermetiq-k8s>/examples/chromium-siso/rbeworkers
 ```
 
+`<path-to-hermetiq-k8s>` is this repository's checkout, relative to the overlay.
+Add your node pool's label to the pools' `nodeSelector` the same way as for
+your other pools, then apply the overlay and check the pools are there:
+
 ```bash
+kubectl apply -k <your-overlay>
 kubectl get rbeworkers -n hermetiq | grep chromium
 ```
 
