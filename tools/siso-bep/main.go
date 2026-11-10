@@ -61,7 +61,7 @@ func parseOptions(args []string) (*options, error) {
 	fs.StringVar(&o.user, "user", "", "Sent as x-forwarded-user, for BES endpoints that trust a forwarded identity (local labs).")
 	fs.StringVar(&o.credentialHelper, "credential_helper", os.Getenv("SISO_CREDENTIAL_HELPER"), "Bazel-style credential helper for BES request headers. Defaults to $SISO_CREDENTIAL_HELPER.")
 	fs.StringVar(&o.resultsURL, "results_url", "", "If set, printed with the invocation ID appended.")
-	fs.BoolVar(&o.noFrontend, "no_frontend", false, "Don't pass -frontend_file to Siso. Failed steps then show no output.")
+	fs.BoolVar(&o.noFrontend, "no_frontend", false, "Don't pass -frontend_file to Siso. Failed steps' output then comes only from siso_output.")
 	fs.BoolVar(&o.allActions, "all_actions", false, "Report every step as an action, not just failed ones. Hermetiq stores successful actions only for projects that enable it.")
 	fs.BoolVar(&o.noProfile, "no_profile", false, "Don't upload a Bazel-format trace profile to Siso's CAS. Hermetiq's timeline and insights need it.")
 	fs.DurationVar(&o.flushTimeout, "flush_timeout", 60*time.Second, "How long to wait for BES after the build finishes.")
@@ -332,13 +332,15 @@ func insertSisoFlags(args []string, flags ...string) []string {
 	}
 	at := 1
 	if !strings.Contains(filepath.Base(args[0]), "autoninja") {
+		// The subcommand can follow Siso's own flags and their values
+		// (siso -log_dir /tmp ninja ...), so look for it up to -C or --.
 		for i := 1; i < len(args); i++ {
 			a := args[i]
 			if a == "ninja" {
 				at = i + 1
 				break
 			}
-			if a == "--" || a == "-C" || strings.HasPrefix(a, "-C") || !strings.HasPrefix(a, "-") {
+			if a == "--" || strings.HasPrefix(a, "-C") {
 				break
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -539,9 +540,13 @@ func finishedEvent(at time.Time, result buildResult, failures []*stepFailure) *b
 
 const maxFailureMessage = 16 << 10
 
+// truncate cuts s to at most n bytes, on a character boundary.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "\n… (truncated)"
 }

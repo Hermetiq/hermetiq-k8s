@@ -46,7 +46,11 @@ func (inv *invocation) collectEnvironment(ctx context.Context, flags []string) {
 	inv.user = os.Getenv("USER")
 	inv.host, _ = os.Hostname()
 	inv.workingDir, _ = os.Getwd()
-	inv.workspaceDir = findWorkspaceRoot(filepath.Join(inv.workingDir, inv.outDir), inv.workingDir)
+	outDir := inv.outDir
+	if !filepath.IsAbs(outDir) {
+		outDir = filepath.Join(inv.workingDir, outDir)
+	}
+	inv.workspaceDir = findWorkspaceRoot(outDir, inv.workingDir)
 	inv.metadata = map[string]string{"TAG_tool": "siso"}
 	for _, kv := range flags {
 		if k, v, ok := strings.Cut(kv, "="); ok {
@@ -219,13 +223,21 @@ func newConsole(stdout, stderr io.Writer, buffer bool) *console {
 	return c
 }
 
+// take returns the output written since the last call. A multi-byte
+// character cut off at the end stays buffered for the next call.
 func (c *console) take() (stdout, stderr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	stdout, stderr = c.out.String(), c.err.String()
-	c.out.Reset()
-	c.err.Reset()
-	return stdout, stderr
+	return takeComplete(&c.out), takeComplete(&c.err)
+}
+
+func takeComplete(buf *bytes.Buffer) string {
+	complete, rest := completeRunes(buf.Bytes())
+	s := string(complete)
+	rest = append([]byte(nil), rest...)
+	buf.Reset()
+	buf.Write(rest)
+	return s
 }
 
 // stepFailure is a failed step as reported on the frontend stream, which is
@@ -369,14 +381,22 @@ func newReporter(ctx context.Context, opts *options, inv *invocation) (*reporter
 	case strings.HasPrefix(target, "grpcs://"):
 		target = strings.TrimPrefix(target, "grpcs://")
 	}
-	conn, err := grpc.NewClient(target,
+	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 60 * time.Second, Timeout: 20 * time.Second}),
-	)
+	}
+	if opts.credentialHelper != "" {
+		if strings.HasPrefix(opts.besBackend, "grpc://") {
+			log.Printf("siso-bep: not sending credential helper headers over plaintext %s", opts.besBackend)
+		} else {
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(newHelperCredentials(opts.credentialHelper, opts.besBackend)))
+		}
+	}
+	conn, err := grpc.NewClient(target, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
-	md, err := requestMetadata(ctx, opts)
+	md, err := requestMetadata(opts)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -392,22 +412,15 @@ func newReporter(ctx context.Context, opts *options, inv *invocation) (*reporter
 	return &reporter{opts: opts, conn: conn, pub: pub, stop: make(chan struct{}), stopped: make(chan struct{})}, nil
 }
 
-func requestMetadata(ctx context.Context, opts *options) (metadata.MD, error) {
+// requestMetadata is the fixed headers on every BES call. Credential helper
+// headers are added per call by helperCredentials.
+func requestMetadata(opts *options) (metadata.MD, error) {
 	md := metadata.MD{}
 	if opts.projectID != "" {
 		md.Set("x-hermetiq-project-id", opts.projectID)
 	}
 	if opts.user != "" {
 		md.Set("x-forwarded-user", opts.user)
-	}
-	if opts.credentialHelper != "" {
-		headers, err := credentialHelperHeaders(ctx, opts.credentialHelper, opts.besBackend)
-		if err != nil {
-			return nil, fmt.Errorf("credential helper: %w", err)
-		}
-		for k, v := range headers {
-			md.Append(strings.ToLower(k), v...)
-		}
 	}
 	for _, h := range opts.headers {
 		k, v, ok := strings.Cut(h, "=")
@@ -419,29 +432,30 @@ func requestMetadata(ctx context.Context, opts *options) (metadata.MD, error) {
 	return md, nil
 }
 
-// credentialHelperHeaders runs a Bazel credential helper
+// runCredentialHelper runs a Bazel credential helper
 // (https://github.com/EngFlow/credential-helper-spec), the same protocol
-// SISO_CREDENTIAL_HELPER uses.
-func credentialHelperHeaders(ctx context.Context, helper, uri string) (map[string][]string, error) {
-	uri = strings.Replace(strings.Replace(uri, "grpcs://", "https://", 1), "grpc://", "http://", 1)
+// SISO_CREDENTIAL_HELPER uses, for uri. expires is zero when the helper
+// doesn't say.
+func runCredentialHelper(ctx context.Context, helper, uri string) (headers map[string][]string, expires time.Time, err error) {
 	req, err := json.Marshal(map[string]string{"uri": uri})
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	cmd := exec.CommandContext(ctx, helper, "get") //nolint:gosec // G204: user-configured helper
 	cmd.Stdin = bytes.NewReader(req)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, fmt.Errorf("credential helper: %w", err)
 	}
 	var resp struct {
 		Headers map[string][]string `json:"headers"`
+		Expires time.Time           `json:"expires"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parse helper output: %w", err)
+		return nil, time.Time{}, fmt.Errorf("parse credential helper output: %w", err)
 	}
-	return resp.Headers, nil
+	return resp.Headers, resp.Expires, nil
 }
 
 func (r *reporter) send(event *bes.BuildEvent, at time.Time) {

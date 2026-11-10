@@ -7,8 +7,8 @@ This repository is the source for Hermetiq's Kubernetes deployment artifacts:
 - example `RbeWorker` pools and Bazel integrations
 - operational and architecture runbooks
 
-The Helm charts, starter values, examples, and operational runbooks in this
-repository are licensed under Apache-2.0. The Hermetiq application container
+The Helm charts, starter values, examples, tools, and operational runbooks in
+this repository are licensed under Apache-2.0. The Hermetiq application container
 images deployed by the charts are commercial software distributed under the
 [Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md); see [License](#license).
 
@@ -576,8 +576,8 @@ unredacted Kubernetes Secrets.
 
 ## License
 
-- **This repository.** The Helm charts, starter values, examples, and runbooks
-  are licensed under the [Apache License 2.0](LICENSE).
+- **This repository.** The Helm charts, starter values, examples, tools, and
+  runbooks are licensed under the [Apache License 2.0](LICENSE).
 - **Hermetiq container images.** The Hermetiq application, the
   grpc-cache-proxy sidecar, and the Buildbarn worker operator are proprietary
   software distributed under the

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	buildpb "google.golang.org/genproto/googleapis/devtools/build/v1"
@@ -24,6 +25,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	bes "github.com/Hermetiq/hermetiq-k8s/tools/siso-bep/pb/build_event_stream"
 )
 
 func TestInsertSisoFlagsGoesBeforeTargets(t *testing.T) {
@@ -378,8 +381,11 @@ type fakeBES struct {
 	mu         sync.Mutex
 	lifecycle  []*buildpb.PublishLifecycleEventRequest
 	seqs       []int64
+	events     []*buildpb.BuildEvent
 	streams    int
 	failFirstN int
+	// failEveryN drops every stream after it has received this many events.
+	failEveryN int
 	headers    metadata.MD
 	// stall makes the server stop acknowledging tool events and hang the
 	// final lifecycle event until the client gives up.
@@ -423,9 +429,13 @@ func (f *fakeBES) PublishBuildToolEventStream(stream buildpb.PublishBuildEvent_P
 		if first && f.failFirstN > 0 && received > f.failFirstN {
 			return io.ErrUnexpectedEOF
 		}
+		if f.failEveryN > 0 && received > f.failEveryN {
+			return io.ErrUnexpectedEOF
+		}
 		obe := req.GetOrderedBuildEvent()
 		f.mu.Lock()
 		f.seqs = append(f.seqs, obe.GetSequenceNumber())
+		f.events = append(f.events, obe.GetEvent())
 		f.mu.Unlock()
 		if err := stream.Send(&buildpb.PublishBuildToolEventStreamResponse{
 			StreamId: obe.GetStreamId(), SequenceNumber: obe.GetSequenceNumber(),
@@ -839,5 +849,150 @@ func TestBuildProfilePhaseEventsStayWithinActionSpan(t *testing.T) {
 		if ev.Ts < actionStart || ev.Ts+ev.Dur > actionEnd {
 			t.Errorf("phase %q [%d, %d] overflows action [%d, %d]", ev.Cat, ev.Ts, ev.Ts+ev.Dur, actionStart, actionEnd)
 		}
+	}
+}
+
+func TestTruncateKeepsCharactersWhole(t *testing.T) {
+	s := strings.Repeat("a", 9) + "‘quoted’"
+	got := truncate(s, 10) // byte 10 is inside the 3-byte ‘
+	if !utf8.ValidString(got) || !strings.HasPrefix(got, strings.Repeat("a", 9)+"\n") {
+		t.Errorf("truncate = %q, want 9 a's then the truncation note", got)
+	}
+}
+
+func TestPublisherSendsEventsWithInvalidUTF8(t *testing.T) {
+	fake := &fakeBES{}
+	conn := dialFakeBES(t, fake)
+	ctx := context.Background()
+	pub := newPublisher(buildpb.NewPublishBuildEventClient(conn), metadata.MD{}, "proj", "build", "inv")
+	pub.start(ctx)
+	if err := pub.send(progressEvent(0, "bad \xff byte\n", ""), time.Time{}); err != nil {
+		t.Fatalf("send with invalid UTF-8: %v", err)
+	}
+	finishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := pub.finish(finishCtx); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var be bes.BuildEvent
+	if err := fake.events[0].GetBazelEvent().UnmarshalTo(&be); err != nil {
+		t.Fatal(err)
+	}
+	if got := be.GetProgress().GetStdout(); got != "bad � byte\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+func TestConsoleHoldsBackACutOffCharacter(t *testing.T) {
+	c := newConsole(io.Discard, io.Discard, true)
+	quote := []byte("‘") // 3 bytes
+	_, _ = c.stdout.Write(append([]byte("x"), quote[:2]...))
+	if got, _ := c.take(); got != "x" {
+		t.Errorf("first take = %q, want the complete part only", got)
+	}
+	_, _ = c.stdout.Write(quote[2:])
+	if got, _ := c.take(); got != "‘" {
+		t.Errorf("second take = %q, want the completed character", got)
+	}
+}
+
+func TestHelperURI(t *testing.T) {
+	for in, want := range map[string]string{
+		"grpcs://bes.example.com:443": "https://bes.example.com:443",
+		"grpc://localhost:8985":       "http://localhost:8985",
+		"bes.example.com:443":         "https://bes.example.com:443",
+	} {
+		if got := helperURI(in); got != want {
+			t.Errorf("helperURI(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHelperCredentialsRerunHelperWhenHeadersExpire(t *testing.T) {
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	helper := filepath.Join(dir, "helper")
+	script := "#!/bin/sh\necho x >> " + count + "\n" +
+		`echo '{"headers":{"Authorization":["Bearer t"]},"expires":"2026-01-01T01:00:00Z"}'` + "\n"
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil { //nolint:gosec // G306: test helper must be executable
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c := newHelperCredentials(helper, "grpcs://bes.example.com")
+	c.now = func() time.Time { return now }
+	calls := func() int {
+		b, _ := os.ReadFile(count) //nolint:gosec // G304: test file
+		return strings.Count(string(b), "x")
+	}
+
+	for range 2 {
+		md, err := c.GetRequestMetadata(context.Background())
+		if err != nil || md["authorization"] != "Bearer t" {
+			t.Fatalf("GetRequestMetadata = %v, %v", md, err)
+		}
+	}
+	if calls() != 1 {
+		t.Errorf("helper ran %d times before expiry, want 1", calls())
+	}
+	now = now.Add(time.Hour)
+	if _, err := c.GetRequestMetadata(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls() != 2 {
+		t.Errorf("helper ran %d times after expiry, want 2", calls())
+	}
+	if !c.RequireTransportSecurity() {
+		t.Error("credential helper headers must not go over plaintext")
+	}
+}
+
+func TestInsertSisoFlagsAfterSisoTopLevelFlags(t *testing.T) {
+	got := insertSisoFlags([]string{"siso", "-log_dir", "/tmp", "ninja", "-C", "out", "chrome"}, "--build_id=x")
+	want := []string{"siso", "-log_dir", "/tmp", "ninja", "--build_id=x", "-C", "out", "chrome"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("insertSisoFlags = %q, want %q", got, want)
+	}
+}
+
+func TestCollectEnvironmentWithAbsoluteOutDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "build/config/siso"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	inv := &invocation{outDir: filepath.Join(root, "out/Default")}
+	inv.collectEnvironment(context.Background(), nil)
+	if inv.workspaceDir != root {
+		t.Errorf("workspaceDir = %q, want %q", inv.workspaceDir, root)
+	}
+}
+
+func TestPublisherSurvivesRepeatedStreamResets(t *testing.T) {
+	old := reconnectBackoff
+	reconnectBackoff = time.Millisecond
+	t.Cleanup(func() { reconnectBackoff = old })
+
+	fake := &fakeBES{failEveryN: 2}
+	conn := dialFakeBES(t, fake)
+	ctx := context.Background()
+	pub := newPublisher(buildpb.NewPublishBuildEventClient(conn), metadata.MD{}, "proj", "build", "inv")
+	pub.start(ctx)
+	// Every stream acknowledges two events and then drops, so this needs far
+	// more than maxReconnects streams in total.
+	for i := range 3 * maxReconnects {
+		if err := pub.send(progressEvent(int32(i), "line\n", ""), time.Time{}); err != nil { //nolint:gosec // G115: tiny test counts
+			t.Fatal(err)
+		}
+	}
+	finishCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := pub.finish(finishCtx); err != nil {
+		t.Fatalf("finish after periodic stream resets: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.streams <= maxReconnects+1 {
+		t.Errorf("streams = %d; the test needs more than maxReconnects+1 to mean anything", fake.streams)
 	}
 }

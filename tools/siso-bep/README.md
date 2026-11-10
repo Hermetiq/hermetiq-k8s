@@ -17,7 +17,7 @@ siso-bep
 go install github.com/Hermetiq/hermetiq-k8s/tools/siso-bep@latest
 ```
 
-Pin a release in scripts and CI, for example `@tools/siso-bep/v0.1.0`. It needs Go 1.26 or later to build. The binary is pure Go and has no runtime dependencies.
+Pin a release in scripts and CI, for example `@v0.1.0` (git tag `tools/siso-bep/v0.1.0`). It needs Go 1.26 or later to build. The binary is pure Go and has no runtime dependencies.
 
 ## Use
 
@@ -32,18 +32,18 @@ siso-bep --bes_backend=grpcs://<your Hermetiq BEP endpoint> --project=<project I
     chrome
 ```
 
-The build runs exactly as it would without the wrapper, with the same terminal output and the same exit code. If Hermetiq can't be reached when the build starts, `siso-bep` logs it and runs the build without reporting.
+The build runs as it would without the wrapper and exits with Siso's exit code. Progress prints one line per finished step. If Hermetiq can't be reached when the build starts, `siso-bep` logs it and runs the build without reporting.
 
 | Flag | Meaning |
 | --- | --- |
 | `--bes_backend` | Hermetiq's BEP endpoint: `grpcs://host:port` (TLS) or `grpc://host:port` (plaintext). Empty runs the build without reporting. |
 | `--project` | Hermetiq project ID. Siso's `-reapi_instance` must be the same ID so remote actions reported by the Buildbarn workers attach to the build. |
-| `--credential_helper` | Bazel-style credential helper for Hermetiq and the profile upload. Defaults to `$SISO_CREDENTIAL_HELPER`, the one Siso uses. |
+| `--credential_helper` | Bazel-style credential helper for Hermetiq and the profile upload. Defaults to `$SISO_CREDENTIAL_HELPER`, the one Siso uses. Its headers are sent only over TLS, and refreshed when they expire. |
 | `--metadata KEY=VALUE` | Build metadata, like Bazel's `--build_metadata`. Repeatable. Use it for tags or a branch name on a detached checkout. |
 | `--bes_header NAME=VALUE` | Extra request header. Repeatable. |
 | `--all_actions` | Report every step as an action, not only failed ones. Hermetiq keeps successful actions only for projects that enable it. |
-| `--no_profile` | Skip the trace profile upload. Hermetiq's timeline and critical path need it. |
-| `--no_frontend` | Don't pass `-frontend_file` to Siso. Failed steps then show no output. |
+| `--no_profile` | Skip the trace profile upload. Hermetiq's timeline and per-action timing need it. |
+| `--no_frontend` | Don't pass `-frontend_file` to Siso. Failed steps' output then comes only from `siso_output`. |
 | `--results_url` | Printed with the invocation ID appended, as a link to the build. |
 | `--flush_timeout` | How long to wait for Hermetiq after the build finishes (default 60s). |
 | `--user` | Sent as `x-forwarded-user`, for endpoints that trust a forwarded identity. |
@@ -65,6 +65,6 @@ go vet ./...
 go test ./...
 ```
 
-`pb/` holds Go code generated from Bazel's BEP protos in `proto/` (Apache 2.0, © The Bazel Authors). Regenerate it with `buf generate` from this directory.
+`pb/` holds Go code generated from Bazel's BEP protos in `proto/` (Apache 2.0, © The Bazel Authors; each file notes what was changed). Regenerate it with `buf generate` from this directory.
 
-This copy is taken from Hermetiq's main repository at commit `35539b5f`.
+The code is kept in step with the copy in Hermetiq's main repository.

@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// Modified by Hermetiq: go_package and import paths changed for
+// github.com/Hermetiq/hermetiq-k8s/tools/siso-bep.
+
 syntax = "proto3";
 
 package options;

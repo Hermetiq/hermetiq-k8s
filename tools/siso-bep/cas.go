@@ -96,7 +96,7 @@ func uploadBlob(ctx context.Context, t casTarget, credentialHelper string, data 
 	defer cancel()
 
 	if credentialHelper != "" && !t.insecure {
-		headers, helperErr := credentialHelperHeaders(ctx, credentialHelper, "grpcs://"+t.address)
+		headers, _, helperErr := runCredentialHelper(ctx, credentialHelper, "https://"+t.address)
 		if helperErr != nil {
 			return "", fmt.Errorf("credential helper: %w", helperErr)
 		}

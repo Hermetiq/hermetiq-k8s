@@ -34,6 +34,7 @@ type publisher struct {
 	invocationID string
 
 	mu      sync.Mutex
+	acked   int64 // events acknowledged so far, to tell a stream that made progress
 	pending []*buildpb.PublishBuildToolEventStreamRequest
 	nextSeq int64
 	closed  bool
@@ -42,10 +43,10 @@ type publisher struct {
 	done    chan error
 }
 
-const (
-	reconnectBackoff = time.Second
-	maxReconnects    = 10
-)
+const maxReconnects = 10
+
+// reconnectBackoff is multiplied by the attempt number. Tests shorten it.
+var reconnectBackoff = time.Second
 
 func newPublisher(client buildpb.PublishBuildEventClient, md metadata.MD, projectID, buildID, invocationID string) *publisher {
 	return &publisher{
@@ -118,6 +119,7 @@ func invocationFinished(result buildResult) *buildpb.BuildEvent {
 // Hermetiq uses event times for target durations, so post-build events carry
 // the time the step actually happened.
 func (p *publisher) send(event *bes.BuildEvent, at time.Time) error {
+	sanitizeUTF8(event)
 	packed, err := anypb.New(event)
 	if err != nil {
 		return fmt.Errorf("pack build event: %w", err)
@@ -194,7 +196,26 @@ func (p *publisher) finish(ctx context.Context) error {
 	}
 }
 
+// run keeps a stream open until every event is acknowledged. maxReconnects
+// counts consecutive failures: a stream that got any acknowledgement resets
+// it, so a long build survives periodic stream resets. After giving up it
+// drops the queue, since nothing will send it.
 func (p *publisher) run(ctx context.Context) error {
+	err := p.runStreams(ctx)
+	if err != nil {
+		p.mu.Lock()
+		p.closed = true
+		dropped := len(p.pending)
+		p.pending = nil
+		p.mu.Unlock()
+		if dropped > 0 {
+			err = fmt.Errorf("%w (%d events not sent)", err, dropped)
+		}
+	}
+	return err
+}
+
+func (p *publisher) runStreams(ctx context.Context) error {
 	var lastErr error
 	for attempt := 0; attempt <= maxReconnects; attempt++ {
 		if ctx.Err() != nil {
@@ -208,11 +229,20 @@ func (p *publisher) run(ctx context.Context) error {
 			case <-time.After(time.Duration(attempt) * reconnectBackoff):
 			}
 		}
+		p.mu.Lock()
+		ackedBefore := p.acked
+		p.mu.Unlock()
 		finished, err := p.runStream(ctx)
 		if finished {
 			return nil
 		}
 		lastErr = err
+		p.mu.Lock()
+		progressed := p.acked > ackedBefore
+		p.mu.Unlock()
+		if progressed {
+			attempt = 0
+		}
 	}
 	return fmt.Errorf("giving up on BES after %d reconnects: %w", maxReconnects, lastErr)
 }
@@ -298,5 +328,6 @@ func (p *publisher) ack(seq int64) {
 	for i < len(p.pending) && p.pending[i].GetOrderedBuildEvent().GetSequenceNumber() <= seq {
 		i++
 	}
+	p.acked += int64(i)
 	p.pending = p.pending[i:]
 }
