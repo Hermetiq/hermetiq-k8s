@@ -340,7 +340,7 @@ func insertSisoFlags(args []string, flags ...string) []string {
 				at = i + 1
 				break
 			}
-			if a == "--" || strings.HasPrefix(a, "-C") {
+			if a == "--" || strings.HasPrefix(a, "-C") || strings.HasPrefix(a, "--C") {
 				break
 			}
 		}

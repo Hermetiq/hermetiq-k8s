@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -994,5 +995,238 @@ func TestPublisherSurvivesRepeatedStreamResets(t *testing.T) {
 	defer fake.mu.Unlock()
 	if fake.streams <= maxReconnects+1 {
 		t.Errorf("streams = %d; the test needs more than maxReconnects+1 to mean anything", fake.streams)
+	}
+}
+
+func TestReadSisoMetricsKeepsStepBuildIDWithoutSummaryLine(t *testing.T) {
+	const stepOnly = `{"build_id":"inv-step-only","step_id":"s1","action":"cxx","outputs":["obj/a.o"],"is_remote":true,"action_start_nanos":1000000,"action_end_nanos":5000000,"duration_nanos":4000000}
+`
+	path := filepath.Join(t.TempDir(), "siso_metrics.json")
+	if err := os.WriteFile(path, []byte(stepOnly), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := readSisoMetrics(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.BuildID != "inv-step-only" || len(m.Steps) != 1 {
+		t.Fatalf("readSisoMetrics = %+v, want BuildID inv-step-only and 1 step", m)
+	}
+	if got := m.wallTime(); got != 5*time.Millisecond {
+		t.Errorf("wallTime = %v, want 5ms", got)
+	}
+}
+
+func TestBuildMetricsEventUsesEarliestPositiveReadyNanos(t *testing.T) {
+	m := writeMetrics(t)
+	m.Steps[0].GNTarget = "//base:base"
+	m.Steps[1].GNTarget = "chrome:chrome"
+	start := time.Unix(1000, 0)
+	ev := buildMetricsEvent(start, m).GetBuildMetrics()
+	timing := ev.GetTimingMetrics()
+	if timing.GetAnalysisPhaseTimeInMs() != 29 || timing.GetExecutionPhaseTimeInMs() != 91 || timing.GetWallTimeInMs() != 120 {
+		t.Errorf("TimingMetrics = %+v, want analysis=29ms execution=91ms wall=120ms", timing)
+	}
+	if got := ev.GetPackageMetrics().GetPackagesLoaded(); got != 2 {
+		t.Errorf("PackagesLoaded = %d, want 2", got)
+	}
+}
+
+func TestMultiLineSisoFailureWithoutBuildStepHeader(t *testing.T) {
+	const output = "FAILED: 1 \"./obj/a.o\" CXX obj/a.o\n" +
+		"err: remote-exec 1/2 failed: exit=2\n" +
+		"line two of error\n" +
+		"line three of error\n" +
+		"digest: 1/2\n" +
+		"/usr/bin/clang++ -c a.cc -o obj/a.o\n"
+	path := filepath.Join(t.TempDir(), "siso_output")
+	if err := os.WriteFile(path, []byte(output), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failures := readSisoFailures(path, time.Time{})
+	if len(failures) != 1 {
+		t.Fatalf("failures = %+v, want 1", failures)
+	}
+	f := failures[0]
+	if !strings.Contains(f.err, "line two of error") || !strings.Contains(f.err, "line three of error") {
+		t.Errorf("err = %q, want all continuation lines", f.err)
+	}
+	if f.command != "/usr/bin/clang++ -c a.cc -o obj/a.o" {
+		t.Errorf("command = %q, want the compiler command after digest:", f.command)
+	}
+}
+
+func TestStartAndFailuresBackfillsInfraErrorFromSisoOutput(t *testing.T) {
+	outDir := t.TempDir()
+	const sisoOut = "FAILED: 1 \"./obj/a.o\" CXX obj/a.o\n" +
+		"err: remote-exec 1/2 no-fallback: DeadlineExceeded\n" +
+		"digest: 1/2\n" +
+		"g++ -c a.cc -o obj/a.o\n"
+	if err := os.WriteFile(filepath.Join(outDir, "siso_output"), []byte(sisoOut), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tracker := newEdgeTracker(io.Discard, io.Discard)
+	tracker.handle(frontendEvent{Started: &edgeStarted{ID: 1, Desc: "CXX obj/a.o", Outputs: []string{"obj/a.o"}, Command: "g++ -c a.cc -o obj/a.o"}})
+	tracker.handle(frontendEvent{Finished: &edgeFinished{ID: 1, EndMs: 100, Status: 1}})
+
+	inv := &invocation{outDir: outDir, started: time.Now()}
+	_, failures := inv.startAndFailures(tracker, buildResult{exitCode: 1})
+	if len(failures) != 1 || !strings.Contains(failures[0].message(), "DeadlineExceeded") {
+		t.Fatalf("failures = %+v, message = %q, want DeadlineExceeded from siso_output", failures, failures[0].message())
+	}
+}
+
+func TestSisoFlagsAndTargetsWithTopLevelAndQuietFlags(t *testing.T) {
+	inv := &invocation{
+		command: []string{"siso", "-log_dir", "/tmp", "-v", "ninja", "-C", "out/Default", "--quiet", "chrome", "unit_tests"},
+	}
+	wantFlags := []string{"-log_dir=/tmp", "-v", "-C=out/Default", "--quiet"}
+	if got := inv.sisoFlags(); !reflect.DeepEqual(got, wantFlags) {
+		t.Errorf("sisoFlags = %q, want %q", got, wantFlags)
+	}
+	wantTargets := []string{"chrome", "unit_tests"}
+	if got := inv.targets(); !reflect.DeepEqual(got, wantTargets) {
+		t.Errorf("targets = %q, want %q", got, wantTargets)
+	}
+}
+
+func TestStepWithEmptyActionRuleAndOutputsProducesValidProfileAndActionEvent(t *testing.T) {
+	s := stepMetric{
+		StepID:           "step-1",
+		GNTarget:         "//base:base",
+		ActionStartNanos: 1_000_000,
+		ActionEndNanos:   2_000_000,
+		DurationNanos:    1_000_000,
+		Err:              true,
+	}
+	if got := s.label(); got != "//base:base" {
+		t.Errorf("label = %q, want //base:base", got)
+	}
+	if got := s.mnemonic(); got != "action" {
+		t.Errorf("mnemonic = %q, want action", got)
+	}
+	ev := actionEvent(time.Unix(1000, 0), &s, nil)
+	if ev.GetId().GetActionCompleted().GetPrimaryOutput() != "step-1" {
+		t.Errorf("ActionCompleted PrimaryOutput = %q, want step-1", ev.GetId().GetActionCompleted().GetPrimaryOutput())
+	}
+	gz, err := buildProfile(&invocation{id: "inv-1"}, time.Unix(1000, 0), &sisoMetrics{BuildID: "inv-1", Steps: []stepMetric{s}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p traceProfile
+	if err := json.NewDecoder(zr).Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	for _, te := range p.TraceEvents {
+		if te.Cat == categoryAction {
+			if te.Args["mnemonic"] == "" || te.Out == "" {
+				t.Errorf("action trace event has empty mnemonic or Out: %+v", te)
+			}
+		}
+	}
+}
+
+func TestSanitizeUTF8MapKeysAndFinalConsoleDrain(t *testing.T) {
+	inv := &invocation{
+		metadata: map[string]string{
+			"bad\xffkey": "bad\xfeval",
+		},
+	}
+	ev := buildMetadataEvent(inv)
+	sanitizeUTF8(ev)
+	md := ev.GetBuildMetadata().GetMetadata()
+	if md["bad\ufffdkey"] != "bad\ufffdval" {
+		t.Errorf("sanitized map = %v", md)
+	}
+
+	c := newConsole(io.Discard, io.Discard, true)
+	quote := []byte("‘") // 3-byte UTF-8 rune
+	_, _ = c.stdout.Write(quote[:2])
+	if got, _ := c.take(); got != "" {
+		t.Errorf("take before completion = %q, want empty", got)
+	}
+	if got, _ := c.drain(); got != string(quote[:2]) {
+		t.Errorf("drain on exit = %q, want remaining partial rune bytes", got)
+	}
+}
+
+func TestSanitizeRepoURLAndRequestMetadataValidation(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://x-access-token:ghs_secret@github.com/org/repo.git": "https://github.com/org/repo.git",
+		"https://token@github.com/org/repo.git":                     "https://github.com/org/repo.git",
+		"ssh://git:secret@github.com/org/repo.git":                  "ssh://git@github.com/org/repo.git",
+		"ssh://git@github.com/org/repo.git":                         "ssh://git@github.com/org/repo.git",
+		"git@github.com:org/repo.git":                               "git@github.com:org/repo.git",
+	} {
+		if got := sanitizeRepoURL(in); got != want {
+			t.Errorf("sanitizeRepoURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if _, err := requestMetadata(&options{headers: stringList{"=value"}}); err == nil {
+		t.Error("requestMetadata accepted empty header name")
+	}
+}
+
+type memoryByteStream struct {
+	bspb.UnimplementedByteStreamServer
+	mu       sync.Mutex
+	resource string
+	data     []byte
+}
+
+func (m *memoryByteStream) Write(stream bspb.ByteStream_WriteServer) error {
+	var buf bytes.Buffer
+	var res string
+	for {
+		req, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if req.GetResourceName() != "" {
+			res = req.GetResourceName()
+		}
+		buf.Write(req.GetData())
+		if req.GetFinishWrite() {
+			break
+		}
+	}
+	m.mu.Lock()
+	m.resource = res
+	m.data = buf.Bytes()
+	m.mu.Unlock()
+	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: int64(buf.Len())})
+}
+
+func TestUploadBlobWritesProfileToCAS(t *testing.T) {
+	casLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cas := &memoryByteStream{}
+	casServer := grpc.NewServer()
+	bspb.RegisterByteStreamServer(casServer, cas)
+	go func() { _ = casServer.Serve(casLis) }()
+	t.Cleanup(casServer.Stop)
+
+	target := casTarget{address: casLis.Addr().String(), instance: "proj-1", insecure: true}
+	payload := []byte("profile-bytes")
+	uri, err := uploadBlob(context.Background(), target, "", payload)
+	if err != nil {
+		t.Fatalf("uploadBlob: %v", err)
+	}
+	if !strings.HasPrefix(uri, "bytestream://"+casLis.Addr().String()+"/proj-1/blobs/") || !strings.HasSuffix(uri, "/13") {
+		t.Errorf("uri = %q", uri)
+	}
+	cas.mu.Lock()
+	defer cas.mu.Unlock()
+	if !bytes.Equal(cas.data, payload) || !strings.HasPrefix(cas.resource, "proj-1/uploads/") {
+		t.Errorf("uploaded resource=%q data=%q", cas.resource, cas.data)
 	}
 }

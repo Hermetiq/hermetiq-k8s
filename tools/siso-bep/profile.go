@@ -66,12 +66,15 @@ func stepSpan(s *stepMetric) (start, dur int64) {
 	return max(start, 1), max(dur, phases, 1)
 }
 
-func stepDescription(s *stepMetric) string {
-	out := firstOutput(s)
-	if out == "" {
-		out = s.label()
+func stepOutput(s *stepMetric) string {
+	if out := firstOutput(s); out != "" {
+		return out
 	}
-	return fmt.Sprintf("%s %s", s.mnemonic(), out)
+	return s.label()
+}
+
+func stepDescription(s *stepMetric) string {
+	return fmt.Sprintf("%s %s", s.mnemonic(), stepOutput(s))
 }
 
 // buildProfile returns the gzipped Bazel-format trace for the build.
@@ -95,6 +98,9 @@ func buildProfile(inv *invocation, start time.Time, m *sisoMetrics) ([]byte, err
 	// Greedy lane assignment: reuse the first lane that is free.
 	var laneEnds []int64
 	firstStart := wall
+	if len(steps) > 0 {
+		firstStart, _ = stepSpan(steps[0])
+	}
 	for _, s := range steps {
 		ts, dur := stepSpan(s)
 		wall = max(wall, ts+dur)
@@ -115,7 +121,7 @@ func buildProfile(inv *invocation, start time.Time, m *sisoMetrics) ([]byte, err
 		tid := firstLaneTid + lane
 		events = append(events, traceEvent{
 			Cat: categoryAction, Name: stepDescription(s), Ph: "X", Pid: tracePid, Tid: tid,
-			Ts: ts, Dur: dur, Out: firstOutput(s),
+			Ts: ts, Dur: dur, Out: stepOutput(s),
 			Args: map[string]any{"mnemonic": s.mnemonic(), "target": s.label(), "target_label": s.label()},
 		})
 		events = append(events, stepPhaseEvents(s, tid)...)

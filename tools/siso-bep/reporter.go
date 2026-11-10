@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,10 +54,12 @@ func (inv *invocation) collectEnvironment(ctx context.Context, flags []string) {
 	inv.workspaceDir = findWorkspaceRoot(outDir, inv.workingDir)
 	inv.metadata = map[string]string{"TAG_tool": "siso"}
 	for _, kv := range flags {
-		if k, v, ok := strings.Cut(kv, "="); ok {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
 			inv.metadata[k] = v
 		}
 	}
+	gitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	for key, args := range map[string][]string{
 		"REPO_URL":    {"remote", "get-url", "origin"},
 		"BRANCH_NAME": {"rev-parse", "--abbrev-ref", "HEAD"},
@@ -65,11 +68,32 @@ func (inv *invocation) collectEnvironment(ctx context.Context, flags []string) {
 		if _, set := inv.metadata[key]; set {
 			continue
 		}
-		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", inv.workspaceDir}, args...)...).Output() //nolint:gosec // G204: fixed git subcommands
+		out, err := exec.CommandContext(gitCtx, "git", append([]string{"-C", inv.workspaceDir}, args...)...).Output() //nolint:gosec // G204: fixed git subcommands
 		if v := strings.TrimSpace(string(out)); err == nil && v != "" {
+			if key == "REPO_URL" {
+				v = sanitizeRepoURL(v)
+			}
 			inv.metadata[key] = v
 		}
 	}
+}
+
+// sanitizeRepoURL strips credentials from an HTTP(S) or URL-formatted git
+// remote so tokens in .git/config are not sent in build metadata.
+func sanitizeRepoURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		u.User = nil
+		return u.String()
+	}
+	if _, hasPassword := u.User.Password(); hasPassword {
+		u.User = url.User(u.User.Username())
+		return u.String()
+	}
+	return raw
 }
 
 // findWorkspaceRoot mirrors Siso: the workspace root is the nearest ancestor
@@ -86,8 +110,14 @@ func findWorkspaceRoot(dir, fallback string) string {
 }
 
 func (inv *invocation) targets() []string {
-	if inv.siso != nil && len(inv.siso.Targets) > 0 {
-		return inv.siso.Targets
+	if inv.siso != nil {
+		if len(inv.siso.Targets) > 0 {
+			return inv.siso.Targets
+		}
+		return []string{"default"}
+	}
+	if _, targets := inv.parseArgs(); len(targets) > 0 {
+		return targets
 	}
 	return []string{"default"}
 }
@@ -100,34 +130,59 @@ func (inv *invocation) toolVersion() string {
 }
 
 var sisoBoolFlags = map[string]bool{
-	"b":              true,
-	"batch":          true,
-	"clobber":        true,
-	"confirm_no_op":  true,
-	"dry_run":        true,
-	"fast_exit":      true,
-	"n":              true,
-	"o":              true,
-	"offline":        true,
-	"prepare":        true,
-	"reapi_insecure": true,
-	"strict_remote":  true,
-	"v":              true,
-	"verbose":        true,
+	"b":                            true,
+	"batch":                        true,
+	"clobber":                      true,
+	"confirm_no_op":                true,
+	"dry_run":                      true,
+	"enable_cloud_logging":         true,
+	"enable_cloud_monitoring":      true,
+	"enable_cloud_profiler":        true,
+	"enable_cloud_trace":           true,
+	"fast_exit":                    true,
+	"fast_last_failure":            true,
+	"fast_nop":                     true,
+	"fs_keep_tainted":              true,
+	"h":                            true,
+	"help":                         true,
+	"local_cache_enable":           true,
+	"n":                            true,
+	"o":                            true,
+	"offline":                      true,
+	"prepare":                      true,
+	"q":                            true,
+	"quiet":                        true,
+	"re_cache_enable_read":         true,
+	"re_cache_enable_write":        true,
+	"reapi_enable_rbe_cred_helper": true,
+	"reapi_insecure":               true,
+	"strict_remote":                true,
+	"v":                            true,
+	"verbose":                      true,
+	"version":                      true,
 }
 
 // sisoFlagArgs returns Siso's command line stripped of the leading binary,
-// "ninja" subcommand and trailing targets.
+// "ninja" subcommand and, when siso_metadata.json is loaded, trailing targets.
 func (inv *invocation) sisoFlagArgs() []string {
 	args := inv.command
 	if inv.siso != nil && len(inv.siso.CommandLine) > 0 {
 		args = inv.siso.CommandLine
 	}
+	isAutoninja := len(args) > 0 && strings.Contains(filepath.Base(args[0]), "autoninja")
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") && args[0] != "ninja" {
 		args = args[1:]
 	}
-	if len(args) > 0 && args[0] == "ninja" {
-		args = args[1:]
+	if !isAutoninja {
+		for i, a := range args {
+			if a == "ninja" {
+				args = append(append([]string(nil), args[:i]...), args[i+1:]...)
+				break
+			}
+			if a == "--" || strings.HasPrefix(a, "-C") || strings.HasPrefix(a, "--C") {
+				break
+			}
+		}
 	}
 	if inv.siso != nil {
 		if n := len(inv.siso.Targets); n > 0 && n <= len(args) {
@@ -137,17 +192,16 @@ func (inv *invocation) sisoFlagArgs() []string {
 	return args
 }
 
-// sisoFlags is Siso's own command line without the subcommand and targets,
-// with "-C dir" style pairs joined as "-C=dir".
-func (inv *invocation) sisoFlags() []string {
+func (inv *invocation) parseArgs() (flags, targets []string) {
 	args := inv.sisoFlagArgs()
-	var flags []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
+			targets = append(targets, args[i+1:]...)
 			break
 		}
 		if !strings.HasPrefix(a, "-") || a == "-" {
+			targets = append(targets, a)
 			continue
 		}
 		if len(a) > 2 && strings.HasPrefix(a, "-C") && a[2] != '=' {
@@ -161,6 +215,13 @@ func (inv *invocation) sisoFlags() []string {
 		}
 		flags = append(flags, a)
 	}
+	return flags, targets
+}
+
+// sisoFlags is Siso's own command line without the subcommand and targets,
+// with "-C dir" style pairs joined as "-C=dir".
+func (inv *invocation) sisoFlags() []string {
+	flags, _ := inv.parseArgs()
 	return flags
 }
 
@@ -229,6 +290,17 @@ func (c *console) take() (stdout, stderr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return takeComplete(&c.out), takeComplete(&c.err)
+}
+
+// drain returns all remaining output, including any trailing partial UTF-8
+// sequence once the build process has exited.
+func (c *console) drain() (stdout, stderr string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	stdout, stderr = c.out.String(), c.err.String()
+	c.out.Reset()
+	c.err.Reset()
+	return stdout, stderr
 }
 
 func takeComplete(buf *bytes.Buffer) string {
@@ -424,7 +496,7 @@ func requestMetadata(opts *options) (metadata.MD, error) {
 	}
 	for _, h := range opts.headers {
 		k, v, ok := strings.Cut(h, "=")
-		if !ok {
+		if !ok || k == "" {
 			return nil, fmt.Errorf("--bes_header %q is not NAME=VALUE", h)
 		}
 		md.Append(strings.ToLower(k), v)
@@ -519,10 +591,19 @@ func (r *reporter) sendPreamble(inv *invocation) {
 }
 
 func (r *reporter) flushConsole() {
+	r.flushConsoleOutput(false)
+}
+
+func (r *reporter) flushConsoleOutput(final bool) {
 	if r.console == nil {
 		return
 	}
-	stdout, stderr := r.console.take()
+	var stdout, stderr string
+	if final {
+		stdout, stderr = r.console.drain()
+	} else {
+		stdout, stderr = r.console.take()
+	}
 	if stdout == "" && stderr == "" {
 		return
 	}
@@ -549,13 +630,15 @@ func (r *reporter) finishBuild(ctx context.Context, inv *invocation, edges *edge
 		r.loadSisoMetadata(inv)
 	}
 	r.sendPreamble(inv)
-	r.flushConsole()
+	r.flushConsoleOutput(true)
 
 	start, failures := inv.startAndFailures(edges, result)
 	metrics, err := readSisoMetrics(filepath.Join(inv.outDir, "siso_metrics.json"))
 	switch {
 	case err != nil:
 		log.Printf("siso-bep: no step metrics: %v", err)
+		metrics = nil
+	case metrics.BuildID == "" && len(metrics.Steps) == 0:
 		metrics = nil
 	case metrics.BuildID != inv.id:
 		log.Printf("siso-bep: siso_metrics.json is from another build; skipping step metrics")
@@ -571,7 +654,7 @@ func (r *reporter) finishBuild(ctx context.Context, inv *invocation, edges *edge
 			s := &metrics.Steps[i]
 			if s.Err || r.opts.allActions {
 				_, end := s.times(start)
-				r.send(actionEvent(start, s, index[firstOutput(s)]), end)
+				r.send(actionEvent(start, s, lookupFailure(index, s)), end)
 			}
 		}
 		r.send(buildMetricsEvent(start, metrics), finishedAt)
@@ -603,12 +686,45 @@ func (inv *invocation) startAndFailures(edges *edgeTracker, result buildResult) 
 		start = inv.siso.StartTime
 	}
 	failures := edges.failed()
-	if len(failures) == 0 && result.exitCode != 0 {
+	needsOutputFallback := len(failures) == 0
+	for _, f := range failures {
+		if strings.TrimSpace(f.output) == "" && f.err == "" {
+			needsOutputFallback = true
+			break
+		}
+	}
+	if needsOutputFallback && result.exitCode != 0 {
 		since := inv.started
 		if !start.IsZero() && (since.IsZero() || start.Before(since)) {
 			since = start
 		}
-		failures = readSisoFailures(filepath.Join(inv.outDir, "siso_output"), since)
+		fromFile := readSisoFailures(filepath.Join(inv.outDir, "siso_output"), since)
+		if len(failures) == 0 {
+			failures = fromFile
+		} else if len(fromFile) > 0 {
+			byOut := byOutput(fromFile)
+			for _, f := range failures {
+				for _, o := range f.outputs {
+					other := byOut[o]
+					if other == nil {
+						other = byOut[strings.TrimPrefix(o, "./")]
+					}
+					if other == nil {
+						continue
+					}
+					if f.err == "" {
+						f.err = other.err
+					}
+					if strings.TrimSpace(f.output) == "" {
+						f.output = other.output
+					}
+					if f.command == "" {
+						f.command = other.command
+					}
+					break
+				}
+			}
+		}
 	}
 	return start, failures
 }

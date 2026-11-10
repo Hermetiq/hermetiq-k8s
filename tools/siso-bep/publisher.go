@@ -329,5 +329,9 @@ func (p *publisher) ack(seq int64) {
 		i++
 	}
 	p.acked += int64(i)
+	clear(p.pending[:i])
 	p.pending = p.pending[i:]
+	if len(p.pending) == 0 {
+		p.pending = nil
+	}
 }

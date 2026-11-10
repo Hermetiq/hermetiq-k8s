@@ -24,7 +24,7 @@ func sanitizeMessage(m protoreflect.Message) {
 			for i := range list.Len() {
 				if fd.Kind() == protoreflect.StringKind {
 					if s := list.Get(i).String(); !utf8.ValidString(s) {
-						list.Set(i, protoreflect.ValueOfString(strings.ToValidUTF8(s, "�")))
+						list.Set(i, protoreflect.ValueOfString(strings.ToValidUTF8(s, "\ufffd")))
 					}
 				} else if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
 					sanitizeMessage(list.Get(i).Message())
@@ -32,23 +32,44 @@ func sanitizeMessage(m protoreflect.Message) {
 			}
 		case fd.IsMap():
 			mp := v.Map()
+			keyIsString := fd.MapKey().Kind() == protoreflect.StringKind
 			kind := fd.MapValue().Kind()
 			isString := kind == protoreflect.StringKind
 			isMessage := kind == protoreflect.MessageKind || kind == protoreflect.GroupKind
+			type badKeyEntry struct {
+				oldKey protoreflect.MapKey
+				newKey protoreflect.MapKey
+				val    protoreflect.Value
+			}
+			var badKeys []badKeyEntry
 			mp.Range(func(k protoreflect.MapKey, mv protoreflect.Value) bool {
 				switch {
 				case isString:
 					if s := mv.String(); !utf8.ValidString(s) {
-						mp.Set(k, protoreflect.ValueOfString(strings.ToValidUTF8(s, "�")))
+						mv = protoreflect.ValueOfString(strings.ToValidUTF8(s, "\ufffd"))
+						mp.Set(k, mv)
 					}
 				case isMessage:
 					sanitizeMessage(mv.Message())
 				}
+				if keyIsString {
+					if ks := k.String(); !utf8.ValidString(ks) {
+						badKeys = append(badKeys, badKeyEntry{
+							oldKey: k,
+							newKey: protoreflect.ValueOfString(strings.ToValidUTF8(ks, "\ufffd")).MapKey(),
+							val:    mv,
+						})
+					}
+				}
 				return true
 			})
+			for _, e := range badKeys {
+				mp.Clear(e.oldKey)
+				mp.Set(e.newKey, e.val)
+			}
 		case fd.Kind() == protoreflect.StringKind:
 			if s := v.String(); !utf8.ValidString(s) {
-				m.Set(fd, protoreflect.ValueOfString(strings.ToValidUTF8(s, "�")))
+				m.Set(fd, protoreflect.ValueOfString(strings.ToValidUTF8(s, "\ufffd")))
 			}
 		case fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind:
 			sanitizeMessage(v.Message())

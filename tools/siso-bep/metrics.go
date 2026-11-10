@@ -143,7 +143,7 @@ func (m *stepMetric) ranRemotely() bool { return m.strategy() == "remote" }
 // stands in.
 func (m *stepMetric) label() string {
 	if m.GNTarget != "" {
-		return "//" + m.GNTarget
+		return "//" + strings.TrimPrefix(m.GNTarget, "//")
 	}
 	if len(m.Outputs) > 0 {
 		return m.Outputs[0]
@@ -161,7 +161,10 @@ func (m *stepMetric) mnemonic() string {
 	if m.Action != "" {
 		return m.Action
 	}
-	return m.Rule
+	if m.Rule != "" {
+		return m.Rule
+	}
+	return "action"
 }
 
 // sisoMetrics is the parsed metrics file.
@@ -188,8 +191,10 @@ func readSisoMetrics(path string) (*sisoMetrics, error) {
 		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
 			return nil, fmt.Errorf("%s line %d: %w", path, line, err)
 		}
-		if !m.isStep() {
+		if m.BuildID != "" {
 			out.BuildID = m.BuildID
+		}
+		if !m.isStep() {
 			out.BuildDuration = time.Duration(m.DurationNanos)
 			out.BuildErr = m.Err
 			continue
@@ -291,6 +296,8 @@ type sisoFailureParser struct {
 	current  *stepFailure
 	output   []string
 	inOutput bool
+	inAux    bool
+	hasMeta  bool
 }
 
 func (p *sisoFailureParser) finish() {
@@ -298,7 +305,7 @@ func (p *sisoFailureParser) finish() {
 		p.current.output = strings.TrimSpace(strings.Join(p.output, "\n"))
 		p.failures = append(p.failures, p.current)
 	}
-	p.current, p.output, p.inOutput = nil, nil, false
+	p.current, p.output, p.inOutput, p.inAux, p.hasMeta = nil, nil, false, false, false
 }
 
 func (p *sisoFailureParser) feed(line string) {
@@ -329,10 +336,13 @@ func (p *sisoFailureParser) feedStepLine(line string) {
 	switch {
 	case line == "stderr:" || line == "stdout:":
 		p.inOutput = true
+		p.inAux = false
 	case strings.HasPrefix(line, "auxiliary outputs:"):
 		p.inOutput = false
+		p.inAux = true
 	case p.inOutput:
 		p.output = append(p.output, line)
+	case p.inAux:
 	case strings.HasPrefix(line, "err: "):
 		p.current.err = strings.TrimPrefix(line, "err: ")
 		if m := sisoExitStatus.FindStringSubmatch(line); m != nil {
@@ -340,17 +350,20 @@ func (p *sisoFailureParser) feedStepLine(line string) {
 				p.current.status = status
 			}
 		}
-	case strings.HasPrefix(line, "build step: "):
-		// Any unlabelled line before "build step:" was a continuation of a
-		// multi-line err: message rather than the step's command line.
+	case strings.HasPrefix(line, "build step: "), strings.HasPrefix(line, "digest: "), strings.HasPrefix(line, "siso_rule: "), strings.HasPrefix(line, "stacktrace: "):
+		// Any unlabelled lines before the step metadata headers were a
+		// continuation of a multi-line err: message rather than the command.
+		p.hasMeta = true
 		if p.current.command != "" {
 			if p.current.err != "" {
 				p.current.err += "\n" + p.current.command
 			}
 			p.current.command = ""
 		}
-	case strings.HasPrefix(line, "digest: "), strings.HasPrefix(line, "siso_rule: "), strings.HasPrefix(line, "stacktrace: "), line == "":
+	case line == "":
 	case p.current.command == "":
 		p.current.command = line
+	case !p.hasMeta:
+		p.current.command += "\n" + line
 	}
 }

@@ -190,7 +190,7 @@ func summarizeTargets(start time.Time, steps []stepMetric, failures map[string]*
 		}
 		if s.Err {
 			t.failed++
-			if f := failures[firstOutput(s)]; f != nil && t.failure == "" {
+			if f := lookupFailure(failures, s); f != nil && t.failure == "" {
 				t.failure = f.message()
 			}
 		}
@@ -259,9 +259,13 @@ func actionEvent(start time.Time, s *stepMetric, f *stepFailure) *bes.BuildEvent
 		}
 		action.FailureDetail = &bazel.FailureDetail{Message: msg}
 	}
+	primary := firstOutput(s)
+	if primary == "" {
+		primary = s.StepID
+	}
 	return &bes.BuildEvent{
 		Id: &bes.BuildEventId{Id: &bes.BuildEventId_ActionCompleted{ActionCompleted: &bes.BuildEventId_ActionCompletedId{
-			PrimaryOutput: firstOutput(s),
+			PrimaryOutput: primary,
 			Label:         s.label(),
 			Configuration: &bes.BuildEventId_ConfigurationId{Id: configurationID},
 		}}},
@@ -274,6 +278,18 @@ func firstOutput(s *stepMetric) string {
 		return s.Outputs[0]
 	}
 	return ""
+}
+
+func lookupFailure(failures map[string]*stepFailure, s *stepMetric) *stepFailure {
+	for _, out := range s.Outputs {
+		if f := failures[out]; f != nil {
+			return f
+		}
+		if f := failures[strings.TrimPrefix(out, "./")]; f != nil {
+			return f
+		}
+	}
+	return nil
 }
 
 // runnerCounts maps Siso step kinds onto the runner names Bazel reports, which
@@ -328,7 +344,7 @@ func buildMetricsEvent(start time.Time, m *sisoMetrics) *bes.BuildEvent {
 		if s.ranRemotely() {
 			cpu += time.Duration(s.ExecNanos)
 		}
-		if firstReady < 0 || s.ReadyNanos < firstReady {
+		if s.ReadyNanos > 0 && (firstReady < 0 || s.ReadyNanos < firstReady) {
 			firstReady = s.ReadyNanos
 		}
 	}
@@ -357,7 +373,7 @@ func buildMetricsEvent(start time.Time, m *sisoMetrics) *bes.BuildEvent {
 	packages := map[string]bool{}
 	for i := range m.Steps {
 		targets[m.Steps[i].label()] = true
-		if pkg, _, ok := strings.Cut(m.Steps[i].GNTarget, ":"); ok {
+		if pkg, _, ok := strings.Cut(strings.TrimPrefix(m.Steps[i].GNTarget, "//"), ":"); ok && pkg != "" {
 			packages[pkg] = true
 		}
 	}
