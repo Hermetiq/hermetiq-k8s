@@ -8,6 +8,11 @@ storage:
     # (a small 2Gi volume) are enough; see docs/iscc-size-classes.md.
     iscc:
       enabled: true
+    # The File System Access Cache. The pools in rbeworkers/ set
+    # spec.config.generated.prefetching, and their workers fail to start
+    # without this store.
+    fsac:
+      enabled: true
 
 scheduler:
   # Size classes need the scheduler's feedback-driven analysis, backed by the
@@ -15,9 +20,10 @@ scheduler:
   sizeClassAnalysis:
     enabled: true
     pageRank:
-      # An action with no history runs first on the small class with this
-      # timeout, then falls back to the large class. The default of 10s sends
-      # too many of Chromium's first-time compiles to the large class.
+      # An action with no history on the large class runs on the small class
+      # first, with this as its timeout; if it runs longer, it is retried on
+      # the large class. The default of 10s sends too many of Chromium's
+      # first-time compiles to the large class.
       minimumExecutionTimeout: 60s
   # Keeps the Chromium platform available while the large pool is at zero.
   # The properties must match the pools and the client's backend.star exactly.
@@ -26,19 +32,3 @@ scheduler:
         - {name: OSFamily, value: Linux}
         - {name: container-image, value: "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"}
       sizeClasses: [1, 4]
-
-frontend:
-  # Buildbarn can't store a blob larger than one block of this cache, and
-  # Chromium's chrome binary is 715 MB. Block size = blocksSizeGi / (old +
-  # current + new + spare): 8 GiB over 10 blocks gives 819 MiB blocks.
-  readCache:
-    enabled: true
-    blocksSizeGi: 8
-    oldBlocks: 2
-    currentBlocks: 5
-    newBlocks: 1
-    spareBlocks: 2
-    keyLocationMapInMemoryEntries: 4194304
-    volume:
-      emptyDir:
-        sizeLimit: 8704Mi

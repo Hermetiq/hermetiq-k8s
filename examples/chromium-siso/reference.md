@@ -18,9 +18,9 @@ Details behind the [Chromium guide](README.md). For RbeWorker fields in general,
 - **Thresholds** sit below `concurrency`, so a pool adds pods before the ones it has are full. A new node takes minutes to arrive.
 - **Warm capacity.** Large scales to zero between builds to save money. A build that starts from zero waits for nodes: in this example's measurements the large pool took about 7 minutes to reach 28 pods. Raise `minReplicas` before a build when that matters, or keep a floor during working hours with a KEDA cron window (see the commented `cron` block in [`worker-ubuntu24-04.yaml`](../../custom-values/rbeworkers/worker-ubuntu24-04.yaml)).
 
-## The frontend read cache
+## Blob size limits
 
-`frontend.readCache` caches recently read blobs on each frontend replica. A blob can't span blocks, so any output bigger than one block fails the build instead of just missing the cache. Block size is `blocksSizeGi / (oldBlocks + currentBlocks + newBlocks + spareBlocks)`. Chromium's largest outputs:
+Buildbarn's block-based stores can't hold a blob bigger than one block, and an output bigger than that fails the build. Block size is `blocksSizeGi / (oldBlocks + currentBlocks + newBlocks + spareBlocks)`. The chart's default CAS has blocks of about 21 GiB, but check any store you've made smaller, and `frontend.readCache` if you enable it. Chromium's largest outputs:
 
 | Output | Size |
 | --- | --- |
@@ -28,17 +28,17 @@ Details behind the [Chromium guide](README.md). For RbeWorker fields in general,
 | `v8_context_snapshot_generator` | 440 MB |
 | `code_cache_generator` | 373 MB |
 
-8 GiB over 10 blocks gives 819 MiB blocks. Scale `keyLocationMapInMemoryEntries` and the volume's `sizeLimit` with `blocksSizeGi`, as the chart's values comments describe.
+If you give `frontend.readCache` an `emptyDir` with a `sizeLimit`, set `frontend.resources.requests.ephemeral-storage` to match, or the kubelet can evict the frontend (see the chart README's Frontend Read Cache section).
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Check |
 | --- | --- | --- |
 | `DeadlineExceeded` on a compile that waited in the queue | Chromium's 2-minute remote timeout | Add `no-remote-timeout` to `--config` |
-| `Blob is N bytes in size, while this backend is only capable of storing blobs of up to M bytes` | An output larger than one frontend read-cache block | Raise `frontend.readCache.blocksSizeGi` |
+| `Blob is N bytes in size, while this backend is only capable of storing blobs of up to M bytes` | An output larger than one block of a store | See [Blob size limits](#blob-size-limits) |
 | `No workers exist for instance name prefix ...` | The client's platform doesn't match the pools', or the queue isn't predeclared while large is at zero | Compare `backend.star` with `platformProperties` and `predeclaredPlatformQueues` |
 | Pods stay `Pending` | The node pool's maximum or a cloud quota | `kubectl -n kube-system get cm cluster-autoscaler-status -o yaml` names the limit, for example `QUOTA_EXCEEDED` |
-| The build doesn't appear in Hermetiq | No `siso-bep`, or a wrong `--bes_backend` / `--project` | `siso-bep` prints the invocation ID when it starts |
+| The build doesn't appear in Hermetiq | No `siso-bep`, or a wrong `--bes_backend` / `--project` | With `--results_url`, `siso-bep` prints a link to the build when it starts |
 | Remote actions are missing from a build in Hermetiq | `-reapi_instance` differs from `--project`, or `completedActionLoggerAddress` is unset | Use the project ID for both |
 | Workers mostly idle during a slow build | Work is running on your workstation | Check `googlechrome` and `default-remote` are in `--config`; Siso's `out/rbe/siso_metrics.json` shows which steps ran locally |
 

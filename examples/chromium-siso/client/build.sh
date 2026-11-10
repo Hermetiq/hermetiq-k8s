@@ -13,7 +13,8 @@ set -euo pipefail
 
 export SISO_CREDENTIAL_HELPER="$CREDENTIAL_HELPER"
 
-siso-bep --bes_backend="grpcs://bep.$DOMAIN" --project="$INSTANCE_NAME" -- \
+siso-bep --bes_backend="grpcs://bep.$DOMAIN" --project="$INSTANCE_NAME" \
+  --results_url="https://dashboard.$DOMAIN/build/" -- \
   autoninja -C out/rbe \
     -reapi_address="bb.$DOMAIN:443" -reapi_instance="$INSTANCE_NAME" \
     --strict_remote --remote_jobs=800 \

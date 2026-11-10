@@ -94,8 +94,7 @@ spec:
       type: CharDevice
     workerMountPath: /worker
     workerVolume:
-      emptyDir:
-        sizeLimit: 64Gi
+      emptyDir: {}
   worker:
     env:
       - name: POD_NAMESPACE

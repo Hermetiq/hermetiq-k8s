@@ -31,7 +31,7 @@ Field-by-field pool details, autoscaling and troubleshooting are in [reference.m
 | --- | --- |
 | Siso | Chromium's build tool. Decides which steps run remotely and sends them to Buildbarn. |
 | [`siso-bep`](../../tools/siso-bep/) | Runs Siso and reports the build to Hermetiq as Build Event Protocol events, the way Bazel does on its own. |
-| Buildbarn frontend | Checks credentials and caches recently read blobs. Its cache's block size limits the largest output a build can produce. |
+| Buildbarn frontend | Checks credentials and passes blobs to storage and actions to the scheduler. |
 | Buildbarn scheduler | Queues actions by platform and learns which ones need the large pool. |
 | Two worker pools | Size class 1 (24 actions per pod) and size class 4 (9 actions per pod), one pod per 16-vCPU node. |
 | Hermetiq | Build history, targets, remote actions, the timeline and critical path for every build, and Barn Owl. |
@@ -62,9 +62,11 @@ You need a Linux workstation with [depot_tools](https://chromium.googlesource.co
 
 1. **Buildbarn values.** Merge [`buildbarn-values.yaml`](buildbarn-values.yaml) into your Buildbarn values and upgrade the release:
    - size-class analysis, which needs the ISCC store (see [ISCC size classes](../../docs/iscc-size-classes.md))
+   - the File System Access Cache, which the pools' input prefetching needs
    - the predeclared queue for the Chromium platform
-   - a frontend read cache whose 819 MiB blocks hold Chromium's largest output
-2. **Nodes.** The pools expect 16-vCPU nodes with local SSD, one worker pod per node: a 13-CPU runner and a 2-CPU worker. Set the node pool's maximum, and your cloud's quota (including local SSD quota), to at least the pools' combined maximum of 40.
+
+   Chromium's `chrome` binary is 715 MB, and Buildbarn can't store a blob bigger than one block of a store. Check your blocks are bigger than that; see [reference.md](reference.md#blob-size-limits).
+2. **Nodes.** The pools expect 16-vCPU nodes with local SSD, one worker pod per node: a 13-CPU runner and a 2-CPU worker. The workers keep their cache and build files in `emptyDir` volumes, so the local SSD must back the node's ephemeral storage (on GKE, `--ephemeral-storage-local-ssd`). Set the node pool's maximum, and your cloud's quota (including local SSD quota), to at least the pools' combined maximum of 40.
 3. **Pools.** Add [`rbeworkers/`](rbeworkers/) as a component to the overlay you apply your RbeWorkers with, then apply it:
 
    ```bash
@@ -78,7 +80,8 @@ You need a Linux workstation with [depot_tools](https://chromium.googlesource.co
 The everyday command is [`client/build.sh`](client/build.sh). It sends every step to Buildbarn, including links, reads from the remote cache, and downloads only the outputs you need locally:
 
 ```bash
-siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME -- \
+siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
+  --results_url=https://dashboard.<your-domain>/build/ -- \
   autoninja -C out/rbe \
     -reapi_address=bb.<your-domain>:443 -reapi_instance=$INSTANCE_NAME \
     --strict_remote --remote_jobs=800 \
