@@ -1,0 +1,7 @@
+# Add to the "src" solution in your .gclient file, then run `gclient runhooks`.
+# reapi_backend_config_path points at the backend.star in this directory.
+"custom_vars": {
+  "reapi_address": "bb.<your-domain>:443",
+  "reapi_instance": "$INSTANCE_NAME",
+  "reapi_backend_config_path": "/path/to/examples/chromium-siso/client/backend.star",
+},
