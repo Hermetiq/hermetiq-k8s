@@ -32,13 +32,16 @@ func sanitizeMessage(m protoreflect.Message) {
 			}
 		case fd.IsMap():
 			mp := v.Map()
+			kind := fd.MapValue().Kind()
+			isString := kind == protoreflect.StringKind
+			isMessage := kind == protoreflect.MessageKind || kind == protoreflect.GroupKind
 			mp.Range(func(k protoreflect.MapKey, mv protoreflect.Value) bool {
-				switch fd.MapValue().Kind() {
-				case protoreflect.StringKind:
+				switch {
+				case isString:
 					if s := mv.String(); !utf8.ValidString(s) {
 						mp.Set(k, protoreflect.ValueOfString(strings.ToValidUTF8(s, "�")))
 					}
-				case protoreflect.MessageKind, protoreflect.GroupKind:
+				case isMessage:
 					sanitizeMessage(mv.Message())
 				}
 				return true

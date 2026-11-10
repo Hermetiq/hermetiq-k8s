@@ -387,7 +387,7 @@ func newReporter(ctx context.Context, opts *options, inv *invocation) (*reporter
 	}
 	if opts.credentialHelper != "" {
 		if strings.HasPrefix(opts.besBackend, "grpc://") {
-			log.Printf("siso-bep: not sending credential helper headers over plaintext %s", opts.besBackend)
+			log.Print("siso-bep: not sending credential helper headers over a plaintext grpc:// connection")
 		} else {
 			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(newHelperCredentials(opts.credentialHelper, opts.besBackend)))
 		}
