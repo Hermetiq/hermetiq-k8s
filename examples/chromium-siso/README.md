@@ -138,20 +138,24 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 
 ### Making It Faster
 
-The cheapest changes come first:
+Try these in order. Each one costs more than the one before.
 
-1. Run every step remotely. It costs nothing and is the biggest win. Without
-   `default-remote` and `googlechrome`, thousands of steps run on the
-   workstation. The command above already includes both.
-2. Warm the pools before building. It costs idle node time. The large pool
-   takes several minutes to scale up from zero, and a cold build waits for it.
-   Raise its `minReplicas`, or keep it warm during working hours with a KEDA
-   cron window.
-3. Add nodes. It costs money. We stopped at 40 because of our cloud quota.
+1. Send every step to Buildbarn. This costs nothing and helps the most.
+   Chromium's default Siso config runs thousands of steps on your workstation,
+   which then becomes the bottleneck. The `default-remote` and `googlechrome`
+   options in the command above send those steps to the worker pools.
+2. Start the large pool before you build. It scales down to zero between
+   builds and takes several minutes to scale back up, so a build that starts
+   while it's at zero waits for it. Set its `minReplicas` above zero, or keep
+   it running during working hours with a KEDA cron window. You pay for the
+   nodes while they sit idle.
+3. Add nodes. More nodes cost more money. We stopped at 40 because of our
+   cloud quota.
 
-To find what is limiting your own builds, open a slow build in Hermetiq and
-click **Ask Barn Owl**. On one of ours, it found the pool ramp-up without being
-told about the pools and recommended warming the large pool.
+To see what's slowing down your own builds, open a slow build in Hermetiq and
+click **Ask Barn Owl**. When we asked it about one of ours, it found that the
+build was waiting for the large pool to scale up, and recommended keeping that
+pool running.
 
 What we tried, in order. Each row is a cold build of `chrome` with remote cache
 reads off.
