@@ -18,3 +18,25 @@
 # build:rbe --tls_client_key=...
 #
 # Then: `bazel test --config=rbe //...`
+
+# Hermetiq · hermetiq-demo
+build:hermetiq --bes_instance_name=223056c5-94bf-4ffc-baae-34eae027b99c
+build:hermetiq --bes_backend=grpcs://bep-dev.cloud-grpc.hermetiq.dev
+build:hermetiq --bes_results_url=https://web-dev.hermetiq.dev/build/
+build:hermetiq --bes_upload_mode=wait_for_upload_complete
+build:hermetiq --show_progress_rate_limit=5
+build:hermetiq --credential_helper="bep-dev.cloud-grpc.hermetiq.dev=%workspace%/tools/hermetiq-credential-helper"
+build:hermetiq --credential_helper="lb.bbdev.cloud-grpc.hermetiq.dev=%workspace%/tools/hermetiq-credential-helper"
+
+# Build metadata · branch, commit and repo, so the filters work
+build:hermetiq --workspace_status_command=$(pwd)/tools/set-build-metadata.sh
+
+# Enhanced metrics · build profiles for timing and bottleneck analysis
+build:hermetiq --generate_json_trace_profile
+build:hermetiq --experimental_profile_include_primary_output
+build:hermetiq --experimental_profile_include_target_label
+build:hermetiq --noslim_profile
+
+# Remote cache · OPTIONAL · remove these two lines if you already run a cache
+build:hermetiq --remote_instance_name=223056c5-94bf-4ffc-baae-34eae027b99c
+build:hermetiq --remote_cache=grpcs://lb.bbdev.cloud-grpc.hermetiq.dev
