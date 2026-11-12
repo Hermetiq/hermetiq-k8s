@@ -7,8 +7,8 @@ This repository is the source for Hermetiq's Kubernetes deployment artifacts:
 - example `RbeWorker` pools and Bazel integrations
 - operational and architecture runbooks
 
-The Helm charts, starter values, examples, and operational runbooks in this
-repository are licensed under Apache-2.0. The Hermetiq application container
+The Helm charts, starter values, examples, tools, and operational runbooks in
+this repository are licensed under Apache-2.0. The Hermetiq application container
 images deployed by the charts are commercial software distributed under the
 [Hermetiq Software License Agreement](charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md); see [License](#license).
 
@@ -124,6 +124,7 @@ Define and manage Buildbarn worker pools as Kubernetes resources.
 | [`custom-values/`](custom-values/) | Starter overrides for the supported stack and its dependencies |
 | [`custom-values/rbeworkers/`](custom-values/rbeworkers/) | Sample `RbeWorker` pools to apply after Buildbarn |
 | [`examples/`](examples/) | Bazel integrations, runner images, and validation projects |
+| [`tools/siso-bep/`](tools/siso-bep/) | Reports Siso (Chromium) builds to Hermetiq as Build Event Protocol events |
 | [`docs/`](docs/) | Focused architecture and operational runbooks |
 
 The component READMEs are the canonical references for chart-specific values
@@ -483,6 +484,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
+| [`docs/image-integrity.md`](docs/image-integrity.md) | Public signing keys and Cosign verification for charts and container images |
 
 ## Shared chart conventions
 
@@ -575,8 +577,8 @@ unredacted Kubernetes Secrets.
 
 ## License
 
-- **This repository.** The Helm charts, starter values, examples, and runbooks
-  are licensed under the [Apache License 2.0](LICENSE).
+- **This repository.** The Helm charts, starter values, examples, tools, and
+  runbooks are licensed under the [Apache License 2.0](LICENSE).
 - **Hermetiq container images.** The Hermetiq application, the
   grpc-cache-proxy sidecar, and the Buildbarn worker operator are proprietary
   software distributed under the
