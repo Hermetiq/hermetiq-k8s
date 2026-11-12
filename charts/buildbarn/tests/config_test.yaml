@@ -128,20 +128,44 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: "feedbackDriven:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "initialSizeClassCache: common.initialSizeClassCache"
 
-  - it: default scheduler declares no predeclared platform queues
+  - it: default scheduler declares no predeclared platform queues and does not reload
     documentSelector:
       path: metadata.name
       value: buildbarn-config
     asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "local routing = import 'scheduler-routing.libsonnet';"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "actionRouter: routing.actionRouter,"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "predeclaredPlatformQueues: routing.predeclaredPlatformQueues,"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: predeclaredPlatformQueues
+          pattern: "configurationReloadInterval"
+      - notMatchRegex:
+          path: data["scheduler-routing.libsonnet"]
+          pattern: "sizeClasses:"
+
+  - it: renders configurationReloadInterval when set with a fork scheduler image
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'configurationReloadInterval: "30s",'
 
   - it: predeclaredPlatformQueues renders a multi-size-class queue when set
     set:
@@ -155,13 +179,10 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler.jsonnet"]
-          pattern: "predeclaredPlatformQueues:"
-      - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: "sizeClasses:"
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: sizeclass
 
   - it: omits actionResultExpiring by default, leaving completenessChecking bare
@@ -263,10 +284,10 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'actionRouter: \{\s*simple: \{'
       - notMatchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'demultiplexing'
 
   # A catch-all needs BOTH halves: a defaultActionRouter to receive the
@@ -293,20 +314,20 @@ tests:
           value: fallback
     asserts:
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'demultiplexing: \{'
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'defaultActionRouter: \{'
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'static: \{'
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: '\{ name: "pool", value: "fallback" \}'
       # The analyzer still reaches every router body, including the catch-all's.
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: 'maximumExecutionTimeout: "7200s"'
 
   - it: splices raw jsonnet for mode custom
@@ -319,7 +340,7 @@ tests:
         remote: { endpoint: { address: 'router:8080' } },
     asserts:
       - matchRegex:
-          path: data["scheduler.jsonnet"]
+          path: data["scheduler-routing.libsonnet"]
           pattern: "remote: \\{ endpoint:"
 
   # The point of the default: adopting the mTLS block must not rewrite a byte of

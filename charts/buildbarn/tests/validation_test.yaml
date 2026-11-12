@@ -342,6 +342,40 @@ tests:
       - failedTemplate:
           errorPattern: "frontend.readCache.blocksSizeGi .* must be smaller than frontend.readCache.volume.emptyDir.sizeLimit"
 
+  - it: rejects unsorted predeclaredPlatformQueues platform properties
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: os
+              value: linux
+            - name: cpu
+              value: x86_64
+          sizeClasses: [0]
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.predeclaredPlatformQueues\\[0\\].platform properties are not sorted by name then value"
+
+  - it: rejects configurationReloadInterval with the upstream scheduler image
+    set:
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork"
+
+  - it: accepts configurationReloadInterval with a fork scheduler image
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects scheduler.handover with the upstream scheduler image
+    set:
+      scheduler.handover.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.enabled requires a bb-scheduler image built from Hermetiq's fork"
+
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

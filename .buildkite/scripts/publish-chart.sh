@@ -5,6 +5,7 @@
 #   - verifies the tag version matches charts/<chart>/Chart.yaml
 #   - lints + templates the chart (fail fast on a broken chart)
 #   - REFUSES to overwrite an already-published OCI version
+#   - records all default image digests in the packaged chart
 #   - cosign-signs the pushed chart and self-verifies the signature
 #
 # Runs inside google/cloud-sdk:slim (docker plugin) with the WIF creds shared in
@@ -15,7 +16,10 @@
 set -euo pipefail
 
 HELM_VERSION="${HELM_VERSION:-3.16.2}"
-COSIGN_VERSION="${COSIGN_VERSION:-2.4.3}"
+COSIGN_VERSION="2.4.3"
+COSIGN_SHA256="caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708"
+CRANE_VERSION="v0.21.9"
+CRANE_SHA256="5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e"
 GCP_PROJECT="hermetiq-cloud"
 OCI_HOST="ghcr.io/hermetiq"
 OCI_REPO="oci://${OCI_HOST}"
@@ -46,12 +50,16 @@ if [ "${chart_version}" != "${VERSION}" ]; then
 fi
 
 # --- toolchain (in-script; the cloud-sdk image provides gcloud) --------------
-echo "+++ :wrench: install curl + helm ${HELM_VERSION} + cosign ${COSIGN_VERSION}"
-apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
+echo "+++ :wrench: install curl + helm ${HELM_VERSION} + cosign ${COSIGN_VERSION} + crane ${CRANE_VERSION}"
+apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates python3 python3-yaml >/dev/null
 curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xz -C /tmp
 install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
 curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64" -o /usr/local/bin/cosign
+echo "${COSIGN_SHA256}  /usr/local/bin/cosign" | sha256sum -c -
 chmod 0755 /usr/local/bin/cosign
+curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o /tmp/crane.tar.gz
+echo "${CRANE_SHA256}  /tmp/crane.tar.gz" | sha256sum -c -
+tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane
 
 # --- validate ----------------------------------------------------------------
 # lint --strict only; full `helm template` + kubeconform needs ci-values fixtures
@@ -60,14 +68,28 @@ chmod 0755 /usr/local/bin/cosign
 echo "+++ :helm: lint ${CHART}"
 helm lint --strict "${DIR}"
 
+# Capture the default image references from the registry immediately before
+# packaging. Work on a copy so the release does not modify the checkout or
+# change the meaning of customer values and tag overrides.
+chart_tmp="$(mktemp -d)"
+cosign_key=""
+trap 'rm -rf "${chart_tmp}"; [ -z "${cosign_key}" ] || rm -f "${cosign_key}"' EXIT
+cp -R "${DIR}" "${chart_tmp}/${CHART}"
+echo "+++ :docker: resolve ${CHART} default image digests"
+/usr/bin/python3 .buildkite/scripts/chart-image-digests.py "${chart_tmp}/${CHART}"
+
 # --- read publish secrets from Secret Manager --------------------------------
 echo "+++ :gcloud: read publish secrets"
 ghcr_token="$(gcloud secrets versions access latest --secret=ghcr-helm-token --project="${GCP_PROJECT}")"
 cosign_key="$(mktemp)"
-trap 'rm -f "${cosign_key}"' EXIT
 gcloud secrets versions access latest --secret=cosign-private-key --project="${GCP_PROJECT}" >"${cosign_key}"
 COSIGN_PASSWORD="$(gcloud secrets versions access latest --secret=cosign-password --project="${GCP_PROJECT}")"
 export COSIGN_PASSWORD
+cosign public-key --key "${cosign_key}" >"${chart_tmp}/cosign.pub"
+if ! cmp -s cosign.pub "${chart_tmp}/cosign.pub"; then
+  echo "chart signing key does not match the published cosign.pub" >&2
+  exit 1
+fi
 
 # --- registry login (helm for push/show, cosign for signing) -----------------
 echo "${ghcr_token}" | helm registry login ghcr.io -u "${GHCR_USER}" --password-stdin
@@ -82,7 +104,7 @@ fi
 
 # --- package + push + sign ---------------------------------------------------
 echo "+++ :helm: package + push ${CHART}:${VERSION}"
-helm package "${DIR}" --destination dist/
+helm package "${chart_tmp}/${CHART}" --destination dist/
 # tee (not var capture) so the push output — and any error — is visible even when
 # push fails: under `set -e`+pipefail a failed `var=$(cmd)` would abort before we
 # could echo it.
@@ -97,8 +119,7 @@ ref="${OCI_HOST}/${CHART}@${digest}"
 
 echo "+++ :cosign: sign + verify ${CHART}:${VERSION}"
 cosign sign --yes --key "${cosign_key}" "${ref}"
-cosign public-key --key "${cosign_key}" >/tmp/cosign.pub
-cosign verify --key /tmp/cosign.pub "${ref}" >/dev/null
+cosign verify --key cosign.pub "${ref}" >/dev/null
 
 echo "+++ :white_check_mark: published + signed ${OCI_HOST}/${CHART}:${VERSION}"
 # This script runs inside google/cloud-sdk:slim (docker plugin), which has no

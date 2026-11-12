@@ -1,0 +1,133 @@
+suite: scheduler zero-downtime handover (Phase 1)
+templates:
+  - templates/deployment-scheduler.yaml
+  - templates/rbac-scheduler.yaml
+  - templates/configmaps.yaml
+  - templates/networkpolicy-scheduler.yaml
+tests:
+  - it: does not render handover resources or sidecar by default
+    template: templates/rbac-scheduler.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: configures RollingUpdate strategy, coordinator sidecar, and shared socket volume when enabled
+    template: templates/deployment-scheduler.yaml
+    set:
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.tag: v0.1.0
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxSurge: 1
+              maxUnavailable: 0
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 1800
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: scheduler
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 2
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: coordinator
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-scheduler-coordinator:v0.1.0
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8985
+            protocol: TCP
+            name: handover
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            mountPath: /run/bb-coordinator
+            name: coordinator-sock
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            mountPath: /run/bb-coordinator
+            name: coordinator-sock
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: coordinator-sock
+            emptyDir: {}
+
+  - it: renders ServiceAccount, Role, and RoleBinding for Lease coordination when enabled
+    template: templates/rbac-scheduler.yaml
+    set:
+      scheduler.handover.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 0
+      - isKind:
+          of: Role
+        documentIndex: 1
+      - equal:
+          path: rules[0].apiGroups
+          value: ["coordination.k8s.io"]
+        documentIndex: 1
+      - equal:
+          path: rules[0].resources
+          value: ["leases"]
+        documentIndex: 1
+      - isKind:
+          of: RoleBinding
+        documentIndex: 2
+
+  - it: renders handoverGrpcServers and coordinator block in scheduler.jsonnet when enabled
+    template: templates/configmaps.yaml
+    documentIndex: 0
+    set:
+      scheduler.handover.enabled: true
+      security.grpcMtls.enabled: true
+      security.grpcMtls.secretName: bb-mtls
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "handoverGrpcServers:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "address: 'unix:///run/bb-coordinator/coordinator\\.sock'"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "peerClientTemplate:"
+
+  - it: admits peer scheduler pods on ports 8982-8985 in NetworkPolicy when handover is enabled
+    template: templates/networkpolicy-scheduler.yaml
+    set:
+      scheduler.networkPolicy.enabled: true
+      scheduler.handover.enabled: true
+    asserts:
+      - equal:
+          path: spec.ingress[3].from
+          value:
+            - podSelector:
+                matchLabels:
+                  app: scheduler
+      - equal:
+          path: spec.ingress[3].ports
+          value:
+            - port: 8982
+              protocol: TCP
+            - port: 8983
+              protocol: TCP
+            - port: 8984
+              protocol: TCP
+            - port: 8985
+              protocol: TCP

@@ -27,6 +27,29 @@
 {{- fail "scheduler.actionRouter.catchAll.platform.properties are not sorted by name then value; the scheduler rejects an unsorted platform and will not start" -}}
 {{- end -}}
 {{- end -}}
+{{- range $i, $q := $.Values.scheduler.predeclaredPlatformQueues -}}
+{{- if not $q.platform -}}
+{{- fail (printf "scheduler.predeclaredPlatformQueues[%d].platform must not be empty" $i) -}}
+{{- end -}}
+{{- $keys := list -}}
+{{- range $q.platform -}}
+{{- $keys = append $keys (printf "%s\x00%s" .name .value) -}}
+{{- end -}}
+{{- if ne (join "\n" $keys) (join "\n" (sortAlpha $keys)) -}}
+{{- fail (printf "scheduler.predeclaredPlatformQueues[%d].platform properties are not sorted by name then value; the scheduler rejects an unsorted platform and will not start" $i) -}}
+{{- end -}}
+{{- end -}}
+{{- /* configurationReloadInterval and the handover settings only exist in
+     Hermetiq's fork of bb-remote-execution. The upstream image parses its
+     configuration strictly, so it would crash-loop on them. */ -}}
+{{- if eq $.Values.images.scheduler.repository "ghcr.io/buildbarn/bb-scheduler" -}}
+{{- if $.Values.scheduler.configurationReloadInterval -}}
+{{- fail "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork of bb-remote-execution; the upstream ghcr.io/buildbarn/bb-scheduler image rejects this option and will not start. Point images.scheduler.repository at the fork's image, or leave scheduler.configurationReloadInterval empty." -}}
+{{- end -}}
+{{- if $.Values.scheduler.handover.enabled -}}
+{{- fail "scheduler.handover.enabled requires a bb-scheduler image built from Hermetiq's fork of bb-remote-execution; the upstream ghcr.io/buildbarn/bb-scheduler image rejects the handover options and will not start. Point images.scheduler.repository at the fork's image, or disable scheduler.handover." -}}
+{{- end -}}
+{{- end -}}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- $validRoutingProviders := list "contour" "gateway" "gateway-httproute-only" "ingress" "none" -}}
 {{- $requestedRoutingProvider := default "" .Values.routing.provider -}}

@@ -1,4 +1,5 @@
 local common = import 'common.libsonnet';
+local routing = import 'scheduler-routing.libsonnet';
 
 {
   adminHttpServers: [{
@@ -26,6 +27,33 @@ local common = import 'common.libsonnet';
     {{- end }}
     {{ include "buildbarn.authenticationPolicy" (dict "root" $ "config" .Values.scheduler.buildQueueStateGrpcServers.authenticationPolicy "path" "scheduler.buildQueueStateGrpcServers.authenticationPolicy" "compact" true) | indent 4 | trim }}
   }],
+  {{- if .Values.scheduler.handover.enabled }}
+  handoverGrpcServers: [{
+    listenAddresses: [':{{ .Values.scheduler.handover.port }}'],
+    {{- if .Values.security.grpcMtls.enabled }}
+    {{ include "buildbarn.mtlsServerTls" . | indent 4 | trim }}
+    {{- end }}
+    {{ include "buildbarn.authenticationPolicy" (dict "root" $ "config" .Values.scheduler.handover.handoverGrpcServers.authenticationPolicy "path" "scheduler.handover.handoverGrpcServers.authenticationPolicy" "compact" true) | indent 4 | trim }}
+  }],
+  coordinator: {
+    client: {
+      address: 'unix:///run/bb-coordinator/coordinator.sock',
+    },
+    selfId: std.extVar('POD_NAME'),
+    selfClientEndpoint: std.extVar('POD_IP') + ':8982',
+    selfWorkerEndpoint: std.extVar('POD_IP') + ':8983',
+    selfStateEndpoint: std.extVar('POD_IP') + ':8984',
+    selfHandoverEndpoint: std.extVar('POD_IP') + ':{{ .Values.scheduler.handover.port }}',
+    {{- if .Values.security.grpcMtls.enabled }}
+    peerClientTemplate: {
+      {{ include "buildbarn.mtlsClientTls" . | indent 6 | trim }}
+    },
+    {{- end }}
+    adoptionWindow: {{ .Values.scheduler.handover.adoptionWindow | quote }},
+    recoveredOperationGracePeriod: {{ .Values.scheduler.handover.recoveredOperationGracePeriod | quote }},
+    relayDrainPeriod: {{ .Values.scheduler.handover.relayDrainPeriod | quote }},
+  },
+  {{- end }}
   browserUrl: common.browserUrl,
   contentAddressableStorage: common.blobstore.contentAddressableStorage,
   {{- if .Values.scheduler.sizeClassAnalysis.enabled }}
@@ -37,67 +65,10 @@ local common = import 'common.libsonnet';
   modifyDrainsAuthorizer: { allow: {} },
   killOperationsAuthorizer: { allow: {} },
   synchronizeAuthorizer: { allow: {} },
-  actionRouter: {
-    {{- if eq .Values.scheduler.actionRouter.mode "simple" }}
-    simple: {
-      platformKeyExtractor: { action: {} },
-      {{ include "buildbarn.schedulerRouterTail" . | indent 6 | trim }}
-    },
-    {{- else if eq .Values.scheduler.actionRouter.mode "demultiplexing" }}
-    {{- /* A catch-all. Platform matching has no fallback of its own — the queue
-         key is the marshalled platform compared by exact string equality — so
-         the only way to serve an action whose platform matches no pool is to
-         route the leftovers to a router that REWRITES their platform onto one
-         that does exist. Both halves are required: a defaultActionRouter that
-         keeps the `action` extractor matches the leftovers exactly as before
-         and still finds no pool. */}}
-    demultiplexing: {
-      platformKeyExtractor: { action: {} },
-      backends: [
-        {{- range .Values.scheduler.actionRouter.backends }}
-        {
-          instanceNamePrefix: {{ .instanceNamePrefix | default "" | quote }},
-          platform: {
-            {{ include "buildbarn.platformProperties" .platform.properties | indent 12 | trim }}
-          },
-          actionRouter: {
-            simple: {
-              platformKeyExtractor: { action: {} },
-              {{ include "buildbarn.schedulerRouterTail" $ | indent 14 | trim }}
-            },
-          },
-        },
-        {{- end }}
-      ],
-      defaultActionRouter: {
-        simple: {
-          platformKeyExtractor: {
-            static: {
-              {{ include "buildbarn.platformProperties" .Values.scheduler.actionRouter.catchAll.platform.properties | indent 14 | trim }}
-            },
-          },
-          {{ include "buildbarn.schedulerRouterTail" . | indent 10 | trim }}
-        },
-      },
-    },
-    {{- else if eq .Values.scheduler.actionRouter.mode "custom" }}
-{{ required "scheduler.actionRouter.custom is required when mode=custom" .Values.scheduler.actionRouter.custom | nindent 4 }}
-    {{- else }}
-    {{- fail "scheduler.actionRouter.mode must be one of simple, demultiplexing, custom" }}
-    {{- end }}
-  },
-  {{- if .Values.scheduler.predeclaredPlatformQueues }}
-  predeclaredPlatformQueues: [
-    {{- range .Values.scheduler.predeclaredPlatformQueues }}
-    {
-      {{- if .instanceNamePrefix }}
-      instanceNamePrefix: {{ .instanceNamePrefix | quote }},
-      {{- end }}
-      platform: { properties: {{ .platform | toJson }} },
-      sizeClasses: {{ .sizeClasses | toJson }},
-    },
-    {{- end }}
-  ],
+  actionRouter: routing.actionRouter,
+  predeclaredPlatformQueues: routing.predeclaredPlatformQueues,
+  {{- with .Values.scheduler.configurationReloadInterval }}
+  configurationReloadInterval: {{ . | quote }},
   {{- end }}
   platformQueueWithNoWorkersTimeout: {{ .Values.scheduler.platformQueueWithNoWorkersTimeout | quote }},
 }

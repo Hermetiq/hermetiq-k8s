@@ -1092,6 +1092,57 @@ scheduler:
   #         - { name: pool, value: sizeclass }
   #       sizeClasses: [1, 2]
   predeclaredPlatformQueues: []
+  # Interval at which bb-scheduler re-reads its configuration and applies
+  # changes to predeclaredPlatformQueues and actionRouter without restarting
+  # (for example "30s"). Empty disables reloading.
+  #
+  # REQUIRES a bb-scheduler image built from Hermetiq's fork of
+  # bb-remote-execution: the upstream ghcr.io/buildbarn/bb-scheduler image
+  # rejects the configurationReloadInterval option and will not start.
+  #
+  # When set, those two settings move out of the scheduler's checksum/config
+  # annotation: changing them updates the mounted ConfigMap in place (the
+  # kubelet refreshes it within about a minute) and the scheduler applies the
+  # change on its next reload instead of the pod rolling. A reload is applied
+  # whole or not at all; a configuration that fails to evaluate is logged,
+  # counted in buildbarn_scheduler_configuration_reloads_total{result="Failure"},
+  # and the previous configuration stays in effect. Changing the sizeClasses of
+  # an existing predeclared queue still needs a restart
+  # (kubectl rollout restart); until then it is reported by
+  # buildbarn_scheduler_predeclared_platform_queues_pending_restart.
+  configurationReloadInterval: ""
+  # Optional zero-downtime blue/green handover for scheduler rollouts (Phase 1).
+  # When enabled, the scheduler Deployment uses a RollingUpdate (maxSurge: 1,
+  # maxUnavailable: 0) with a Lease-backed coordinator sidecar and streams its
+  # in-memory build queue state to the replacement pod before retiring and
+  # relaying in-flight Execute / WaitExecution streams.
+  handover:
+    enabled: false
+    port: 8985
+    terminationGracePeriodSeconds: 1800
+    adoptionWindow: 15s
+    recoveredOperationGracePeriod: 30s
+    relayDrainPeriod: 1740s
+    handoverGrpcServers:
+      authenticationPolicy:
+        mode: ""
+        denyMessage: ""
+        custom: ""
+    coordinator:
+      leaseDurationSeconds: 10
+      renewInterval: 2s
+      image:
+        repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-scheduler-coordinator
+        tag: v0.1.0
+        digest: ""
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 25m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
   resources:
     requests:
       cpu: 200m
