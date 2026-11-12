@@ -22,8 +22,8 @@ container-dependent workflows.
 `chromium-siso/` builds Chromium's `chrome` target remotely on Buildbarn with
 Siso, Chromium's build tool, and reports every build to Hermetiq. It includes
 two size-class worker pools for Google's `siso-chromium` runner image, the
-Buildbarn values they need, the client configuration, and what we changed to
-make the build faster.
+Buildbarn values they need, the client configuration, and the build times to
+expect.
 
 - [chromium-siso/README.md](chromium-siso/README.md)
 

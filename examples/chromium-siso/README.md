@@ -136,26 +136,14 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 
 `siso-bep` prints a link to the build in Hermetiq when it starts.
 
-### What We Tried
+### Build Times
 
-We made the build faster one change at a time, and timed a cold build of
-`chrome` after each change, with remote cache reads off so every step ran. Each
-attempt has its own page. The [summary](attempts/summary.md) ranks the changes
-by what they cost and what they saved.
-
-| # | Change | Build time |
-| --- | --- | --- |
-| 1 | [Siso's defaults on 16 nodes](attempts/01-siso-defaults.md) | 46 min |
-| 2 | [Up to 40 nodes](attempts/02-more-nodes.md) | 29 min |
-| 3 | [Add `default-remote`](attempts/03-default-remote.md) | 29 min |
-| 4 | [Keep links on the workstation](attempts/04-local-links.md) | 23 min |
-| 5 | [Add `googlechrome`](attempts/05-googlechrome.md) | 18 min |
-| 6 | [Double `--remote_jobs` to 800](attempts/06-remote-jobs.md) | 17 min |
-| 7 | [Warm the pools first](attempts/07-warm-pools.md) | 12 min |
-| 8 | [Shrink the small pool](attempts/08-smaller-small-pool.md) | slower |
-| 9 | [Drop the patch: Chromium's own config](attempts/09-chromium-config.md) | 21 min |
-| 10 | [Warm the pools first, again](attempts/10-warm-pools-again.md) | 16 min |
-| 11 | [More actions per large pod](attempts/11-more-actions-per-pod.md) | no faster |
+On 40 nodes, a cold build of `chrome` with this configuration takes about 21
+minutes when the large pool starts from zero, and about 16 minutes when both
+pools are scaled up before the build starts. New nodes take several minutes to
+arrive, so a build that starts from zero spends its first minutes waiting for
+them. See [The pools](reference.md#the-pools) for keeping capacity warm, and
+[Build flags](reference.md#build-flags) for measuring a cold build yourself.
 
 ### Troubleshooting
 
