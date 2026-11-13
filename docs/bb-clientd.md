@@ -38,19 +38,43 @@ systemctl --user restart bb_clientd
 ls ~/bb_clientd   # cas  outputs  scratch
 ```
 
-The release also has standalone binaries for Linux and macOS. To run one, copy
-[`configs/bb_clientd.jsonnet`](https://github.com/buildbarn/bb-clientd/blob/main/configs/bb_clientd.jsonnet)
-next to your configuration as `bb_clientd_defaults.jsonnet`, create the
-directories listed in the bb-clientd README, and start it:
+On Linux, if `/etc/fuse.conf` lacks `user_allow_other`, set
+`mount+: { fuse+: { allowOther: false } }`.
+
+### macOS (standalone release)
+
+macOS uses NFSv4; macFUSE is not required. Download the binary and default
+configuration from the **same release tag**, rather than mixing a release
+binary with the defaults on `main`:
 
 ```bash
-export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-OS="$(uname)" bb_clientd ~/.config/bb_clientd/bb_clientd.jsonnet
+BB_CLIENTD_RELEASE=20261008T163232Z-ffb6815
+BB_CLIENTD_ARCH="$(uname -m)"
+[ "$BB_CLIENTD_ARCH" != x86_64 ] || BB_CLIENTD_ARCH=amd64
+mkdir -p "$HOME/.local/bin" "$HOME/.config/bb_clientd"
+curl -fL "https://github.com/buildbarn/bb-clientd/releases/download/$BB_CLIENTD_RELEASE/bb_clientd.darwin_$BB_CLIENTD_ARCH" \
+  -o "$HOME/.local/bin/bb_clientd"
+curl -fL "https://raw.githubusercontent.com/buildbarn/bb-clientd/$BB_CLIENTD_RELEASE/configs/bb_clientd.jsonnet" \
+  -o "$HOME/.config/bb_clientd/bb_clientd_defaults.jsonnet"
+chmod +x "$HOME/.local/bin/bb_clientd"
 ```
 
-If
-`/etc/fuse.conf` lacks `user_allow_other`, set
-`mount+: { fuse+: { allowOther: false } }`.
+Create `~/.config/bb_clientd/bb_clientd.jsonnet` as shown below, then start:
+
+```bash
+export XDG_CACHE_HOME="$HOME/.cache"
+mkdir -p \
+  "$XDG_CACHE_HOME/bb_clientd/ac/persistent_state" \
+  "$XDG_CACHE_HOME/bb_clientd/cas/persistent_state" \
+  "$XDG_CACHE_HOME/bb_clientd/outputs" "$HOME/bb_clientd"
+OS=Darwin "$HOME/.local/bin/bb_clientd" "$HOME/.config/bb_clientd/bb_clientd.jsonnet"
+```
+
+Leave this terminal open; stop with Ctrl+C. From another terminal, check
+`ls ~/bb_clientd` (expect `cas`, `outputs`, `scratch`). Logs are in
+`~/.cache/bb_clientd/log`; no per-request log output is normal. Recreate the
+directories if you remove the cache. The standalone Linux binary uses the
+same setup with `OS=Linux` and the FUSE requirements above.
 
 ## Configure
 
@@ -117,10 +141,16 @@ build:bb-clientd --credential_helper=%workspace%/tools/bb-clientd-credential-hel
 - `--remote_bytestream_uri_prefix` makes `bytestream://` links in the build
   event stream point at `bb.<your-domain>` instead of the local socket, so
   Hermetiq and other build event consumers can read those blobs.
-- Drop `--remote_executor` to use bb_clientd for caching only.
+- Drop `--remote_executor` for caching only. The two output-service flags
+  independently enable lazy outputs; omit them for a plain caching proxy.
 - Keep the BEP settings (`--bes_backend` and its scoped
   `--credential_helper=bep.<your-domain>=...`) as they are. BEP does not go
   through bb_clientd.
+
+If an existing config already sets `--remote_cache`, apply `--config=bb-clientd`
+last: Bazel uses the last value, so it connects to the socket instead of the
+remote host. The daemon's `clusters` setting selects the upstream host.
+Duplicate-option warnings are expected when overriding the existing config.
 
 Bazel chooses a credential helper by host, and a socket has none, so the cache
 helper has to be unscoped. An unscoped helper also answers for every other host
@@ -139,6 +169,35 @@ esac
 
 Save it as `tools/bb-clientd-credential-helper`, make it executable, and keep
 both helpers out of version control. Build with `--config=bb-clientd`.
+
+### What this verifies
+
+Normal incremental builds already reuse Bazel's local outputs. The daemon's
+separate blob cache is useful when the same outputs are needed across output
+bases or checkouts; `--disk_cache` provides overlapping functionality.
+`bazel clean` is a verification technique, not a recommended daily workflow.
+Bazel's “remote cache hit” label alone does not distinguish local daemon reads
+from upstream downloads.
+
+To inspect cache reuse, optionally add this inside the daemon's `global+:`
+block and restart without deleting its cache:
+
+```jsonnet
+diagnosticsHttpServer: {
+  httpServers: [{
+    listenAddresses: ['127.0.0.1:12345'],
+    authenticationPolicy: { allow: {} },
+  }],
+  enablePrometheus: true,
+},
+```
+
+Compare `curl -fsS http://127.0.0.1:12345/metrics` before and after a clean
+rebuild. For `buildbarn_blobstore_blob_access_operations_blob_size_bytes_sum`
+with `operation="Get", storage_type="cas"`, an increase for
+`backend_type="local_block_device"` without an increase for `backend_type="grpc"`
+confirms output bytes were served locally. Upstream action-result lookups
+(`storage_type="ac"`) are still expected.
 
 ## Siso
 
