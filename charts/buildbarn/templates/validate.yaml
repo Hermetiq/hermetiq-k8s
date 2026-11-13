@@ -42,6 +42,11 @@
 {{- /* configurationReloadInterval and the handover settings only exist in
      Hermetiq's fork of bb-remote-execution. The upstream image parses its
      configuration strictly, so it would crash-loop on them. */ -}}
+{{- with $.Values.scheduler.configurationReloadInterval -}}
+{{- if gt (int64 (first (splitList "." (trimSuffix "s" .)))) (int64 315576000000) -}}
+{{- fail "scheduler.configurationReloadInterval exceeds the maximum protobuf duration of 315576000000 seconds" -}}
+{{- end -}}
+{{- end -}}
 {{- if eq $.Values.images.scheduler.repository "ghcr.io/buildbarn/bb-scheduler" -}}
 {{- if $.Values.scheduler.configurationReloadInterval -}}
 {{- fail "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork of bb-remote-execution; the upstream ghcr.io/buildbarn/bb-scheduler image rejects this option and will not start. Point images.scheduler.repository at the fork's image, or leave scheduler.configurationReloadInterval empty." -}}

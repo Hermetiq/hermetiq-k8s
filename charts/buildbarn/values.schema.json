@@ -126,7 +126,13 @@
         },
         "configurationReloadInterval": {
           "type": "string",
-          "pattern": "^$|^[0-9]+(\\.[0-9]+)?(ms|s|m|h)$"
+          "anyOf": [
+            { "const": "" },
+            {
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,9})?s$",
+              "not": { "pattern": "^0+(\\.0+)?s$" }
+            }
+          ]
         },
         "clientGrpcServers": {
           "type": "object",
@@ -176,6 +182,7 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "peerServerName": { "type": "string", "minLength": 1 },
             "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
             "adoptionWindow": { "type": "string" },

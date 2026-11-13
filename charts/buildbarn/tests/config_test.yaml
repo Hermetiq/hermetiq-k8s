@@ -128,32 +128,27 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: "feedbackDriven:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "initialSizeClassCache: common.initialSizeClassCache"
 
-  - it: default scheduler declares no predeclared platform queues and does not reload
+  - it: preserves the upstream scheduler configuration with feature hooks disabled
     documentSelector:
       path: metadata.name
       value: buildbarn-config
     asserts:
-      - matchRegex:
-          path: data["scheduler.jsonnet"]
-          pattern: "local routing = import 'scheduler-routing.libsonnet';"
-      - matchRegex:
-          path: data["scheduler.jsonnet"]
-          pattern: "actionRouter: routing.actionRouter,"
-      - matchRegex:
-          path: data["scheduler.jsonnet"]
-          pattern: "predeclaredPlatformQueues: routing.predeclaredPlatformQueues,"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "configurationReloadInterval"
-      - notMatchRegex:
+          pattern: "scheduler-routing|configurationReloadInterval|predeclaredPlatformQueues|handoverGrpcServers|coordinator:|deprecatedAdminHttpServers|legacyContentAddressableStorage"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "actionRouter:"
+      - notExists:
           path: data["scheduler-routing.libsonnet"]
-          pattern: "sizeClasses:"
+      - notExists:
+          path: data["scheduler-coordinator-ca.pem"]
 
   - it: renders configurationReloadInterval when set with a fork scheduler image
     set:
@@ -166,6 +161,27 @@ tests:
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: 'configurationReloadInterval: "30s",'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'deprecatedAdminHttpServers:'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,'
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: '(?m)^  contentAddressableStorage:'
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'adminHttpServers:|browserUrl:|deprecatedPortalUrl:'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "local routing = import 'scheduler-routing.libsonnet';"
+      - matchRegex:
+          path: data["scheduler-routing.libsonnet"]
+          pattern: "actionRouter:"
+      - matchRegex:
+          path: data["scheduler-routing.libsonnet"]
+          pattern: "predeclaredPlatformQueues:"
 
   - it: predeclaredPlatformQueues renders a multi-size-class queue when set
     set:
@@ -179,10 +195,10 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: "sizeClasses:"
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: sizeclass
 
   - it: omits actionResultExpiring by default, leaving completenessChecking bare
@@ -284,10 +300,10 @@ tests:
       value: buildbarn-config
     asserts:
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'actionRouter: \{\s*simple: \{'
       - notMatchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'demultiplexing'
 
   # A catch-all needs BOTH halves: a defaultActionRouter to receive the
@@ -314,20 +330,20 @@ tests:
           value: fallback
     asserts:
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'demultiplexing: \{'
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'defaultActionRouter: \{'
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'static: \{'
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: '\{ name: "pool", value: "fallback" \}'
       # The analyzer still reaches every router body, including the catch-all's.
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: 'maximumExecutionTimeout: "7200s"'
 
   - it: splices raw jsonnet for mode custom
@@ -340,7 +356,7 @@ tests:
         remote: { endpoint: { address: 'router:8080' } },
     asserts:
       - matchRegex:
-          path: data["scheduler-routing.libsonnet"]
+          path: data["scheduler.jsonnet"]
           pattern: "remote: \\{ endpoint:"
 
   # The point of the default: adopting the mTLS block must not rewrite a byte of

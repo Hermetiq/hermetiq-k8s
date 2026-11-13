@@ -6,12 +6,14 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.8
+version: 0.9.9
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
     - kind: changed
       description: "Update the optional grpc-cache-proxy sidecar image to v0.9.6"
     - kind: fixed

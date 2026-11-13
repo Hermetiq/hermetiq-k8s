@@ -32,15 +32,7 @@ spec:
         {{- if or .Values.commonAnnotations .Values.podAnnotations }}
         {{- include "buildbarn.podAnnotations" $ | nindent 8 }}
         {{- end }}
-        {{- /* With configurationReloadInterval set, the scheduler re-reads
-             scheduler-routing.libsonnet itself, so changing it must not roll
-             the pod. Without it, the file is only read at startup and has to
-             be part of the checksum. */}}
-        {{- $checksumFiles := list "common.libsonnet" "scheduler.jsonnet" }}
-        {{- if not .Values.scheduler.configurationReloadInterval }}
-        {{- $checksumFiles = append $checksumFiles "scheduler-routing.libsonnet" }}
-        {{- end }}
-        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" $checksumFiles) }}
+        checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "scheduler.jsonnet")) }}
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.scheduler.handover.enabled }}
@@ -129,9 +121,14 @@ spec:
             - mountPath: /config/
               name: configs
               readOnly: true
-        {{- if .Values.scheduler.handover.enabled }}
-        {{- $coord := .Values.scheduler.handover.coordinator }}
+      {{- if .Values.scheduler.handover.enabled }}
+      {{- $coord := .Values.scheduler.handover.coordinator }}
+      {{- $mtls := .Values.security.grpcMtls }}
+      # Native sidecars stop after application containers, keeping the
+      # coordinator available throughout the scheduler's handover and drain.
+      initContainers:
         - name: coordinator
+          restartPolicy: Always
           image: {{ include "buildbarn.image" (dict "root" . "name" "scheduler.handover.coordinator.image" "repository" $coord.image.repository "tag" $coord.image.tag "digest" $coord.image.digest) }}
           imagePullPolicy: {{ $coord.image.pullPolicy }}
           args:
@@ -140,6 +137,12 @@ spec:
             - -lease-duration={{ $coord.leaseDurationSeconds }}s
             - -renew-interval={{ $coord.renewInterval }}
             - -ping-endpoint=127.0.0.1:{{ .Values.scheduler.handover.port }}
+            {{- if $mtls.enabled }}
+            - {{ printf "-ping-ca-file=%s" (default "/config/scheduler-coordinator-ca.pem" $mtls.certificateAuthoritiesFile) | quote }}
+            - {{ printf "-ping-cert-file=%s/%s" $mtls.mountPath $mtls.certificatePath | quote }}
+            - {{ printf "-ping-key-file=%s/%s" $mtls.mountPath $mtls.privateKeyPath | quote }}
+            - {{ printf "-ping-server-name=%s" .Values.scheduler.handover.peerServerName | quote }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -163,7 +166,15 @@ spec:
           volumeMounts:
             - mountPath: /run/bb-coordinator
               name: coordinator-sock
-        {{- end }}
+            {{- if $mtls.enabled }}
+            {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
+            {{- if not $mtls.certificateAuthoritiesFile }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      {{- end }}
       {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
       volumes:
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
@@ -182,5 +193,11 @@ spec:
                 path: common.libsonnet
               - key: scheduler.jsonnet
                 path: scheduler.jsonnet
+              {{- if .Values.scheduler.configurationReloadInterval }}
               - key: scheduler-routing.libsonnet
                 path: scheduler-routing.libsonnet
+              {{- end }}
+              {{- if and .Values.scheduler.handover.enabled .Values.security.grpcMtls.enabled .Values.security.grpcMtls.certificateAuthorities }}
+              - key: scheduler-coordinator-ca.pem
+                path: scheduler-coordinator-ca.pem
+              {{- end }}

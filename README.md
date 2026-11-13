@@ -200,7 +200,7 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.7` |             `0.9.6` |
-| Buildbarn |       `0.9.8` |  `20260908T142448Z` |
+| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
 | BB Worker Operator |      `0.3.10` |           `v0.3.11` |
 
 The release PR updates the chart versions and README pins together. Tag the

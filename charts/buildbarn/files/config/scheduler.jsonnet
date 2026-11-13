@@ -1,8 +1,10 @@
 local common = import 'common.libsonnet';
+{{- if .Values.scheduler.configurationReloadInterval }}
 local routing = import 'scheduler-routing.libsonnet';
+{{- end }}
 
 {
-  adminHttpServers: [{
+  {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}deprecatedAdminHttpServers{{ else }}adminHttpServers{{ end }}: [{
     listenAddresses: [':7982'],
     {{ include "buildbarn.httpAuthenticationPolicy" (dict "root" $ "config" .Values.scheduler.adminHttpServers.authenticationPolicy "path" "scheduler.adminHttpServers.authenticationPolicy" "compact" true) | indent 4 | trim }}
   }],
@@ -46,7 +48,7 @@ local routing = import 'scheduler-routing.libsonnet';
     selfHandoverEndpoint: std.extVar('POD_IP') + ':{{ .Values.scheduler.handover.port }}',
     {{- if .Values.security.grpcMtls.enabled }}
     peerClientTemplate: {
-      {{ include "buildbarn.mtlsClientTls" . | indent 6 | trim }}
+      {{ include "buildbarn.mtlsClientTls" (dict "Values" .Values "serverName" .Values.scheduler.handover.peerServerName) | indent 6 | trim }}
     },
     {{- end }}
     adoptionWindow: {{ .Values.scheduler.handover.adoptionWindow | quote }},
@@ -54,8 +56,10 @@ local routing = import 'scheduler-routing.libsonnet';
     relayDrainPeriod: {{ .Values.scheduler.handover.relayDrainPeriod | quote }},
   },
   {{- end }}
+  {{- if not (or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled) }}
   browserUrl: common.browserUrl,
-  contentAddressableStorage: common.blobstore.contentAddressableStorage,
+  {{- end }}
+  {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}legacyContentAddressableStorage{{ else }}contentAddressableStorage{{ end }}: common.blobstore.contentAddressableStorage,
   {{- if .Values.scheduler.sizeClassAnalysis.enabled }}
   initialSizeClassCache: common.initialSizeClassCache,
   {{- end }}
@@ -65,10 +69,12 @@ local routing = import 'scheduler-routing.libsonnet';
   modifyDrainsAuthorizer: { allow: {} },
   killOperationsAuthorizer: { allow: {} },
   synchronizeAuthorizer: { allow: {} },
+  {{- if .Values.scheduler.configurationReloadInterval }}
   actionRouter: routing.actionRouter,
   predeclaredPlatformQueues: routing.predeclaredPlatformQueues,
-  {{- with .Values.scheduler.configurationReloadInterval }}
-  configurationReloadInterval: {{ . | quote }},
+  configurationReloadInterval: {{ .Values.scheduler.configurationReloadInterval | quote }},
+  {{- else }}
+  {{ include "buildbarn.schedulerRouting" . }}
   {{- end }}
   platformQueueWithNoWorkersTimeout: {{ .Values.scheduler.platformQueueWithNoWorkersTimeout | quote }},
 }

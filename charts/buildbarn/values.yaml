@@ -1094,10 +1094,12 @@ scheduler:
   predeclaredPlatformQueues: []
   # Interval at which bb-scheduler re-reads its configuration and applies
   # changes to predeclaredPlatformQueues and actionRouter without restarting
-  # (for example "30s"). Empty disables reloading.
+  # (for example "30s" or "0.5s"). Use a positive duration in protobuf
+  # seconds notation; empty disables reloading. Zero, ms, m, and h are rejected.
   #
   # REQUIRES a bb-scheduler image built from Hermetiq's fork of
-  # bb-remote-execution: the upstream ghcr.io/buildbarn/bb-scheduler image
+  # bb-remote-execution, including legacyContentAddressableStorage support
+  # for the chart's existing storage. The upstream ghcr.io/buildbarn/bb-scheduler image
   # rejects the configurationReloadInterval option and will not start.
   #
   # When set, those two settings move out of the scheduler's checksum/config
@@ -1112,12 +1114,18 @@ scheduler:
   # buildbarn_scheduler_predeclared_platform_queues_pending_restart.
   configurationReloadInterval: ""
   # Optional zero-downtime blue/green handover for scheduler rollouts (Phase 1).
+  # Disabled by default; requires a compatible fork scheduler image and a
+  # matching coordinator image. Keep opt-in images/settings in environment
+  # overrides. The first upgrade from an upstream scheduler must run idle.
   # When enabled, the scheduler Deployment uses a RollingUpdate (maxSurge: 1,
   # maxUnavailable: 0) with a Lease-backed coordinator sidecar and streams its
   # in-memory build queue state to the replacement pod before retiring and
   # relaying in-flight Execute / WaitExecution streams.
   handover:
     enabled: false
+    # TLS identity shared by scheduler certificates. Peer connections dial
+    # Pod IPs but verify this DNS SAN, including the coordinator's local Ping.
+    peerServerName: scheduler
     port: 8985
     terminationGracePeriodSeconds: 1800
     adoptionWindow: 15s
@@ -1129,6 +1137,8 @@ scheduler:
         denyMessage: ""
         custom: ""
     coordinator:
+      # Runs as a native Kubernetes sidecar (Kubernetes 1.29+) so Lease
+      # renewal and handover RPCs remain available until the scheduler exits.
       leaseDurationSeconds: 10
       renewInterval: 2s
       image:

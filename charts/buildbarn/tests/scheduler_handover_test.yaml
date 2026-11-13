@@ -5,11 +5,50 @@ templates:
   - templates/configmaps.yaml
   - templates/networkpolicy-scheduler.yaml
 tests:
-  - it: does not render handover resources or sidecar by default
+  - it: does not render handover RBAC by default
     template: templates/rbac-scheduler.yaml
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: preserves the upstream scheduler pod and permissions by default
+    template: templates/deployment-scheduler.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/buildbarn/bb-scheduler:20260908T142432Z-77f7642
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - notExists:
+          path: spec.template.spec.serviceAccountName
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - notExists:
+          path: spec.template.spec.terminationGracePeriodSeconds
+      - notExists:
+          path: spec.strategy
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - containerPort: 9980
+              name: metrics
+              protocol: TCP
+            - containerPort: 8982
+              protocol: TCP
+            - containerPort: 8983
+              protocol: TCP
+            - containerPort: 7982
+              protocol: TCP
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - mountPath: /config/
+              name: configs
+              readOnly: true
 
   - it: configures RollingUpdate strategy, coordinator sidecar, and shared socket volume when enabled
     template: templates/deployment-scheduler.yaml
@@ -35,13 +74,27 @@ tests:
           value: true
       - lengthEqual:
           path: spec.template.spec.containers
-          count: 2
+          count: 1
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
       - equal:
-          path: spec.template.spec.containers[1].name
+          path: spec.template.spec.initContainers[0].name
           value: coordinator
       - equal:
-          path: spec.template.spec.containers[1].image
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.initContainers[0].image
           value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-scheduler-coordinator:v0.1.0
+      - isSubset:
+          path: spec.template.spec.initContainers[0].securityContext
+          content:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
       - contains:
           path: spec.template.spec.containers[0].ports
           content:
@@ -54,7 +107,7 @@ tests:
             mountPath: /run/bb-coordinator
             name: coordinator-sock
       - contains:
-          path: spec.template.spec.containers[1].volumeMounts
+          path: spec.template.spec.initContainers[0].volumeMounts
           content:
             mountPath: /run/bb-coordinator
             name: coordinator-sock
@@ -103,10 +156,100 @@ tests:
           pattern: "handoverGrpcServers:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
+          pattern: "deprecatedAdminHttpServers:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,"
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?m)^  contentAddressableStorage:"
+      - notMatchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "adminHttpServers:|browserUrl:|deprecatedPortalUrl:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
           pattern: "address: 'unix:///run/bb-coordinator/coordinator\\.sock'"
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "peerClientTemplate:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'serverName: "scheduler"'
+
+  - it: uses the configured TLS identity for peers
+    template: templates/configmaps.yaml
+    documentIndex: 0
+    set:
+      scheduler.handover.enabled: true
+      scheduler.handover.peerServerName: scheduler.bbdev.svc
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'serverName: "scheduler.bbdev.svc"'
+
+  - it: mounts the mTLS identity and configures authenticated local health checks
+    template: templates/deployment-scheduler.yaml
+    set:
+      scheduler.handover.enabled: true
+      scheduler.handover.peerServerName: scheduler.bbdev.svc
+      security.grpcMtls.enabled: true
+      security.grpcMtls.secretName: bb-mtls
+      security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: -ping-ca-file=/etc/buildbarn/mtls/ca.crt
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: -ping-cert-file=/etc/buildbarn/mtls/tls.crt
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: -ping-key-file=/etc/buildbarn/mtls/tls.key
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: -ping-server-name=scheduler.bbdev.svc
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: buildbarn-mtls
+            mountPath: /etc/buildbarn/mtls
+            readOnly: true
+
+  - it: exposes an inline CA to the coordinator through the ConfigMap
+    template: templates/configmaps.yaml
+    documentIndex: 0
+    set:
+      scheduler.handover.enabled: true
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: test-ca-pem
+    asserts:
+      - equal:
+          path: data["scheduler-coordinator-ca.pem"]
+          value: test-ca-pem
+
+  - it: mounts the inline CA file for coordinator health checks
+    template: templates/deployment-scheduler.yaml
+    set:
+      scheduler.handover.enabled: true
+      security.grpcMtls.enabled: true
+      security.grpcMtls.certificateAuthorities: test-ca-pem
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: -ping-ca-file=/config/scheduler-coordinator-ca.pem
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: configs
+            mountPath: /config/
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes[?(@.name == "configs")].configMap.items
+          content:
+            key: scheduler-coordinator-ca.pem
+            path: scheduler-coordinator-ca.pem
 
   - it: admits peer scheduler pods on ports 8982-8985 in NetworkPolicy when handover is enabled
     template: templates/networkpolicy-scheduler.yaml
