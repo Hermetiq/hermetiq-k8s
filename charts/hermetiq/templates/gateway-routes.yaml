@@ -14,11 +14,17 @@ spec:
   hostnames:
     - {{ include "hermetiq-core.bepGrpcHost" . | quote }}
   rules:
+    {{- /* Only gateway.routes.bepGrpcServices (Bazel's Build Event Service by
+         default). The publisher also serves CompletedActionLogger, which it
+         admits by source address (publisher.trustedCalCidrs); relayed through
+         this route, an internet caller would present the proxy's pod IP. */}}
     {{- if $httpRouteOnly }}
     - matches:
+        {{- range (include "hermetiq-core.bepGrpcServices" . | fromJsonArray) }}
         - path:
             type: PathPrefix
-            value: /
+            value: {{ printf "/%s/" . | quote }}
+        {{- end }}
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -28,7 +34,12 @@ spec:
         - name: {{ include "hermetiq-core.publisherName" . }}
           port: 50091
     {{- else }}
-    - filters:
+    - matches:
+        {{- range (include "hermetiq-core.bepGrpcServices" . | fromJsonArray) }}
+        - method:
+            service: {{ . | quote }}
+        {{- end }}
+      filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
             remove:
@@ -142,6 +153,14 @@ spec:
         - path:
             type: PathPrefix
             value: {{ .Values.gateway.routes.apiWebPathPrefix | quote }}
+      {{- with .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      {{- /* Callers must not supply the identity headers the core reads. */}}
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              {{- toYaml . | nindent 14 }}
+      {{- end }}
       backendRefs:
         - name: {{ include "hermetiq-core.apiName" . }}
           port: 80

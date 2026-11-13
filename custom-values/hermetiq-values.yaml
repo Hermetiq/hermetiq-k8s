@@ -122,9 +122,11 @@ api:
         memory: 1000Mi
 
 publisher:
-  # REQUIRED when running Buildbarn RbeWorkers: set to your cluster pod CIDR
-  # (e.g. "10.244.0.0/16") so workers can stream Completed Action Logs (CAL)
-  # to bep-nats-pub:50091. Leaving this empty rejects all worker CAL calls.
+  # REQUIRED when running Buildbarn RbeWorkers: set to the range the worker
+  # pods run in (e.g. "10.244.8.0/21") so workers can stream Completed Action
+  # Logs (CAL) to bep-nats-pub:50091. It must not contain gateway or ingress
+  # proxy pods; see publisher.trustedCalCidrs in the chart's values.yaml.
+  # Leaving this empty rejects all worker CAL calls.
   trustedCalCidrs: ""
   # Example capacity for bep-nats-pub, which authenticates and publishes BEP.
   replicas: 2

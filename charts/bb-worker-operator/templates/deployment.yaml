@@ -117,6 +117,24 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: POD_SERVICE_ACCOUNT
+              value: {{ include "bb-worker-operator.serviceAccountName" . | quote }}
+            {{- with .Values.specPolicy.allowedPodServiceAccounts }}
+            - name: ALLOWED_POD_SERVICE_ACCOUNTS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.specPolicy.allowPrivilegedExtraContainers }}
+            - name: ALLOW_PRIVILEGED_EXTRA_CONTAINERS
+              value: "true"
+            {{- end }}
+            {{- with .Values.specPolicy.allowedHostPathPrefixes }}
+            - name: ALLOWED_HOST_PATH_PREFIXES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.specPolicy.allowedClusterTriggerAuthentications }}
+            - name: ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 12 }}
             {{- end }}

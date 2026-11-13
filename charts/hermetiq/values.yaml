@@ -365,11 +365,41 @@ hosts:
 #         header_property: username
 #         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
 #         auto_sign_up: true
+#         auto_assign_org_role: Viewer
 #         enable_login_token: true
+#         whitelist: "<pod CIDR>"
+#
+# Grafana then believes X-Forwarded-User from any peer that can reach it, so
+# the proxy must be its only client: grafana.networkPolicy (below) admits only
+# this proxy and the metrics scraper to the Grafana pod.
 #
 # Also register https://grafana.<domainBase>/oauth2/callback as an allowed
 # callback URL with your IdP.
 grafana:
+  # NetworkPolicy selecting the Grafana pod (installed by another chart in
+  # this namespace) that admits only grafana-oauth2-proxy and scrapersFrom.
+  # Rendered whenever the Grafana oauth2-proxy is, independent of
+  # networkPolicy.enabled, because Grafana's auth.proxy trusts any caller's
+  # X-Forwarded-User. Set enabled=false only if something else restricts
+  # who can reach Grafana; any other in-cluster Grafana client must be added
+  # to scrapersFrom.
+  networkPolicy:
+    enabled: true
+    # Selector for the Grafana pods. null selects app.kubernetes.io/name:
+    # grafana (grafana chart / victoria-metrics-k8s-stack). A selector set here
+    # replaces that default and must set matchLabels or matchExpressions.
+    podSelector: null
+    # Grafana's container port (the Service port is usually 80).
+    port: 3000
+    # NetworkPolicyPeer entries besides grafana-oauth2-proxy allowed to reach
+    # Grafana, by default the VictoriaMetrics vmagent that scrapes /metrics.
+    # For a scraper in another namespace, put namespaceSelector and
+    # podSelector in the same entry; a namespaceSelector on its own admits
+    # every pod in that namespace.
+    scrapersFrom:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: vmagent
   oauth2Proxy:
     enabled: true
     replicas: 1
@@ -424,11 +454,33 @@ gateway:
   namespace: ""
   routes:
     bepGrpcName: bep-cloud-grpc
+    # gRPC services the public BEP route forwards to bep-nats-pub, on every
+    # routing provider. Defaults to Bazel's Build Event Service only. The
+    # publisher also serves Buildbarn's CompletedActionLogger, which it admits
+    # by source address (publisher.trustedCalCidrs); relayed by a gateway or
+    # ingress proxy, an internet caller would present the proxy's pod IP.
+    # Workers reach CAL in-cluster on bep-nats-pub:50091 and need no route.
+    # Add a service only if clients outside the cluster need it.
+    bepGrpcServices:
+      - google.devtools.build.v1.PublishBuildEvent
     apiGrpcName: api-cloud-grpc
     bbcalGrpcEnabled: false
     bbcalGrpcName: bbcal-grpc
     apiWebName: api-web
     apiWebPathPrefix: /api/v1
+    # Request headers removed from every request on the public api-web route
+    # (Gateway HTTPRoute filter, Contour requestHeadersPolicy; Ingress only
+    # with ingress.apiWeb.stripIdentityHeaders=true). Several /api/v1 handlers
+    # take the caller from X-Forwarded-User, so clients must not supply these.
+    # This is defence in depth: authentication of the on-prem REST API itself
+    # depends on bep-nats rejecting unauthenticated requests. Set [] only when a
+    # trusted proxy in front of the route sets these headers.
+    apiWebRemoveRequestHeaders:
+      - X-Forwarded-User
+      - X-Forwarded-Email
+      - X-Forwarded-Groups
+      - X-Forwarded-Preferred-Username
+      - X-Hermetiq-Project-Id
     dashboardName: dashboard
     mcpName: mcp
     mcpPathPrefix: /
@@ -698,6 +750,9 @@ contour:
 
 ingress:
   enabled: true
+  # routing.provider=ingress targets ingress-nginx: the routes use nginx
+  # annotations, and the BEP route's ImplementationSpecific gRPC path matches
+  # as a prefix only there (GCE and ALB ingress classes treat it as exact).
   className: nginx
   proxyBodySize: "50m"
   grpc:
@@ -745,6 +800,13 @@ ingress:
     clusterIssuer: ""
   apiWeb:
     annotations: {}
+    # Remove gateway.routes.apiWebRemoveRequestHeaders on the api-web Ingress
+    # with an nginx configuration-snippet. Off by default because
+    # ingress-nginx rejects snippet annotations unless the controller sets
+    # allow-snippet-annotations=true and annotations-risk-level=Critical.
+    # Without it, clear these headers in the controller's proxy-set-headers
+    # ConfigMap or in a proxy in front of the controller.
+    stripIdentityHeaders: false
   dashboard:
     annotations: {}
   mcp:
@@ -1131,9 +1193,17 @@ publisher:
   # across projects and present no user credential, so network position is the
   # only thing that admits them. Empty means the exemption is off and every CAL
   # call is rejected with UNAUTHENTICATED — remote-execution action telemetry
-  # silently stops arriving. Set it to the cluster's pod CIDR (or the narrower
-  # range the Buildbarn workers run in), e.g. "10.244.0.0/16". There is no safe
-  # default the chart can guess, so it ships empty and fails closed.
+  # silently stops arriving. Set it to the range the Buildbarn worker pods run
+  # in, such as the pod range of a dedicated worker node pool, e.g.
+  # "10.244.8.0/21". It must not contain gateway or ingress proxy pods (Envoy
+  # Gateway, Contour Envoy, ingress-nginx): the core checks the immediate TCP
+  # peer, so a request one of them relays from the internet arrives from that
+  # proxy's pod IP. The public BEP route forwards only
+  # gateway.routes.bepGrpcServices, but gateway.routes.bbcalGrpcEnabled=true
+  # publishes every publisher method, CAL included. If the workers cannot get
+  # a range of their own, the whole pod CIDR is acceptable only while no route
+  # forwards CAL. There is no safe default the chart can guess, so it ships
+  # empty and fails closed.
   trustedCalCidrs: ""
 
   jwks:

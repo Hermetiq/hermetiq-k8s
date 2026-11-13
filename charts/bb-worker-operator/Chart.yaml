@@ -6,19 +6,19 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.10
+version: 0.3.11
 appVersion: "v0.3.11"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.11"
+      description: "The repository's starter values now install the operator namespace-scoped (rbac.mode=namespace, metrics.secure=false), matching the installation guide. The chart default stays rbac.mode=cluster"
+    - kind: security
+      description: "Document that the RbeWorker editor and admin roles are equivalent to privileged pod create with any ServiceAccount in their namespace, and that cluster mode gives the operator ServiceAccount Deployment create in every namespace"
     - kind: added
-      description: "spec.config.generated.nativeBuildDirectory sets the file-count and size limits of a native build directory's cache, which were fixed at 100000 files and 5 GiB"
+      description: "Install notes warn when the operator runs with a cluster-wide manager binding"
     - kind: added
-      description: "spec.config.generated.instanceNamePrefix registers a pool's workers under a Buildbarn instance name prefix, so a private pool serves only that tenant's instance name; the generated KEDA query follows it unless autoscaling.prometheus.instanceNamePrefix is set"
-    - kind: changed
-      description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed"
+      description: "specPolicy values (allowedPodServiceAccounts, allowPrivilegedExtraContainers, allowedHostPathPrefixes, allowedClusterTriggerAuthentications) configure the operator's RbeWorker spec policy, and the manager gets POD_SERVICE_ACCOUNT from the chart's ServiceAccount. Pools with hostPath CAS or worker volumes must set specPolicy.allowedHostPathPrefixes before moving to an operator image that enforces the policy"
 keywords:
   - buildbarn
   - bazel

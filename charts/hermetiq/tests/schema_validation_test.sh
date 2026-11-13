@@ -34,4 +34,12 @@ expect_schema_failure 'gateway.timeouts.apiWeb.requestTimeout="five-minutes"' \
   "apiWeb\.requestTimeout: Does not match pattern|apiWeb/requestTimeout': .* does not match pattern"
 expect_schema_failure 'gateway.timeouts.mcp.maxStreamDuration="forever"' \
   "mcp\.maxStreamDuration: Does not match pattern|mcp/maxStreamDuration': .* does not match pattern"
+# An empty list would render a BEP route with no matches, i.e. every method.
+expect_schema_failure 'gateway.routes.bepGrpcServices=[]' \
+  "bepGrpcServices: Array must have at least 1 items|bepGrpcServices': minItems: got 0, want 1"
+expect_schema_failure 'gateway.routes.bepGrpcServices=["/google.devtools.build.v1.PublishBuildEvent/"]' \
+  "bepGrpcServices\.0: Does not match pattern|bepGrpcServices/0': .* does not match pattern"
+# Header names are interpolated into the optional nginx snippet.
+expect_schema_failure 'gateway.routes.apiWebRemoveRequestHeaders=["X-Forwarded-User \"\"; return 200"]' \
+  "apiWebRemoveRequestHeaders\.0: Does not match pattern|apiWebRemoveRequestHeaders/0': .* does not match pattern"
 echo 'Assistant and RBE values schema checks passed'
