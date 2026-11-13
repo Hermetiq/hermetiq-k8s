@@ -1,6 +1,6 @@
 apiVersion: v2
 name: buildbarn
-description: Production-ready Buildbarn Helm chart for Kubernetes — remote cache (CAS/AC), remote build execution (RBE), and bb-browser/portal for Bazel and other REAPI clients. Maintained by Hermetiq.
+description: "Apache-2.0 Helm chart for Buildbarn on Kubernetes, including on-prem: Bazel remote cache (CAS/AC), remote execution (REAPI), Buildbarn Browser, and optional bb-portal. Maintained by Hermetiq."
 type: application
 home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
@@ -11,6 +11,11 @@ appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/Hermetiq/hermetiq-k8s
+    - name: Buildbarn Helm chart
+      url: https://www.hermetiq.com/buildbarn-helm-chart
   artifacthub.io/changes: |
     - kind: changed
       description: "Update the optional grpc-cache-proxy sidecar image to v0.9.6"
@@ -34,6 +39,8 @@ keywords:
   - reapi
   - cas
   - kubernetes
+  - on-prem
+  - bazel-remote-execution
   - build-cache
   - chromium-siso
 maintainers:
