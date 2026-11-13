@@ -1,10 +1,13 @@
-# Hermetiq Buildbarn Helm Chart
+# Buildbarn Helm chart
 
-Production-ready **Buildbarn Helm chart** for Kubernetes: remote cache (CAS/AC),
-remote build execution (RBE), Buildbarn Browser, and optionally the Remote Asset
-API. This README is the detailed operator reference for chart internals; the
-chart is also listed on
-[Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
+Apache-2.0 Helm chart for Buildbarn on Kubernetes, including on-prem clusters.
+It deploys a Bazel remote cache (CAS/AC), remote execution (REAPI), Buildbarn
+Browser, and optionally the Remote Asset API and bb-portal. Worker pools come
+from the bb-worker-operator chart. This README is the operator reference. The
+chart is listed on
+[Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn)
+and summarized at
+[hermetiq.com/buildbarn-helm-chart](https://www.hermetiq.com/buildbarn-helm-chart).
 
 Install the [Hermetiq](../hermetiq/README.md) and
 [bb-worker-operator](../bb-worker-operator/README.md) charts before this one.
