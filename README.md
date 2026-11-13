@@ -482,6 +482,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/buildbarn-storage-operations.md`](docs/buildbarn-storage-operations.md) | Buildbarn storage lifecycle and runbooks |
 | [`docs/buildbarn-block-storage.md`](docs/buildbarn-block-storage.md) | Raw block-device deployment guidance |
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
+| [`docs/bb-clientd.md`](docs/bb-clientd.md) | bb_clientd local cache and lazy Bazel outputs on developer machines |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 | [`docs/image-integrity.md`](docs/image-integrity.md) | Public signing keys and Cosign verification for charts and container images |
