@@ -6,6 +6,8 @@
 #   kubeconform on the rendered manifests (core kinds; CRDs skipped for now)
 #   metadata gates: maintenance change notes; release version + README synchronization
 #   helm-unittest (when charts/<chart>/tests/ exists)
+#   .buildkite/tests/*_test.sh <chart> (CI script tests, e.g. the release-tag
+#   image digest gate; the gate itself runs only in publish-chart.sh)
 #
 # Runs inside debian:bookworm-slim (docker plugin); installs helm + kubeconform.
 # No GCP/secrets needed — pure chart validation. (A prebuilt toolchain image
@@ -97,6 +99,13 @@ for script in "${DIR}"/tests/*_test.sh; do
   [[ -e "${script}" ]] || continue
   echo "+++ :test_tube: $(basename "${script}")"
   bash "${script}"
+done
+
+# Tests for the CI scripts themselves, run against this chart.
+for script in .buildkite/tests/*_test.sh; do
+  [[ -e "${script}" ]] || continue
+  echo "+++ :test_tube: $(basename "${script}") ${CHART}"
+  bash "${script}" "${CHART}"
 done
 
 echo "+++ :white_check_mark: ${CHART} validation passed"

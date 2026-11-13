@@ -204,10 +204,14 @@ The following versions form the first tested bundle in this repository:
 | Buildbarn |       `0.9.8` |  `20260908T142448Z` |
 | BB Worker Operator |      `0.3.10` |           `v0.3.11` |
 
-The release PR updates the chart versions and README pins together. Tag the
-merged commit to publish the matching OCI packages. Maintenance PRs leave
-both version sets unchanged and describe their user-visible change in the
-chart's `artifacthub.io/changes` annotation. This guide documents the
+The release PR updates the chart versions and README pins together, and sets
+every default image digest for images in
+`us-docker.pkg.dev/hermetiq-cloud/hermetiq-public` to the signed release
+digest (see [`docs/image-integrity.md`](docs/image-integrity.md#pin-image-digests)).
+Tag the merged commit to publish the matching OCI packages. The publish step
+refuses a release tag whose values leave any of those digests empty.
+Maintenance PRs leave both version sets unchanged and describe their
+user-visible change in the chart's `artifacthub.io/changes` annotation. This guide documents the
 supported current state, not a cumulative release history.
 
 ## Installation
@@ -496,6 +500,9 @@ individual chart defaults as the exact contract.
   runner images.
 - `global.imagePullSecrets` is combined with chart-level `imagePullSecrets`.
 - Image `digest` values pin immutable content while retaining readable tags.
+  A tag is resolved when the image is pulled; set a digest so an install runs
+  the content you verified. See
+  [`docs/image-integrity.md`](docs/image-integrity.md#pin-image-digests).
 - `commonLabels` and `commonAnnotations` add organizational metadata without
   changing immutable workload selectors.
 - `standardLabels.appVersion` opts into the standard application-version label.
