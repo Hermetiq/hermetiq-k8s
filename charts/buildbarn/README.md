@@ -264,8 +264,8 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.8
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.8
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.9
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.9
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
@@ -281,7 +281,7 @@ install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.8 \
+  --version 0.9.9 \
   --values buildbarn-values.yaml
 ```
 
@@ -375,7 +375,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.8 \
+  --version 0.9.9 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -2007,6 +2007,80 @@ Prometheus setting alone does not change worker registration.
 See the [scale-up-from-zero guide](../../custom-values/rbeworkers/README.md#scale-up-from-zero)
 for matching worker examples, KEDA settings, and verification.
 
+### Optional configuration reload and scheduler handover
+
+Both features are disabled by default. A chart upgrade keeps the existing
+scheduler image, inline configuration, pod permissions, and restart behavior
+unless you explicitly opt in:
+
+```yaml
+scheduler:
+  configurationReloadInterval: ""
+  handover:
+    enabled: false
+```
+
+The default upstream scheduler image does not support these options. To enable
+them, supply a scheduler image built from the handover/reload implementation in
+Hermetiq's `bb-remote-execution` fork. Handover also needs a matching
+`bb-scheduler-coordinator` image and Kubernetes native sidecar support
+(Kubernetes 1.29+ with `SidecarContainers` enabled). Keep these settings in a
+separate environment override; publishing or upgrading the chart alone does
+not activate them.
+
+The opt-in configuration requires a fork image with
+`legacyContentAddressableStorage` support. It uses that field to read Actions
+from the existing, non-CDC storage deployment without changing storage,
+frontend, or worker configuration. Legacy Action reads use uncompressed
+`BatchReadBlobs` requests, even when the shared backend enables compression,
+to avoid the newer client's CDC capability negotiation. Digest validation,
+message-size bounds, and configured storage decorators still apply.
+It also uses the fork's renamed
+`deprecatedAdminHttpServers` field and omits the removed `browserUrl` field.
+With both features disabled the chart retains the configuration schema for its
+pinned upstream scheduler image. If you run a newer image without either
+feature, supply a matching `configOverrides."scheduler.jsonnet"`.
+
+```yaml
+# Environment-specific opt-in; replace the repositories and digests with your
+# tested scheduler and coordinator images before applying.
+images:
+  scheduler:
+    repository: REGISTRY/bb-scheduler
+    digest: sha256:SCHEDULER_DIGEST
+scheduler:
+  configurationReloadInterval: 30s
+  handover:
+    enabled: true
+    coordinator:
+      image:
+        repository: REGISTRY/bb-scheduler-coordinator
+        tag: COORDINATOR_TAG
+        digest: sha256:COORDINATOR_DIGEST
+```
+
+Reload and handover can be enabled independently. Reload applies changes to
+`actionRouter` and `predeclaredPlatformQueues` through the mounted
+`scheduler-routing.libsonnet` file without rolling the pod. Other settings
+still roll the scheduler. Use positive protobuf seconds notation, such as
+`30s` or `0.5s`; `0s`, `500ms`, and `1m` are rejected. Invalid reloads keep the
+previous configuration, and changes to an existing queue's size classes still
+require a rollout. ConfigMap projection adds its own delay before the next
+reload interval.
+
+Handover adds a Lease coordinator sidecar and namespaced RBAC, keeps the old
+scheduler available until its replacement restores the queue, and relays
+existing execution streams during retirement. The initial upgrade from an
+unmodified scheduler cannot transfer its state: apply that first upgrade when
+builds are idle. Subsequent handover-enabled rollouts can transfer queued and
+running work. This does not preserve queue state through scheduler crashes or
+node loss.
+
+When in-cluster mTLS is enabled, `scheduler.handover.peerServerName` must match
+a DNS SAN on the scheduler certificate (default `scheduler`). The chart passes
+the same CA and client identity to peer connections and coordinator health
+checks.
+
 ## Worker And Runner
 
 The Buildbarn chart does not create worker Deployments or KEDA worker
@@ -2072,11 +2146,14 @@ resource requests to review before applying them.
 
 ## Action Routing And Catch-All Workers
 
-Platform matching has no fallback. The scheduler's queue key is
-`{instanceNamePrefix, the marshalled platform}` compared by exact string
-equality, so an action whose platform matches no worker pool does not degrade
-to some default pool — it fails with `No matching worker pool`, or waits
-forever. `scheduler.actionRouter` is how you serve it instead.
+For custom routing and catch-all worker examples, see the
+[action routing guide](docs/action-routing.md). It explains exact platform
+matching, instance-prefix precedence, scoped rewrites, and fallback worker queues.
+
+Platform properties match exactly. Within that platform, the scheduler selects
+the longest matching instance-name prefix. An action with no matching platform
+does not automatically fall back to another pool. `scheduler.actionRouter`
+can explicitly rewrite its scheduling platform to select an existing queue.
 
 ```yaml
 scheduler:
@@ -2328,7 +2405,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.8 \
+  --version 0.9.9 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```

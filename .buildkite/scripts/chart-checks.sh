@@ -23,7 +23,7 @@ K8S_VERSION="${K8S_VERSION:-1.30.0}"
 HELM_UNITTEST_VERSION="${HELM_UNITTEST_VERSION:-0.8.2}"
 
 echo "+++ :wrench: install helm ${HELM_VERSION} + kubeconform ${KUBECONFORM_VERSION}"
-apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates git >/dev/null
+apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates git python3 python3-yaml >/dev/null
 curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xz -C /tmp
 install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
 curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /usr/local/bin kubeconform
@@ -64,6 +64,9 @@ fi
 
 echo "+++ :memo: metadata gates"
 bash .buildkite/scripts/chart-metadata-checks.sh "${CHART}"
+
+echo "+++ :test_tube: chart image digest inventory"
+/usr/bin/python3 -m unittest discover -s .buildkite/tests -p 'test_chart_image_digests.py'
 
 echo "+++ :test_tube: helm-unittest"
 if [ -d "${DIR}/tests" ]; then

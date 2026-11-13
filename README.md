@@ -201,7 +201,7 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.7` |             `0.9.6` |
-| Buildbarn |       `0.9.8` |  `20260908T142448Z` |
+| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
 | BB Worker Operator |      `0.3.10` |           `v0.3.11` |
 
 The release PR updates the chart versions and README pins together. Tag the
@@ -496,6 +496,16 @@ individual chart defaults as the exact contract.
   runner images.
 - `global.imagePullSecrets` is combined with chart-level `imagePullSecrets`.
 - Image `digest` values pin immutable content while retaining readable tags.
+- Each newly published chart contains `image-digests.yaml`, an inventory of the
+  chart's default images and their registry manifest digests at publication.
+  To inspect it, run `helm pull oci://ghcr.io/hermetiq/<chart> --version <version>
+  --untar` and open `<chart>/image-digests.yaml`. The inventory includes
+  optional images, but excludes dependency charts, worker images and images
+  supplied through custom values. It records default references; it does not
+  automatically pin deployed images. To pin or mirror them, set the relevant
+  image repository and digest values explicitly. When changing a tag, update or
+  clear its digest too, because Kubernetes pulls by digest when both are set.
+  See [image integrity](docs/image-integrity.md) for verification guidance.
 - `commonLabels` and `commonAnnotations` add organizational metadata without
   changing immutable workload selectors.
 - `standardLabels.appVersion` opts into the standard application-version label.

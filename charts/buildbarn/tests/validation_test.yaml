@@ -342,6 +342,87 @@ tests:
       - failedTemplate:
           errorPattern: "frontend.readCache.blocksSizeGi .* must be smaller than frontend.readCache.volume.emptyDir.sizeLimit"
 
+  - it: accepts an empty predeclaredPlatformQueues platform (default {} worker pool)
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform: []
+          sizeClasses: [0]
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects unsorted predeclaredPlatformQueues platform properties
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: os
+              value: linux
+            - name: cpu
+              value: x86_64
+          sizeClasses: [0]
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.predeclaredPlatformQueues\\[0\\].platform properties are not sorted by name then value"
+
+  - it: rejects duplicate predeclaredPlatformQueues platform properties
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: os
+              value: linux
+            - name: os
+              value: linux
+          sizeClasses: [0]
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.predeclaredPlatformQueues\\[0\\].platform properties are not sorted by name then value"
+
+  - it: rejects configurationReloadInterval with the upstream scheduler image
+    set:
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork"
+
+  - it: accepts configurationReloadInterval with a fork scheduler image
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects scheduler.handover with the upstream scheduler image
+    set:
+      scheduler.handover.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.enabled requires a bb-scheduler image built from Hermetiq's fork"
+
+  - it: rejects scheduler.handover without coordinator image repository and tag
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.enabled requires scheduler.handover.coordinator.image.repository and scheduler.handover.coordinator.image.tag to be set"
+
+  - it: rejects handoverGrpcServers mode=mtls without security.grpcMtls.enabled
+    set:
+      scheduler.handover.handoverGrpcServers.authenticationPolicy.mode: mtls
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.handoverGrpcServers.authenticationPolicy.mode=mtls requires security.grpcMtls.enabled=true"
+
+  - it: rejects handoverGrpcServers mode=deny when handover is enabled
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.handoverGrpcServers.authenticationPolicy.mode: deny
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.handoverGrpcServers.authenticationPolicy.mode=deny blocks the coordinator sidecar's local Ping"
+
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

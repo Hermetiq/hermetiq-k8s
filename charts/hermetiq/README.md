@@ -1384,9 +1384,9 @@ it does not establish that there were no events or incidents.
 Barn Owl is Hermetiq's AI Agent that optimizes your Bazel and Buildbarn builds; 
 chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime sidecar.
 
-The API and runtime need outbound HTTPS access to Anthropic. Create the same
-namespace-local Secret they will both reference, using a file containing only
-the API key:
+The API and runtime need outbound HTTPS access to Anthropic or an
+Anthropic-compatible gateway. Create the same namespace-local Secret they will
+both reference, using a file containing only the API key:
 
 ```bash
 kubectl -n hermetiq create secret generic claude-api-key \
@@ -1405,6 +1405,24 @@ assistant:
       existingSecretKey: ANTHROPIC_API_KEY
   streamTimeoutSeconds: 660
 ```
+
+To route both ordinary chat and runtime-backed prompts through an
+Anthropic-compatible gateway, set the same base URL in both containers:
+
+```yaml
+api:
+  env:
+    ANTHROPIC_BASE_URL: https://gateway.example.com
+assistant:
+  promptRuntime:
+    env:
+      ANTHROPIC_BASE_URL: https://gateway.example.com
+```
+
+Use the gateway's base URL without a trailing slash. It must support the
+Anthropic Messages API, the configured models and streaming, and API-key
+authentication. The Secret configured above is still required. Verify the
+gateway's compatibility with your configuration before relying on it.
 
 `assistant.enabled` defaults to `false` and controls both the dashboard's
 Barn Owl visibility and its backend/runtime configuration. When enabled, the

@@ -52,6 +52,20 @@ tests:
           path: spec.template.spec.containers[?(@.name == "prompt-runtime")].ports
       - notExists:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AICHAT_POLICY_CONFIG")]
+  - it: passes the Anthropic gateway base URL to both clients
+    template: templates/deployment-api.yaml
+    set:
+      assistant.enabled: true
+      assistant.anthropic.apiKey.existingSecret: llm-key
+      api.env.ANTHROPIC_BASE_URL: https://gateway.example.com
+      assistant.promptRuntime.env.ANTHROPIC_BASE_URL: https://gateway.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "ANTHROPIC_BASE_URL")].value
+          value: https://gateway.example.com
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "ANTHROPIC_BASE_URL")].value
+          value: https://gateway.example.com
   - it: provides writable scratch space while retaining the restricted runtime
     template: templates/deployment-api.yaml
     set:

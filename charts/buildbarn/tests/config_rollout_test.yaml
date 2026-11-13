@@ -1,10 +1,12 @@
 suite: browser OAuth configuration rolls its pod
 templates:
   - templates/deployment-browser.yaml
+  - templates/deployment-scheduler.yaml
 values:
   - ../ci-values/ci.yaml
 tests:
   - it: changes the config checksum when chart-managed OAuth settings change
+    template: templates/deployment-browser.yaml
     set:
       browser.oauth2Proxy.enabled: true
       browser.oauth2Proxy.existingConfigMap: ""
@@ -23,6 +25,7 @@ tests:
           value: 06736b941e563de901b1d29faad6542c660ad6a41190872bfbe2320a914c84a2
 
   - it: changes the secret checksum when chart-managed OAuth credentials change
+    template: templates/deployment-browser.yaml
     set:
       browser.oauth2Proxy.enabled: true
       browser.oauth2Proxy.existingConfigMap: ""
@@ -40,6 +43,7 @@ tests:
           value: 4a7a7504c23c25c8aed38a9f11f552ee3d61735162491a2d7a3843154928c3a5
 
   - it: omits chart-managed checksums when using external OAuth resources
+    template: templates/deployment-browser.yaml
     set:
       browser.oauth2Proxy.enabled: true
     asserts:
@@ -47,3 +51,76 @@ tests:
           path: spec.template.metadata.annotations["checksum/oauth2-proxy-config"]
       - notExists:
           path: spec.template.metadata.annotations["checksum/oauth2-proxy-secret"]
+
+  # Without configurationReloadInterval the scheduler only reads its routing
+  # configuration at startup, so changing it must roll the pod.
+  - it: baseline scheduler checksum/config with configuration reloading disabled
+    template: templates/deployment-scheduler.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: ea8c9d0913d4e2fa17ca8ae212517c3d5c2beea9a0ba292e8ac90afab0c1f1c0
+      - equal:
+          path: spec.template.spec.volumes[0].configMap.items
+          value:
+            - key: common.libsonnet
+              path: common.libsonnet
+            - key: scheduler.jsonnet
+              path: scheduler.jsonnet
+
+  - it: rolls the scheduler when predeclaredPlatformQueues change and reloading is disabled
+    template: templates/deployment-scheduler.yaml
+    set:
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: cpu
+              value: x86_64
+          sizeClasses: [1, 2]
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: ea8c9d0913d4e2fa17ca8ae212517c3d5c2beea9a0ba292e8ac90afab0c1f1c0
+
+  # With configurationReloadInterval the scheduler applies changes to the
+  # action router and predeclared queues itself, so they must not roll it.
+  - it: baseline scheduler checksum/config with configuration reloading enabled
+    template: templates/deployment-scheduler.yaml
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4
+      - contains:
+          path: spec.template.spec.volumes[0].configMap.items
+          content:
+            key: scheduler-routing.libsonnet
+            path: scheduler-routing.libsonnet
+
+  - it: does not roll the scheduler when predeclaredPlatformQueues change and reloading is enabled
+    template: templates/deployment-scheduler.yaml
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+      scheduler.predeclaredPlatformQueues:
+        - platform:
+            - name: cpu
+              value: x86_64
+          sizeClasses: [1, 2]
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4
+
+  - it: does not roll the scheduler when the actionRouter changes and reloading is enabled
+    template: templates/deployment-scheduler.yaml
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "simple: {},"
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4

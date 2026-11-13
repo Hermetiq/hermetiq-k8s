@@ -904,6 +904,9 @@ switch.
 {{- $m := .Values.security.grpcMtls -}}
 {{- if $m.enabled -}}
 tls: {
+  {{- with .serverName }}
+  serverName: {{ . | quote }},
+  {{- end }}
   clientKeyPair: {
     files: {
       certificatePath: '{{ $m.mountPath }}/{{ $m.certificatePath }}',

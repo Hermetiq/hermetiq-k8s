@@ -124,6 +124,16 @@
             "custom": { "type": "string" }
           }
         },
+        "configurationReloadInterval": {
+          "type": "string",
+          "anyOf": [
+            { "const": "" },
+            {
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,9})?s$",
+              "not": { "pattern": "^0+(\\.0+)?s$" }
+            }
+          ]
+        },
         "clientGrpcServers": {
           "type": "object",
           "properties": { "authenticationPolicy": {
@@ -167,6 +177,40 @@
             "custom": { "type": "string" }
           }
         } }
+        },
+        "handover": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "peerServerName": { "type": "string", "minLength": 1 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
+            "adoptionWindow": { "type": "string" },
+            "recoveredOperationGracePeriod": { "type": "string" },
+            "relayDrainPeriod": { "type": "string" },
+            "handoverGrpcServers": {
+              "type": "object",
+              "properties": {
+                "authenticationPolicy": {
+                  "type": "object",
+                  "properties": {
+                    "mode": { "type": "string", "enum": ["", "allow", "deny", "mtls", "custom"] },
+                    "denyMessage": { "type": "string" },
+                    "custom": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "coordinator": {
+              "type": "object",
+              "properties": {
+                "leaseDurationSeconds": { "type": "integer", "minimum": 1 },
+                "renewInterval": { "type": "string" },
+                "image": { "type": "object" },
+                "resources": { "type": "object" }
+              }
+            }
+          }
         }
       }
     },
