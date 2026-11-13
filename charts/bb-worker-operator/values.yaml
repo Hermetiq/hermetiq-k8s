@@ -58,7 +58,13 @@ rbac:
   # namespace creates only Roles/RoleBindings and automatically scopes the
   # manager watch to the release namespace. Disable secure metrics or the
   # metrics endpoint in this mode; Kubernetes TokenReview needs cluster RBAC.
-  # cluster preserves the existing multi-namespace behavior.
+  # The repository's starter values (custom-values/bb-worker-operator-values.yaml)
+  # use this mode.
+  # cluster, the chart default for existing installs, binds the manager
+  # ClusterRole with a ClusterRoleBinding: the operator ServiceAccount can
+  # create, update and delete Deployments, ConfigMaps and KEDA ScaledObjects in
+  # every namespace. A Deployment can run any ServiceAccount of its namespace,
+  # so treat that token as cluster-admin equivalent.
   mode: cluster
   # How the manager ClusterRole is bound to the operator ServiceAccount.
   # Legacy setting for cluster mode; use mode=namespace for a fully namespaced
@@ -68,10 +74,55 @@ rbac:
   managerBindingMode: cluster
   # Create unbound RbeWorker admin/editor/viewer roles for humans or CI.
   # They are ClusterRoles in cluster mode and Roles in namespace mode.
+  #
+  # The editor and admin roles are equivalent to pod create in each namespace
+  # where they are bound: the operator copies spec.pod, including
+  # serviceAccountName, automountServiceAccountToken, securityContext and extra
+  # containers and volumes, into the worker Deployment it creates. A holder can
+  # therefore run privileged pods under any ServiceAccount in that namespace
+  # and mount its Secrets and ConfigMaps. In rbac.mode=cluster with the
+  # operator in the same namespace, that includes the operator's own
+  # ServiceAccount and its cluster-wide Deployment create. Bind them only to
+  # subjects you would also allow to create privileged pods there. The viewer
+  # role is read-only.
   rbeWorkerRoles:
     create: true
   metricsReader:
     create: true
+
+# Limits on what an RbeWorker spec may request, since the operator writes the
+# worker Deployment and ScaledObject with its own credentials. Each setting is
+# passed to the manager as an environment variable and is left unset when empty
+# or false. A spec outside these limits gets Ready=False with reason
+# SpecInvalid, and its existing Deployment and ScaledObject stop being updated.
+# See the README's "RbeWorker spec policy" section. The variables need an
+# operator image that enforces the policy; older images ignore them.
+#
+# The chart always sets POD_SERVICE_ACCOUNT to its ServiceAccount name, so no
+# RbeWorker in the operator's namespace may run as the operator.
+specPolicy:
+  # spec.pod.serviceAccountName values allowed besides "default". A pod that
+  # mounts its token (automountServiceAccountToken: true) also needs its
+  # ServiceAccount, including "default", listed here. "*" allows any.
+  # Rendered as ALLOWED_POD_SERVICE_ACCOUNTS.
+  allowedPodServiceAccounts: []
+  # Allow privileged: true and capabilities.add in spec.pod.extraContainers
+  # and extraInitContainers. Rendered as ALLOW_PRIVILEGED_EXTRA_CONTAINERS.
+  allowPrivilegedExtraContainers: false
+  # Absolute node paths that hostPath volumes may use: spec.pod.extraVolumes,
+  # spec.storage.workerVolume, spec.storage.casVolume,
+  # spec.docker.dind.storageVolume, and a spec.storage.fuse.path other than
+  # /dev/fuse. A prefix matches itself and
+  # paths below it. Pools with a node-SSD hostPath CAS must set it before
+  # upgrading, for example:
+  #   - /mnt/stateful_partition/kube-ephemeral-ssd
+  # Rendered as ALLOWED_HOST_PATH_PREFIXES.
+  allowedHostPathPrefixes: []
+  # KEDA ClusterTriggerAuthentication names that autoscaling trigger
+  # authenticationRefs may reference. Namespaced TriggerAuthentications are
+  # always allowed. "*" allows any.
+  # Rendered as ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS.
+  allowedClusterTriggerAuthentications: []
 
 leaderElection:
   enabled: true

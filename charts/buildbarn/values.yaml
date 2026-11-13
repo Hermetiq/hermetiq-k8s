@@ -659,6 +659,10 @@ storage:
   # in this namespace (app: frontend/scheduler/browser/remote-asset/bb-portal/
   # worker/storage) plus the peers listed below. Requires a
   # CNI that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
+  # Off here so an upgrade never cuts off a client you have not listed; the
+  # starter values (custom-values/buildbarn-values.yaml) turn it on. Build
+  # actions run inside app=worker pods and are still admitted; only
+  # security.grpcMtls stops them.
   networkPolicy:
     enabled: false
     # Extra trusted NetworkPolicyPeer entries allowed to reach gRPC :8981.
@@ -712,6 +716,18 @@ frontend:
     # if both are empty). Set to "`true`" (backticks included) to accept any
     # signed JWT, or write your own JMESPath to validate additional claims.
     claimsValidationExpression: ""
+    # Client binding. issuer + audience alone accept a token minted for ANY
+    # client in the IdP tenant that can obtain that audience, and every such
+    # token gets canWriteToCache. List the client IDs allowed to write and
+    # execute (for example the Bazel machine-to-machine app); the chart renders
+    # `((<expression above>) == \`true\`) && contains(<ids>, payload.<clientIdClaim>)`,
+    # including for a custom claimsValidationExpression. Empty => no binding.
+    # Requires frontend.jwks.enabled.
+    allowedClientIds: []
+    # Top-level claim carrying the client ID: azp (Auth0, Keycloak, Entra v2),
+    # cid (Okta), appid (Entra v1) or client_id (RFC 9068). Names that are not
+    # plain identifiers, such as https://example.com/client_id, are quoted.
+    clientIdClaim: azp
     # ConfigMap mounted into the frontend pod containing the JWKS file.
     # The frontend reloads the file every 300s; kubelet propagates ConfigMap
     # updates to the mounted volume within ~60s, so key rotation is hands-off.
@@ -1023,11 +1039,19 @@ scheduler:
   # The admin port is HTTP, not gRPC. http.server.AuthenticationPolicy has no
   # tlsClientCertificate arm at all, so this one cannot do mutual TLS however
   # security.grpcMtls is configured: allow | deny | custom only.
+  #
+  # The admin UI can kill operations and add or remove worker drains with a
+  # plain GET. The render fails when an rbeWeb route (ingress.rbeWeb or
+  # gateway.httpRoutes.rbeWeb) would publish it while mode is allow (or "").
+  # Authenticate the port with mode custom (for example an oidc policy), or, if
+  # something in front of the route already authenticates every request, set
+  # allowUnauthenticatedRoute: true.
   adminHttpServers:
     authenticationPolicy:
       mode: allow
       denyMessage: ""
       custom: ""
+    allowUnauthenticatedRoute: false
   # How the scheduler decides which queue an action joins.
   #
   #   simple          (default) route on the platform the client requested.
@@ -1114,6 +1138,10 @@ scheduler:
   # submit actions straight to the scheduler, bypassing the frontend's
   # authorizers, or register as a worker and receive actions. Requires a CNI
   # that enforces NetworkPolicy (GKE: Dataplane V2 or Calico).
+  # Off here so an upgrade never cuts off a client you have not listed; the
+  # starter values turn it on. Build actions run inside app=worker pods and
+  # can still reach :8983; only security.grpcMtls stops them registering as a
+  # worker.
   networkPolicy:
     enabled: false
     # Extra trusted NetworkPolicyPeer entries allowed on worker gRPC :8983.
@@ -1123,9 +1151,10 @@ scheduler:
     # Extra peers allowed on client gRPC :8982 and BuildQueueState :8984,
     # beyond this release's frontend and bb-portal.
     additionalClientPeers: []
-    # Peers allowed on the admin web UI :7982, which the rbeWeb route
-    # publishes. Empty list => allow from anywhere, so the route keeps working.
-    # List your ingress controller or Gateway namespace to narrow it.
+    # Peers allowed on the admin web UI :7982. Empty list => no pod can reach
+    # it (kubectl port-forward still works). If you publish an rbeWeb route,
+    # list your ingress controller or Gateway namespace here or the route
+    # cannot reach the scheduler. bb-portal uses :8984 and needs no entry.
     adminPeers: []
     # Peers allowed to scrape metrics :9980. Empty list => allow from anywhere.
     metricsPeers: []
@@ -1428,8 +1457,10 @@ ingress:
     enabled: true
     name: browser-bb
     corsAllowOrigin: https://dashboard.hermetiq.io,https://web-dev.hermetiq.dev,http://localhost:3000
+  # Scheduler admin web UI (:7982). Off by default: it has no authentication
+  # unless scheduler.adminHttpServers.authenticationPolicy says otherwise.
   rbeWeb:
-    enabled: true
+    enabled: false
     name: rbe-web-bb
   frontendGrpc:
     enabled: true
@@ -1483,8 +1514,9 @@ gateway:
       enabled: true
       name: browser-bb
       pathPrefix: /
+    # Scheduler admin web UI (:7982). Off by default; see ingress.rbeWeb.
     rbeWeb:
-      enabled: true
+      enabled: false
       name: rbe-web-bb
       pathPrefix: /
     # Rendered only when portal.enabled.

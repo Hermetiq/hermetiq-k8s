@@ -1,2 +1,19 @@
-# No operator overrides are needed for the hermetiq namespace used in the guide.
+# Namespace-scoped operator for the hermetiq namespace used in the guide. The
+# chart creates only Roles and RoleBindings and watches only the release
+# namespace, so a cluster administrator applies the RbeWorker CRD first and
+# the install uses --skip-crds (see the chart README's Install section).
+#
+# Secure metrics need cluster-scoped TokenReview and SubjectAccessReview
+# grants, so this mode serves plain HTTP metrics. Restrict access to them with
+# a NetworkPolicy or your monitoring setup.
+#
+# To manage pools in several namespaces, set rbac.mode=cluster and
+# metrics.secure=true instead. That gives the operator ServiceAccount
+# create/update/delete on Deployments, ConfigMaps and KEDA ScaledObjects in
+# every namespace. Read the chart README's RBAC Scope section before choosing it.
+#
 # Advanced settings: ../charts/bb-worker-operator/values.yaml
+rbac:
+  mode: namespace
+metrics:
+  secure: false

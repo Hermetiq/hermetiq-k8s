@@ -1,0 +1,21 @@
+suite: install notes
+templates:
+  - templates/NOTES.txt
+release:
+  name: bb-worker-operator
+  namespace: hermetiq
+tests:
+  - it: warns about the cluster-wide manager binding by default
+    asserts:
+      - matchRegexRaw:
+          pattern: "WARNING: rbac.mode=cluster binds the operator ServiceAccount"
+      - matchRegexRaw:
+          pattern: "RbeWorker editor or admin role can create privileged worker pods"
+
+  - it: does not warn for a namespace-scoped operator
+    set:
+      rbac.mode: namespace
+      metrics.secure: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "WARNING"

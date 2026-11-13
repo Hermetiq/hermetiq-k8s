@@ -121,6 +121,36 @@
         }
       }
     },
+    "specPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedPodServiceAccounts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^,\\s]+$"
+          }
+        },
+        "allowPrivilegedExtraContainers": {
+          "type": "boolean"
+        },
+        "allowedHostPathPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/[^,]*$"
+          }
+        },
+        "allowedClusterTriggerAuthentications": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^,\\s]+$"
+          }
+        }
+      }
+    },
     "leaderElection": {
       "type": "object",
       "properties": {

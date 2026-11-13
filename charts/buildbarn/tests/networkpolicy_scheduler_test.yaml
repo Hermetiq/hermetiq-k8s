@@ -43,17 +43,15 @@ tests:
       - equal:
           path: spec.ingress[2].ports[0].port
           value: 8983
-      # The admin UI and metrics stay reachable until adminPeers/metricsPeers
-      # narrow them, so an existing rbeWeb route and scrapers keep working.
+      # Nothing reaches the admin UI until adminPeers names a caller; metrics
+      # stay reachable until metricsPeers narrows them, so scrapers keep working.
+      - lengthEqual:
+          path: spec.ingress
+          count: 4
       - notExists:
           path: spec.ingress[3].from
       - equal:
           path: spec.ingress[3].ports[0].port
-          value: 7982
-      - notExists:
-          path: spec.ingress[4].from
-      - equal:
-          path: spec.ingress[4].ports[0].port
           value: 9980
 
   - it: appends worker and client peers and narrows the admin UI and scrapers
@@ -94,6 +92,9 @@ tests:
       - equal:
           path: spec.ingress[3].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
           value: envoy-gateway-system
+      - equal:
+          path: spec.ingress[3].ports[0].port
+          value: 7982
       - equal:
           path: spec.ingress[4].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
           value: victoriametrics

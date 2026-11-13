@@ -30,6 +30,14 @@
 {{- if and (ne $provider "none") .Values.tls.certificate.enabled (not .Values.tls.certificate.issuerRef.name) -}}
 {{- fail "tls.certificate.issuerRef.name is required when tls.certificate.enabled=true" -}}
 {{- end -}}
+{{- range .Values.gateway.routes.apiWebRemoveRequestHeaders -}}
+  {{- if not (regexMatch "^[A-Za-z0-9-]+$" (toString .)) -}}
+  {{- fail (printf "gateway.routes.apiWebRemoveRequestHeaders entry %q is not an HTTP header name" (toString .)) -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (eq $provider "ingress") .Values.ingress.apiWeb.stripIdentityHeaders (hasKey (default (dict) .Values.ingress.apiWeb.annotations) "nginx.ingress.kubernetes.io/configuration-snippet") -}}
+{{- fail "ingress.apiWeb.stripIdentityHeaders renders nginx.ingress.kubernetes.io/configuration-snippet; remove it from ingress.apiWeb.annotations, or set stripIdentityHeaders=false and add the proxy_set_header lines to your own snippet" -}}
+{{- end -}}
 {{- if and .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data -}}
 {{- fail "dashboard.quickstartConfig.existingConfigMap and dashboard.quickstartConfig.data are mutually exclusive" -}}
 {{- end -}}

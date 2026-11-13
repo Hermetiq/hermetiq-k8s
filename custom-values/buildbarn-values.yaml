@@ -33,6 +33,19 @@ storage:
   # the objects its blocks volume can hold.
   keyLocationMapSizing:
     validate: true
+  # Storage gRPC :8981 is the cache itself and has no authentication of its
+  # own. Admit only Buildbarn components and RbeWorker pods in this namespace;
+  # list any other client in additionalClientPeers before installing. Needs a
+  # CNI that enforces NetworkPolicy (GKE Dataplane V2, Calico, Cilium).
+  # Build actions run inside the admitted worker pods; only security.grpcMtls
+  # (charts/buildbarn/README.md#in-cluster-mutual-tls) shuts them out too.
+  networkPolicy:
+    enabled: true
+    # Example: limit metrics :9980 to your scraper's namespace.
+    # metricsPeers:
+    #   - namespaceSelector:
+    #       matchLabels:
+    #         kubernetes.io/metadata.name: hermetiq
   persistence:
     # Enable ISCC and FSAC before first install when using mode=pvc: StatefulSet
     # volumeClaimTemplates are immutable after creation, and the starter
@@ -84,6 +97,17 @@ frontend:
     enabled: true
     issuer: https://<tenant>.auth0.com/ # TODO: your OIDC issuer URL
     audience: https://bep.helm.hermetiq.dev
+    # Issuer + audience alone admit a token from ANY client in the tenant that
+    # can get this audience, and every such token may write and execute. Bind
+    # it to the Bazel machine-to-machine client. The chart requires the
+    # issuer/audience check to be true and contains(allowedClientIds, payload.azp);
+    # set clientIdClaim to cid (Okta), appid (Entra v1) or client_id if your IdP
+    # names the claim differently.
+    allowedClientIds:
+      - <bazel-m2m-client-id> # TODO: the Bazel M2M application's client ID
+    # Or bind to a scope/permission instead of a client, replacing the
+    # generated expression (allowedClientIds still applies when set):
+    # claimsValidationExpression: "payload.iss == 'https://<tenant>.auth0.com/' && contains(to_array(payload.aud), 'https://bep.helm.hermetiq.dev') && contains(payload.permissions || `[]`, 'rbe:write')"
     sync:
       # Fetch the IdP's public signing keys into frontend-jwks at install and
       # on a schedule so frontend can verify tokens without calling the IdP.
@@ -133,6 +157,15 @@ browser:
 scheduler:
   # Requires storage.persistence.iscc.enabled=true above.
   sizeClassAnalysis:
+    enabled: true
+  # Client gRPC :8982 accepts Execute without the frontend's authorizers, and
+  # anything reaching worker gRPC :8983 can register as a worker and receive
+  # other users' actions. Admit only the frontend (:8982), bb-portal (:8984)
+  # and RbeWorker pods (:8983) in this namespace. Build actions run inside
+  # those worker pods and can still reach :8983; enabling security.grpcMtls,
+  # with the client key pair mounted on the worker container only, is the
+  # step that stops them.
+  networkPolicy:
     enabled: true
   # Declare every platform queue whose RbeWorker pool can scale to zero
   # (minReplicas: 0, or idleReplicas: 0), so builds queue and trigger KEDA
@@ -189,5 +222,7 @@ gateway:
       - https://dashboard.helm.hermetiq.dev
   httpRoutes:
     rbeWeb:
-      # Do not expose the scheduler web UI until you have access controls for it.
+      # Off by default. The scheduler web UI can kill operations and drain
+      # workers, and the render refuses to publish it while
+      # scheduler.adminHttpServers.authenticationPolicy is allow.
       enabled: false

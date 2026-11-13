@@ -6,22 +6,20 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.8
+version: 0.9.9
 appVersion: "20260908T142448Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: security
+      description: "Turn the scheduler admin UI routes (ingress.rbeWeb, gateway.httpRoutes.rbeWeb) off by default, and fail the render when one would publish :7982 while scheduler.adminHttpServers.authenticationPolicy is allow; set scheduler.adminHttpServers.allowUnauthenticatedRoute=true to keep such a route"
+    - kind: security
+      description: "Starter values enable the storage and scheduler NetworkPolicies, and the chart README documents security.grpcMtls as the step that also keeps build actions in worker pods off :8981 and :8983; the chart defaults stay off"
+    - kind: added
+      description: "frontend.jwks.allowedClientIds and clientIdClaim bind frontend JWTs to named clients, ANDed onto the claims expression; the starter values bind to the Bazel machine-to-machine client"
     - kind: changed
-      description: "Update the optional grpc-cache-proxy sidecar image to v0.9.6"
-    - kind: fixed
-      description: "Fail early when a filesystem store's blocksSizeGi plus its on-disk key-location map leaves no room on the PVC or emptyDir, and format storage.dataIntegrityValidationCache.cacheSize as a 64-bit integer"
-    - kind: changed
-      description: "Add an installation prerequisites checklist, pre-install PVC and Hermetiq co-installation guidance, and large-scale 10 TiB (5-10 shard) storage sizing and KLM profiles"
-    - kind: changed
-      description: "Correct PodDisruptionBudget default documentation, LVM volume-group sizing guidance, and Browser oauth2-proxy production hardening flags"
-    - kind: changed
-      description: "Starter values now enable ISCC, FSAC, and key-location map validation and declare the starter workers' scale-to-zero platform queues; existing mode=pvc installs must recreate the storage StatefulSet before upgrading with the new starter"
+      description: "With scheduler.networkPolicy enabled, the admin UI :7982 admits only scheduler.networkPolicy.adminPeers (none by default); the render fails when an rbeWeb route is enabled with no adminPeers"
 keywords:
   - buildbarn
   - buildbarn-helm-chart
