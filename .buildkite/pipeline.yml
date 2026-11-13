@@ -6,7 +6,8 @@
 #
 # Publish: on a `hermetiq-vX.Y.Z` / `buildbarn-vX.Y.Z` tag, publish-chart.sh
 # (running in google/cloud-sdk:slim with WIF creds for bk-on-prem-helm) verifies
-# the tag↔Chart.yaml version, lints/templates, then packages, pushes to
+# the tag↔Chart.yaml version, requires a sha256 digest on every default
+# hermetiq-public image (image-digest-check.sh), lints/templates, then packages, pushes to
 # oci://ghcr.io/hermetiq, cosign-signs, and refuses to overwrite an existing
 # version. Secrets (ghcr-helm-token, cosign-private-key/password) come from GCP
 # Secret Manager.
@@ -75,6 +76,9 @@ steps:
                 - "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"
 
   - label: ":helm: publish + sign chart"
+    # The bk-on-prem-helm WIF binding matches this key on chart release tags
+    # (cloud-native pulumi-iac/buildkite-oidc); keep it in sync.
+    key: "publish-chart"
     if: build.tag =~ /^(hermetiq|buildbarn|bb-worker-operator)-v[0-9]/
     command: "bash .buildkite/scripts/publish-chart.sh"
     concurrency: 1

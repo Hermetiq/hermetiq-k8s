@@ -55,6 +55,64 @@ Image and chart signatures are separate: a signed chart does not sign the
 container images it references. When mirroring, preserve the image digest and
 copy its Cosign signature artifacts too; verify again at the destination.
 
+## Pin image digests
+
+A tag such as `v0.9.6` is resolved when a node pulls the image, so a tag-only
+reference runs whatever the registry serves under that tag at that moment. A
+digest names fixed content. When a digest is set, the charts render
+`repository:tag@sha256:<digest>`; the runtime pulls by digest and the tag is
+only a label.
+
+The Hermetiq-built images and their digest fields are:
+
+| Chart | Image | Digest field |
+|---|---|---|
+| `hermetiq` | `bep-nats` | `images.bepNats.apiDigest`, `pubDigest`, `subDigest`, `bootstrapDigest` |
+| `hermetiq` | `grpc-auth-proxy` | `images.authProxy.digest` |
+| `hermetiq` | `hermetiq-web-ui` | `images.dashboard.digest` |
+| `hermetiq` | `prompt-runtime` | `images.promptRuntime.digest` |
+| `hermetiq` | `oauth2-proxy` (mirror) | `images.oauth2Proxy.digest` |
+| `buildbarn` | `grpc-cache-proxy` | `images.grpcCacheProxy.digest` |
+| `bb-worker-operator` | `bb-worker-operator` | `image.digest` |
+
+### Installing
+
+Pin each image you deploy in your values file, using a digest you verified with
+`cosign verify` as shown above:
+
+```yaml
+images:
+  authProxy:
+    tag: "v0.9.6"
+    digest: "sha256:<image-digest>"
+```
+
+Change the tag and the digest together. Once a digest is set, the runtime
+pulls that digest whatever the tag says, so a new tag alone does not change the
+image. Setting a digest to `""` returns that image to pulling by tag.
+
+### Releasing a chart
+
+The publish step (`.buildkite/scripts/publish-chart.sh`) runs
+`.buildkite/scripts/image-digest-check.sh` on release tags. It fails the release
+if any default image in `us-docker.pkg.dev/hermetiq-cloud/hermetiq-public`
+lacks a `sha256:` digest in the chart's `values.yaml`. Chart PRs are not gated,
+because images change while a release is being prepared. Before tagging, the
+release PR sets each digest in the table above to the digest of the signed
+release image. Look up the digest, then confirm its signature:
+
+```sh
+gcloud artifacts docker images describe \
+  us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/<image>:<tag> \
+  --format='value(image_summary.digest)'
+cosign verify --key image-signing.pub \
+  us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/<image>@sha256:<image-digest>
+```
+
+Third-party images that the charts pull from their upstream registries, such
+as `ghcr.io/buildbarn/*`, are not gated. Pin their digests in your values in
+the same way.
+
 ## Public-key fingerprints
 
 Fingerprints are SHA-256 of the DER-encoded SubjectPublicKeyInfo, calculated with:
