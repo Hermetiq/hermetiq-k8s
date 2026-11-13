@@ -14,16 +14,6 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
-    - kind: changed
-      description: "Update the optional grpc-cache-proxy sidecar image to v0.9.6"
-    - kind: fixed
-      description: "Fail early when a filesystem store's blocksSizeGi plus its on-disk key-location map leaves no room on the PVC or emptyDir, and format storage.dataIntegrityValidationCache.cacheSize as a 64-bit integer"
-    - kind: changed
-      description: "Add an installation prerequisites checklist, pre-install PVC and Hermetiq co-installation guidance, and large-scale 10 TiB (5-10 shard) storage sizing and KLM profiles"
-    - kind: changed
-      description: "Correct PodDisruptionBudget default documentation, LVM volume-group sizing guidance, and Browser oauth2-proxy production hardening flags"
-    - kind: changed
-      description: "Starter values now enable ISCC, FSAC, and key-location map validation and declare the starter workers' scale-to-zero platform queues; existing mode=pvc installs must recreate the storage StatefulSet before upgrading with the new starter"
 keywords:
   - buildbarn
   - buildbarn-helm-chart
