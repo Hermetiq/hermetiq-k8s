@@ -46,6 +46,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Browser SSO](#browser-sso)
   - [Custom auth sidecar hook](#custom-auth-sidecar-hook)
 - [Frontend Authentication And Writes](#frontend-authentication-and-writes)
+  - [Bind tokens to a client](#bind-tokens-to-a-client)
   - [Reads are open by design](#reads-are-open-by-design)
   - [CAS read efficiency](#cas-read-efficiency)
 - [Frontend Read Cache](#frontend-read-cache)
@@ -67,6 +68,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Security And Availability Hardening](#security-and-availability-hardening)
   - [Restricting direct storage access](#restricting-direct-storage-access)
   - [Restricting direct scheduler access](#restricting-direct-scheduler-access)
+  - [Scheduler admin web UI](#scheduler-admin-web-ui)
   - [Locking down the rest](#locking-down-the-rest)
 - [Scheduling](#scheduling)
 - [Verification](#verification)
@@ -141,6 +143,11 @@ Confirm the following before running `helm upgrade --install`:
     guide) with the default `rbac.mode=cluster` or with `rbac.mode=namespace`
     (see its [RBAC scope](../bb-worker-operator/README.md#rbac-scope)), so
     `RbeWorker` resources reconcile after the chart installs.
+  - **A CNI that enforces NetworkPolicy** (GKE Dataplane V2, Calico, Cilium).
+    The starter values enable `storage.networkPolicy` and
+    `scheduler.networkPolicy`; without enforcement they are accepted and do
+    nothing (see
+    [Restricting direct storage access](#restricting-direct-storage-access)).
 - [ ] **Target namespace and Pod Security Admission (PSA)**
   - Create the target namespace (for example, `hermetiq`).
   - Label it `pod-security.kubernetes.io/enforce=privileged` if you will run
@@ -249,8 +256,10 @@ in `buildbarn-values.yaml` and `hermetiq-values.yaml`:
    manifests stream Completed Action Logs to `bep-nats-pub:50091`
    (`completedActionLoggerAddress`). The Hermetiq chart ships
    `publisher.trustedCalCidrs` empty, which rejects every CAL stream, so set it
-   in `hermetiq-values.yaml` to your cluster's Pod CIDR (and Node CIDR if any
-   workers use `hostNetwork`).
+   in `hermetiq-values.yaml` to the range the worker pods run in (and the Node
+   CIDR if any workers use `hostNetwork`). The range must not contain gateway
+   or ingress proxy pods, which relay internet requests from their own pod
+   IPs; see the Hermetiq chart's `publisher.trustedCalCidrs` documentation.
 
 ### Deploying the chart
 
@@ -333,7 +342,9 @@ This produces:
 
 - `browser.<domainBase>` for Buildbarn Browser.
 - `bb.<domainBase>` for frontend gRPC.
-- `rbe-web.<domainBase>` for scheduler web UI.
+- `rbe-web.<domainBase>` for the scheduler web UI, only when you enable an
+  `rbeWeb` route (off by default; see
+  [Scheduler admin web UI](#scheduler-admin-web-ui)).
 - `asset.<domainBase>` for Remote Asset API when enabled.
 - `portal.<domainBase>` and `bes.<domainBase>` for bb-portal when enabled.
 
@@ -1471,6 +1482,43 @@ calls should require a valid JWT. Keep `allow` only for clusters where another
 proxy layer is intentionally handling trust, or where open writes/execution are
 acceptable.
 
+### Bind tokens to a client
+
+`issuer` and `audience` say which IdP signed a token and which API it is for,
+not which application asked for it. Any client in the same IdP tenant that can
+obtain a token for that audience (another machine-to-machine app, a first-party
+SPA, a test client) gets `canWriteToCache`, and with it cache writes and
+Execute. Bind the policy to the Bazel client:
+
+```yaml
+frontend:
+  jwks:
+    allowedClientIds:
+      - <bazel-m2m-client-id>
+    # azp (Auth0, Keycloak, Entra v2), cid (Okta), appid (Entra v1) or
+    # client_id (RFC 9068 access tokens)
+    clientIdClaim: azp
+```
+
+The chart renders `((<claims expression>) == \`true\`) && contains(<allowedClientIds>, payload.<clientIdClaim>)`,
+whether it generated the claims expression from `issuer`/`audience` or you
+supplied `claimsValidationExpression`. bb-storage accepts a token only when the
+whole expression is exactly `true`, and the explicit comparison keeps that rule
+for a custom expression that returns some other value. A token with no such
+claim fails validation and falls through to the unauthenticated arm, so it can
+still read but not write or execute. A `clientIdClaim` that is not a plain
+identifier, such as `https://example.com/client_id`, is quoted; it must be a
+top-level claim. `allowedClientIds` requires `frontend.jwks.enabled`.
+
+To bind on a scope or permission instead, write the whole expression. With
+Auth0 RBAC and "Add Permissions in the Access Token" enabled:
+
+```yaml
+frontend:
+  jwks:
+    claimsValidationExpression: "payload.iss == 'https://<tenant>.auth0.com/' && contains(to_array(payload.aud), 'https://bep.example.com') && contains(payload.permissions || `[]`, 'rbe:write')"
+```
+
 ### Reads are open by design
 
 With `frontend.jwks.enabled`, the frontend renders its authentication policy as
@@ -2225,8 +2273,9 @@ exposure is in-cluster: by default any pod in the cluster can reach it.
 
 `storage.networkPolicy` restricts it to the Buildbarn components plus peers you
 name. Workers in the Buildbarn namespace are admitted by their `app=worker`
-label. It is disabled by default so you can check any additional clients before
-enabling it:
+label. The starter values (`custom-values/buildbarn-values.yaml`) enable it.
+The chart default stays off so that upgrading an existing release never cuts
+off a client nobody listed; turn it on after checking your clients:
 
 ```yaml
 storage:
@@ -2247,6 +2296,12 @@ rather than a clear connection error. The cluster also needs a
 NetworkPolicy-enforcing CNI; without one the policy is accepted and silently
 does nothing.
 
+The policy cannot tell a worker from the build action it runs: the runner and
+the action share the worker pod's network, so an action can still reach
+`:8981`. [In-cluster mutual TLS](#in-cluster-mutual-tls) is the step that
+closes that, as long as the client key pair is mounted on the worker container
+only and never on the runner.
+
 ### Restricting direct scheduler access
 
 The scheduler has the same exposure:
@@ -2260,12 +2315,14 @@ The scheduler has the same exposure:
 - bb-portal on BuildQueueState `:8984`
 - workers in the Buildbarn namespace on `:8983`
 
+As with storage, the starter values enable it and the chart default is off.
+
 ```yaml
 scheduler:
   networkPolicy:
     enabled: true
-    # The admin web UI on :7982, published by the rbeWeb route, stays open to
-    # any source until you name your ingress controller or Gateway namespace.
+    # No pod reaches the admin web UI on :7982 unless listed here. Name your
+    # ingress controller or Gateway namespace only if you publish rbeWeb.
     adminPeers:
       - namespaceSelector:
           matchLabels:
@@ -2277,6 +2334,35 @@ narrows `:9980`, as it does for storage. Standard `RbeWorker` pods need no
 `additionalWorkerPeers` entry; keep their `app=worker` label so they can
 register on `:8983`. Reserve additional peers for explicitly trusted custom
 clients of that port.
+
+Build actions run inside those `app=worker` pods, so the policy still lets an
+action dial `:8983`, register as a worker, and receive other users' actions.
+Enabling [`security.grpcMtls`](#in-cluster-mutual-tls), with the client key
+pair mounted on the worker container and not on the runner, is what stops a
+caller that holds no certificate.
+
+### Scheduler admin web UI
+
+The scheduler's admin UI on `:7982` lists operations and workers, kills
+operations and adds or removes worker drains. Those actions are plain GET
+requests, and `scheduler.adminHttpServers.authenticationPolicy` defaults to
+`allow`. `ingress.rbeWeb` and `gateway.httpRoutes.rbeWeb` are therefore off by
+default, and the render fails if either would publish the UI while that policy
+is `allow` (or `""`). To publish it, do one of these:
+
+- authenticate the port itself with `mode: custom`, for example an `oidc`
+  policy (browsers send no bearer token, so `jwt` suits only API clients);
+- put an authenticating layer in front of the route that checks every request,
+  then set `scheduler.adminHttpServers.allowUnauthenticatedRoute: true` to
+  acknowledge that the scheduler itself does not.
+
+With `scheduler.networkPolicy` enabled, a published route also needs your
+ingress controller or Gateway namespace in `scheduler.networkPolicy.adminPeers`;
+an empty list admits no pod to `:7982`, so the render fails for that
+combination.
+
+`kubectl -n <namespace> port-forward svc/scheduler 7982` reaches the UI without
+a route.
 
 ### Locking down the rest
 

@@ -16,17 +16,27 @@ local common = import 'common.libsonnet';
                 {{- $expr := .Values.frontend.jwks.claimsValidationExpression -}}
                 {{- $issuer := .Values.frontend.jwks.issuer -}}
                 {{- $audience := .Values.frontend.jwks.audience -}}
-                {{- if $expr }}
-                {{ $expr | quote }}
-                {{- else if and $issuer $audience }}
-                {{ printf "payload.iss == '%s' && contains(to_array(payload.aud), '%s')" (replace "'" "\\'" $issuer) (replace "'" "\\'" $audience) | quote }}
-                {{- else if $issuer }}
-                {{ printf "payload.iss == '%s'" (replace "'" "\\'" $issuer) | quote }}
-                {{- else if $audience }}
-                {{ printf "contains(to_array(payload.aud), '%s')" (replace "'" "\\'" $audience) | quote }}
-                {{- else }}
-                '`true`'
+                {{- $clientIds := .Values.frontend.jwks.allowedClientIds -}}
+                {{- $base := "`true`" -}}
+                {{- if $expr -}}
+                {{- $base = $expr -}}
+                {{- else if and $issuer $audience -}}
+                {{- $base = printf "payload.iss == '%s' && contains(to_array(payload.aud), '%s')" (replace "'" "\\'" $issuer) (replace "'" "\\'" $audience) -}}
+                {{- else if $issuer -}}
+                {{- $base = printf "payload.iss == '%s'" (replace "'" "\\'" $issuer) -}}
+                {{- else if $audience -}}
+                {{- $base = printf "contains(to_array(payload.aud), '%s')" (replace "'" "\\'" $audience) -}}
+                {{- end -}}
+                {{- if $clientIds -}}
+                {{- /* bb-storage accepts only a literal true, while `&&` returns its
+                     right operand when the left is truthy, so compare explicitly. */ -}}
+                {{- $claim := .Values.frontend.jwks.clientIdClaim -}}
+                {{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) -}}
+                {{- $claim = printf "\"%s\"" $claim -}}
+                {{- end -}}
+                {{- $base = printf "((%s) == `true`) && contains(`[\"%s\"]`, payload.%s)" $base (join "\",\"" $clientIds) $claim -}}
                 {{- end }}
+                {{ $base | quote }}
               },
               metadataExtractionJmespathExpression: { expression: '{ "private": { "canWriteToCache": `true` }}' },
             },

@@ -281,6 +281,43 @@
 {{- if not (has $adminMode (list "" "allow" "deny" "custom")) -}}
 {{- fail (printf "scheduler.adminHttpServers.authenticationPolicy.mode is %q; must be one of: allow, deny, custom. It is an HTTP server, and http.server.AuthenticationPolicy has no tlsClientCertificate arm — mutual TLS is not available on this port at all" $adminMode) -}}
 {{- end -}}
+{{/* The scheduler admin UI kills operations and adds or removes worker drains
+     on a plain GET, so publishing it through a route with an allow policy
+     hands that to anyone who can reach the host. The conditions mirror
+     gateway-routes.yaml, httpproxy.yaml and certificate-ingress.yaml. */}}
+{{- $routeProvider := include "buildbarn.routingProvider" $ -}}
+{{- $rbeWebGateway := and $.Values.gateway.enabled (has $routeProvider (list "gateway" "gateway-httproute-only")) $.Values.gateway.httpRoutes.rbeWeb.enabled -}}
+{{- $rbeWebIngress := and $.Values.ingress.enabled (has $routeProvider (list "contour" "ingress")) $.Values.ingress.rbeWeb.enabled -}}
+{{- if and (or $rbeWebGateway $rbeWebIngress) (has $adminMode (list "" "allow")) (not $.Values.scheduler.adminHttpServers.allowUnauthenticatedRoute) -}}
+{{- fail (printf "an rbeWeb route would publish the scheduler admin UI (:7982) at %s with no authentication, and that UI can kill operations and drain workers. Disable gateway.httpRoutes.rbeWeb and ingress.rbeWeb, authenticate the port with scheduler.adminHttpServers.authenticationPolicy.mode=custom (for example an oidc policy), or, if something in front of the route already authenticates every request, set scheduler.adminHttpServers.allowUnauthenticatedRoute=true" (include "buildbarn.rbeWebHost" $)) -}}
+{{- end -}}
+{{- if and (or $rbeWebGateway $rbeWebIngress) $.Values.scheduler.networkPolicy.enabled (not $.Values.scheduler.networkPolicy.adminPeers) -}}
+{{- fail "an rbeWeb route is enabled, but scheduler.networkPolicy admits no pod to the admin UI (:7982) while scheduler.networkPolicy.adminPeers is empty, so the route could not reach the scheduler. List your ingress controller or Gateway namespace in adminPeers, or disable the route" -}}
+{{- end -}}
+{{/* frontend.jwks client binding: the IDs are spliced into a JMESPath JSON
+     literal and the claim name into a (possibly quoted) identifier, so keep
+     both free of quotes, backslashes and control characters. */}}
+{{- $jwks := $.Values.frontend.jwks -}}
+{{- if and $jwks.allowedClientIds (not $jwks.enabled) -}}
+{{- fail "frontend.jwks.allowedClientIds is set but frontend.jwks.enabled=false, so the frontend checks no JWT and binds no client. Enable frontend.jwks or clear allowedClientIds" -}}
+{{- end -}}
+{{- if $jwks.allowedClientIds -}}
+{{- if not (kindIs "slice" $jwks.allowedClientIds) -}}
+{{- fail "frontend.jwks.allowedClientIds must be a list of client ID strings" -}}
+{{- end -}}
+{{- range $id := $jwks.allowedClientIds -}}
+{{- if not (and (kindIs "string" $id) $id) -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entries must be non-empty strings; got %v" $id) -}}
+{{- end -}}
+{{- if or (contains "`" $id) (contains "\\" $id) (contains "\"" $id) (regexMatch "[[:cntrl:]]" $id) -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entry %q contains a quote, backtick, backslash or control character" $id) -}}
+{{- end -}}
+{{- end -}}
+{{- $claim := toString $jwks.clientIdClaim -}}
+{{- if or (not $claim) (contains "\"" $claim) (contains "\\" $claim) (regexMatch "[[:cntrl:]]" $claim) -}}
+{{- fail (printf "frontend.jwks.clientIdClaim is %q; it must be a top-level claim name (for example azp, cid, appid, client_id or https://example.com/client_id) with no quote, backslash or control character" $claim) -}}
+{{- end -}}
+{{- end -}}
 {{- if $mtls.enabled -}}
 {{- if and $mtls.certificateAuthorities $mtls.certificateAuthoritiesFile -}}
 {{- fail "security.grpcMtls: set certificateAuthorities or certificateAuthoritiesFile, not both" -}}

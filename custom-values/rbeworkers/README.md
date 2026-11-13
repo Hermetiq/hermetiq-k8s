@@ -243,7 +243,10 @@ taints, runtime, and scratch-storage needs.
   other scratch files. Check available disk capacity and set appropriate
   ephemeral-storage requests and limits for your cluster. If you use a local
   disk through `hostPath` instead, patch `spec.storage.casVolume` and ensure
-  concurrently scheduled workers cannot share the same CAS cache path.
+  concurrently scheduled workers cannot share the same CAS cache path. Also
+  add that path to the operator chart's `specPolicy.allowedHostPathPrefixes`,
+  or an operator that enforces the RbeWorker spec policy marks the pool
+  `SpecInvalid` (see the chart README's RbeWorker spec policy section).
 - Docker-in-Docker workers need nodes and Pod policies that permit their
   privileged Docker container. Sysbox workers need Sysbox installed on the
   selected nodes and the `sysbox-runc` RuntimeClass. Configure RuntimeClass

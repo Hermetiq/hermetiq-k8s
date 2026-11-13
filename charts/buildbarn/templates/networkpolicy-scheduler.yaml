@@ -55,16 +55,13 @@ spec:
       ports:
         - port: 8983
           protocol: TCP
-    # Admin web UI (the rbeWeb route): the ingress controller or Gateway must
-    # reach it, so allow it from anywhere unless adminPeers narrows it.
-    {{- if $np.adminPeers }}
+    # Admin web UI: unauthenticated by default and able to kill operations and
+    # drain workers, so nothing reaches it unless adminPeers names a caller,
+    # such as the ingress controller or Gateway behind a published rbeWeb route.
+    {{- with $np.adminPeers }}
     - from:
-        {{- toYaml $np.adminPeers | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
       ports:
-        - port: 7982
-          protocol: TCP
-    {{- else }}
-    - ports:
         - port: 7982
           protocol: TCP
     {{- end }}

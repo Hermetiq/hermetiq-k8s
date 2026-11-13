@@ -175,9 +175,10 @@ You need:
 
 The Hermetiq chart defaults to namespace RBAC, including permission to read
 its own Namespace UID for license identity. It creates no ClusterRole or
-ClusterRoleBinding in that mode. The bb-worker-operator chart
-defaults to cluster RBAC; for a namespace-scoped operator installation, set
-`rbac.mode=namespace` and `metrics.secure=false`. See the
+ClusterRoleBinding in that mode. The bb-worker-operator starter values
+install a namespace-scoped operator with `rbac.mode=namespace` and
+`metrics.secure=false`. The chart itself still defaults to cluster RBAC,
+which lets the operator create Deployments in every namespace. See the
 [Hermetiq RBAC settings](charts/hermetiq/README.md#serviceaccount-tokens-and-rbac)
 and [operator RBAC settings](charts/bb-worker-operator/README.md#rbac-scope).
 For a namespace-scoped operator installation, a cluster administrator must
@@ -200,9 +201,9 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.7` |             `0.9.6` |
-| Buildbarn |       `0.9.8` |  `20260908T142448Z` |
-| BB Worker Operator |      `0.3.10` |           `v0.3.11` |
+| Hermetiq |       `0.9.8` |             `0.9.6` |
+| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
+| BB Worker Operator |      `0.3.11` |           `v0.3.11` |
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -317,7 +318,11 @@ applications (plus Dynamic Client Registration for MCP clients):
   `https://browser.<your-domain>/oauth2/callback`.
 - A machine-to-machine application for authenticated Bazel BEP and remote-cache
   traffic. Register the expected API audiences and authorize the client for
-  those audiences.
+  those audiences. Put its client ID in the Buildbarn values'
+  `frontend.jwks.allowedClientIds`: the frontend otherwise grants cache writes
+  and Execute to a token from any client in the tenant that can get that
+  audience (see
+  [Bind tokens to a client](charts/buildbarn/README.md#bind-tokens-to-a-client)).
 
 Create the shared dashboard OAuth Secret:
 
@@ -357,7 +362,12 @@ helm upgrade --install --namespace hermetiq otel \
 ```
 
 Confirm the VictoriaMetrics insert endpoint and Grafana domain in the starter
-values before installation. Hermetiq and Buildbarn render dashboards, scrape
+values before installation, and optionally set Grafana's
+`auth.proxy.whitelist` to your cluster's pod CIDR. Grafana trusts the `X-Forwarded-User` header that
+`grafana-oauth2-proxy` sets, so the Hermetiq chart admits only that proxy and
+`vmagent` to the Grafana pod with a NetworkPolicy; see
+[Grafana SSO](charts/hermetiq/README.md#grafana-sso). New SSO users start as
+Grafana Viewers. Hermetiq and Buildbarn render dashboards, scrape
 objects, and recording rules consumed by this stack. The operator's worker
 autoscaling and Buildbarn's optional scalers query VictoriaMetrics; configure
 their Prometheus-compatible server addresses to match the installation.

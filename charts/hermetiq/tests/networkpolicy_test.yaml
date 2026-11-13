@@ -4,7 +4,70 @@ templates:
 values:
   - ../ci-values/ci.yaml
 tests:
-  - it: renders no NetworkPolicies by default
+  # Grafana's auth.proxy trusts X-Forwarded-User from any caller, so the
+  # Grafana policy renders with the Grafana oauth2-proxy even while
+  # networkPolicy.enabled is false.
+  - it: renders only the Grafana NetworkPolicy by default
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: grafana-from-oauth2-proxy
+
+  - it: admits only grafana-oauth2-proxy and vmagent to Grafana
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value:
+            matchLabels: {app.kubernetes.io/name: grafana}
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+      - equal:
+          path: spec.ingress
+          value:
+            - ports:
+                - {protocol: TCP, port: 3000}
+              from:
+                - podSelector:
+                    matchLabels: {app: grafana-oauth2-proxy}
+                - podSelector:
+                    matchLabels: {app.kubernetes.io/name: vmagent}
+
+  - it: replaces the default Grafana selector instead of merging into it
+    set:
+      grafana.networkPolicy.podSelector.matchLabels.app: grafana
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value:
+            matchLabels: {app: grafana}
+
+  - it: refuses a Grafana selector that would select every pod
+    set:
+      grafana.networkPolicy.podSelector.matchLabels: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "grafana.networkPolicy.podSelector must set matchLabels or matchExpressions"
+
+  - it: renders no Grafana NetworkPolicy without the Grafana oauth2-proxy
+    set:
+      grafana.oauth2Proxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders no Grafana NetworkPolicy without the Grafana route
+    set:
+      gateway.routes.grafanaEnabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders no NetworkPolicies when the Grafana policy is opted out
+    set:
+      grafana.networkPolicy.enabled: false
     asserts:
       - hasDocuments:
           count: 0

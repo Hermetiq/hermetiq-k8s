@@ -32,16 +32,19 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
 spec:
   routes:
+    {{- /* Only gateway.routes.bepGrpcServices: see gateway-routes.yaml. */}}
+    {{- range (include "hermetiq-core.bepGrpcServices" . | fromJsonArray) }}
     - conditions:
-        - prefix: /
+        - prefix: {{ printf "/%s/" . }}
       services:
-        - name: {{ include "hermetiq-core.publisherName" . }}
+        - name: {{ include "hermetiq-core.publisherName" $ }}
           port: 50091
           protocol: h2c
       loadBalancerPolicy:
-        strategy: {{ .Values.contour.httpProxy.loadBalancerPolicy }}
+        strategy: {{ $.Values.contour.httpProxy.loadBalancerPolicy }}
       timeoutPolicy:
-        response: {{ .Values.contour.httpProxy.responseTimeout | quote }}
+        response: {{ $.Values.contour.httpProxy.responseTimeout | quote }}
+    {{- end }}
   virtualhost:
     fqdn: {{ include "hermetiq-core.bepGrpcHost" . }}
     {{- if .Values.contour.cors.enabled }}
@@ -233,6 +236,12 @@ spec:
   routes:
     - conditions:
         - prefix: {{ .Values.gateway.routes.apiWebPathPrefix }}
+      {{- with .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      {{- /* Callers must not supply the identity headers the core reads. */}}
+      requestHeadersPolicy:
+        remove:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
       services:
         - name: {{ include "hermetiq-core.apiName" . }}
           port: 80
