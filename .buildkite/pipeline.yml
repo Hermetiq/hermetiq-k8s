@@ -76,6 +76,9 @@ steps:
                 - "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"
 
   - label: ":helm: publish + sign chart"
+    # The bk-on-prem-helm WIF binding matches this key on chart release tags
+    # (cloud-native pulumi-iac/buildkite-oidc); keep it in sync.
+    key: "publish-chart"
     if: build.tag =~ /^(hermetiq|buildbarn|bb-worker-operator)-v[0-9]/
     command: "bash .buildkite/scripts/publish-chart.sh"
     concurrency: 1
