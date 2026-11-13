@@ -3,6 +3,8 @@
 #
 # Ports the GitHub Action to Buildkite and hardens it:
 #   - verifies the tag version matches charts/<chart>/Chart.yaml
+#   - refuses a chart whose default Hermetiq registry images have no digest
+#     (image-digest-check.sh)
 #   - lints + templates the chart (fail fast on a broken chart)
 #   - REFUSES to overwrite an already-published OCI version
 #   - cosign-signs the pushed chart and self-verifies the signature
@@ -44,6 +46,11 @@ if [ "${chart_version}" != "${VERSION}" ]; then
   echo ":x: tag version ${VERSION} != ${DIR}/Chart.yaml version ${chart_version} — bump Chart.yaml or retag" >&2
   exit 1
 fi
+
+# A tag-only default resolves at pull time, so the image registry's writers
+# would decide what a default install runs. Release tags must ship digests.
+echo "+++ :lock: image digests"
+bash .buildkite/scripts/image-digest-check.sh "${DIR}/values.yaml"
 
 # --- toolchain (in-script; the cloud-sdk image provides gcloud) --------------
 echo "+++ :wrench: install curl + helm ${HELM_VERSION} + cosign ${COSIGN_VERSION}"
