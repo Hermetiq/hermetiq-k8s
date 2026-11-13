@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -969,6 +970,34 @@ func TestCollectEnvironmentWithAbsoluteOutDir(t *testing.T) {
 	}
 }
 
+func TestCollectEnvironmentRepoURLNeverCarriesCredential(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	for origin, want := range map[string]string{
+		"https://u:V10DUMMY^x@example.invalid/org/repo.git":  "https://example.invalid/org/repo.git",
+		"https://u:12/V10DUMMY@example.invalid/org/repo.git": "",
+	} {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "build/config/siso"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", origin}} {
+			if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v: %s", args, err, out)
+			}
+		}
+		inv := &invocation{outDir: root}
+		inv.collectEnvironment(context.Background(), nil)
+		got, set := inv.metadata["REPO_URL"]
+		if want == "" && set {
+			t.Errorf("origin %q: REPO_URL = %q, want omitted", origin, got)
+		} else if want != "" && got != want {
+			t.Errorf("origin %q: REPO_URL = %q, want %q", origin, got, want)
+		}
+	}
+}
+
 func TestPublisherSurvivesRepeatedStreamResets(t *testing.T) {
 	old := reconnectBackoff
 	reconnectBackoff = time.Millisecond
@@ -1161,9 +1190,33 @@ func TestSanitizeRepoURLAndRequestMetadataValidation(t *testing.T) {
 		"ssh://git:secret@github.com/org/repo.git":                  "ssh://git@github.com/org/repo.git",
 		"ssh://git@github.com/org/repo.git":                         "ssh://git@github.com/org/repo.git",
 		"git@github.com:org/repo.git":                               "git@github.com:org/repo.git",
+		"https://github.com/org/repo.git":                           "https://github.com/org/repo.git",
+		"https://host:8443/org/repo.git?ref=main#top":               "https://host:8443/org/repo.git?ref=main#top",
+		// url.Parse rejects these; the secret must still be stripped.
+		"https://u:V10DUMMY^x@example.invalid/org/repo.git":   "https://example.invalid/org/repo.git",
+		"https://u:V10DUMMY\"x@example.invalid/org/repo.git":  "https://example.invalid/org/repo.git",
+		"https://u:V10 DUMMY@example.invalid/org/repo.git":    "https://example.invalid/org/repo.git",
+		"https://u:V10DUMMY%g1@example.invalid/org/repo.git":  "https://example.invalid/org/repo.git",
+		"https://u:V10DUMMY@example.invalid:abc/org/repo.git": "https://example.invalid:abc/org/repo.git",
+		"HTTPS://u:V10DUMMY|x@example.invalid/org/repo.git":   "HTTPS://example.invalid/org/repo.git",
+		"https://u:p@ss:V10DUMMY@example.invalid/org/repo":    "https://example.invalid/org/repo",
+		"ssh://git:V10DUMMY^x@example.invalid/org/repo.git":   "ssh://git@example.invalid/org/repo.git",
 	} {
-		if got := sanitizeRepoURL(in); got != want {
-			t.Errorf("sanitizeRepoURL(%q) = %q, want %q", in, got, want)
+		if got, ok := sanitizeRepoURL(in); !ok || got != want {
+			t.Errorf("sanitizeRepoURL(%q) = %q, %v, want %q, true", in, got, ok, want)
+		}
+	}
+	// An '@' outside the delimited authority cannot be separated from the
+	// host safely (url.Parse accepts the first form with User == nil), so
+	// REPO_URL is omitted.
+	for _, in := range []string{
+		"https://u:12/V10DUMMY@example.invalid/org/repo.git",
+		"https://u:V10/DUMMY@example.invalid/org/repo.git",
+		"https://u:V10?DUMMY@example.invalid/org/repo.git",
+		"https://u:V10#DUMMY@example.invalid/org/repo.git",
+	} {
+		if got, ok := sanitizeRepoURL(in); ok || got != "" {
+			t.Errorf("sanitizeRepoURL(%q) = %q, %v, want omitted", in, got, ok)
 		}
 	}
 	if _, err := requestMetadata(&options{headers: stringList{"=value"}}); err == nil {

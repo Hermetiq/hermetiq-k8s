@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"math"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,7 +70,10 @@ func (inv *invocation) collectEnvironment(ctx context.Context, flags []string) {
 		out, err := exec.CommandContext(gitCtx, "git", append([]string{"-C", inv.workspaceDir}, args...)...).Output() //nolint:gosec // G204: fixed git subcommands
 		if v := strings.TrimSpace(string(out)); err == nil && v != "" {
 			if key == "REPO_URL" {
-				v = sanitizeRepoURL(v)
+				var ok bool
+				if v, ok = sanitizeRepoURL(v); !ok {
+					continue
+				}
 			}
 			inv.metadata[key] = v
 		}
@@ -79,21 +81,42 @@ func (inv *invocation) collectEnvironment(ctx context.Context, flags []string) {
 }
 
 // sanitizeRepoURL strips credentials from an HTTP(S) or URL-formatted git
-// remote so tokens in .git/config are not sent in build metadata.
-func sanitizeRepoURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
+// remote so tokens in .git/config are not sent in build metadata. HTTP(S)
+// remotes lose the whole userinfo; other schemes keep only the login name
+// (ssh://git:pw@host becomes ssh://git@host). Scp-like remotes
+// (git@host:org/repo) have no scheme and are returned unchanged.
+//
+// The authority is split by hand rather than with url.Parse, which rejects
+// credentialed remotes such as a password containing '^' or a space, an invalid
+// '%' escape or a non-numeric port. ok is false when an '@' follows the scheme
+// but is not inside the authority (an unescaped '/', '?' or '#' in the
+// password); the caller then omits REPO_URL rather than risk sending a secret.
+func sanitizeRepoURL(raw string) (sanitized string, ok bool) {
+	schemeEnd := strings.Index(raw, "://")
+	if schemeEnd < 0 {
+		return raw, true
 	}
-	if u.Scheme == "http" || u.Scheme == "https" {
-		u.User = nil
-		return u.String()
+	start := schemeEnd + len("://")
+	rest := raw[start:]
+	authority := rest
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		authority = rest[:end]
 	}
-	if _, hasPassword := u.User.Password(); hasPassword {
-		u.User = url.User(u.User.Username())
-		return u.String()
+	at := strings.LastIndexByte(authority, '@')
+	if at < 0 {
+		if strings.Contains(rest, "@") {
+			return "", false
+		}
+		return raw, true
 	}
-	return raw
+	scheme := raw[:schemeEnd]
+	if strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https") {
+		return raw[:start] + rest[at+1:], true
+	}
+	if username, _, hasPassword := strings.Cut(authority[:at], ":"); hasPassword {
+		return raw[:start] + username + rest[at:], true
+	}
+	return raw, true
 }
 
 // findWorkspaceRoot mirrors Siso: the workspace root is the nearest ancestor
