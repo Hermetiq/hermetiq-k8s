@@ -1,0 +1,7 @@
+# Regenerate pb/ with `buf generate` from this directory.
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.12
+    out: pb
+    opt:
+      - module=github.com/Hermetiq/hermetiq-k8s/tools/siso-bep/pb
