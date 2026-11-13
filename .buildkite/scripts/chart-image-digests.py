@@ -21,14 +21,25 @@ def image_references(values, app_version):
     """Find image values recursively, including optional and string images."""
     found = []
 
-    def visit(value, path):
+    def visit(value, path, enabled=True):
         if not isinstance(value, dict):
             return
+        if isinstance(value.get("enabled"), bool):
+            enabled = enabled and value["enabled"]
         if "repository" in value:
             repo = value["repository"]
+            tags = [k for k in value if k == "tag" or k.endswith("Tag")]
+            digest_keys = ["digest" if k == "tag" else k[:-3] + "Digest" for k in tags]
+            if (
+                not enabled
+                and repo == ""
+                and tags
+                and all(value.get(k) == "" for k in tags)
+                and all(k in value and (value[k] or "") == "" for k in digest_keys)
+            ):
+                return
             if not isinstance(repo, str) or not repo:
                 raise ValueError(f"{'.'.join(path)}.repository is empty")
-            tags = [k for k in value if k == "tag" or k.endswith("Tag")]
             if not tags:
                 raise ValueError(f"{'.'.join(path)}.repository has no tag")
             for key in tags:
@@ -51,7 +62,7 @@ def image_references(values, app_version):
                     raise ValueError(f"invalid digest at {'.'.join(path + (key,))}")
                 found.append((".".join(path + (key,)), ref, digest))
             elif isinstance(child, dict):
-                visit(child, path + (key,))
+                visit(child, path + (key,), enabled)
 
     visit(values, ())
     if not found:

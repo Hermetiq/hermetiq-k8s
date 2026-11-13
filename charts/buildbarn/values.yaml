@@ -1141,9 +1141,11 @@ scheduler:
       # renewal and handover RPCs remain available until the scheduler exits.
       leaseDurationSeconds: 10
       renewInterval: 2s
+      # Required when scheduler.handover.enabled is true; left empty by default
+      # so the disabled hook is a no-op.
       image:
-        repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-scheduler-coordinator
-        tag: v0.1.0
+        repository: ""
+        tag: ""
         digest: ""
         pullPolicy: IfNotPresent
       resources:

@@ -57,7 +57,13 @@ for reload_enabled, handover_enabled in [(True, False), (False, True), (True, Tr
         "images": {"scheduler": {"repository": "example.com/bb-scheduler"}},
         "scheduler": {
             "configurationReloadInterval": "30s" if reload_enabled else "",
-            "handover": {"enabled": handover_enabled},
+            "handover": {
+                "enabled": handover_enabled,
+                "coordinator": {"image": {
+                    "repository": "example.com/bb-scheduler-coordinator",
+                    "tag": "v0.1.0",
+                }},
+            },
         },
     }
     enabled = render(values)

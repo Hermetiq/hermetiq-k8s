@@ -168,7 +168,7 @@ spec:
               name: coordinator-sock
             {{- if $mtls.enabled }}
             {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
-            {{- if not $mtls.certificateAuthoritiesFile }}
+            {{- if or (not $mtls.certificateAuthoritiesFile) (hasPrefix "/config/" $mtls.certificateAuthoritiesFile) }}
             - mountPath: /config/
               name: configs
               readOnly: true

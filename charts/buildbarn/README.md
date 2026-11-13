@@ -2055,6 +2055,7 @@ scheduler:
     coordinator:
       image:
         repository: REGISTRY/bb-scheduler-coordinator
+        tag: COORDINATOR_TAG
         digest: sha256:COORDINATOR_DIGEST
 ```
 

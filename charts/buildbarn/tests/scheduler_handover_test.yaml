@@ -4,6 +4,7 @@ templates:
   - templates/rbac-scheduler.yaml
   - templates/configmaps.yaml
   - templates/networkpolicy-scheduler.yaml
+  - templates/validate.yaml
 tests:
   - it: does not render handover RBAC by default
     template: templates/rbac-scheduler.yaml
@@ -53,7 +54,9 @@ tests:
   - it: configures RollingUpdate strategy, coordinator sidecar, and shared socket volume when enabled
     template: templates/deployment-scheduler.yaml
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
       - equal:
@@ -86,7 +89,7 @@ tests:
           value: Always
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-scheduler-coordinator:v0.1.0
+          value: us-docker.pkg.dev/example/bb-scheduler-coordinator:v0.1.0
       - isSubset:
           path: spec.template.spec.initContainers[0].securityContext
           content:
@@ -120,7 +123,10 @@ tests:
   - it: renders ServiceAccount, Role, and RoleBinding for Lease coordination when enabled
     template: templates/rbac-scheduler.yaml
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
       - hasDocuments:
           count: 3
@@ -146,7 +152,10 @@ tests:
     template: templates/configmaps.yaml
     documentIndex: 0
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
       security.grpcMtls.secretName: bb-mtls
       security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
@@ -180,7 +189,10 @@ tests:
     template: templates/configmaps.yaml
     documentIndex: 0
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.handover.peerServerName: scheduler.bbdev.svc
       security.grpcMtls.enabled: true
       security.grpcMtls.certificateAuthoritiesFile: /etc/buildbarn/mtls/ca.crt
@@ -192,7 +204,10 @@ tests:
   - it: mounts the mTLS identity and configures authenticated local health checks
     template: templates/deployment-scheduler.yaml
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.handover.peerServerName: scheduler.bbdev.svc
       security.grpcMtls.enabled: true
       security.grpcMtls.secretName: bb-mtls
@@ -221,7 +236,10 @@ tests:
     template: templates/configmaps.yaml
     documentIndex: 0
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
       security.grpcMtls.certificateAuthorities: test-ca-pem
     asserts:
@@ -232,7 +250,10 @@ tests:
   - it: mounts the inline CA file for coordinator health checks
     template: templates/deployment-scheduler.yaml
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
       security.grpcMtls.certificateAuthorities: test-ca-pem
     asserts:
@@ -254,8 +275,11 @@ tests:
   - it: admits peer scheduler pods on ports 8982-8985 in NetworkPolicy when handover is enabled
     template: templates/networkpolicy-scheduler.yaml
     set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.networkPolicy.enabled: true
       scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
       - equal:
           path: spec.ingress[3].from

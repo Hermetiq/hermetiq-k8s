@@ -37,6 +37,41 @@ class ChartImageDigestsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing digest"):
             inventory.image_references({"images": {"api": {"repository": "example/api", "tag": "v1"}}}, "v1")
 
+    def test_disabled_unconfigured_feature_image_hook_is_skipped(self):
+        values = {
+            "images": {"api": {"repository": "example/api", "tag": "v1", "digest": ""}},
+            "feature": {
+                "enabled": False,
+                "sidecar": {"image": {"repository": "", "tag": "", "digest": ""}},
+            },
+        }
+        self.assertEqual(
+            inventory.image_references(values, "v1"),
+            [("images.api.tag", "example/api:v1", "")],
+        )
+
+    def test_enabled_or_partial_empty_image_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "feature.sidecar.image.repository is empty"):
+            inventory.image_references(
+                {
+                    "feature": {
+                        "enabled": True,
+                        "sidecar": {"image": {"repository": "", "tag": "", "digest": ""}},
+                    }
+                },
+                "v1",
+            )
+        with self.assertRaisesRegex(ValueError, "feature.sidecar.image.repository is empty"):
+            inventory.image_references(
+                {
+                    "feature": {
+                        "enabled": False,
+                        "sidecar": {"image": {"repository": "", "tag": "v1", "digest": ""}},
+                    }
+                },
+                "v1",
+            )
+
     def test_manifest_digest_and_duplicate_lookups(self):
         with tempfile.TemporaryDirectory() as tmp:
             chart = Path(tmp) / "chart"
