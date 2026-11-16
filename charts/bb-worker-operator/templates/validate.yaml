@@ -13,6 +13,9 @@
 {{- if and (or .Values.otel.metrics.enabled .Values.otel.logs.enabled) (not .Values.otel.endpoint) -}}
 {{- fail "otel.endpoint is required when otel.metrics.enabled=true or otel.logs.enabled=true" -}}
 {{- end -}}
+{{- if and (or .Values.vmRules.enabled .Values.prometheusRules.enabled) (not .Values.otel.metrics.enabled) -}}
+{{- fail "vmRules.enabled and prometheusRules.enabled require otel.metrics.enabled=true; the alerts read operator metrics that are exported only over OTLP" -}}
+{{- end -}}
 {{- if not (has .Values.rbac.managerBindingMode (list "cluster" "namespace")) -}}
 {{- fail (printf "rbac.managerBindingMode must be one of: cluster, namespace (got %s)" .Values.rbac.managerBindingMode) -}}
 {{- end -}}

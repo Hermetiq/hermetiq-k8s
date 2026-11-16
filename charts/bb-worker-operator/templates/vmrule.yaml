@@ -1,0 +1,24 @@
+{{- if .Values.vmRules.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: {{ include "bb-worker-operator.fullname" . }}-alerts
+  namespace: {{ default (include "bb-worker-operator.namespace" .) .Values.vmRules.namespaceOverride }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+    {{- with .Values.vmRules.labels }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- if or .Values.commonAnnotations .Values.vmRules.annotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "bb-worker-operator.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- with .Values.vmRules.annotations }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  groups:
+    {{- include "bb-worker-operator.alertGroups" . | nindent 4 }}
+{{- end }}

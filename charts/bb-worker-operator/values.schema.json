@@ -138,6 +138,61 @@
     "otel": {
       "type": "object"
     },
+    "vmRules": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespaceOverride": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object"
+        },
+        "annotations": {
+          "type": "object"
+        }
+      }
+    },
+    "prometheusRules": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespaceOverride": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object"
+        },
+        "annotations": {
+          "type": "object"
+        }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "properties": {
+        "specInvalid": {
+          "type": "object",
+          "properties": {
+            "window": {
+              "type": "string",
+              "pattern": "^([0-9]+(ms|s|m|h|d|w|y))+$"
+            },
+            "severity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "labels": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
     "enableHTTP2": {
       "type": "boolean"
     },

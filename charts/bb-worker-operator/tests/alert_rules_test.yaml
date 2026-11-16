@@ -1,0 +1,80 @@
+suite: operator alert rules
+templates:
+  - templates/vmrule.yaml
+  - templates/prometheusrule.yaml
+  - templates/validate.yaml
+set:
+  otel.metrics.enabled: true
+  otel.endpoint: otel-collector.observability.svc.cluster.local:4317
+tests:
+  - it: renders no rule objects by default
+    template: templates/vmrule.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the SpecInvalid alert as a VMRule
+    template: templates/vmrule.yaml
+    set:
+      vmRules.enabled: true
+    asserts:
+      - isKind:
+          of: VMRule
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: RbeWorkerSpecInvalid
+      # Matches both the dotted OTLP name VictoriaMetrics stores by default and
+      # the Prometheus-translated name.
+      - matchRegex:
+          path: spec.groups[0].rules[0].expr
+          pattern: 'increase\(\{__name__=~"bb_worker_operator\[\._\]reconcile\[\._\]count\(_total\)\?", result="spec_invalid"\}\[30m\]\) > 0'
+      - matchRegex:
+          path: spec.groups[0].rules[0].expr
+          pattern: 'unless \{[^}]+\} offset 30m'
+      - matchRegex:
+          path: spec.groups[0].rules[0].annotations.description
+          pattern: 'kubectl get rbeworker -A'
+      - matchRegex:
+          path: spec.groups[0].rules[0].annotations.description
+          pattern: 'clears after 30m even if the RbeWorker is still invalid'
+      # The alert template variable must reach the rule evaluator unrendered.
+      - matchRegex:
+          path: spec.groups[0].rules[0].annotations.description
+          pattern: '\{\{ with \$labels\.namespace \}\}'
+
+  - it: renders the same alert as a PrometheusRule
+    template: templates/prometheusrule.yaml
+    set:
+      prometheusRules.enabled: true
+    asserts:
+      - isKind:
+          of: PrometheusRule
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: RbeWorkerSpecInvalid
+
+  - it: uses the configured window and severity
+    template: templates/vmrule.yaml
+    set:
+      vmRules.enabled: true
+      alerts.specInvalid.window: 2h
+      alerts.specInvalid.severity: critical
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[0].expr
+          pattern: '\[2h\]\) > 0'
+      - matchRegex:
+          path: spec.groups[0].rules[0].expr
+          pattern: 'offset 2h'
+      - equal:
+          path: spec.groups[0].rules[0].labels.severity
+          value: critical
+
+  - it: refuses rule objects without OTLP metrics
+    template: templates/validate.yaml
+    set:
+      otel.metrics.enabled: false
+      vmRules.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "vmRules.enabled and prometheusRules.enabled require otel.metrics.enabled=true; the alerts read operator metrics that are exported only over OTLP"

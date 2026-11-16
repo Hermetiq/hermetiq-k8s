@@ -1,0 +1,24 @@
+{{- if .Values.prometheusRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "bb-worker-operator.fullname" . }}-alerts
+  namespace: {{ default (include "bb-worker-operator.namespace" .) .Values.prometheusRules.namespaceOverride }}
+  labels:
+    {{- include "bb-worker-operator.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRules.labels }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- if or .Values.commonAnnotations .Values.prometheusRules.annotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- include "bb-worker-operator.commonAnnotations" $ | nindent 4 }}
+    {{- end }}
+    {{- with .Values.prometheusRules.annotations }}
+    {{- include "bb-worker-operator.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  groups:
+    {{- include "bb-worker-operator.alertGroups" . | nindent 4 }}
+{{- end }}

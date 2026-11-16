@@ -158,6 +158,33 @@ otel:
   # service.namespace=buildbarn,deployment.environment=prod
   resourceAttributes: ""
 
+# Alerting rules for the operator. They read bb_worker_operator.reconcile.count,
+# which the operator exports only over OTLP, not on the scraped metrics
+# endpoint, so either rule object requires otel.metrics.enabled=true and a
+# pipeline that delivers those metrics to the rule evaluator.
+vmRules:
+  # Renders a VictoriaMetrics VMRule. Needs the VictoriaMetrics operator CRDs.
+  enabled: false
+  # Defaults to the chart namespace. Override when your VM operator only watches
+  # a dedicated observability namespace.
+  namespaceOverride: ""
+  labels: {}
+  annotations: {}
+prometheusRules:
+  # Renders a Prometheus Operator PrometheusRule with the same alerts.
+  enabled: false
+  namespaceOverride: ""
+  labels: {}
+  annotations: {}
+alerts:
+  # RbeWorkerSpecInvalid fires when the operator refused an RbeWorker spec
+  # (Ready=False, reason SpecInvalid) within the window. It counts refusals, so
+  # it clears after the window even if the RbeWorker is still invalid.
+  specInvalid:
+    window: 30m
+    severity: warning
+    labels: {}
+
 enableHTTP2: false
 extraArgs: []
 extraEnv: []

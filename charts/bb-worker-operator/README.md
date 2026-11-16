@@ -16,6 +16,7 @@ supported full-stack deployment order.
 - [Security Context](#security-context)
 - [RBAC Scope](#rbac-scope)
 - [Observability](#observability)
+  - [Alerts](#alerts)
 - [Local chart development](#local-chart-development)
 - [License](#license)
 
@@ -410,6 +411,31 @@ scraping pod's ServiceAccount token by default through
 the ClusterRole created by `rbac.metricsReader.create`. Use
 `metrics.<scrape>.authorization` to supply a different credential, or set
 `bearerTokenFile: ""` to scrape without one.
+
+### Alerts
+
+`vmRules.enabled` renders a VictoriaMetrics `VMRule`, and
+`prometheusRules.enabled` renders a Prometheus Operator `PrometheusRule`, with
+one alert, `RbeWorkerSpecInvalid`. It fires when the operator refused an
+RbeWorker spec within `alerts.specInvalid.window` (default `30m`). A refused
+RbeWorker reports `Ready=False` with reason `SpecInvalid`, and the operator
+leaves its existing Deployment and ScaledObject unchanged, so the pool keeps
+running the previous spec. Find it with `kubectl get rbeworker -A`, read the
+`Ready` and `ConfigReady` condition messages, and either fix the spec or allow
+the request with the matching pod policy flag in `extraArgs`, for example
+`--allowed-host-path-prefixes`, on operator versions that enforce the RbeWorker
+pod policy.
+
+The alert reads `bb_worker_operator.reconcile.count{result="spec_invalid"}`,
+which the operator exports only over OTLP, so both rule objects require
+`otel.metrics.enabled=true` and a collector that delivers the metric to the
+rule evaluator. The expression matches both the dotted name that
+VictoriaMetrics stores by default and the Prometheus-translated
+`bb_worker_operator_reconcile_count_total`.
+
+The alert counts refusals, so it is event-based: a refused spec is not
+retried until it changes or the controller resyncs, and the alert clears after
+the window even if the RbeWorker is still invalid.
 
 ## Local chart development
 
