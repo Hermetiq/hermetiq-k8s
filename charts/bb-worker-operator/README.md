@@ -10,7 +10,16 @@ supported full-stack deployment order.
 - [Install](#install)
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
+  - [Replacing the CRD from scratch](#replacing-the-crd-from-scratch)
+- [RbeWorker Pools](#rbeworker-pools)
+  - [Configuration modes](#configuration-modes)
+  - [Completed-action logger address](#completed-action-logger-address)
+  - [FUSE build directories](#fuse-build-directories)
+  - [Draining actions on termination](#draining-actions-on-termination)
+  - [Docker-capable workers](#docker-capable-workers)
 - [KEDA Autoscaling](#keda-autoscaling)
+  - [Private pools](#private-pools)
+  - [Scaling to zero](#scaling-to-zero)
   - [Tuning generated autoscaling](#tuning-generated-autoscaling)
   - [Diagnose a pool that does not scale](#diagnose-a-pool-that-does-not-scale)
 - [Security Context](#security-context)
@@ -149,6 +158,241 @@ For a rendered install bundle, pass `--include-crds` to `helm template` as shown
 in [Local chart development](#local-chart-development); Helm omits CRDs from
 its default template output.
 
+### Replacing the CRD from scratch
+
+Updating the CRD in place, as above, is the normal path. To replace it from
+scratch instead, delete it and apply the new one. **Deleting the CRD deletes
+every `RbeWorker` in the cluster**, and Kubernetes then garbage-collects each
+pool's Deployment, generated ConfigMap, and `ScaledObject`, so keep your
+`RbeWorker` manifests to re-apply afterward.
+
+```bash
+# 1. Stop the controller so it does not react while the API disappears.
+kubectl -n hermetiq scale deployment/bb-worker-operator --replicas=0
+
+# 2. Delete the old CRD. This deletes existing RbeWorker objects too.
+kubectl delete crd rbeworkers.bb.hermetiq.com --wait=true --ignore-not-found
+
+# 3. Apply the CRD from the release you are installing, and wait for it.
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.10/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
+
+# 4. Upgrade or restart the controller on the same release.
+helm upgrade --install --namespace hermetiq bb-worker-operator \
+  oci://ghcr.io/hermetiq/bb-worker-operator \
+  --version 0.3.10 \
+  --skip-crds \
+  --values bb-worker-operator-values.yaml
+```
+
+Then re-apply your `RbeWorker` manifests.
+
+## RbeWorker Pools
+
+Each `RbeWorker` describes one Buildbarn worker pool. The operator creates an
+owned `Deployment`, an owned generated ConfigMap when you use generated config,
+and, when autoscaling is enabled, a KEDA `ScaledObject`. The Buildbarn chart's
+[sample worker pools](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
+are complete `RbeWorker` manifests to copy from, with notes on pod scheduling,
+memory sizing, and environment overlays.
+
+### Configuration modes
+
+A pool takes its Buildbarn config in one of two modes:
+
+- `spec.config.generated`: you provide common pool settings such as
+  `platformProperties`, `concurrency`, action environment, the virtual build
+  directory, and runner user settings, and the operator renders the standard
+  worker and runner Jsonnet files.
+- `spec.config.files`: for expert use, you provide a ConfigMap that holds the
+  complete Jsonnet files and choose `workerConfigPath` and `runnerConfigPath`.
+
+Generated config imports `common.libsonnet` from a same-namespace ConfigMap named
+by `spec.config.generated.commonConfigMapName`. That file stays the place for
+cluster-wide Buildbarn settings such as storage, the browser URL, message size,
+tracing, and diagnostics. The Buildbarn chart renders it as
+`buildbarn-worker-config`.
+
+### Completed-action logger address
+
+For generated config, set `spec.config.generated.completedActionLoggerAddress`
+to the publisher's full address, for example
+`bep-nats-pub.hermetiq.svc.cluster.local:50091`. The operator passes it to the
+worker container as `BBCAL_ADDRESS`, which the generated Jsonnet reads with
+`std.extVar('BBCAL_ADDRESS')`, so the generated Jsonnet carries no
+environment-specific endpoint.
+
+An explicit `spec.worker.env` entry named `BBCAL_ADDRESS` takes precedence over
+that field and can use `value` or `valueFrom`:
+
+```yaml
+spec:
+  worker:
+    env:
+      - name: BBCAL_ADDRESS
+        valueFrom:
+          configMapKeyRef:
+            name: worker-endpoints
+            key: completed-action-logger
+```
+
+When neither is set, the operator supplies an empty `BBCAL_ADDRESS`, which
+disables completed-action logging. Use `spec.worker.env` for the override: the
+generated default takes precedence over entries supplied by `envFrom`. Changing
+the address in the `RbeWorker` updates the Deployment's pod environment and
+triggers a rollout even when `spec.config.rolloutOnChange` is false. If the
+address comes from a referenced ConfigMap or Secret, restart the worker Pods
+after changing that external value so they receive the new environment.
+
+When upgrading from an operator release that embedded the address in the
+generated Jsonnet, first add `BBCAL_ADDRESS` to `spec.worker.env` with the
+current address (or an empty value to keep logging disabled) and let that
+rollout finish before upgrading the operator. Generated ConfigMaps are updated
+in place, so this staging lets an old Pod still restart successfully after its
+Jsonnet starts reading the environment. Afterward you can remove the explicit
+entry and use `completedActionLoggerAddress` again.
+
+For `spec.config.files`, the logger configuration and environment stay under
+your control. A custom `worker-common.libsonnet` used with generated config
+still receives `config.completedActionLoggerAddress` as a string.
+
+### FUSE build directories
+
+A pool that sets `spec.config.generated.virtualBuildDirectory` and
+`spec.storage.fuse` runs its build directory on a FUSE mount, which needs the
+privileged containers described under [Security Context](#security-context).
+
+#### Cleanup on termination
+
+FUSE-backed workers enable `spec.storage.fuse.cleanupOnTermination` by default.
+The operator adds a Kubernetes-native sidecar that stays alive until the worker
+and runner containers stop, then lazily unmounts `<workerMountPath>/build`
+through a bidirectional mount. This avoids leaving a dead FUSE mount that
+prevents kubelet from deleting the worker `emptyDir` and Pod. No sidecar is
+added when `spec.storage.fuse` is absent. Set the field to `false` to opt out:
+
+```yaml
+spec:
+  storage:
+    fuse:
+      cleanupOnTermination: false
+```
+
+The sidecar uses `spec.images.volumeInit` (or the operator's BusyBox default),
+runs privileged so the bidirectional unmount reaches the node, and requires
+Kubernetes 1.29 or newer. Keep enough pod termination grace time for the main
+containers to stop and the sidecar's termination handler to run. Cleanup runs on
+the sidecar's termination signal, never in `preStop`, because that hook can
+execute before the main containers have stopped. The sidecar logs each cleanup
+attempt and any failure.
+
+#### Kernel tunables
+
+A pool with a virtual build directory serves every concurrent action in a Pod
+from one FUSE mount, and the Linux defaults for that mount are sized for light
+use. Two optional fields under `virtualBuildDirectory.fuse` raise those limits.
+Both are omitted by default, so pools that do not set them keep the worker
+config they had before.
+
+```yaml
+spec:
+  config:
+    generated:
+      virtualBuildDirectory:
+        # filePoolPath, filePoolSizeBytes, ... as usual
+        fuse:
+          maximumBackgroundTasks: 1664
+          linuxBackingDevInfoTunables:
+            max_ratio: "10"
+            strict_limit: "0"
+```
+
+- `maximumBackgroundTasks` sets the FUSE `max_background` limit: how many
+  asynchronous requests, mostly readahead and writeback, the kernel keeps in
+  flight for the mount. The kernel default is 12, and once three quarters of the
+  limit is queued the kernel throttles further async requests, so a mount shared
+  by many concurrent actions stalls reads. The
+  [Meroton FUSE worker guidance](https://meroton.com/blog/fuse-guidance/)
+  suggests 128 per runner vCPU, so a 13 vCPU runner would use 1664. Buildbarn's
+  own documentation of the option suggests roughly 128 per worker thread, which
+  here is `concurrency`. Start from whichever is larger, and tune upward if reads
+  still stall under sustained concurrency.
+- `linuxBackingDevInfoTunables` writes the listed files under the mount's
+  `/sys/class/bdi/<major>:<minor>/` directory. `max_ratio: "10"` with
+  `strict_limit: "0"` enlarges the mount's share of the kernel write-back cache
+  and speeds up random-access writes on large runners.
+
+Before enabling them:
+
+- `strict_limit` exists only on Linux 6.2 and newer. Check the kernel version of
+  the nodes that run the pool, for example with
+  `kubectl get nodes -o custom-columns=NODE:.metadata.name,KERNEL:.status.nodeInfo.kernelVersion`.
+- The worker container must be able to write `/sys`. A privileged worker
+  container normally can. Otherwise you can mount the host's `/sys` with
+  `spec.pod.extraVolumes` and `spec.worker.extraVolumeMounts`, though Kubernetes
+  may still make it read-only depending on the other containers in the Pod.
+- `bb_worker` exits at startup if it cannot write one of the listed files, and
+  Kubernetes then restarts it in a crash loop. The operator cannot check the
+  node's kernel or `/sys` access. It rejects only names that are not plain sysfs
+  file names (lowercase letters, digits, and underscores) and values that are not
+  unsigned integers, with reason `SpecInvalid`. Roll the change out to one pool
+  first and confirm its workers start and stay healthy.
+- The fields exist only in operator and CRD releases that include them. Check the
+  installed CRD with
+  `kubectl explain rbeworker.spec.config.generated.virtualBuildDirectory.fuse`:
+  if the two fields are not listed, upgrade the CRD and controller together as
+  described in [CRD Lifecycle](#crd-lifecycle) before applying them.
+
+Setting or changing either field changes the generated worker config and the
+Deployment's `bb.hermetiq.com/config-hash` annotation, so that pool's Pods roll
+to pick it up.
+
+### Draining actions on termination
+
+Kubernetes sends SIGTERM to `bb_worker` and `bb_runner` at the same time. The
+generated runner config sets `stopGracefully: true`, so `bb_runner` lets the
+in-flight action finish instead of aborting it. A custom
+`worker-common.libsonnet` supplied through `commonItems` should set it in its
+`runnerConfig` too. Kubernetes still kills both containers when
+`spec.pod.terminationGracePeriodSeconds` (60 seconds by default) runs out, so
+raise it for pools whose actions run longer.
+
+### Docker-capable workers
+
+Docker-capable Bazel actions, such as Testcontainers tests, use
+`spec.docker.mode`:
+
+- `dind` adds a privileged Docker-in-Docker sidecar, a shared
+  `/var/run/docker.sock`, registry mirrors, and image preloading. It is a
+  Kubernetes-native sidecar, so on termination dockerd stops only after the
+  runner has drained, and the worker starts once dockerd is ready and images are
+  preloaded.
+- `sysbox` assumes the runner image starts Docker under a Sysbox runtime and
+  already contains `/bb/bb_runner`; the runner installer is disabled by default.
+  The nodes need Sysbox installed and the `sysbox-runc` RuntimeClass.
+
+The `testcontainers` and `testcontainers-sysbox` components in the
+[sample worker pools](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md)
+are ready-made pools for each mode. Advertise a pool property such as
+`pool=testcontainers` or `pool=testcontainers-sysbox`, then route Bazel targets
+with matching `exec_properties`.
+
+Bazel test processes should set the Docker environment directly on the test rule,
+because Bazel's test wrapper may not preserve worker-injected action environment:
+
+```python
+go_test(
+    name = "redis_test",
+    env = {
+        "DOCKER_HOST": "unix:///var/run/docker.sock",
+        "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE": "/var/run/docker.sock",
+        "TESTCONTAINERS_HOST_OVERRIDE": "localhost",
+    },
+    exec_properties = {"pool": "testcontainers"},
+)
+```
+
 ## KEDA Autoscaling
 
 The bundled CRD supports the operator's generated Prometheus scaler plus
@@ -183,6 +427,11 @@ spec:
 Keep `start` and `end` distinct. For scale-to-zero outside the window, set
 `minReplicas: 0` and use a positive `desiredReplicas` in the cron trigger.
 
+The generated query watches the scheduler queue for the pool's
+`config.generated.sizeClass` and `config.generated.instanceNamePrefix`. Set
+`autoscaling.prometheus.sizeClass` or `autoscaling.prometheus.instanceNamePrefix`
+only to watch a different queue.
+
 For a fully custom KEDA `ScaledObject`, disable operator-managed autoscaling and
 replica management:
 
@@ -199,6 +448,46 @@ block for documentation, keep its `prometheus` section too.
 With that setting, the operator still manages the worker Deployment template and
 config, but it preserves `Deployment.spec.replicas` for an external HPA or KEDA
 `ScaledObject`.
+
+### Private pools
+
+A pool serves a single tenant when its workers register under that tenant's
+instance name:
+
+```yaml
+spec:
+  config:
+    generated:
+      instanceNamePrefix: 3f6c1d2e-8b4a-4c7e-9a1d-5e2f7b9c0a14
+      platformProperties:
+        - name: pool
+          value: private-linux-x86-64
+```
+
+`bb_worker` then receives only operations whose instance name starts with the
+prefix, compared as whole `/`-separated components. The empty default serves
+every instance name. The operator rejects a prefix `bb_worker` would refuse: a
+leading, trailing, or repeated `/`, or a component that REv2 reserves (`blobs`,
+`uploads`, `compressed-blobs`, `actions`, `actionResults`, `operations`,
+`capabilities`). Predeclare the queue in the Buildbarn scheduler with the same
+prefix, platform, and size classes, as described under
+[Scaling to zero](#scaling-to-zero). A custom `worker-common.libsonnet` supplied
+through `commonItems` must copy `config.instanceNamePrefix` onto its runners
+itself.
+
+### Scaling to zero
+
+`minReplicas: 0` (or `idleReplicas: 0`) needs a matching entry in the Buildbarn
+scheduler's `predeclaredPlatformQueues`, with the same instance name prefix,
+platform properties, and size classes as the pool. Without one, the scheduler
+removes the pool's platform queue after the last worker leaves, once
+`platformQueueWithNoWorkersTimeout` elapses (15 minutes by default). From then
+on it rejects every action for that platform with `No workers exist` before
+counting it, so the queue-depth query stays at zero and KEDA never scales the
+pool back up. A cron window only restores capacity during the window. Either
+predeclare the queue or keep `minReplicas` at 1 or more. The
+[sample worker pools](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/rbeworkers/README.md#scale-up-from-zero)
+show the Buildbarn values and how to match them to each pool.
 
 ### Tuning generated autoscaling
 
@@ -388,6 +677,9 @@ otel:
   insecure: true
   resourceAttributes: service.namespace=buildbarn,deployment.environment=prod
 ```
+
+`otel.serviceName` sets the exported service name and defaults to the Helm
+fullname.
 
 `metrics.serviceMonitor.enabled` and `metrics.vmServiceScrape.enabled` are
 available for clusters that install the Prometheus Operator or VictoriaMetrics
