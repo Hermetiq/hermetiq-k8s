@@ -2076,6 +2076,14 @@ builds are idle. Subsequent handover-enabled rollouts can transfer queued and
 running work. This does not preserve queue state through scheduler crashes or
 node loss.
 
+Handover requires a mounted ServiceAccount token for the coordinator's
+Kubernetes API access. Leave `scheduler.automountServiceAccountToken` null
+(handover defaults it to true) or set it to true; explicit false is rejected.
+The global `serviceAccount.automountServiceAccountToken` default still applies
+to other workloads. A custom `scheduler.handover.port` must differ from the
+scheduler's existing listeners on ports 7982, 8982, 8983, 8984, and 9980.
+These checks apply only when handover is enabled.
+
 When in-cluster mTLS is enabled, `scheduler.handover.peerServerName` must match
 a DNS SAN on the scheduler certificate (default `scheduler`). The chart passes
 the same CA and client identity to peer connections and coordinator health

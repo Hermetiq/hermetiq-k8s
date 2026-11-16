@@ -196,6 +196,9 @@ tests:
     asserts:
       - matchRegex:
           path: data["scheduler.jsonnet"]
+          pattern: "predeclaredPlatformQueues:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
           pattern: "sizeClasses:"
       - matchRegex:
           path: data["scheduler.jsonnet"]

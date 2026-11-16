@@ -61,6 +61,12 @@
 {{- if eq $.Values.scheduler.handover.handoverGrpcServers.authenticationPolicy.mode "deny" -}}
 {{- fail "scheduler.handover.handoverGrpcServers.authenticationPolicy.mode=deny blocks the coordinator sidecar's local Ping health check and prevents the scheduler from acquiring the Lease" -}}
 {{- end -}}
+{{- if and (kindIs "bool" $.Values.scheduler.automountServiceAccountToken) (not $.Values.scheduler.automountServiceAccountToken) -}}
+{{- fail "scheduler.automountServiceAccountToken=false prevents the handover coordinator from accessing the Kubernetes API; set it to true or null when scheduler.handover.enabled=true" -}}
+{{- end -}}
+{{- if has (int $.Values.scheduler.handover.port) (list 7982 8982 8983 8984 9980) -}}
+{{- fail (printf "scheduler.handover.port=%d conflicts with an existing scheduler listener; choose a port other than 7982, 8982, 8983, 8984, or 9980" (int $.Values.scheduler.handover.port)) -}}
+{{- end -}}
 {{- end -}}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- $validRoutingProviders := list "contour" "gateway" "gateway-httproute-only" "ingress" "none" -}}

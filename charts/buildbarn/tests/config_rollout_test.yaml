@@ -83,6 +83,8 @@ tests:
 
   # With configurationReloadInterval the scheduler applies changes to the
   # action router and predeclared queues itself, so they must not roll it.
+  # The reload baseline includes the object-inheritance form that preserves
+  # custom routers' `$` references; only that opt-in source checksum changes.
   - it: baseline scheduler checksum/config with configuration reloading enabled
     template: templates/deployment-scheduler.yaml
     set:
@@ -91,7 +93,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4
+          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb
       - contains:
           path: spec.template.spec.volumes[0].configMap.items
           content:
@@ -111,7 +113,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4
+          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb
 
   - it: does not roll the scheduler when the actionRouter changes and reloading is enabled
     template: templates/deployment-scheduler.yaml
@@ -123,4 +125,4 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 80162a3ae15e4f00705c5b813c10d6f92c9cd9d2d9b8213cb5c3d7ee351184c4
+          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb

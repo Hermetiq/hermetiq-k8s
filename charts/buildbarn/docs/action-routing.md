@@ -282,6 +282,10 @@ With reload disabled, the router is inside `buildbarn-config`'s
 `scheduler-routing.libsonnet`. Helm renders custom Jsonnet as text; a successful
 render alone does not establish that the scheduler accepts or can serve it.
 
+Custom routers retain access to the `common` import and the complete scheduler
+Jsonnet root (`$`) in both modes. For example, `common.maximumMessageSizeBytes`
+and `$.maximumMessageSizeBytes` continue to resolve when reload is enabled.
+
 Check the destination queue's instance prefix, platform, and size classes in
 the scheduler UI or BuildQueueState API. Run one request with the exact input
 platform, one with a changed property, and one outside the configured prefix.

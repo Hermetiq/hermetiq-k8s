@@ -2,6 +2,10 @@ local common = import 'common.libsonnet';
 {{- if .Values.scheduler.configurationReloadInterval }}
 local routing = import 'scheduler-routing.libsonnet';
 {{- end }}
+{{- if .Values.scheduler.handover.enabled }}
+local podIP = std.extVar('POD_IP');
+local podHost = if std.length(std.findSubstr(':', podIP)) > 0 then '[' + podIP + ']' else podIP;
+{{- end }}
 
 {
   {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}deprecatedAdminHttpServers{{ else }}adminHttpServers{{ end }}: [{
@@ -42,10 +46,10 @@ local routing = import 'scheduler-routing.libsonnet';
       address: 'unix:///run/bb-coordinator/coordinator.sock',
     },
     selfId: std.extVar('POD_NAME'),
-    selfClientEndpoint: std.extVar('POD_IP') + ':8982',
-    selfWorkerEndpoint: std.extVar('POD_IP') + ':8983',
-    selfStateEndpoint: std.extVar('POD_IP') + ':8984',
-    selfHandoverEndpoint: std.extVar('POD_IP') + ':{{ .Values.scheduler.handover.port }}',
+    selfClientEndpoint: podHost + ':8982',
+    selfWorkerEndpoint: podHost + ':8983',
+    selfStateEndpoint: podHost + ':8984',
+    selfHandoverEndpoint: podHost + ':{{ .Values.scheduler.handover.port }}',
     {{- if .Values.security.grpcMtls.enabled }}
     peerClientTemplate: {
       {{ include "buildbarn.mtlsClientTls" (dict "Values" .Values "serverName" .Values.scheduler.handover.peerServerName) | indent 6 | trim }}
@@ -70,11 +74,9 @@ local routing = import 'scheduler-routing.libsonnet';
   killOperationsAuthorizer: { allow: {} },
   synchronizeAuthorizer: { allow: {} },
   {{- if .Values.scheduler.configurationReloadInterval }}
-  actionRouter: routing.actionRouter,
-  predeclaredPlatformQueues: routing.predeclaredPlatformQueues,
   configurationReloadInterval: {{ .Values.scheduler.configurationReloadInterval | quote }},
   {{- else }}
   {{ include "buildbarn.schedulerRouting" . }}
   {{- end }}
   platformQueueWithNoWorkersTimeout: {{ .Values.scheduler.platformQueueWithNoWorkersTimeout | quote }},
-}
+}{{ if .Values.scheduler.configurationReloadInterval }} + routing{{ end }}

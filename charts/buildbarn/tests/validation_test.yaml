@@ -423,6 +423,90 @@ tests:
       - failedTemplate:
           errorPattern: "scheduler.handover.handoverGrpcServers.authenticationPolicy.mode=deny blocks the coordinator sidecar's local Ping"
 
+  - it: rejects disabling the service account token required by the handover coordinator
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.automountServiceAccountToken: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.automountServiceAccountToken=false prevents the handover coordinator from accessing the Kubernetes API"
+
+  - it: accepts disabled token mounting and an unused conflicting port when handover is disabled
+    set:
+      scheduler.automountServiceAccountToken: false
+      scheduler.handover.port: 8982
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects handover port collisions with the client gRPC listener
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.port: 8982
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.port=8982 conflicts with an existing scheduler listener"
+
+  - it: rejects handover port collisions with the worker gRPC listener
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.port: 8983
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.port=8983 conflicts with an existing scheduler listener"
+
+  - it: rejects handover port collisions with the queue state gRPC listener
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.port: 8984
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.port=8984 conflicts with an existing scheduler listener"
+
+  - it: rejects handover port collisions with the admin HTTP listener
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.port: 7982
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.port=7982 conflicts with an existing scheduler listener"
+
+  - it: rejects handover port collisions with the diagnostics HTTP listener
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.handover.port: 9980
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.port=9980 conflicts with an existing scheduler listener"
+
+  - it: accepts a distinct custom handover port and explicit token mounting
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+      scheduler.automountServiceAccountToken: true
+      scheduler.handover.port: 9999
+    asserts:
+      - notFailedTemplate: {}
+
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

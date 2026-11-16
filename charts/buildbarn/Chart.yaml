@@ -14,6 +14,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
+    - kind: fixed
+      description: "Preserve custom router common imports and scheduler root references during reload, format IPv6 scheduler handover endpoints, and reject handover configurations with disabled API credentials or conflicting listener ports"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

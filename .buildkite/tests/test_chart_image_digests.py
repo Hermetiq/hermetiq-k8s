@@ -104,6 +104,53 @@ class ChartImageDigestsTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 inventory.inspect_reference("example.com/api:v1")
 
+    def test_pinned_images_resolve_by_digest_and_preserve_readable_references(self):
+        digest = "sha256:" + "a" * 64
+        values = {
+            "images": {
+                "api": {"repository": "registry.example:5000/api", "tag": "v1", "digest": digest},
+                "worker": {"image": "registry.example:5000/worker@" + digest},
+                "init": {"image": "registry.example:5000/worker:latest@" + digest},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp)
+            (chart / "Chart.yaml").write_text("name: example\nversion: 1.0.0\nappVersion: v1\n")
+            original_values = yaml.safe_dump(values, sort_keys=False)
+            (chart / "values.yaml").write_text(original_values)
+            with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), str(chart)]), mock.patch.object(
+                inventory, "inspect_reference", return_value=digest
+            ) as inspect:
+                inventory.main()
+            self.assertEqual(inspect.call_args_list, [
+                mock.call("registry.example:5000/api@" + digest),
+                mock.call("registry.example:5000/worker@" + digest),
+            ])
+            output = yaml.safe_load((chart / "image-digests.yaml").read_text())
+            self.assertEqual(output["images"], [
+                {"value": "images.api.tag", "image": "registry.example:5000/api:v1", "digest": digest},
+                {"value": "images.worker.image", "image": "registry.example:5000/worker", "digest": digest},
+                {"value": "images.init.image", "image": "registry.example:5000/worker:latest", "digest": digest},
+            ])
+            self.assertEqual((chart / "values.yaml").read_text(), original_values)
+
+    def test_pinned_digest_mismatch_does_not_write_an_inventory(self):
+        pinned = "sha256:" + "a" * 64
+        actual = "sha256:" + "b" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp)
+            (chart / "Chart.yaml").write_text("name: example\nversion: 1.0.0\nappVersion: v1\n")
+            (chart / "values.yaml").write_text(yaml.safe_dump({
+                "images": {"api": {"repository": "example/api", "tag": "v1", "digest": pinned}},
+            }))
+            with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), str(chart)]), mock.patch.object(
+                inventory, "inspect_reference", return_value=actual
+            ) as inspect:
+                with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                    inventory.main()
+            inspect.assert_called_once_with("example/api@" + pinned)
+            self.assertFalse((chart / "image-digests.yaml").exists())
+
     def test_invalid_registry_digest_is_rejected(self):
         with mock.patch.object(inventory.subprocess, "run", return_value=mock.Mock(stdout="latest\n")):
             with self.assertRaisesRegex(ValueError, "invalid registry digest"):
