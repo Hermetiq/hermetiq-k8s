@@ -6,19 +6,25 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.10
-appVersion: "v0.3.11"
+version: 0.3.11
+appVersion: "v0.3.13"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Use bb-worker-operator v0.3.11"
+      description: "Use bb-worker-operator v0.3.13"
+    - kind: security
+      description: "The operator enforces an RbeWorker spec policy: pods may not run as the operator's ServiceAccount, and other ServiceAccounts, ServiceAccount token mounts, privileged extra containers, hostPath volumes and ClusterTriggerAuthentication references need an allowlist entry, or the RbeWorker reports SpecInvalid. specPolicy sets the allowlists; hostPath under GKE's /mnt/stateful_partition/kube-ephemeral-ssd is allowed by default"
+    - kind: security
+      description: "The operator no longer overwrites a Deployment, ConfigMap or ScaledObject that the RbeWorker does not control, and reports NameConflict instead"
     - kind: added
-      description: "spec.config.generated.nativeBuildDirectory sets the file-count and size limits of a native build directory's cache, which were fixed at 100000 files and 5 GiB"
+      description: "Installs and upgrades fail with a list of fixes when the cluster has existing RbeWorkers that the new spec policy or ownership checks would stop reconciling; specPolicy.checkExistingRbeWorkers=false skips the check"
     - kind: added
-      description: "spec.config.generated.instanceNamePrefix registers a pool's workers under a Buildbarn instance name prefix, so a private pool serves only that tenant's instance name; the generated KEDA query follows it unless autoscaling.prometheus.instanceNamePrefix is set"
+      description: "spec.config.generated.virtualBuildDirectory.fuse.maximumBackgroundTasks and linuxBackingDevInfoTunables raise the FUSE max_background limit and the mount's write-back cache share"
     - kind: changed
-      description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed"
+      description: "The Docker-in-Docker container runs as a Kubernetes-native sidecar, so dockerd outlives the runner on termination; upgrading restarts dind worker pools once"
+    - kind: added
+      description: "Operator release images are signed; see docs/image-integrity.md"
 keywords:
   - buildbarn
   - bazel
