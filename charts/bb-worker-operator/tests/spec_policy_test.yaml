@@ -1,0 +1,298 @@
+suite: RbeWorker spec policy
+templates:
+  - templates/deployment.yaml
+  - templates/validate.yaml
+release:
+  name: o
+  namespace: hermetiq
+capabilities:
+  apiVersions:
+    - bb.hermetiq.com/v1/RbeWorker
+kubernetesProvider:
+  scheme:
+    "bb.hermetiq.com/v1/RbeWorker":
+      gvr:
+        group: bb.hermetiq.com
+        version: v1
+        resource: rbeworkers
+      namespaced: true
+  objects:
+    # Matches the GKE local-SSD pools in use: hostPath CAS under
+    # /mnt/stateful_partition/kube-ephemeral-ssd, FUSE at /dev/fuse.
+    - apiVersion: bb.hermetiq.com/v1
+      kind: RbeWorker
+      metadata:
+        name: worker-ssd
+        namespace: buildbarn
+      spec:
+        storage:
+          fuse: {}
+          casVolume:
+            hostPath:
+              path: /mnt/stateful_partition/kube-ephemeral-ssd/cas-ssd
+              type: DirectoryOrCreate
+        pod:
+          extraContainers:
+            - name: sidecar
+              securityContext:
+                capabilities:
+                  drop: [ALL]
+        autoscaling:
+          enabled: true
+          prometheus:
+            authenticationRef:
+              name: prom
+tests:
+  - it: passes the default policy to the manager as environment variables
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOWED_HOST_PATH_PREFIXES
+            value: /mnt/stateful_partition/kube-ephemeral-ssd
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOWED_POD_SERVICE_ACCOUNTS
+            value: ""
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOW_PRIVILEGED_EXTRA_CONTAINERS
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS
+            value: ""
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_SERVICE_ACCOUNT
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.serviceAccountName
+
+  # Operator images older than v0.3.13 exit on unknown flags.
+  - it: never passes the policy as flags
+    template: templates/deployment.yaml
+    set:
+      specPolicy:
+        allowedPodServiceAccounts: [builder, ci]
+        allowPrivilegedExtraContainers: true
+        allowedHostPathPrefixes: [/mnt/a, /mnt/b]
+        allowedClusterTriggerAuthentications: ["*"]
+        checkExistingRbeWorkers: false
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: allow
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOWED_POD_SERVICE_ACCOUNTS
+            value: builder,ci
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOW_PRIVILEGED_EXTRA_CONTAINERS
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ALLOWED_HOST_PATH_PREFIXES
+            value: /mnt/a,/mnt/b
+
+  - it: accepts existing GKE local-SSD pools under the default policy
+    template: templates/validate.yaml
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses an upgrade that would make an existing hostPath pool SpecInvalid
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: []
+    asserts:
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-ssd: spec.storage.casVolume.hostPath.path "/mnt/stateful_partition/kube-ephemeral-ssd/cas-ssd" needs a covering entry in specPolicy.allowedHostPathPrefixes'
+
+  - it: matches whole path components, not string prefixes
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: [/mnt/stateful_partition/kube-ephemeral]
+    asserts:
+      - failedTemplate:
+          errorPattern: worker-ssd
+  - it: allows every hostPath with the "/" prefix
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: [/]
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: can skip the existing-RbeWorker check
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: []
+      specPolicy.checkExistingRbeWorkers: false
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a host path prefix containing '..'
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: [/mnt/../etc]
+    asserts:
+      - failedTemplate:
+          errorPattern: "must not contain '..'"
+
+  - it: rejects a relative host path prefix
+    template: templates/validate.yaml
+    set:
+      specPolicy.allowedHostPathPrefixes: [mnt/ssd]
+    asserts:
+      - failedTemplate: {}
+
+  - it: reports every policy the existing RbeWorkers would break
+    template: templates/validate.yaml
+    kubernetesProvider:
+      scheme:
+        "bb.hermetiq.com/v1/RbeWorker":
+          gvr:
+            group: bb.hermetiq.com
+            version: v1
+            resource: rbeworkers
+          namespaced: true
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata:
+            name: worker-loose
+            namespace: buildbarn
+          spec:
+            storage:
+              fuse:
+                path: /dev/fuse
+                type: File
+              workerVolume:
+                hostPath:
+                  path: /mnt/../var/lib
+            pod:
+              serviceAccountName: builder
+              extraVolumes:
+                - name: token
+                  projected:
+                    sources:
+                      - serviceAccountToken:
+                          path: token
+              extraInitContainers:
+                - name: tune
+                  securityContext:
+                    privileged: true
+              extraContainers:
+                - name: proc
+                  securityContext:
+                    procMount: Unmasked
+            autoscaling:
+              enabled: true
+              prometheus:
+                authenticationRef:
+                  name: shared
+                  kind: ClusterTriggerAuthentication
+              additionalTriggers:
+                - type: cron
+                  authenticationRef:
+                    name: other
+                    kind: ClusterTriggerAuthentication
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata:
+            name: worker-token
+            namespace: buildbarn
+          spec:
+            pod:
+              automountServiceAccountToken: true
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata:
+            name: worker-operator-sa
+            namespace: hermetiq
+          spec:
+            pod:
+              serviceAccountName: o-bb-worker-operator
+    asserts:
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.pod.serviceAccountName "builder" needs specPolicy.allowedPodServiceAccounts'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.storage.workerVolume.hostPath.path "/mnt/../var/lib"'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.pod.extraVolumes\[token\] projects a ServiceAccount token'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.storage.fuse "/dev/fuse" \(type File\)'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.pod.extraInitContainers "tune"'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.pod.extraContainers "proc"'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.autoscaling.prometheus.authenticationRef ClusterTriggerAuthentication "shared"'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-loose: spec.autoscaling.additionalTriggers\[0\].authenticationRef ClusterTriggerAuthentication "other"'
+      - failedTemplate:
+          errorPattern: 'buildbarn/worker-token: spec.pod.automountServiceAccountToken needs specPolicy.allowedPodServiceAccounts to include "default"'
+      - failedTemplate:
+          errorPattern: 'hermetiq/worker-operator-sa: spec.pod.serviceAccountName "o-bb-worker-operator" is the operator''s own ServiceAccount'
+
+  - it: accepts the same RbeWorkers under the compatibility policy, except the operator's own ServiceAccount
+    template: templates/validate.yaml
+    set:
+      specPolicy:
+        allowedPodServiceAccounts: ["*"]
+        allowPrivilegedExtraContainers: true
+        allowedHostPathPrefixes: [/]
+        allowedClusterTriggerAuthentications: ["*"]
+    kubernetesProvider:
+      scheme:
+        "bb.hermetiq.com/v1/RbeWorker":
+          gvr:
+            group: bb.hermetiq.com
+            version: v1
+            resource: rbeworkers
+          namespaced: true
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata:
+            name: worker-loose
+            namespace: buildbarn
+          spec:
+            storage:
+              fuse:
+                path: /dev/fuse
+                type: File
+              casVolume:
+                hostPath:
+                  path: /var/lib/cas
+            pod:
+              serviceAccountName: builder
+              automountServiceAccountToken: true
+              extraContainers:
+                - name: proc
+                  securityContext:
+                    privileged: true
+            autoscaling:
+              enabled: true
+              prometheus:
+                authenticationRef:
+                  name: shared
+                  kind: ClusterTriggerAuthentication
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: only reads RbeWorkers in the watched namespace
+    template: templates/validate.yaml
+    set:
+      watchNamespace: team-a
+      specPolicy.allowedHostPathPrefixes: []
+    asserts:
+      - notFailedTemplate: {}
