@@ -8,6 +8,13 @@ metadata:
     {{- include "buildbarn.componentLabel" (dict "component" "scheduler") | nindent 4 }}
 spec:
   replicas: {{ .Values.scheduler.replicas }}
+  {{- if .Values.scheduler.handover.enabled }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
   progressDeadlineSeconds: 600
   revisionHistoryLimit: 10
   selector:
@@ -28,7 +35,13 @@ spec:
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "scheduler.jsonnet")) }}
     spec:
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.scheduler.handover.enabled }}
+      terminationGracePeriodSeconds: {{ .Values.scheduler.handover.terminationGracePeriodSeconds }}
+      serviceAccountName: scheduler
+      automountServiceAccountToken: {{ if ne .Values.scheduler.automountServiceAccountToken nil }}{{ .Values.scheduler.automountServiceAccountToken }}{{ else }}true{{ end }}
+      {{- else }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
+      {{- end }}
       {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
       containers:
         - name: scheduler
@@ -36,9 +49,28 @@ spec:
           imagePullPolicy: {{ .Values.images.scheduler.pullPolicy }}
           args:
             - /config/scheduler.jsonnet
-          {{- if .Values.tracing.enabled }}
+          {{- if or .Values.tracing.enabled .Values.scheduler.handover.enabled }}
           env:
+            {{- if .Values.tracing.enabled }}
             {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "bb-scheduler") | nindent 12 }}
+            {{- end }}
+            {{- if .Values.scheduler.handover.enabled }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            {{- end }}
           {{- end }}
           ports:
             - containerPort: 9980
@@ -48,6 +80,13 @@ spec:
               protocol: TCP
             - containerPort: 8983
               protocol: TCP
+            {{- if .Values.scheduler.handover.enabled }}
+            - containerPort: 8984
+              protocol: TCP
+            - containerPort: {{ .Values.scheduler.handover.port }}
+              protocol: TCP
+              name: handover
+            {{- end }}
             - containerPort: 7982
               protocol: TCP
           readinessProbe:
@@ -75,14 +114,76 @@ spec:
             {{- if .Values.security.grpcMtls.enabled }}
             {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
             {{- end }}
+            {{- if .Values.scheduler.handover.enabled }}
+            - mountPath: /run/bb-coordinator
+              name: coordinator-sock
+            {{- end }}
             - mountPath: /config/
               name: configs
               readOnly: true
+      {{- if .Values.scheduler.handover.enabled }}
+      {{- $coord := .Values.scheduler.handover.coordinator }}
+      {{- $mtls := .Values.security.grpcMtls }}
+      # Native sidecars stop after application containers, keeping the
+      # coordinator available throughout the scheduler's handover and drain.
+      initContainers:
+        - name: coordinator
+          restartPolicy: Always
+          image: {{ include "buildbarn.image" (dict "root" . "name" "scheduler.handover.coordinator.image" "repository" $coord.image.repository "tag" $coord.image.tag "digest" $coord.image.digest) }}
+          imagePullPolicy: {{ $coord.image.pullPolicy }}
+          args:
+            - -socket-path=/run/bb-coordinator/coordinator.sock
+            - -lease-name=scheduler-ubuntu22-04
+            - -lease-duration={{ $coord.leaseDurationSeconds }}s
+            - -renew-interval={{ $coord.renewInterval }}
+            - -ping-endpoint=127.0.0.1:{{ .Values.scheduler.handover.port }}
+            {{- if $mtls.enabled }}
+            - {{ printf "-ping-ca-file=%s" (default "/config/scheduler-coordinator-ca.pem" $mtls.certificateAuthoritiesFile) | quote }}
+            - {{ printf "-ping-cert-file=%s/%s" $mtls.mountPath $mtls.certificatePath | quote }}
+            - {{ printf "-ping-key-file=%s/%s" $mtls.mountPath $mtls.privateKeyPath | quote }}
+            - {{ printf "-ping-server-name=%s" .Values.scheduler.handover.peerServerName | quote }}
+            {{- end }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          resources:
+            {{- toYaml $coord.resources | nindent 12 }}
+          securityContext:
+            {{- include "buildbarn.containerSecurityContext" $ | nindent 12 }}
+          volumeMounts:
+            - mountPath: /run/bb-coordinator
+              name: coordinator-sock
+            {{- if $mtls.enabled }}
+            {{- include "buildbarn.mtlsVolumeMount" . | nindent 12 }}
+            {{- if or (not $mtls.certificateAuthoritiesFile) (hasPrefix "/config/" $mtls.certificateAuthoritiesFile) }}
+            - mountPath: /config/
+              name: configs
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      {{- end }}
       {{- include "buildbarn.podScheduling" (dict "root" . "workload" .Values.scheduler) | nindent 6 }}
       volumes:
         {{- include "buildbarn.tracingVolume" . | nindent 8 }}
         {{- if .Values.security.grpcMtls.enabled }}
         {{- include "buildbarn.mtlsVolume" . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.scheduler.handover.enabled }}
+        - name: coordinator-sock
+          emptyDir: {}
         {{- end }}
         - name: configs
           configMap:
@@ -92,3 +193,11 @@ spec:
                 path: common.libsonnet
               - key: scheduler.jsonnet
                 path: scheduler.jsonnet
+              {{- if .Values.scheduler.configurationReloadInterval }}
+              - key: scheduler-routing.libsonnet
+                path: scheduler-routing.libsonnet
+              {{- end }}
+              {{- if and .Values.scheduler.handover.enabled .Values.security.grpcMtls.enabled .Values.security.grpcMtls.certificateAuthorities }}
+              - key: scheduler-coordinator-ca.pem
+                path: scheduler-coordinator-ca.pem
+              {{- end }}
