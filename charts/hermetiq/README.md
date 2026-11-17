@@ -44,6 +44,8 @@ the full-stack deployment order and shared services used by the other charts.
 - [Install](#install)
   - [Verification](#verification)
   - [Installation checkpoint](#installation-checkpoint)
+- [Upgrade to 0.9.8](#upgrade-to-098)
+  - [Backfill retained cache history](#backfill-retained-cache-history)
 - [Advanced Topics](#advanced-topics)
   - [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
   - [Progress log storage](#progress-log-storage)
@@ -796,6 +798,64 @@ and
 [installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
 Come back to the advanced topics below after the deployment is working end to
 end.
+
+## Upgrade to 0.9.8
+
+Chart 0.9.8 uses application v0.9.7. Review custom image overrides: update or
+clear old digest fields when changing tags, because a digest takes precedence
+over the tag. Newly published chart packages pin their default images; see
+[image integrity](../../docs/image-integrity.md).
+
+### Backfill retained cache history
+
+Application v0.9.7 moves cache counts and previous-hit evidence to new rollup
+and fingerprint tables. Existing installations using cache analytics need a
+one-time backfill to carry retained pre-upgrade cache events into these tables.
+Until it finishes, historical cache totals and previous-hit baselines can be
+incomplete. New installations do not need it.
+
+Wait for the chart's database migration hook and **all subscriber Deployments**
+to finish upgrading to v0.9.7 before starting. Old subscribers must stop writing
+uncounted events first. The backfill can run alongside new-version ingestion.
+Run only one backfill Job at a time.
+
+With `partitionMaintenance.enabled` (the default), clone its CronJob to inherit
+the release's image, database settings, Secret references and scheduling:
+
+```bash
+set -euo pipefail
+KUBE_CONTEXT=<customer-context>
+NAMESPACE=<release-namespace>
+RELEASE=<helm-release-name>
+BACKFILL_JOB=cache-rollups-backfill-097
+
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment \
+  -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=subscriber" \
+  --timeout=15m
+
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" create job "$BACKFILL_JOB" \
+  --from=cronjob/partition-maintenance --dry-run=client -o json |
+  jq '
+    .spec.template.spec.containers[0].command = ["/app/dbadmin"] |
+    .spec.template.spec.containers[0].args = ["backfill-cache-rollups", "--since=744h"] |
+    .spec.activeDeadlineSeconds = 28800 |
+    .spec.backoffLimit = 3
+  ' |
+  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" create -f -
+
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" logs -f "job/$BACKFILL_JOB"
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" wait \
+  --for=condition=complete "job/$BACKFILL_JOB" --timeout=8h
+```
+
+`--since=744h` covers 31 days by invocation start time; increase it if older
+cache-event history remains in PostgreSQL. Use hours, not `31d`. The command
+cannot restore expired history. It commits one day at a time and can be retried
+without double-counting completed work; omit `--force` for normal retries. After
+a terminal failure, ensure the previous Job has stopped and use a fresh Job
+name. Keep its logs until completion is confirmed. If partition maintenance is
+disabled, use a separate Job with the bootstrap Job's database environment and
+Secret references.
 
 ## Advanced Topics
 

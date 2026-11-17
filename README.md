@@ -200,7 +200,7 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.7` |             `0.9.6` |
+| Hermetiq |       `0.9.8` |             `0.9.7` |
 | Buildbarn |       `0.9.9` |  `20260908T142448Z` |
 | BB Worker Operator |      `0.3.11` |           `v0.3.13` |
 
@@ -501,10 +501,11 @@ individual chart defaults as the exact contract.
   To inspect it, run `helm pull oci://ghcr.io/hermetiq/<chart> --version <version>
   --untar` and open `<chart>/image-digests.yaml`. The inventory includes
   optional images, but excludes dependency charts, worker images and images
-  supplied through custom values. It records default references; it does not
-  automatically pin deployed images. To pin or mirror them, set the relevant
-  image repository and digest values explicitly. When changing a tag, update or
-  clear its digest too, because Kubernetes pulls by digest when both are set.
+  supplied through custom values. Chart publication also sets these digests in
+  the packaged default values, so default deployments pull immutable content.
+  To use a different image, set its repository, tag and digest together. For a
+  tag-only override, explicitly clear its digest, because Kubernetes pulls by
+  digest when both are set. Registry mirrors must preserve the pinned digest.
   See [image integrity](docs/image-integrity.md) for verification guidance.
 - `commonLabels` and `commonAnnotations` add organizational metadata without
   changing immutable workload selectors.

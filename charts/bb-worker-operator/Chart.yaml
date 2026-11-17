@@ -14,6 +14,8 @@ annotations:
     - kind: changed
       description: "Use bb-worker-operator v0.3.13"
     - kind: security
+      description: "Pin the operator v0.3.13 image to its immutable SHA-256 manifest digest"
+    - kind: security
       description: "The operator enforces an RbeWorker spec policy: pods may not run as the operator's ServiceAccount, and other ServiceAccounts, ServiceAccount token mounts, privileged extra containers, hostPath volumes and ClusterTriggerAuthentication references need an allowlist entry, or the RbeWorker reports SpecInvalid. specPolicy sets the allowlists; hostPath under GKE's /mnt/stateful_partition/kube-ephemeral-ssd is allowed by default"
     - kind: security
       description: "The operator no longer overwrites a Deployment, ConfigMap or ScaledObject that the RbeWorker does not control, and reports NameConflict instead"

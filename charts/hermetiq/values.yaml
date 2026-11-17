@@ -22,27 +22,27 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.6"
+    apiTag: "v0.9.7"
     apiDigest: ""
-    pubTag: "v0.9.6"
+    pubTag: "v0.9.7"
     pubDigest: ""
-    subTag: "v0.9.6"
+    subTag: "v0.9.7"
     subDigest: ""
-    bootstrapTag: "v0.9.6"
+    bootstrapTag: "v0.9.7"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.6"
+    tag: "v0.9.7"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.6"
+    tag: "v0.9.7"
     digest: ""
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v0.9.6"
+    tag: "v0.9.7"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
@@ -51,7 +51,7 @@ images:
     # not depend on quay.io. Re-mirror with `crane copy` when bumping the tag.
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/oauth2-proxy
     tag: v7.15.4
-    digest: ""
+    digest: "sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded"
     pullPolicy: IfNotPresent
 
 bootstrap:

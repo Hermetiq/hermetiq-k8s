@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -103,6 +104,92 @@ class ChartImageDigestsTest(unittest.TestCase):
         with mock.patch.object(inventory.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "crane")):
             with self.assertRaises(subprocess.CalledProcessError):
                 inventory.inspect_reference("example.com/api:v1")
+
+    def test_pin_preserves_comments_and_sets_all_image_shapes(self):
+        digest = "sha256:" + "a" * 64
+        source = """# Keep release guidance.
+images:
+  api:
+    repository: example.com/api
+    apiTag: v1
+    apiDigest: "" # API pin
+    pubTag: v1
+    pubDigest: ''
+  init:
+    image: busybox:1.0 # Init helper
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp)
+            (chart / "Chart.yaml").write_text("name: example\nversion: 1.0.0\nappVersion: v1\n")
+            (chart / "values.yaml").write_text(source)
+            with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
+                inventory, "inspect_reference", return_value=digest
+            ):
+                inventory.main()
+            pinned = (chart / "values.yaml").read_text()
+            self.assertEqual(pinned, source.replace('apiDigest: ""', f'apiDigest: "{digest}"')
+                             .replace("pubDigest: ''", f'pubDigest: "{digest}"')
+                             .replace("image: busybox:1.0", f'image: "busybox:1.0@{digest}"'))
+            images = yaml.safe_load((chart / "image-digests.yaml").read_text())["images"]
+            self.assertEqual(inventory.pin_values(pinned, images), pinned)
+
+    def test_pin_registry_failure_leaves_values_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp)
+            (chart / "Chart.yaml").write_text("name: example\nversion: 1.0.0\nappVersion: v1\n")
+            source = """images:
+  api:
+    repository: example/api
+    tag: v1
+    digest: ''
+  worker:
+    repository: example/worker
+    tag: v1
+    digest: ''
+"""
+            (chart / "values.yaml").write_text(source)
+            with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
+                inventory, "inspect_reference", side_effect=["sha256:" + "a" * 64, subprocess.CalledProcessError(1, "crane")]
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    inventory.main()
+            self.assertEqual((chart / "values.yaml").read_text(), source)
+            self.assertFalse((chart / "image-digests.yaml").exists())
+
+    def test_pin_accepts_an_implicit_null_digest(self):
+        digest = "sha256:" + "a" * 64
+        source = "images:\n  api:\n    repository: example/api\n    tag: v1\n    digest:\n"
+        pinned = inventory.pin_values(source, [
+            {"value": "images.api.tag", "image": "example/api:v1", "digest": digest},
+        ])
+        self.assertEqual(yaml.safe_load(pinned)["images"]["api"]["digest"], digest)
+
+    @unittest.skipUnless(shutil.which("helm"), "helm is required for rendering")
+    def test_pinned_chart_defaults_and_explicit_tag_override_render(self):
+        digest = "sha256:" + "b" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp) / "hermetiq"
+            shutil.copytree(ROOT / "charts/hermetiq", chart)
+            with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
+                inventory, "inspect_reference", side_effect=lambda ref: ref.partition("@")[2] or digest
+            ):
+                inventory.main()
+            command = ["helm", "template", "test", str(chart), "-f", str(chart / "ci-values/ci.yaml")]
+            rendered = subprocess.check_output(command, text=True)
+            containers = [container for document in yaml.safe_load_all(rendered)
+                          if document and document["kind"] == "Deployment"
+                          for container in document["spec"]["template"]["spec"]["containers"]]
+            api = next(container for container in containers if container["name"] == "api")
+            self.assertTrue(api["image"].endswith("@" + digest), api["image"])
+            overridden = subprocess.check_output(command + [
+                "--set", "global.imageRegistry=mirror.example", "--set", "images.bepNats.apiTag=custom",
+                "--set-string", "images.bepNats.apiDigest=",
+            ], text=True)
+            containers = [container for document in yaml.safe_load_all(overridden)
+                          if document and document["kind"] == "Deployment"
+                          for container in document["spec"]["template"]["spec"]["containers"]]
+            api = next(container for container in containers if container["name"] == "api")
+            self.assertEqual(api["image"], "mirror.example/hermetiq-cloud/hermetiq-public/bep-nats:custom")
 
     def test_pinned_images_resolve_by_digest_and_preserve_readable_references(self):
         digest = "sha256:" + "a" * 64

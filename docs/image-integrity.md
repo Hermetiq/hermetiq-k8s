@@ -55,6 +55,48 @@ Image and chart signatures are separate: a signed chart does not sign the
 container images it references. When mirroring, preserve the image digest and
 copy its Cosign signature artifacts too; verify again at the destination.
 
+## Release image inventories and chart pins
+
+The cloud-native and bb-worker-operator release signing jobs upload
+`artifacts/release-images.json` and `artifacts/image-digests.txt` to their
+Buildkite builds after all image signatures and release-tag digests pass
+verification. The build annotation links both downloads. The JSON records the
+source repository, commit and release tag, plus each image's repository, tag,
+SHA-256 manifest digest and immutable reference. The text file lists those
+immutable references. For a multi-platform image, the digest identifies the
+top-level index, not one architecture's child manifest.
+
+Every newly published chart includes a public `image-digests.yaml` inventory
+and pins its packaged default values to those digests. This covers optional
+default images too; upstream images and mirrors in the inventory are not
+automatically signed by Hermetiq's application release jobs.
+
+To prepare source pins after the application release has published, install
+`crane` and Python's `PyYAML`, set the intended image tags in `values.yaml`, and
+run from this repository:
+
+```sh
+python3 .buildkite/scripts/chart-image-digests.py --pin charts/hermetiq
+python3 .buildkite/scripts/chart-image-digests.py --pin charts/bb-worker-operator
+```
+
+The command resolves every default image before editing values, preserves
+comments, and writes `image-digests.yaml`. Missing release images fail the
+command without partially pinning values. Existing explicit digests remain
+authoritative: when moving to another release, update or clear the old digest
+fields along with its tags before running the command. Review and commit the
+pins with the chart release. Publication repeats resolution on a temporary copy
+before packaging and signing.
+
+Helm merges custom values with those pinned defaults. A tag-only override must
+explicitly clear the matching digest, for example:
+
+```sh
+--set images.bepNats.apiTag=v0.9.7 --set-string images.bepNats.apiDigest=
+```
+
+For the operator the corresponding values are `image.tag` and `image.digest`.
+
 ## Public-key fingerprints
 
 Fingerprints are SHA-256 of the DER-encoded SubjectPublicKeyInfo, calculated with:

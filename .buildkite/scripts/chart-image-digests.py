@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Write a release inventory of the chart's default image references.
 
-This runs against a temporary copy of the chart, before it is packaged and
-signed. It never modifies the source values or changes Helm's override rules.
+With --pin, also pin the chart's default image values to the resolved digests.
+Publication uses a temporary chart copy; maintainers can use the same command
+on source charts to update their pins without rewriting comments or formatting.
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -84,12 +86,48 @@ def inspect_reference(ref):
     return digest
 
 
+def pin_values(source, images):
+    """Replace only image scalar values, preserving YAML comments and layout."""
+    root = yaml.compose(source)
+    replacements = []
+    for image in images:
+        path = image["value"].split(".")
+        if path[-1] == "image":
+            replacement = image["image"] + "@" + image["digest"]
+        else:
+            path[-1] = "digest" if path[-1] == "tag" else path[-1][:-3] + "Digest"
+            replacement = image["digest"]
+        node = root
+        for key in path:
+            if not isinstance(node, yaml.MappingNode):
+                raise ValueError(f"image value {'.'.join(path)} is not a mapping")
+            node = next((value for name, value in node.value if name.value == key), None)
+            if node is None:
+                raise ValueError(f"missing image value {'.'.join(path)}")
+        if not isinstance(node, yaml.ScalarNode):
+            raise ValueError(f"image value {'.'.join(path)} is not a scalar")
+        if node.value != replacement:
+            encoded = json.dumps(replacement)
+            if node.start_mark.index == node.end_mark.index:
+                encoded = " " + encoded
+            replacements.append((node.start_mark.index, node.end_mark.index, encoded))
+    for start, end, replacement in sorted(replacements, reverse=True):
+        source = source[:start] + replacement + source[end:]
+    # Reject unsupported YAML structures (for example overlapping aliases)
+    # before replacing a maintainer's source file.
+    yaml.safe_load(source)
+    return source
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("chart", type=Path, help="temporary chart directory")
+    parser.add_argument("chart", type=Path, help="chart directory")
+    parser.add_argument("--pin", action="store_true", help="also set default image digests in values.yaml")
     args = parser.parse_args()
     chart = yaml.safe_load((args.chart / "Chart.yaml").read_text())
-    values = yaml.safe_load((args.chart / "values.yaml").read_text())
+    values_path = args.chart / "values.yaml"
+    values_source = values_path.read_text()
+    values = yaml.safe_load(values_source)
     references = image_references(values, str(chart.get("appVersion", "")))
     cache = {}
     images = []
@@ -106,6 +144,10 @@ def main():
             raise ValueError(f"digest mismatch for {reference}: got {actual}")
         images.append({"value": value_path, "image": tag_ref, "digest": actual})
     output = {"schemaVersion": 1, "chart": chart["name"], "version": str(chart["version"]), "images": images}
+    # Resolve every image before writing anything: a missing release tag must
+    # not leave the chart with only some of its defaults pinned.
+    if args.pin:
+        values_path.write_text(pin_values(values_source, images))
     (args.chart / "image-digests.yaml").write_text(
         yaml.safe_dump(output, sort_keys=False, default_flow_style=False)
     )

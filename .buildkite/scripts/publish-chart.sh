@@ -5,7 +5,7 @@
 #   - verifies the tag version matches charts/<chart>/Chart.yaml
 #   - lints + templates the chart (fail fast on a broken chart)
 #   - REFUSES to overwrite an already-published OCI version
-#   - records all default image digests in the packaged chart
+#   - pins all default images and records their digests in the packaged chart
 #   - cosign-signs the pushed chart and self-verifies the signature
 #
 # Runs inside google/cloud-sdk:slim (docker plugin) with the WIF creds shared in
@@ -68,15 +68,15 @@ tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane
 echo "+++ :helm: lint ${CHART}"
 helm lint --strict "${DIR}"
 
-# Capture the default image references from the registry immediately before
-# packaging. Work on a copy so the release does not modify the checkout or
-# change the meaning of customer values and tag overrides.
+# Pin the default images immediately before packaging and include an inventory.
+# Work on a copy so the release does not modify the checkout. Customer image
+# overrides must update or clear their corresponding digest as documented.
 chart_tmp="$(mktemp -d)"
 cosign_key=""
 trap 'rm -rf "${chart_tmp}"; [ -z "${cosign_key}" ] || rm -f "${cosign_key}"' EXIT
 cp -R "${DIR}" "${chart_tmp}/${CHART}"
 echo "+++ :docker: resolve ${CHART} default image digests"
-/usr/bin/python3 .buildkite/scripts/chart-image-digests.py "${chart_tmp}/${CHART}"
+/usr/bin/python3 .buildkite/scripts/chart-image-digests.py --pin "${chart_tmp}/${CHART}"
 
 # --- read publish secrets from Secret Manager --------------------------------
 echo "+++ :gcloud: read publish secrets"

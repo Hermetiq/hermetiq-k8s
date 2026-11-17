@@ -758,7 +758,8 @@ network policy or monitoring setup.
 
 `watchNamespace` renders as `--watch-namespace`, so it needs an operator image
 that accepts that flag; older images exit with
-`flag provided but not defined`. Change it together with `image.tag`.
+`flag provided but not defined`. Change it together with `image.tag` and update
+or clear `image.digest`; a digest takes precedence over the tag.
 
 `rbac.managerBindingMode` is retained for existing installs in cluster mode.
 Its `namespace` option binds a **ClusterRole** within one namespace and still
