@@ -1,19 +1,11 @@
-# Buildbarn Helm chart for Kubernetes
+# Hermetiq and Buildbarn Helm charts for Kubernetes
 
-Bazel remote cache and remote execution on Kubernetes, including on-prem, with
-Bazel build analytics.
+Deploy Hermetiq build analytics, Buildbarn remote caching and execution, and
+Buildbarn worker pools on Kubernetes, including on-prem clusters.
 
-This repository is the source for Hermetiq's
-[Buildbarn Helm chart](https://www.hermetiq.com/buildbarn-helm-chart) and the
-charts installed with it. The Buildbarn chart deploys Buildbarn on Kubernetes:
-a remote cache (CAS and action cache) and remote execution for Bazel and other
-REAPI clients (frontend, scheduler, sharded storage, and Buildbarn Browser).
-The same chart is what you install for Buildbarn on-prem, on a conformant
-Kubernetes 1.32+ cluster. Worker pools are `RbeWorker` resources from the
-bb-worker-operator chart. The Hermetiq chart records Bazel build analytics for
-those builds, including Buildbarn action timings. Install the published charts
-from `oci://ghcr.io/hermetiq/`. The package is listed on
-[Artifact Hub](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
+This repository contains three Helm charts maintained by Hermetiq:
+`hermetiq`, `buildbarn`, and `bb-worker-operator`, along with starter values,
+integration examples, and operational runbooks for the supported stack.
 
 The Helm charts, starter values, examples, tools, and operational runbooks in
 this repository are licensed under Apache-2.0. The Hermetiq application container
@@ -31,36 +23,23 @@ configuration.
 
 ## What you get
 
-- **Buildbarn Helm chart.** Frontend, scheduler, sharded storage, and Buildbarn
-  Browser for a Bazel remote cache and remote execution service. Optional
-  Remote Asset API and bb-portal. Worker Deployments come from the
-  bb-worker-operator chart. [Chart reference](charts/buildbarn/README.md).
-- **Buildbarn on Kubernetes, including on-prem.** Kubernetes 1.32 or newer.
-  Starter values and examples target GKE. On-prem remote execution, EKS, and
-  AKS use the same charts with the storage, identity, routing, DNS, and TLS
-  from the paragraph above.
-- **Remote execution workers.** The bb-worker-operator chart turns `RbeWorker`
-  resources into worker Deployments, with optional KEDA autoscaling.
-  [Operator reference](charts/bb-worker-operator/README.md).
-- **Buildbarn analytics.** The Hermetiq chart ingests Build Event Protocol
-  traffic and stores Bazel build analytics for remote builds: invocations,
-  cache behavior, and per-action timings. Hermetiq application images are
-  commercial; the chart source is Apache-2.0.
-  [Hermetiq reference](charts/hermetiq/README.md).
-- **Chromium on Buildbarn.**
-  [`examples/chromium-siso/`](examples/chromium-siso/) builds Chromium `chrome`
-  with Siso v1.6.7 and reports the build to Hermetiq. On 40 nodes, that
-  example records a cold build at about 21 minutes when the large pool starts
-  from zero, and about 16 minutes when both pools are already scaled up
-  (Chromium 159.0.8128.0).
+| Chart | Purpose |
+|---|---|
+| [Hermetiq Helm chart](charts/hermetiq/README.md) (`hermetiq`) | Bazel build analytics and AI-assisted investigation: API and MCP server, dashboard, Build Event Protocol (BEP) ingestion, and database maintenance. |
+| [Buildbarn Helm chart](charts/buildbarn/README.md) (`buildbarn`) | Remote cache (CAS and action cache) and remote execution services for Bazel and other Remote Execution API (REAPI) clients: frontend, scheduler, sharded storage, and Buildbarn Browser, with optional Remote Asset API and bb-portal. |
+| [BB Worker Operator Helm chart](charts/bb-worker-operator/README.md) (`bb-worker-operator`) | `RbeWorker` custom resource definition (CRD) and controller that manage Buildbarn worker Deployments and configuration, with optional KEDA autoscaling. |
+
+The charts have separate responsibilities and are installed as separate Helm
+releases. The [installation guide](#installation) covers their shared services
+and supported deployment order.
 
 ## Contents
 
 - [What you get](#what-you-get)
 - [Key features](#key-features)
-  - [Hermetiq chart](#hermetiq-chart)
-  - [Buildbarn chart](#buildbarn-chart)
-  - [BB Worker Operator chart](#bb-worker-operator-chart)
+  - [Hermetiq Helm chart](#hermetiq-helm-chart)
+  - [Buildbarn Helm chart](#buildbarn-helm-chart)
+  - [BB Worker Operator Helm chart](#bb-worker-operator-helm-chart)
 - [Repository layout](#repository-layout)
 - [Supported chart bundle](#supported-chart-bundle)
 - [Architecture](#architecture)
@@ -84,10 +63,13 @@ configuration.
 
 ## Key features
 
-### Hermetiq chart
+<a id="hermetiq-chart"></a>
 
-Understand slow builds, cache misses, flaky tests, and remote execution costs
-with Bazel analytics running in your own cluster.
+### Hermetiq Helm chart
+
+The **Hermetiq Helm chart** deploys Bazel build analytics in your own cluster
+to help you understand slow builds, cache misses, flaky tests, and remote
+execution costs.
 
 **Try it in the cloud:** [Sign up for Hermetiq Cloud](https://dashboard.hermetiq.io/)
 to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
@@ -112,10 +94,15 @@ to explore Hermetiq and Managed Buildbarn before deploying the Helm stack.
   instructions and bundled Grafana dashboards. A 30-day trial is issued on first
   boot when you provide a contact email.
 
-### Buildbarn chart
+<a id="buildbarn-chart"></a>
+
+### Buildbarn Helm chart
 
 Hermetiq's **Buildbarn Helm chart** gives Bazel a shared remote cache and
-execution backend, with storage and worker pools sized for your workloads.
+execution backend on Kubernetes, including on-prem clusters, with storage
+sized for your workloads. Worker pools are managed by the BB Worker Operator.
+See the [Buildbarn chart overview](https://www.hermetiq.com/buildbarn-helm-chart)
+and its [Artifact Hub listing](https://artifacthub.io/packages/helm/hermetiq-buildbarn/buildbarn).
 
 - **Deploy a coordinated build backend.** One chart configures the frontend,
   scheduler, sharded storage, and Browser from a shared Jsonnet model, keeping
@@ -133,9 +120,12 @@ execution backend, with storage and worker pools sized for your workloads.
   details into Hermetiq, and worker and storage metrics are scoped by namespace
   so each team can track its own performance and cache health.
 
-### BB Worker Operator chart
+<a id="bb-worker-operator-chart"></a>
 
-Define and manage Buildbarn worker pools as Kubernetes resources.
+### BB Worker Operator Helm chart
+
+The **BB Worker Operator Helm chart** installs the controller and `RbeWorker`
+CRD for defining and managing Buildbarn worker pools as Kubernetes resources.
 
 - **Declare workers alongside your workloads.** Each `RbeWorker` describes a
   pool; the operator maintains its worker Deployment, configuration, and KEDA
@@ -508,6 +498,12 @@ depend on cluster configuration:
 For Bazel client examples, start with [`examples/README.md`](examples/README.md).
 
 ## Examples and runbooks
+
+The [Chromium on Buildbarn example](examples/chromium-siso/) builds Chromium
+`chrome` with Siso v1.6.7 and reports the build to Hermetiq. On 40 nodes, that
+example records a cold build at about 21 minutes when the large pool starts
+from zero, and about 16 minutes when both pools are already scaled up
+(Chromium 159.0.8128.0).
 
 | Document | Purpose |
 |---|---|
