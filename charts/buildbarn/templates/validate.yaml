@@ -125,14 +125,25 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{/* --- Storage backend, sizing, raw block-device, and ISCC/FSAC validation --- */}}
+{{/* --- Storage backend, sizing, raw block-device, CMS, and ISCC/FSAC validation --- */}}
 {{- $bd := .Values.storage.persistence.blockDevice -}}
 {{- if not (has $bd.deviceAccess (list "group" "chownInit")) -}}
 {{- fail "storage.persistence.blockDevice.deviceAccess must be one of: group, chownInit" -}}
 {{- end -}}
-{{- range $store := list "cas" "ac" "iscc" "fsac" -}}
+{{- $cms := .Values.storage.persistence.cms -}}
+{{- if not (has $cms.backend (list "sharedCas" "filesystem" "blockDevice")) -}}
+{{- fail "storage.persistence.cms.backend must be one of: sharedCas, filesystem, blockDevice" -}}
+{{- end -}}
+{{- if not (has $cms.keyLocationMap.type (list "inMemory" "blockDevice")) -}}
+{{- fail "storage.persistence.cms.keyLocationMap.type must be one of: inMemory, blockDevice" -}}
+{{- end -}}
+{{- $cmsTotalBlocks := add (int $cms.spareBlocks) (int $cms.oldBlocks) (int $cms.currentBlocks) (int $cms.newBlocks) -}}
+{{- if gt $cmsTotalBlocks 100 -}}
+{{- fail (printf "storage.persistence.cms: spareBlocks+oldBlocks+currentBlocks+newBlocks is %d; bb-storage supports at most 100 blocks per store" (int $cmsTotalBlocks)) -}}
+{{- end -}}
+{{- range $store := list "cas" "cms" "ac" "iscc" "fsac" -}}
 {{- $s := index $.Values.storage.persistence $store -}}
-{{- $active := or (eq $store "cas") (eq $store "ac") $s.enabled -}}
+{{- $active := or (eq $store "cas") (eq $store "ac") (and (eq $store "cms") (ne $s.backend "sharedCas")) (and (has $store (list "iscc" "fsac")) $s.enabled) -}}
 {{- if $active -}}
 {{- if not (has $s.backend (list "filesystem" "blockDevice")) -}}
 {{- fail (printf "storage.persistence.%s.backend must be one of: filesystem, blockDevice" $store) -}}
@@ -160,6 +171,14 @@
 {{- $klmDiskMi = int $s.keyLocationMap.sizeMi -}}
 {{- end -}}
 {{- $blocksMi := mul (int $s.blocksSizeGi) 1024 -}}
+{{- $sharedCmsBlocksMi := 0 -}}
+{{- $sharedCmsKlmMi := 0 -}}
+{{- if and (eq $store "cas") (eq $cms.backend "sharedCas") -}}
+{{- $sharedCmsBlocksMi = mul (int $cms.blocksSizeGi) 1024 -}}
+{{- if eq $cms.keyLocationMap.type "blockDevice" -}}
+{{- $sharedCmsKlmMi = int $cms.keyLocationMap.sizeMi -}}
+{{- end -}}
+{{- end -}}
 {{- if eq $.Values.storage.persistence.mode "pvc" -}}
 {{- $storeSizeGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.size" $store) "value" $s.size) -}}
 {{- if ge (int $s.blocksSizeGi) (int $storeSizeGi) -}}
@@ -168,6 +187,9 @@
 {{- if ge (add $blocksMi $klmDiskMi) (mul (int $storeSizeGi) 1024) -}}
 {{- fail (printf "storage.persistence.%s: blocksSizeGi (%dGi) plus on-disk key-location map (%dMi) leaves no room inside storage.persistence.%s.size (%s) for persistent state and filesystem metadata" $store (int $s.blocksSizeGi) $klmDiskMi $store $s.size) -}}
 {{- end -}}
+{{- if and (eq $store "cas") (eq $cms.backend "sharedCas") (ge (add $blocksMi $klmDiskMi $sharedCmsBlocksMi $sharedCmsKlmMi) (mul (int $storeSizeGi) 1024)) -}}
+{{- fail (printf "storage.persistence.cas: blocksSizeGi (%dGi) + on-disk KLM (%dMi) + sharedCas cms.blocksSizeGi (%dGi) + cms KLM (%dMi) leaves no room inside storage.persistence.cas.size (%s) for persistent state and filesystem metadata" (int $s.blocksSizeGi) $klmDiskMi (int $cms.blocksSizeGi) $sharedCmsKlmMi $s.size) -}}
+{{- end -}}
 {{- else if eq $.Values.storage.persistence.mode "emptyDir" -}}
 {{- $limitGi := include "buildbarn.storageSizeGi" (dict "name" (printf "storage.persistence.%s.emptyDir.sizeLimit" $store) "value" $s.emptyDir.sizeLimit) -}}
 {{- if ge (int $s.blocksSizeGi) (int $limitGi) -}}
@@ -175,6 +197,9 @@
 {{- end -}}
 {{- if ge (add $blocksMi $klmDiskMi) (mul (int $limitGi) 1024) -}}
 {{- fail (printf "storage.persistence.%s: blocksSizeGi (%dGi) plus on-disk key-location map (%dMi) leaves no room inside storage.persistence.%s.emptyDir.sizeLimit (%s) for persistent state and filesystem metadata" $store (int $s.blocksSizeGi) $klmDiskMi $store $s.emptyDir.sizeLimit) -}}
+{{- end -}}
+{{- if and (eq $store "cas") (eq $cms.backend "sharedCas") (ge (add $blocksMi $klmDiskMi $sharedCmsBlocksMi $sharedCmsKlmMi) (mul (int $limitGi) 1024)) -}}
+{{- fail (printf "storage.persistence.cas: blocksSizeGi (%dGi) + on-disk KLM (%dMi) + sharedCas cms.blocksSizeGi (%dGi) + cms KLM (%dMi) leaves no room inside storage.persistence.cas.emptyDir.sizeLimit (%s) for persistent state and filesystem metadata" (int $s.blocksSizeGi) $klmDiskMi (int $cms.blocksSizeGi) $sharedCmsKlmMi $s.emptyDir.sizeLimit) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -199,6 +224,15 @@
 {{- $keyLocationMapSizeMi := int $s.blockDevice.metadata.keyLocationMapSizeMi -}}
 {{- if le (int $metadataSizeMi) $keyLocationMapSizeMi -}}
 {{- fail (printf "storage.persistence.%s.blockDevice.metadata.size (%s) must be larger than storage.persistence.%s.blockDevice.metadata.keyLocationMapSizeMi (%dMi) to leave headroom for persistent state" $store $s.blockDevice.metadata.size $store $keyLocationMapSizeMi) -}}
+{{- end -}}
+{{- if and (eq $store "cas") (eq $cms.backend "sharedCas") -}}
+{{- $sharedCmsMetaMi := mul (int $cms.blocksSizeGi) 1024 -}}
+{{- if eq $cms.keyLocationMap.type "blockDevice" -}}
+{{- $sharedCmsMetaMi = add $sharedCmsMetaMi (int $cms.keyLocationMap.sizeMi) -}}
+{{- end -}}
+{{- if le (int $metadataSizeMi) (add $keyLocationMapSizeMi $sharedCmsMetaMi) -}}
+{{- fail (printf "storage.persistence.cas.blockDevice.metadata.size (%s) must be larger than cas.blockDevice.metadata.keyLocationMapSizeMi (%dMi) plus sharedCas CMS files (%dMi) to leave headroom for persistent state" $s.blockDevice.metadata.size $keyLocationMapSizeMi $sharedCmsMetaMi) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -235,20 +269,24 @@
 {{- $klm := .Values.storage.keyLocationMapSizing -}}
 {{- if $klm.validate -}}
 {{- $ratio := $klm.minimumRatio | float64 -}}
-{{- range $store := list "cas" "ac" "iscc" "fsac" -}}
+{{- range $store := list "cas" "cms" "ac" "iscc" "fsac" -}}
 {{- $s := index $.Values.storage.persistence $store -}}
-{{- if or (eq $store "cas") (eq $store "ac") $s.enabled -}}
+{{- if or (eq $store "cas") (eq $store "cms") (eq $store "ac") $s.enabled -}}
 {{- $isBlock := eq $s.backend "blockDevice" -}}
+{{- $casNoFs := and (eq $.Values.storage.persistence.cas.backend "blockDevice") (ne $.Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
 {{/* Bytes the blocks device/file offers, and how many of its blocks hold data. */}}
-{{- $deviceMi := 0 -}}
+{{- $deviceMi := 0.0 -}}
 {{- if $isBlock -}}
-{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) -}}
+{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) | float64 -}}
+{{- else if and (eq $store "cms") (eq $s.backend "sharedCas") $casNoFs -}}
+{{- $cmsInMemTotal := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) (int $s.spareBlocks) -}}
+{{- $deviceMi = divf (mulf ($cmsInMemTotal | float64) ($s.blocksInMemoryBlockSizeBytes | float64)) 1048576.0 -}}
 {{- else -}}
-{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 -}}
+{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 | float64 -}}
 {{- end -}}
 {{- $data := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
 {{- $total := add $data (int $s.spareBlocks) -}}
-{{- $usableMi := divf (mulf ($deviceMi | float64) ($data | float64)) ($total | float64) -}}
+{{- $usableMi := divf (mulf $deviceMi ($data | float64)) ($total | float64) -}}
 {{- $avg := index $klm.averageObjectSizeBytes $store | float64 -}}
 {{- $maxObjects := divf (mulf $usableMi 1048576.0) $avg -}}
 {{/* Entries the configured KLM can actually index. A device/file-backed KLM
@@ -268,7 +306,7 @@
 {{- else if eq $store "cas" -}}
 {{- $entries = divf (mulf (int $s.keyLocationMapSizeMi | float64) 1048576.0) 64.0 -}}
 {{- $klmDesc = printf "keyLocationMapSizeMi=%d" (int64 $s.keyLocationMapSizeMi) -}}
-{{- else if eq $s.keyLocationMap.type "blockDevice" -}}
+{{- else if and (eq $s.keyLocationMap.type "blockDevice") (not (and (eq $store "cms") (eq $s.backend "sharedCas") $casNoFs)) -}}
 {{- $entries = divf (mulf (int $s.keyLocationMap.sizeMi | float64) 1048576.0) 64.0 -}}
 {{- $klmDesc = printf "keyLocationMap.sizeMi=%d" (int64 $s.keyLocationMap.sizeMi) -}}
 {{- else -}}
@@ -347,6 +385,103 @@
 {{- range $name, $_ := $.Values.configOverrides -}}
 {{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "scheduler.jsonnet" "portal.jsonnet") -}}
 {{- fail (printf "configOverrides[%q] replaces a file that carries one half of an in-cluster mTLS hop, and an override is spliced in verbatim without templating — security.grpcMtls would configure the other half only, leaving that hop broken. Add the tls block to your override and remove this file from the check, or turn security.grpcMtls off" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{/* --- CDC schema upgrade guardrails (render-time values & cluster lookup) --- */}}
+{{- $removedCdcFields := list
+      (dict "field" "dataIntegrityValidationCache" "pattern" "dataIntegrityValidationCache[[:space:]]*:" "hint" "remove dataIntegrityValidationCache (integrity validation is now performed per FastCDC chunk and via chunkMappingValidating)")
+      (dict "field" "keyLocationMapInMemory" "pattern" "keyLocationMapInMemory[[:space:]]*:" "hint" "replace keyLocationMapInMemory with keyLocationMap: { inMemory: ... }")
+      (dict "field" "keyLocationMapOnBlockDevice" "pattern" "keyLocationMapOnBlockDevice[[:space:]]*:" "hint" "replace keyLocationMapOnBlockDevice with keyLocationMap: { onBlockDevice: ... }")
+      (dict "field" "keyLocationMapMaximumGetAttempts" "pattern" "keyLocationMapMaximumGetAttempts[[:space:]]*:" "hint" "move maximumGetAttempts inside keyLocationMap: { ..., maximumGetAttempts: 16 }")
+      (dict "field" "keyLocationMapMaximumPutAttempts" "pattern" "keyLocationMapMaximumPutAttempts[[:space:]]*:" "hint" "move maximumPutAttempts inside keyLocationMap: { ..., maximumPutAttempts: 64 }")
+      (dict "field" "browserUrl" "pattern" "(^|[^a-zA-Z0-9_])browserUrl([[:space:]]*:|[^a-zA-Z0-9_])" "hint" "replace browserUrl with portalUrl (or deprecatedPortalUrl in scheduler.jsonnet)")
+      (dict "field" "adminHttpServers" "pattern" "(^|[^a-zA-Z0-9_])adminHttpServers[[:space:]]*:" "hint" "replace adminHttpServers with deprecatedAdminHttpServers")
+      (dict "field" "adminRoutePrefix" "pattern" "adminRoutePrefix[[:space:]]*:" "hint" "remove adminRoutePrefix (removed upstream in bb-scheduler)")
+      (dict "field" "zstdPool" "pattern" "zstdPool[[:space:]]*:" "hint" "remove zstdPool (removed upstream in CDC Buildbarn)") -}}
+{{- range $name, $content := default (dict) $.Values.configOverrides -}}
+{{- $text := $content | toString -}}
+{{- range $rule := $removedCdcFields -}}
+{{- if regexMatch $rule.pattern $text -}}
+{{- fail (printf "configOverrides[%q] contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s, or run the CDC config migration tool" $name $rule.field $rule.hint) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch "(^|[^a-zA-Z0-9_])contentAddressableStorage[[:space:]]*:" $text) (not (regexMatch "contentAddressableStorageServer[[:space:]]*:" $text)) -}}
+{{- fail (printf "configOverrides[%q] uses pre-CDC top-level field \"contentAddressableStorage\"; rename it to \"contentAddressableStorageServer\" with chunkStorage and chunkMappingStorage, or run the CDC config migration tool" $name) -}}
+{{- end -}}
+{{- if and (has $name (list "common.libsonnet" "scheduler.jsonnet" "asset.jsonnet")) (regexMatch "contentAddressableStorage[[:space:]]*:" $text) (not (regexMatch "(chunkStorage[[:space:]]*:|common\\.blobstore\\.contentAddressableStorage)" $text)) -}}
+{{- fail (printf "configOverrides[%q] defines a pre-CDC single-store \"contentAddressableStorage\" without \"chunkStorage\"; update it to the CDC { chunkStorage, chunkMappingStorage, cdcParameterCache } shape, or run the CDC config migration tool" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $router.mode "custom") $router.custom -}}
+{{- range $rule := $removedCdcFields -}}
+{{- if regexMatch $rule.pattern ($router.custom | toString) -}}
+{{- fail (printf "scheduler.actionRouter.custom contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s" $rule.field $rule.hint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ns := include "buildbarn.namespace" . -}}
+{{- $mockLookup := default (dict) $.Values._testLookup -}}
+{{- $rbeWorkers := default (lookup "bb.hermetiq.com/v1" "RbeWorker" $ns "") (index $mockLookup "rbeWorkers") -}}
+{{- range $worker := default (list) (index (default (dict) $rbeWorkers) "items") -}}
+{{- $wName := (default (dict) $worker.metadata).name | default "<unknown>" -}}
+{{- $wSpec := default (dict) $worker.spec -}}
+{{- $wConfig := default (dict) $wSpec.config -}}
+{{- range $fName, $fContent := default (dict) $wConfig.files -}}
+{{- range $rule := $removedCdcFields -}}
+{{- if regexMatch $rule.pattern ($fContent | toString) -}}
+{{- fail (printf "live RbeWorker %s/%s spec.config.files[%q] contains pre-CDC field %q (%s); migrate the RbeWorker configuration before upgrading the buildbarn chart" $ns $wName $fName $rule.field $rule.hint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $wImages := default (dict) $wSpec.images -}}
+{{- range $imgField, $imgVal := dict
+      "spec.workerImage" (default "" $wSpec.workerImage)
+      "spec.runnerInstallerImage" (default "" $wSpec.runnerInstallerImage)
+      "spec.images.worker" (default "" (index $wImages "worker"))
+      "spec.images.runnerInstaller" (default "" (index $wImages "runnerInstaller")) -}}
+{{- if and $imgVal (regexMatch ":(202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" ($imgVal | toString)) -}}
+{{- fail (printf "live RbeWorker %s/%s pins pre-CDC image %q in %s; remove the pin so the worker inherits buildbarn-worker-config's CDC image or update it to >= 20261102T before upgrading the buildbarn chart" $ns $wName ($imgVal | toString) $imgField) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $configMaps := default (lookup "v1" "ConfigMap" $ns "") (index $mockLookup "configMaps") -}}
+{{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
+{{- $cmMeta := default (dict) $cm.metadata -}}
+{{- $cmName := $cmMeta.name | default "" -}}
+{{- $cmLabels := default (dict) $cmMeta.labels -}}
+{{- $isChartCm := has $cmName (list (include "buildbarn.configName" $) (include "buildbarn.workerConfigName" $)) -}}
+{{- $isOperatorOwned := false -}}
+{{- range $owner := default (list) $cmMeta.ownerReferences -}}
+{{- if eq (default "" $owner.kind) "RbeWorker" -}}{{- $isOperatorOwned = true -}}{{- end -}}
+{{- end -}}
+{{- if and (not $isChartCm) (not $isOperatorOwned) (or (hasKey $cmLabels "hermetiq.com/worker-pool") (hasSuffix "-worker-config" $cmName)) -}}
+{{- range $fName, $fContent := default (dict) $cm.data -}}
+{{- range $rule := $removedCdcFields -}}
+{{- if regexMatch $rule.pattern ($fContent | toString) -}}
+{{- fail (printf "live worker ConfigMap %s/%s data[%q] contains pre-CDC field %q (%s); migrate the ConfigMap before upgrading the buildbarn chart" $ns $cmName $fName $rule.field $rule.hint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $deployments := default (lookup "apps/v1" "Deployment" $ns "") (index $mockLookup "deployments") -}}
+{{- range $dep := default (list) (index (default (dict) $deployments) "items") -}}
+{{- $dMeta := default (dict) $dep.metadata -}}
+{{- $dName := $dMeta.name | default "" -}}
+{{- $dLabels := default (dict) $dMeta.labels -}}
+{{- $dAnnotations := default (dict) $dMeta.annotations -}}
+{{- $chartLabel := default "" (index $dLabels "helm.sh/chart") -}}
+{{- $appVer := default "" (index $dLabels "app.kubernetes.io/version") -}}
+{{- $cdcCapable := eq (default "" (index $dAnnotations "hermetiq.com/cdc-compatible")) "true" -}}
+{{- if and (or (eq $dName "bb-worker-operator") (eq $dName "bb-worker-operator-controller-manager") (hasPrefix "bb-worker-operator-" $chartLabel)) (not $cdcCapable) -}}
+{{- if or (regexMatch "^bb-worker-operator-0\\.[01]\\." $chartLabel) (regexMatch "^v?0\\.[01]\\." $appVer) -}}
+{{- fail (printf "live Deployment %s/%s (%s) predates the CDC-compatible bb-worker-operator release; upgrade bb-worker-operator first so its std.objectHas CDC guard is active before buildbarn-worker-config switches to CDC" $ns $dName (default $appVer $chartLabel)) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (or (has $dName (list "bep-nats" "bep-nats-pub" "bep-nats-sub")) (hasPrefix "hermetiq-" $chartLabel)) (not $cdcCapable) -}}
+{{- if or (regexMatch "^hermetiq-0\\.[0-8]\\." $chartLabel) (regexMatch "^v?0\\.[0-8]\\." $appVer) -}}
+{{- fail (printf "live Deployment %s/%s (%s) predates the Phase 0a dual-descriptor bep-nats release; upgrade the hermetiq chart first so bep-nats accepts both pre-CDC and CDC Buildbarn configurations" $ns $dName (default $appVer $chartLabel)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

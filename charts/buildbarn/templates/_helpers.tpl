@@ -538,7 +538,9 @@ mounted at /storage-<store>-meta) holds the KLM file + persistent_state.
 */}}
 
 {{- define "buildbarn.storage.storeList" -}}
-{{- $stores := list "cas" "ac" -}}
+{{- $stores := list "cas" -}}
+{{- if ne .Values.storage.persistence.cms.backend "sharedCas" -}}{{- $stores = append $stores "cms" -}}{{- end -}}
+{{- $stores = append $stores "ac" -}}
 {{- if .Values.storage.persistence.iscc.enabled -}}{{- $stores = append $stores "iscc" -}}{{- end -}}
 {{- if .Values.storage.persistence.fsac.enabled -}}{{- $stores = append $stores "fsac" -}}{{- end -}}
 {{- join " " $stores -}}
@@ -637,6 +639,15 @@ mkdir -p {{ $dir }}/persistent_state
 chmod 0700 {{ $dir }}/persistent_state
 {{- if $hostPath }}
 chown 65534:65534 {{ $dir }}/persistent_state
+{{- end }}
+{{- end }}
+{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
+{{- if and (eq .Values.storage.persistence.cms.backend "sharedCas") (not $casNoFs) (eq .Values.storage.persistence.cms.keyLocationMap.type "blockDevice") }}
+{{- $sharedCasDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
+mkdir -p {{ $sharedCasDir }}/cms_persistent_state
+chmod 0700 {{ $sharedCasDir }}/cms_persistent_state
+{{- if $hostPath }}
+chown 65534:65534 {{ $sharedCasDir }}/cms_persistent_state
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -840,14 +851,16 @@ properties: [
 {{- define "buildbarn.frontendReadCachingBackend" -}}
 {
   readCaching: {
-    slow: common.blobstore.contentAddressableStorage,
+    slow: common.blobstore.contentAddressableStorage.chunkStorage,
     fast: {
       'local': {
-        keyLocationMapInMemory: {
-          entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
+        keyLocationMap: {
+          inMemory: {
+            entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
+          },
+          maximumGetAttempts: 16,
+          maximumPutAttempts: 64,
         },
-        keyLocationMapMaximumGetAttempts: 16,
-        keyLocationMapMaximumPutAttempts: 64,
         oldBlocks: {{ .Values.frontend.readCache.oldBlocks }},
         currentBlocks: {{ .Values.frontend.readCache.currentBlocks }},
         newBlocks: {{ .Values.frontend.readCache.newBlocks }},
@@ -859,15 +872,6 @@ properties: [
             },
           },
           spareBlocks: {{ .Values.frontend.readCache.spareBlocks }},
-          // Objects read out of a block device are checksummed end to end on
-          // every read by default. This caches the verdict, so a cache hit
-          // does not pay for a full re-digest — the cost the cache exists to
-          // avoid.
-          dataIntegrityValidationCache: {
-            cacheSize: {{ int64 .Values.frontend.readCache.dataIntegrityValidationCache.cacheSize }},
-            cacheDuration: {{ .Values.frontend.readCache.dataIntegrityValidationCache.cacheDuration | quote }},
-            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
-          },
         },
       },
     },

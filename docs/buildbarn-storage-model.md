@@ -1,9 +1,13 @@
 # Buildbarn Storage Model and Sizing
 
-Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume, an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
+Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both FastCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
 
 - a fixed-size key-location map, which is the index from digest to location
 - a ring of fixed-size blocks, which holds the bytes
+
+With FastCDC content-defined chunking (`contentAddressableStorageServer`), the CAS is split into two stores:
+- **`chunkStorage` (CS)**: holds raw FastCDC chunks (64 KiB–1 MiB, 256 KiB average) plus unchunked small blobs (`storage.persistence.cas`).
+- **`chunkMappingStorage` (CMS)**: maps whole-blob CAS digests to their ordered list of chunk digests (`storage.persistence.cms`, defaulting to `backend: sharedCas` on the existing CAS filesystem/metadata volume so upgrades do not require new `volumeClaimTemplates`).
 
 Most surprising behavior comes from those two structures being fixed-size and tightly coupled. If the map is too small, writes can become invisible even though bytes are still on disk. If the block geometry changes, a persistent store starts empty. If the map lives in memory, durable disks do not make the store durable.
 
@@ -54,7 +58,7 @@ The chart defaults follow Buildbarn's intended shape:
 
 For the CAS, too few old blocks makes the store behave more like FIFO. Too many old blocks wastes space on duplicate refreshed data. In practice, the current group should usually be two to three times larger than the old group.
 
-For AC, ISCC, and FSAC, `newBlocks` must be **exactly 1**. It is an equality check, so `0` is rejected as surely as `5`:
+For CMS (`chunkMappingStorage`), AC, ISCC, and FSAC, `newBlocks` must be **exactly 1**. It is an equality check, so `0` is rejected as surely as `5`:
 
 ```text
 The number of "new" blocks must be set to 1 for this storage type, as objects cannot be updated reliably otherwise
@@ -110,12 +114,12 @@ Buildbarn's KLM is a fixed-size hash table. To avoid long probe loops, `Get()` a
 
 That failure mode is easy to misread. Disk usage can look healthy, writes may not return an error, and builds may report `NotFound` for blobs that were uploaded moments earlier.
 
-Trust these metrics:
+Trust these metrics (renamed in CDC `bb-storage` from `buildbarn_blobstore_hashing_key_location_map_*` to `buildbarn_lossymap_hash_map_*` with `name="KeyLocationMap:<storage_type>"`):
 
 ```text
-buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
-buildbarn_blobstore_hashing_key_location_map_put_iterations_count{outcome="TooManyAttempts"}
-buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+buildbarn_lossymap_hash_map_put_too_many_iterations_total
+buildbarn_lossymap_hash_map_put_iterations_count{outcome="TooManyAttempts"}
+buildbarn_lossymap_hash_map_get_too_many_attempts_total
 ```
 
 Any sustained nonzero rate means the map is too small for the live object count. Grow the map and, if it is in memory, grow the pod memory request with it. The chart ships an alert for dropped puts.
@@ -206,7 +210,7 @@ Two more settings that are easy to copy wrongly from the storage tier:
   ```
 
   Spare blocks hold no data, so they do not count toward capacity — but they still divide the block size, so they shrink both numbers at once. And the mean size of a blob that *enters* the cache is not the mean size of a blob that is *requested*: the first is what the replicator actually copied, and it is the one this formula wants. Raise `blocksSizeGi` without raising `entries` and the map fills before the disk does, which is the `TooManyAttempts` failure above — blobs on disk that the index can no longer reach.
-- `dataIntegrityValidationCache` is on by default here for a reason: a file-backed fast tier re-checksums every object on every read without it, which is exactly the cost the cache exists to avoid.
+- Note: `dataIntegrityValidationCache` was removed from `local.BlobAccessConfiguration` in CDC `bb-storage` (integrity validation is now performed per FastCDC chunk and via `chunkMappingValidating`).
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 

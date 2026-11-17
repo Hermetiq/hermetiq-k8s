@@ -8,7 +8,7 @@ local podHost = if std.length(std.findSubstr(':', podIP)) > 0 then '[' + podIP +
 {{- end }}
 
 {
-  {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}deprecatedAdminHttpServers{{ else }}adminHttpServers{{ end }}: [{
+  deprecatedAdminHttpServers: [{
     listenAddresses: [':7982'],
     {{ include "buildbarn.httpAuthenticationPolicy" (dict "root" $ "config" .Values.scheduler.adminHttpServers.authenticationPolicy "path" "scheduler.adminHttpServers.authenticationPolicy" "compact" true) | indent 4 | trim }}
   }],
@@ -61,7 +61,7 @@ local podHost = if std.length(std.findSubstr(':', podIP)) > 0 then '[' + podIP +
   },
   {{- end }}
   {{- if not (or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled) }}
-  browserUrl: common.browserUrl,
+  deprecatedPortalUrl: common.portalUrl,
   {{- end }}
   {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}legacyContentAddressableStorage{{ else }}contentAddressableStorage{{ end }}: common.blobstore.contentAddressableStorage,
   {{- if .Values.scheduler.sizeClassAnalysis.enabled }}

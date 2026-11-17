@@ -6,3 +6,4 @@
 charts/
 tmp/
 docs/
+tests/testdata/

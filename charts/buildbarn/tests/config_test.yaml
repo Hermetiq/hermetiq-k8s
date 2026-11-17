@@ -104,7 +104,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: 'writeConcurrencyLimit: 64,\n          \},\n          spareBlocks:'
+          pattern: 'writeConcurrencyLimit: 64,\n            \},\n            spareBlocks:'
 
   - it: legacy blockDevice.writeConcurrencyLimit alias renders inside source
     set:
@@ -117,7 +117,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: 'writeConcurrencyLimit: 32,\n          \},'
+          pattern: 'writeConcurrencyLimit: 32,\n            \},'
 
   - it: sizeClassAnalysis wires the feedback-driven analyzer + ISCC backend
     set:
@@ -141,7 +141,13 @@ tests:
     asserts:
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "scheduler-routing|configurationReloadInterval|predeclaredPlatformQueues|handoverGrpcServers|coordinator:|deprecatedAdminHttpServers|legacyContentAddressableStorage"
+          pattern: "scheduler-routing|configurationReloadInterval|predeclaredPlatformQueues|handoverGrpcServers|coordinator:|legacyContentAddressableStorage|adminHttpServers:|browserUrl:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "deprecatedAdminHttpServers:"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "deprecatedPortalUrl: common.portalUrl,"
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "actionRouter:"
@@ -281,7 +287,7 @@ tests:
           pattern: "existenceCaching"
       - matchRegex:
           path: data["frontend.jsonnet"]
-          pattern: "backend: common.blobstore.contentAddressableStorage"
+          pattern: "contentAddressableStorage: common.blobstore.contentAddressableStorage"
 
   - it: never omits minimumTimestamp, whatever the value
     # Regression: omitting the field made bb-storage fail startup with
@@ -449,10 +455,60 @@ tests:
     asserts:
       - isNotNull:
           path: data["common.libsonnet"]
+      - equal:
+          path: data["workerImage"]
+          value: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+      - equal:
+          path: data["runnerInstallerImage"]
+          value: ghcr.io/buildbarn/bb-runner-installer:20261113T075319Z-f22e022
       - notExists:
           path: data["worker-common.libsonnet"]
       - notExists:
           path: data["worker-ubuntu22-04.jsonnet"]
+
+  - it: renders FastCDC chunkStorage, chunkMappingStorage, and nested keyLocationMap across configs
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "chunkStorage: shardedStorage,"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "chunkMappingValidating:"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "cdcParameterCache:"
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "portalUrl: 'https://browser.helm.hermetiq.dev',"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "contentAddressableStorageServer:"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "chunkingParameters:"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "path: '/storage-cas/cms-blocks.db'"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "dataIntegrityValidationCache|keyLocationMapInMemory|keyLocationMapOnBlockDevice"
+      - matchRegex:
+          path: data["browser.jsonnet"]
+          pattern: "address: 'frontend-internal:8980'"
+
+  - it: wraps common.libsonnet CAS stores in deadlineEnforcing when timeout is set
+    set:
+      config.blobstore.deadlineEnforcing.timeout: 30s
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'deadlineEnforcing: \{\n          timeout: "30s",\n          backend: shardedStorage,'
 
   - it: keeps a named mode over the grpcMtls default, for a staged rollout
     documentSelector:

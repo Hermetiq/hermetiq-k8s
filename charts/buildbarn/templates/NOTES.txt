@@ -44,3 +44,12 @@ longer derived from storage.replicas — keep the override's shard list in
 lockstep with storage.replicas, or added/removed storage pods silently
 receive no traffic.
 {{- end }}
+{{- if .Values.storage.dataIntegrityValidationCache.enabled }}
+
+DEPRECATION NOTE: storage.dataIntegrityValidationCache was removed from
+local.BlobAccessConfiguration in CDC bb-storage (integrity validation now runs
+per FastCDC chunk and via chunkMappingValidating) and is ignored by chart
+templates. Remove storage.dataIntegrityValidationCache (and
+frontend.readCache.dataIntegrityValidationCache) from your values file when
+convenient.
+{{- end }}

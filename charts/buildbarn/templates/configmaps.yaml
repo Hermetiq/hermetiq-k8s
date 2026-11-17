@@ -53,6 +53,8 @@ data:
 {{- else }}
 {{ tpl (.Files.Get "files/config/common.libsonnet") . | nindent 4 }}
 {{- end }}
+  workerImage: {{ include "buildbarn.image" (dict "root" . "name" "images.worker" "repository" .Values.images.worker.repository "tag" .Values.images.worker.tag "digest" .Values.images.worker.digest) | quote }}
+  runnerInstallerImage: {{ include "buildbarn.image" (dict "root" . "name" "images.runnerInstaller" "repository" .Values.images.runnerInstaller.repository "tag" .Values.images.runnerInstaller.tag "digest" .Values.images.runnerInstaller.digest) | quote }}
 {{- if and .Values.browser.oauth2Proxy.enabled (not .Values.browser.oauth2Proxy.existingConfigMap) }}
 ---
 apiVersion: v1

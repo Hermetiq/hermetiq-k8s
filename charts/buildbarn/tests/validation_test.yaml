@@ -507,6 +507,110 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  - it: rejects configOverrides containing removed pre-CDC fields
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorageServer: {
+              contentAddressableStorage: {
+                chunkStorage: {
+                  'local': {
+                    blocksOnBlockDevice: {
+                      dataIntegrityValidationCache: { cacheSize: 1000 },
+                    },
+                  },
+                },
+              },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "dataIntegrityValidationCache"'
+
+  - it: rejects configOverrides with pre-CDC top-level contentAddressableStorage in storage.jsonnet
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorage: {
+              backend: {},
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] uses pre-CDC top-level field "contentAddressableStorage"'
+
+  - it: rejects configOverrides with pre-CDC single-store contentAddressableStorage in common.libsonnet
+    set:
+      configOverrides:
+        common.libsonnet: |
+          {
+            blobstore: {
+              contentAddressableStorage: {
+                sharding: {},
+              },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["common\.libsonnet"\] defines a pre-CDC single-store "contentAddressableStorage" without "chunkStorage"'
+
+  - it: rejects live RbeWorker CR with pre-CDC field in spec.config.files
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-legacy
+              spec:
+                config:
+                  files:
+                    worker.jsonnet: "browserUrl: 'https://browser.example.com',"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/worker-legacy spec\.config\.files\["worker\.jsonnet"\] contains pre-CDC field "browserUrl"'
+
+  - it: rejects live RbeWorker CR pinning a pre-CDC bb-worker image
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-old-img
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/worker-old-img pins pre-CDC image .* in spec\.images\.worker'
+
+  - it: rejects live pre-CDC bb-worker-operator Deployment
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.1.0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bb-worker-operator .* predates the CDC-compatible bb-worker-operator release'
+
+  - it: rejects live pre-0a bep-nats Deployment but allows absent or CDC-ready bep-nats
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-pub
+                labels:
+                  helm.sh/chart: hermetiq-0.8.0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bep-nats-pub .* predates the Phase 0a dual-descriptor bep-nats release'
+
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
   # template runs, so they cannot be asserted with failedTemplate — helm reports

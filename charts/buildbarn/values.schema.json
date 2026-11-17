@@ -14,7 +14,46 @@
     "standardLabels": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "configOverrides": { "type": "object" },
-    "config": { "type": "object" },
+    "config": {
+      "type": "object",
+      "properties": {
+        "blobstore": {
+          "type": "object",
+          "properties": {
+            "deadlineEnforcing": {
+              "type": "object",
+              "properties": {
+                "timeout": {
+                  "type": "string",
+                  "pattern": "^([0-9]+(\\.[0-9]+)?s)?$"
+                }
+              }
+            }
+          }
+        },
+        "contentAddressableStorage": {
+          "type": "object",
+          "properties": {
+            "maximumChunkCount": { "type": "integer", "minimum": 1 },
+            "chunkingParameters": {
+              "type": "object",
+              "properties": {
+                "minChunkSizeBytes": { "type": "integer", "minimum": 64 },
+                "horizonSizeBytes": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "cdcParameterCache": {
+              "type": "object",
+              "properties": {
+                "cacheSize": { "type": "integer", "minimum": 1 },
+                "cacheDuration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?s)$" },
+                "cacheReplacementPolicy": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
     "images": { "type": "object" },
     "secrets": { "type": "object" },
     "hosts": { "type": "object" },
@@ -77,6 +116,29 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "cms": {
+              "type": "object",
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "enum": ["sharedCas", "filesystem", "blockDevice"]
+                }
+              }
+            }
+          }
+        },
+        "dataIntegrityValidationCache": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "cacheSize": { "type": "integer", "minimum": 0 },
+            "cacheDuration": { "type": "string" },
+            "cacheReplacementPolicy": { "type": "string" }
           }
         },
         "grpcServers": {

@@ -17,7 +17,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/buildbarn/bb-scheduler:20260908T142432Z-77f7642
+          value: ghcr.io/buildbarn/bb-scheduler:20261113T075319Z-f22e022
       - lengthEqual:
           path: spec.template.spec.containers
           count: 1

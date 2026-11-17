@@ -7,11 +7,13 @@ icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.9
-appVersion: "20260908T142448Z"
+appVersion: "20261112T085002Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Update Buildbarn images and Jsonnet configurations to the FastCDC chunked CAS storage model (chunkStorage, chunkMappingStorage, nested keyLocationMap, bb-portal top-level database and authorizers, and workerImage/runnerInstallerImage defaults in buildbarn-worker-config)"
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
     - kind: fixed
