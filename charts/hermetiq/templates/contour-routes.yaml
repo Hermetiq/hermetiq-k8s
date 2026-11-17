@@ -236,7 +236,7 @@ spec:
   routes:
     - conditions:
         - prefix: {{ .Values.gateway.routes.apiWebPathPrefix }}
-      {{- with .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      {{- with (include "hermetiq-core.apiWebRemoveRequestHeaders" . | fromJsonArray) }}
       {{- /* Callers must not supply the identity headers the core reads. */}}
       requestHeadersPolicy:
         remove:

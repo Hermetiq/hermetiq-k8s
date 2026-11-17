@@ -7,6 +7,11 @@
 # grants, so this mode serves plain HTTP metrics. Restrict access to them with
 # a NetworkPolicy or your monitoring setup.
 #
+# Before applying these values to an existing installation, check all
+# RbeWorker namespaces. Namespace mode stops reconciling pools outside the
+# release namespace. Keep the existing cluster mode until those pools have
+# their own operator or have been migrated (see the README RBAC Scope section).
+#
 # To manage pools in several namespaces, set rbac.mode=cluster and
 # metrics.secure=true instead. That gives the operator ServiceAccount
 # create/update/delete on Deployments, ConfigMaps and KEDA ScaledObjects in

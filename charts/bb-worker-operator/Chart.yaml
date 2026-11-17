@@ -28,11 +28,9 @@ annotations:
     - kind: changed
       description: "The repository's starter values now install the operator namespace-scoped (rbac.mode=namespace, metrics.secure=false), matching the installation guide. The chart default stays rbac.mode=cluster"
     - kind: security
-      description: "Document that the RbeWorker editor and admin roles are equivalent to privileged pod create with any ServiceAccount in their namespace, and that cluster mode gives the operator ServiceAccount Deployment create in every namespace"
+      description: "Document that RbeWorker editor and admin roles control privileged worker pods subject to specPolicy, and that cluster mode grants the operator ServiceAccount Deployment create in every namespace"
     - kind: added
       description: "Install notes warn when the operator runs with a cluster-wide manager binding"
-    - kind: added
-      description: "specPolicy values (allowedPodServiceAccounts, allowPrivilegedExtraContainers, allowedHostPathPrefixes, allowedClusterTriggerAuthentications) configure the operator's RbeWorker spec policy, and the manager gets POD_SERVICE_ACCOUNT from the chart's ServiceAccount. Pools with hostPath CAS or worker volumes must set specPolicy.allowedHostPathPrefixes before moving to an operator image that enforces the policy"
 keywords:
   - buildbarn
   - bazel

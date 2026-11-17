@@ -32,8 +32,8 @@ grafana:
       check_for_updates: false
       reporting_enabled: false
     auth:
-      # Login form stays enabled as a fallback / debug path. With auth.proxy
-      # enabled, authenticated requests bypass it.
+      # SSO uses auth.proxy; manage local accounts through the HTTP API
+      # over kubectl port-forward while the login form is disabled.
       disable_login_form: true
       disable_signout_menu: true
       signout_redirect_url: https://grafana.helm.hermetiq.dev/login
@@ -52,12 +52,6 @@ grafana:
       # Pass email and groups through as additional Grafana fields.
       headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
       auto_sign_up: true
-      # New SSO users start as Viewers. Grafana OSS cannot map IdP groups to
-      # org roles under auth.proxy, so promote editors and admins with the
-      # grafana-admin credentials (the login form is disabled; use Grafana's
-      # HTTP API over kubectl port-forward). Set Admin here only if every SSO
-      # user should administer Grafana.
-      auto_assign_org_role: Viewer
       # Mint a Grafana session cookie on first authenticated request so the
       # frontend's /api/user/auth-tokens/rotate calls succeed instead of
       # 401-looping. With this false, Grafana re-authenticates every request
@@ -84,6 +78,11 @@ grafana:
     users:
       allow_sign_up: true
       auto_assign_org: true
+      # New SSO users start as Viewers. Grafana OSS cannot map IdP groups to
+      # org roles under auth.proxy, so promote editors and admins with the
+      # grafana-admin credentials (the login form is disabled; use Grafana's
+      # HTTP API over kubectl port-forward). Set Admin here only if every SSO
+      # user should administer Grafana.
       auto_assign_org_role: Viewer
   resources:
     limits:

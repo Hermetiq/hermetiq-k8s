@@ -184,6 +184,12 @@ and [operator RBAC settings](charts/bb-worker-operator/README.md#rbac-scope).
 For a namespace-scoped operator installation, a cluster administrator must
 install its CRD separately.
 
+When upgrading an existing cluster-scoped operator with these starter values,
+check for worker pools outside the release namespace first: namespace mode
+stops reconciling those pools. Keep `rbac.mode=cluster` if they must remain
+managed, and review the [operator migration notes](charts/bb-worker-operator/README.md#rbac-scope)
+before changing scope.
+
 Verify the basics before starting:
 
 ```bash

@@ -28,8 +28,6 @@ supported full-stack deployment order.
   - [Keeping the previous behavior](#keeping-the-previous-behavior)
 - [RBAC Scope](#rbac-scope)
   - [RbeWorker roles](#rbeworker-roles)
-- [RbeWorker spec policy](#rbeworker-spec-policy)
-  - [Upgrading to an operator that enforces the policy](#upgrading-to-an-operator-that-enforces-the-policy)
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
 - [License](#license)
@@ -704,7 +702,11 @@ The chart passes these settings to the manager as environment variables
 `ALLOWED_HOST_PATH_PREFIXES`, `ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS`) rather
 than flags, and sets `POD_SERVICE_ACCOUNT` so the operator knows its own
 ServiceAccount. Operator images older than v0.3.13 ignore the variables, so
-the values are safe to set before the image changes.
+the values are safe to set before the image changes. Empty lists and `false`
+are sent explicitly, so clearing an allowlist also clears the operator's
+policy. Do not run the operator as the `default` ServiceAccount in a namespace
+that holds `RbeWorker`s: those pools use `default` unless they name another
+ServiceAccount, and the policy would reject them.
 
 ### Keeping the previous behavior
 
@@ -784,8 +786,20 @@ empty. The operator watches one namespace or all namespaces, not an arbitrary
 list of namespaces. Each `RbeWorker` must still share a namespace with the
 Buildbarn installation it uses.
 
+When updating an existing installation with the starter values, check the
+namespaces of all its `RbeWorker` objects first (`kubectl get rbeworkers -A`).
+Switching to namespace mode stops reconciling every pool outside the release
+namespace, including updates and deletions. Keep `rbac.mode=cluster` and
+`metrics.secure=true` in your values until those pools have their own operator
+or have been migrated. The spec-policy preflight checks only the new watched
+scope; it does not detect pools abandoned by this scope change.
+
 Switching an existing release to namespace mode removes its old ClusterRoles
 and ClusterRoleBindings, so that upgrade requires permission to delete them.
+Recreate any externally managed RoleBindings for the RbeWorker
+admin/editor/viewer roles with references to the new namespaced Roles; their
+`roleRef` cannot be patched. Existing bindings that still reference the removed
+ClusterRoles no longer grant access.
 The `RbeWorker` CRD also needs cluster-level installation; a platform team can
 install it separately before a namespace-scoped chart install.
 
@@ -799,97 +813,21 @@ editor, and viewer roles, such as `bb-worker-operator-rbeworker-editor`, for
 people and CI.
 They are ClusterRoles in cluster mode and Roles in namespace mode.
 
-Binding the editor or admin role in a namespace is equivalent to granting pod
-create there. The operator copies `spec.pod` into the worker Deployment it
-creates, including `serviceAccountName`, `automountServiceAccountToken`, the
-Pod security context, and extra containers and volumes. A holder can therefore
-run privileged Pods under any ServiceAccount in that namespace and mount its
-Secrets and ConfigMaps. When the operator runs in that namespace in cluster
-mode, this includes the operator's own ServiceAccount, and with it
-Deployment create in every namespace. Bind these roles only to subjects you
-would also allow to create privileged Pods in that namespace, and prefer
-namespace mode when the operator shares a namespace with delegated `RbeWorker`
-authors. The viewer role is read-only. Set `rbac.rbeWorkerRoles.create=false`
-if you do not delegate `RbeWorker` management.
+Binding the editor or admin role lets a subject control worker Pod commands,
+containers and volumes in that namespace, subject to the
+[RbeWorker Spec Policy](#rbeworker-spec-policy). Operator v0.3.13 and newer
+refuse the operator's own ServiceAccount; other non-`default` ServiceAccounts,
+mounted ServiceAccount tokens, privileged extra containers and most `hostPath`
+volumes need explicit allowlist entries.
 
-An operator image that enforces the
-[RbeWorker spec policy](#rbeworker-spec-policy) narrows this: by default it
-refuses the operator's own ServiceAccount, other non-`default`
-ServiceAccounts, mounted ServiceAccount tokens, privileged extra containers,
-and `hostPath` volumes. Privileged worker and runner containers stay allowed,
-so the editor and admin roles still amount to privileged pod create. Use Pod
-Security admission in the namespace to limit that further.
-
-## RbeWorker spec policy
-
-The operator writes worker Deployments and KEDA `ScaledObject`s with its own
-credentials, so it limits what an `RbeWorker` spec may ask for. A spec outside
-these limits gets `Ready=False` with reason `SpecInvalid`. The operator then
-leaves that pool's existing Deployment and `ScaledObject` as they are: they
-keep running but stop receiving updates until the spec or the policy changes.
-
-The defaults keep the operator samples working. Privileged worker and runner
-containers, FUSE at `/dev/fuse`, and the operator's own volume-init,
-fuse-cleanup and Docker-in-Docker containers are always allowed. Everything
-below is refused unless allowed through `specPolicy`:
-
-| Value | Environment variable | Default | Allows |
-| --- | --- | --- | --- |
-| `specPolicy.allowedPodServiceAccounts` | `ALLOWED_POD_SERVICE_ACCOUNTS` | `[]` | `spec.pod.serviceAccountName` values besides `default`. `automountServiceAccountToken: true`, or a projected `serviceAccountToken` volume, also needs the pod's ServiceAccount, including `default`, in this list. `"*"` allows any. |
-| `specPolicy.allowPrivilegedExtraContainers` | `ALLOW_PRIVILEGED_EXTRA_CONTAINERS` | `false` | `privileged: true` or `capabilities.add` in `spec.pod.extraContainers` and `extraInitContainers`. |
-| `specPolicy.allowedHostPathPrefixes` | `ALLOWED_HOST_PATH_PREFIXES` | `[]` | Absolute node paths for `hostPath` volumes in `spec.pod.extraVolumes`, `spec.storage.workerVolume`, `spec.storage.casVolume` and `spec.docker.dind.storageVolume`, and for a `spec.storage.fuse.path` other than `/dev/fuse`. A prefix matches itself and paths below it. |
-| `specPolicy.allowedClusterTriggerAuthentications` | `ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS` | `[]` | KEDA `ClusterTriggerAuthentication` names that autoscaling trigger `authenticationRef`s may reference. Namespaced `TriggerAuthentication`s are always allowed. `"*"` allows any. |
-
-Lists render as comma-separated values and are left unset when empty; the
-boolean is left unset when `false`. The chart also sets `POD_SERVICE_ACCOUNT`
-to its ServiceAccount name (see `serviceAccount.name`). No `RbeWorker` in the
-operator's namespace may run as that ServiceAccount, whatever
-`allowedPodServiceAccounts` says. Do not run the operator as the `default`
-ServiceAccount of a namespace that holds `RbeWorker`s, because pools there use
-`default` unless they name another ServiceAccount.
-
-For example, to allow a node-SSD CAS and one worker ServiceAccount that needs
-its token:
-
-```yaml
-specPolicy:
-  allowedHostPathPrefixes:
-    - /mnt/stateful_partition/kube-ephemeral-ssd
-  allowedPodServiceAccounts:
-    - rbe-worker
-```
-
-Images that predate the policy ignore these variables, so setting them early
-is safe.
-
-### Upgrading to an operator that enforces the policy
-
-Check every `RbeWorker` against the table above before moving to an operator
-image that enforces the policy. In particular, installs whose pools keep the
-worker directory or local CAS on a node disk through a `hostPath`
-`spec.storage.workerVolume`, `spec.storage.casVolume` or
-`spec.docker.dind.storageVolume`, for example under
-`/mnt/stateful_partition/kube-ephemeral-ssd`, must set
-`specPolicy.allowedHostPathPrefixes` first. Upgrade the chart with the new
-values while still on the old image, or in the same release as the image
-change. Otherwise those pools go `SpecInvalid` and stop updating.
-
-To list pools that use `hostPath` volumes or a non-default ServiceAccount:
-
-```bash
-kubectl get rbeworkers -A -o json | jq -r '.items[]
-  | select(([.. | objects | has("hostPath")] | any)
-      or ((.spec.pod.serviceAccountName // "default") != "default"))
-  | "\(.metadata.namespace)/\(.metadata.name)"'
-```
-
-After the upgrade, look for pools the policy refused:
-
-```bash
-kubectl get rbeworkers -A -o json | jq -r '.items[]
-  | select(.status.conditions[]? | .type == "Ready" and .reason == "SpecInvalid")
-  | "\(.metadata.namespace)/\(.metadata.name)"'
-```
+Privileged worker and runner containers and namespaced Secret/ConfigMap
+mounts remain allowed. Bind these roles only to subjects you would also trust
+to create privileged Pods in that namespace, and use Pod Security admission
+to limit those privileges. The viewer role is read-only. Set
+`rbac.rbeWorkerRoles.create=false` if you do not delegate `RbeWorker`
+management. Older operator images without the spec policy also allow worker
+Pods to run as the operator's ServiceAccount, so avoid delegating these roles
+when running such images.
 
 ## Observability
 

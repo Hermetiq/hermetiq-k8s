@@ -1493,22 +1493,40 @@ Execute. Bind the policy to the Bazel client:
 ```yaml
 frontend:
   jwks:
+    enabled: true
     allowedClientIds:
       - <bazel-m2m-client-id>
     # azp (Auth0, Keycloak, Entra v2), cid (Okta), appid (Entra v1) or
     # client_id (RFC 9068 access tokens)
     clientIdClaim: azp
+  actionCache:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  contentAddressableStorage:
+    putAuthorizer:
+      mode: requireCanWriteToCache
+  executeAuthorizer:
+    mode: requireCanWriteToCache
 ```
+
+Keep your `issuer`, `audience`, and JWKS configuration alongside this block.
+Client binding controls which tokens receive `canWriteToCache`; the three
+authorizers enforce it. Any authorizer left at its chart default, `allow`,
+continues to permit that operation without a matching token.
 
 The chart renders `((<claims expression>) == \`true\`) && contains(<allowedClientIds>, payload.<clientIdClaim>)`,
 whether it generated the claims expression from `issuer`/`audience` or you
 supplied `claimsValidationExpression`. bb-storage accepts a token only when the
 whole expression is exactly `true`, and the explicit comparison keeps that rule
 for a custom expression that returns some other value. A token with no such
-claim fails validation and falls through to the unauthenticated arm, so it can
-still read but not write or execute. A `clientIdClaim` that is not a plain
-identifier, such as `https://example.com/client_id`, is quoted; it must be a
+claim fails validation and falls through to the unauthenticated arm, so with
+the authorizers above it can still read but not write or execute. A
+`clientIdClaim` that is not a plain identifier, such as
+`https://example.com/client_id`, is quoted; it must be a
 top-level claim. `allowedClientIds` requires `frontend.jwks.enabled`.
+It cannot be combined with a non-empty `configOverrides["frontend.jsonnet"]`,
+which replaces the generated policy. If you maintain a raw frontend config,
+implement the binding and authorizers there and leave `allowedClientIds` empty.
 
 To bind on a scope or permission instead, write the whole expression. With
 Auth0 RBAC and "Add Permissions in the Access Token" enabled:

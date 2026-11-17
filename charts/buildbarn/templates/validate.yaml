@@ -320,6 +320,11 @@
 {{- end -}}
 {{- end -}}
 {{- $adminMode := $.Values.scheduler.adminHttpServers.authenticationPolicy.mode -}}
+{{/* Legacy --reuse-values releases can lack new keys. Missing opt-outs remain
+     false; supplied values must have the correct type even without the schema. */}}
+{{- if and (hasKey $.Values.scheduler.adminHttpServers "allowUnauthenticatedRoute") (not (kindIs "bool" $.Values.scheduler.adminHttpServers.allowUnauthenticatedRoute)) -}}
+{{- fail "scheduler.adminHttpServers.allowUnauthenticatedRoute must be a boolean, not a string or other value" -}}
+{{- end -}}
 {{- if not (has $adminMode (list "" "allow" "deny" "custom")) -}}
 {{- fail (printf "scheduler.adminHttpServers.authenticationPolicy.mode is %q; must be one of: allow, deny, custom. It is an HTTP server, and http.server.AuthenticationPolicy has no tlsClientCertificate arm — mutual TLS is not available on this port at all" $adminMode) -}}
 {{- end -}}
@@ -340,12 +345,15 @@
      literal and the claim name into a (possibly quoted) identifier, so keep
      both free of quotes, backslashes and control characters. */}}
 {{- $jwks := $.Values.frontend.jwks -}}
+{{- if and (hasKey $jwks "allowedClientIds") (not (kindIs "slice" $jwks.allowedClientIds)) -}}
+{{- fail "frontend.jwks.allowedClientIds must be a list of client ID strings (use [] to disable binding)" -}}
+{{- end -}}
 {{- if and $jwks.allowedClientIds (not $jwks.enabled) -}}
 {{- fail "frontend.jwks.allowedClientIds is set but frontend.jwks.enabled=false, so the frontend checks no JWT and binds no client. Enable frontend.jwks or clear allowedClientIds" -}}
 {{- end -}}
 {{- if $jwks.allowedClientIds -}}
-{{- if not (kindIs "slice" $jwks.allowedClientIds) -}}
-{{- fail "frontend.jwks.allowedClientIds must be a list of client ID strings" -}}
+{{- if index (default dict $.Values.configOverrides) "frontend.jsonnet" -}}
+{{- fail "frontend.jwks.allowedClientIds cannot be combined with configOverrides[\"frontend.jsonnet\"]: the override replaces the generated JWT policy, so client binding would not be applied. Remove the override, or implement the binding in it and clear allowedClientIds" -}}
 {{- end -}}
 {{- range $id := $jwks.allowedClientIds -}}
 {{- if not (and (kindIs "string" $id) $id) -}}
@@ -355,7 +363,13 @@
 {{- fail (printf "frontend.jwks.allowedClientIds entry %q contains a quote, backtick, backslash or control character" $id) -}}
 {{- end -}}
 {{- end -}}
-{{- $claim := toString $jwks.clientIdClaim -}}
+{{- if and (hasKey $jwks "clientIdClaim") (not (kindIs "string" $jwks.clientIdClaim)) -}}
+{{- fail "frontend.jwks.clientIdClaim must be a string containing a top-level claim name" -}}
+{{- end -}}
+{{- $claim := "azp" -}}
+{{- if hasKey $jwks "clientIdClaim" -}}
+{{- $claim = $jwks.clientIdClaim -}}
+{{- end -}}
 {{- if or (not $claim) (contains "\"" $claim) (contains "\\" $claim) (regexMatch "[[:cntrl:]]" $claim) -}}
 {{- fail (printf "frontend.jwks.clientIdClaim is %q; it must be a top-level claim name (for example azp, cid, appid, client_id or https://example.com/client_id) with no quote, backslash or control character" $claim) -}}
 {{- end -}}

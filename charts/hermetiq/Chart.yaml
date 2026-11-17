@@ -14,8 +14,10 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Preserve security defaults on upgrades reusing pre-hardening values, and validate custom ingress snippets only when generated header stripping would conflict"
     - kind: security
-      description: "Admit only grafana-oauth2-proxy and vmagent to the Grafana pod with a new grafana-from-oauth2-proxy NetworkPolicy, rendered with the Grafana proxy (opt out with grafana.networkPolicy.enabled=false), because Grafana's auth.proxy trusts X-Forwarded-User from any caller"
+      description: "Admit only grafana-oauth2-proxy and vmagent to the Grafana pod with a new grafana-from-oauth2-proxy NetworkPolicy, retained when the public Grafana route is disabled (opt out with grafana.networkPolicy.enabled=false), because Grafana's auth.proxy trusts X-Forwarded-User from any caller"
     - kind: security
       description: "Forward only gateway.routes.bepGrpcServices (default google.devtools.build.v1.PublishBuildEvent) on the public BEP route for every routing provider, so a gateway or ingress proxy can no longer relay internet CompletedActionLogger calls into the publisher's trustedCalCidrs exemption"
     - kind: security

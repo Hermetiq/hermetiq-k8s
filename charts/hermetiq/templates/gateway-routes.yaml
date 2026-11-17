@@ -153,7 +153,7 @@ spec:
         - path:
             type: PathPrefix
             value: {{ .Values.gateway.routes.apiWebPathPrefix | quote }}
-      {{- with .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      {{- with (include "hermetiq-core.apiWebRemoveRequestHeaders" . | fromJsonArray) }}
       {{- /* Callers must not supply the identity headers the core reads. */}}
       filters:
         - type: RequestHeaderModifier

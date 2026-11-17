@@ -167,8 +167,11 @@ spec:
 {{- end }}
 {{- /* Grafana's auth.proxy takes the login from X-Forwarded-User, so only the
      oauth2-proxy that sets it (and the metrics scraper) may reach Grafana.
-     Independent of networkPolicy.enabled: see grafana.networkPolicy. */}}
-{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled .Values.grafana.networkPolicy.enabled }}
+     Independent of networkPolicy.enabled and the public Grafana route: removing
+     the route must not expose a separately installed auth.proxy Grafana to
+     unauthenticated in-cluster callers. See grafana.networkPolicy. */}}
+{{- $grafanaPolicy := .Values.grafana.networkPolicy | default dict }}
+{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") (dig "enabled" true $grafanaPolicy) }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -179,7 +182,7 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "grafana") | nindent 4 }}
 spec:
-  {{- $selector := .Values.grafana.networkPolicy.podSelector | default (dict "matchLabels" (dict "app.kubernetes.io/name" "grafana")) }}
+  {{- $selector := get $grafanaPolicy "podSelector" | default (dict "matchLabels" (dict "app.kubernetes.io/name" "grafana")) }}
   {{- if not (or $selector.matchLabels $selector.matchExpressions) }}
   {{- fail "grafana.networkPolicy.podSelector must set matchLabels or matchExpressions: an empty selector applies the Grafana policy to every pod in the namespace" }}
   {{- end }}
@@ -191,13 +194,13 @@ spec:
     - ports:
         - protocol: TCP
           {{- /* A string names the Grafana container port. */}}
-          {{- $port := required "grafana.networkPolicy.port is required" .Values.grafana.networkPolicy.port }}
+          {{- $port := required "grafana.networkPolicy.port is required" (dig "port" 3000 $grafanaPolicy) }}
           port: {{ kindIs "string" $port | ternary (quote $port) (int $port) }}
       from:
         - podSelector:
             matchLabels:
               app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
-        {{- with .Values.grafana.networkPolicy.scrapersFrom }}
+        {{- with (dig "scrapersFrom" (list (dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" "vmagent")))) $grafanaPolicy) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
 {{- end }}

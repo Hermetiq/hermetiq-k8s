@@ -166,7 +166,10 @@ imagePullSecrets:
      list would render a route with no matches, which matches every method,
      so it fails instead. */}}
 {{- define "hermetiq-core.bepGrpcServices" -}}
-{{- $services := .Values.gateway.routes.bepGrpcServices -}}
+{{- $services := list "google.devtools.build.v1.PublishBuildEvent" -}}
+{{- if hasKey .Values.gateway.routes "bepGrpcServices" -}}
+{{- $services = .Values.gateway.routes.bepGrpcServices -}}
+{{- end -}}
 {{- if not $services -}}
 {{- fail "gateway.routes.bepGrpcServices must list at least one gRPC service (default: google.devtools.build.v1.PublishBuildEvent)" -}}
 {{- end -}}
@@ -176,6 +179,16 @@ imagePullSecrets:
 {{- end -}}
 {{- end -}}
 {{- toJson $services -}}
+{{- end -}}
+
+{{/* Keep the secure defaults on --reuse-values upgrades from charts that
+     predate these settings. An explicitly empty header list still opts out. */}}
+{{- define "hermetiq-core.apiWebRemoveRequestHeaders" -}}
+{{- $headers := list "X-Forwarded-User" "X-Forwarded-Email" "X-Forwarded-Groups" "X-Forwarded-Preferred-Username" "X-Hermetiq-Project-Id" -}}
+{{- if hasKey .Values.gateway.routes "apiWebRemoveRequestHeaders" -}}
+{{- $headers = .Values.gateway.routes.apiWebRemoveRequestHeaders -}}
+{{- end -}}
+{{- toJson $headers -}}
 {{- end -}}
 
 {{- define "hermetiq-core.dashboardRemoteCacheUrl" -}}

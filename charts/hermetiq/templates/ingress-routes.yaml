@@ -156,11 +156,12 @@ metadata:
     {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}
     {{- end }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
-    {{- if and .Values.ingress.apiWeb.stripIdentityHeaders .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+    {{- $removeHeaders := include "hermetiq-core.apiWebRemoveRequestHeaders" . | fromJsonArray }}
+    {{- if and .Values.ingress.apiWeb.stripIdentityHeaders $removeHeaders }}
     {{- /* Opt-in: ingress-nginx rejects snippet annotations unless the
          controller allows them. Empty proxy_set_header drops the header. */}}
     nginx.ingress.kubernetes.io/configuration-snippet: |
-      {{- range .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      {{- range $removeHeaders }}
       proxy_set_header {{ . }} "";
       {{- end }}
     {{- end }}

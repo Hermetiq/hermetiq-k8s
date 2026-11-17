@@ -211,6 +211,29 @@ expect_render_failure "a binding without jwks is refused" "frontend.jwks.enabled
   --set-json 'frontend.jwks.allowedClientIds=["a"]'
 expect_render_failure "client IDs cannot break out of the JSON literal" "frontend.jwks.allowedClientIds entry" \
   --set frontend.jwks.enabled=true --set-json 'frontend.jwks.allowedClientIds=["a`b"]'
+expect_render_failure "frontend override cannot silently discard client binding" "frontend.jwks.allowedClientIds cannot be combined" \
+  --set frontend.jwks.enabled=true --set-json 'frontend.jwks.allowedClientIds=["a"]' \
+  --set-file 'configOverrides.frontend\.jsonnet'="${chart}/files/config/frontend.jsonnet"
+
+# Helm values supplied by external templating systems can turn booleans into
+# strings. A string "false" is truthy in a Go template and used to acknowledge
+# public unauthenticated admin access. Check both schema and template guards.
+for validation in schema template; do
+  validation_args=(--skip-schema-validation=false)
+  [[ "${validation}" == template ]] && validation_args=(--skip-schema-validation)
+  expect_render_failure "${validation}: string false cannot authorize public admin access" \
+    "allowUnauthenticatedRoute" "${validation_args[@]}" \
+    --set routing.provider=gateway --set gateway.httpRoutes.rbeWeb.enabled=true \
+    --set-string scheduler.adminHttpServers.allowUnauthenticatedRoute=false
+  for ids in false 0 '""' '{}'; do
+    expect_render_failure "${validation}: invalid client ID list ${ids} cannot disable binding" \
+      "allowedClientIds" "${validation_args[@]}" \
+      --set frontend.jwks.enabled=true --set-json "frontend.jwks.allowedClientIds=${ids}"
+  done
+  expect_render_failure "${validation}: claim name must be a string" "clientIdClaim" \
+    "${validation_args[@]}" --set frontend.jwks.enabled=true \
+    --set-json 'frontend.jwks.allowedClientIds=["a"]' --set frontend.jwks.clientIdClaim=123
+done
 # Some helm versions reject the control character while parsing the values
 # ("yaml: control characters are not allowed") before validate.yaml runs;
 # either rejection keeps it out of the rendered config.

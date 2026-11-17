@@ -365,9 +365,10 @@ hosts:
 #         header_property: username
 #         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
 #         auto_sign_up: true
-#         auto_assign_org_role: Viewer
 #         enable_login_token: true
 #         whitelist: "<pod CIDR>"
+#       users:
+#         auto_assign_org_role: Viewer
 #
 # Grafana then believes X-Forwarded-User from any peer that can reach it, so
 # the proxy must be its only client: grafana.networkPolicy (below) admits only
@@ -378,11 +379,13 @@ hosts:
 grafana:
   # NetworkPolicy selecting the Grafana pod (installed by another chart in
   # this namespace) that admits only grafana-oauth2-proxy and scrapersFrom.
-  # Rendered whenever the Grafana oauth2-proxy is, independent of
-  # networkPolicy.enabled, because Grafana's auth.proxy trusts any caller's
+  # Rendered while grafana.oauth2Proxy.enabled=true, even if the public
+  # Grafana route is disabled, and independent of networkPolicy.enabled,
+  # because Grafana's auth.proxy trusts any caller's
   # X-Forwarded-User. Set enabled=false only if something else restricts
   # who can reach Grafana; any other in-cluster Grafana client must be added
-  # to scrapersFrom.
+  # to scrapersFrom. Disabling grafana.oauth2Proxy.enabled also omits this
+  # policy for deployments that use Grafana's own authentication instead.
   networkPolicy:
     enabled: true
     # Selector for the Grafana pods. null selects app.kubernetes.io/name:

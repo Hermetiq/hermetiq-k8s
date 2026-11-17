@@ -30,7 +30,7 @@ local common = import 'common.libsonnet';
                 {{- if $clientIds -}}
                 {{- /* bb-storage accepts only a literal true, while `&&` returns its
                      right operand when the left is truthy, so compare explicitly. */ -}}
-                {{- $claim := .Values.frontend.jwks.clientIdClaim -}}
+                {{- $claim := default "azp" .Values.frontend.jwks.clientIdClaim -}}
                 {{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $claim) -}}
                 {{- $claim = printf "\"%s\"" $claim -}}
                 {{- end -}}

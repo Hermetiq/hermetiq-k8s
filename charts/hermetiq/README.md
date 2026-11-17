@@ -433,6 +433,11 @@ Gateway that should accept the chart's routes.
 
 ### What the public routes forward
 
+Upgrades using `--reuse-values` get the new BEP service and identity-header
+restrictions even when those keys are absent from the previous release's
+values. Explicit service lists and empty header-removal lists keep their
+configured meaning.
+
 The public BEP route forwards only the gRPC services in
 `gateway.routes.bepGrpcServices`, by default Bazel's Build Event Service
 (`google.devtools.build.v1.PublishBuildEvent`). It is a method match on the
@@ -455,7 +460,9 @@ controller sets `allow-snippet-annotations: "true"` and
 `ingress.apiWeb.stripIdentityHeaders=true`. Otherwise clear these headers in
 the controller's `proxy-set-headers` ConfigMap or in a proxy in front of it. Set
 the list to `[]` only when a trusted proxy in front of the route sets these
-headers.
+headers. If `ingress.apiWeb.annotations` or `commonAnnotations` already supplies
+a `configuration-snippet`, combine the header-removal directives into that
+snippet and leave `stripIdentityHeaders=false` to avoid duplicate annotations.
 
 > ⚠ Header removal is defence in depth. Authentication of the on-prem REST API
 > (`/api/v1` on `api-web`) depends on bep-nats itself rejecting unauthenticated
@@ -713,7 +720,11 @@ grafana:
 Grafana then logs in whatever user `X-Forwarded-User` names, for any caller in
 `whitelist` (an empty whitelist means any caller). The pod CIDR also holds other
 pods, including RBE runners, so the chart renders a
-`grafana-from-oauth2-proxy` NetworkPolicy alongside the proxy. It selects the
+`grafana-from-oauth2-proxy` NetworkPolicy while
+`grafana.oauth2Proxy.enabled=true`, including upgrades that reuse older values
+without a `grafana.networkPolicy` block. Disabling only the public Grafana route
+keeps this policy: Grafana is installed separately and still trusts proxy
+headers after the route and proxy are removed. It selects the
 Grafana pods (`grafana.networkPolicy.podSelector`, default
 `app.kubernetes.io/name: grafana`; a selector you set replaces the default) and
 admits only `grafana-oauth2-proxy` and
@@ -724,7 +735,9 @@ Add any other in-cluster Grafana client to `scrapersFrom`. For a scraper in
 another namespace, put its `namespaceSelector` and `podSelector` in the same
 entry: a `namespaceSelector` on its own admits every pod in that namespace.
 Set `grafana.networkPolicy.enabled=false` only if something else restricts who
-can reach Grafana.
+can reach Grafana. Turning off `grafana.oauth2Proxy.enabled` omits the policy
+and routes directly to Grafana; configure Grafana's own authentication before
+switching to that mode.
 
 New SSO users start as Viewers: Grafana OSS cannot map IdP groups to org roles
 under `auth.proxy`. Promote editors and admins with the Grafana admin

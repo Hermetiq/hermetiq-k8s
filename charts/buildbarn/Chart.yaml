@@ -18,6 +18,8 @@ annotations:
       description: "Starter values enable the storage and scheduler NetworkPolicies, and the chart README documents security.grpcMtls as the step that also keeps build actions in worker pods off :8981 and :8983; the chart defaults stay off"
     - kind: added
       description: "frontend.jwks.allowedClientIds and clientIdClaim bind frontend JWTs to named clients, ANDed onto the claims expression; the starter values bind to the Bazel machine-to-machine client"
+    - kind: fixed
+      description: "Reject mistyped scheduler admin opt-outs and client binding settings, and refuse frontend.jsonnet overrides that would silently discard allowedClientIds; document the write authorizers needed to enforce the binding"
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
     - kind: fixed

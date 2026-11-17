@@ -722,7 +722,10 @@ frontend:
     # execute (for example the Bazel machine-to-machine app); the chart renders
     # `((<expression above>) == \`true\`) && contains(<ids>, payload.<clientIdClaim>)`,
     # including for a custom claimsValidationExpression. Empty => no binding.
-    # Requires frontend.jwks.enabled.
+    # Requires frontend.jwks.enabled and the generated frontend.jsonnet (no
+    # non-empty configOverrides entry for that file). This controls which JWTs
+    # receive canWriteToCache; set the write/execute authorizers below to
+    # requireCanWriteToCache to enforce it. An authorizer set to allow stays open.
     allowedClientIds: []
     # Top-level claim carrying the client ID: azp (Auth0, Keycloak, Entra v2),
     # cid (Okta), appid (Entra v1) or client_id (RFC 9068). Names that are not
