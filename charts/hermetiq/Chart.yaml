@@ -21,7 +21,7 @@ annotations:
     - kind: fixed
       description: "Publisher and API authentication refresh remote JWKS on unknown signing-key IDs and periodically, allowing identity-provider key rotation without restarting pods"
     - kind: changed
-      description: "Cache analytics count every lookup in compact rollups and retain reusable action fingerprints; individual cache hits are retained only during full capture. Existing installations need a one-time backfill for retained cache history; see the chart upgrade guide"
+      description: "Cache analytics count every lookup in compact rollups and retain reusable action fingerprints; individual cache hits are retained only during full capture"
     - kind: added
       description: "Project Settings controls timed and target-specific cache capture, and individual builds can request full capture with x-hermetiq-cache-capture=full"
     - kind: added
