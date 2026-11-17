@@ -7,6 +7,7 @@ container-dependent workflows.
 
 ## Table of Contents
 
+- [Chromium (Siso)](#chromium-siso)
 - [Testcontainers](#testcontainers)
 - [Sysbox Runner Image](#sysbox-runner-image)
 - [Drake Runner Image](#drake-runner-image)
@@ -15,6 +16,16 @@ container-dependent workflows.
 - [codex](#codex)
 - [drake](#drake)
 - [envoy](#envoy)
+
+## Chromium (Siso)
+
+`chromium-siso/` builds Chromium's `chrome` target remotely on Buildbarn with
+Siso, Chromium's build tool, and reports every build to Hermetiq. It includes
+two size-class worker pools for Google's `siso-chromium` runner image, the
+Buildbarn values they need, the client configuration, and the build times to
+expect.
+
+- [chromium-siso/README.md](chromium-siso/README.md)
 
 ## Testcontainers
 

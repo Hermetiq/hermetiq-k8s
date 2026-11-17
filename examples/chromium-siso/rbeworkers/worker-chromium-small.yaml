@@ -1,0 +1,112 @@
+# Chromium (Siso) pool, size class 1. Most of the build's actions run here.
+#
+# Both Chromium pools advertise the same platform as the client's backend.star:
+# OSFamily=Linux plus Google's public siso-chromium runner image. The scheduler's
+# size-class analysis decides which actions need the large class; Siso doesn't.
+# One pod fills one 16-vCPU node: a 13-CPU runner plus a 2-CPU worker.
+apiVersion: bb.hermetiq.com/v1
+kind: RbeWorker
+metadata:
+  name: worker-chromium-small
+spec:
+  config:
+    generated:
+      commonConfigMapName: buildbarn-worker-config
+      completedActionLoggerAddress: bep-nats-pub.hermetiq.svc.cluster.local:50091
+      concurrency: 24
+      inputDownloadConcurrency: 16
+      outputUploadConcurrency: 16
+      environmentVariables: {}
+      platformProperties:
+        - name: OSFamily
+          value: Linux
+        - name: container-image
+          value: docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a
+      sizeClass: 1
+      prefetching:
+        bloomFilterBitsPerPath: 14
+        bloomFilterMaximumSizeBytes: 65536
+      virtualBuildDirectory:
+        filePoolPath: /storage-worker-cas/file_pool
+        filePoolSizeBytes: 34359738368 # 32 GiB
+        maximumFilePoolFileCount: 200000
+        maximumFilePoolSizeBytes: 25769803776 # 24 GiB
+    rolloutOnChange: true
+  images:
+    runner: gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a
+    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+    volumeInit: busybox:1.31.1-uclibc
+    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+  pod:
+    # Put these pools on 16-vCPU nodes with local SSD. Add your node pool's
+    # label here, and a toleration if the nodes are tainted (spot nodes often are).
+    nodeSelector:
+      kubernetes.io/arch: amd64
+      kubernetes.io/os: linux
+    terminationGracePeriodSeconds: 60
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 12
+    cooldownPeriodSeconds: 300
+    pollingIntervalSeconds: 30
+    fallback:
+      failureThreshold: 3
+      replicas: 1
+    prometheus:
+      serverAddress: http://vmselect-vmks.hermetiq.svc.cluster.local:8481/select/0/prometheus
+      metricName: worker_chromium_small_active_or_queued_tasks
+      sizeClass: "1"
+      threshold: "18" # below concurrency, so the pool adds pods before it is full
+    advanced:
+      horizontalPodAutoscalerConfig:
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: 0
+            selectPolicy: Max
+            policies:
+              - {type: Pods, value: 8, periodSeconds: 15}
+              - {type: Percent, value: 100, periodSeconds: 15}
+          scaleDown:
+            stabilizationWindowSeconds: 300
+            selectPolicy: Max
+            policies:
+              - {type: Percent, value: 100, periodSeconds: 60}
+  runner:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests: {cpu: 13000m, memory: 32Gi}
+      limits: {cpu: 13000m, memory: 32Gi}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: {drop: [ALL]}
+      privileged: false
+      runAsNonRoot: true
+      runAsUser: 65534
+  storage:
+    casMountPath: /storage-worker-cas
+    casVolume:
+      emptyDir: {}
+    fuse:
+      cleanupOnTermination: true
+      mountPath: /dev/fuse
+      path: /dev/fuse
+      type: CharDevice
+    workerMountPath: /worker
+    workerVolume:
+      emptyDir: {}
+  worker:
+    env:
+      - name: POD_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests: {cpu: 2000m, memory: 9Gi}
+      limits: {cpu: 2000m, memory: 9Gi}
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: true
+      runAsGroup: 0
+      runAsUser: 0

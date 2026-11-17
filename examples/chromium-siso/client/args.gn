@@ -1,0 +1,4 @@
+use_remoteexec = true
+use_siso = true
+is_debug = false
+symbol_level = 0

@@ -55,6 +55,23 @@ spec:
       ports:
         - port: 8983
           protocol: TCP
+    {{- if .Values.scheduler.handover.enabled }}
+    # Peer scheduler pods (for zero-downtime handover state transfer and
+    # LeaderGate forwarding/relaying across client, worker, state, and handover ports).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: scheduler
+      ports:
+        - port: 8982
+          protocol: TCP
+        - port: 8983
+          protocol: TCP
+        - port: 8984
+          protocol: TCP
+        - port: {{ .Values.scheduler.handover.port }}
+          protocol: TCP
+    {{- end }}
     # Admin web UI (the rbeWeb route): the ingress controller or Gateway must
     # reach it, so allow it from anywhere unless adminPeers narrows it.
     {{- if $np.adminPeers }}

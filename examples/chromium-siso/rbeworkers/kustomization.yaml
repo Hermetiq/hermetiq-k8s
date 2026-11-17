@@ -1,0 +1,10 @@
+# Chromium (Siso) worker pools: size classes 1 and 4 on one platform.
+# Add as a component to the overlay that applies your RbeWorkers, and declare
+# the platform in Buildbarn's scheduler.predeclaredPlatformQueues
+# (see ../buildbarn-values.yaml).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - worker-chromium-small.yaml
+  - worker-chromium-large.yaml

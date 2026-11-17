@@ -826,6 +826,32 @@ spec:
                               inodeAttributeValidity:
                                 default: 300s
                                 type: string
+                              linuxBackingDevInfoTunables:
+                                additionalProperties:
+                                  type: string
+                                description: |-
+                                  LinuxBackingDevInfoTunables sets files under the mount's
+                                  /sys/class/bdi/<major>:<minor>/ directory, such as max_ratio and
+                                  strict_limit, to raise the mount's share of the kernel write-back cache.
+                                  Buildbarn documents max_ratio "10" with strict_limit "0" for random
+                                  access writes on large runners. strict_limit requires Linux 6.2 or
+                                  newer, and the worker container needs write access to /sys, so enable it
+                                  only on nodes where both hold. Omitted by default.
+                                maxProperties: 16
+                                type: object
+                              maximumBackgroundTasks:
+                                description: |-
+                                  MaximumBackgroundTasks caps the asynchronous FUSE requests (mostly
+                                  page-cache readahead and writeback) the kernel keeps in flight against
+                                  the build directory mount (the FUSE max_background setting). The kernel
+                                  default is 12, and it throttles other async requests once more than
+                                  three quarters of the limit are queued, so a mount shared by many
+                                  concurrent actions stalls reads at the default. Reasonable starting points
+                                  are 128 per runner vCPU or 128 per concurrent action, whichever is larger.
+                                  Omitted by default, which leaves the bb_worker default in place.
+                                format: int32
+                                minimum: 1
+                                type: integer
                               mountMethod:
                                 default: DIRECT
                                 type: string

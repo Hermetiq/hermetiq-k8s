@@ -113,6 +113,25 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # Names the operator's own ServiceAccount, which RbeWorker pods may
+            # never use. Without it the operator reads the name from its token.
+            - name: POD_SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.serviceAccountName
+            # specPolicy goes in environment variables rather than flags because
+            # operator images older than v0.3.13 ignore unknown variables but
+            # exit on unknown flags.
+            {{- with .Values.specPolicy }}
+            - name: ALLOWED_POD_SERVICE_ACCOUNTS
+              value: {{ join "," .allowedPodServiceAccounts | quote }}
+            - name: ALLOW_PRIVILEGED_EXTRA_CONTAINERS
+              value: {{ .allowPrivilegedExtraContainers | toString | quote }}
+            - name: ALLOWED_HOST_PATH_PREFIXES
+              value: {{ join "," .allowedHostPathPrefixes | quote }}
+            - name: ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS
+              value: {{ join "," .allowedClusterTriggerAuthentications | quote }}
+            {{- end }}
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
