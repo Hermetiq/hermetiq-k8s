@@ -92,7 +92,7 @@ Helm merges custom values with those pinned defaults. A tag-only override must
 explicitly clear the matching digest, for example:
 
 ```sh
---set images.bepNats.apiTag=v0.9.7 --set-string images.bepNats.apiDigest=
+--set images.bepNats.apiTag=v0.9.8 --set-string images.bepNats.apiDigest=
 ```
 
 For the operator the corresponding values are `image.tag` and `image.digest`.

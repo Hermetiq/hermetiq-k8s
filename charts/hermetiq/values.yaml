@@ -22,36 +22,36 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.7"
-    apiDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
-    pubTag: "v0.9.7"
-    pubDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
-    subTag: "v0.9.7"
-    subDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
-    bootstrapTag: "v0.9.7"
-    bootstrapDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
+    apiTag: "v0.9.8"
+    apiDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
+    pubTag: "v0.9.8"
+    pubDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
+    subTag: "v0.9.8"
+    subDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
+    bootstrapTag: "v0.9.8"
+    bootstrapDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.7"
-    digest: "sha256:038186935cef844a5c466b4f6ae50aa78411ce7304eb164ec845ba414f2d751d"
+    tag: "v0.9.8"
+    digest: "sha256:8555a0160ab6adc41a02c029f0eca5a6c3277a7c00c167bff7f73c1459e769dc"
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.7"
-    digest: "sha256:633267f434700e1bd2f825031676cd6da708909b8485372b96f091ec5ff79b6f"
+    tag: "v0.9.8"
+    digest: "sha256:8154cc722cb7cec11b27913a49f6be660f1e9ff3aba68e93c31404fe20c4ca97"
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v0.9.7"
-    digest: "sha256:896c674e2885fce9f802cc71bec4e22cf9bf77e6773ea71cb3a5a3deba13e2c4"
+    tag: "v0.9.8"
+    digest: "sha256:edcfa745b7f551c72ad0b8d701119a168659f96e4660e2b5034e263779023a42"
     pullPolicy: IfNotPresent
   oauth2Proxy:
     # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public
     # registry so on-prem installs pull every chart image from one place and do
     # not depend on quay.io. Re-mirror with `crane copy` when bumping the tag.
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/oauth2-proxy
-    tag: v7.15.4
-    digest: "sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded"
+    tag: v7.15.6
+    digest: "sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048"
     pullPolicy: IfNotPresent
 
 bootstrap:

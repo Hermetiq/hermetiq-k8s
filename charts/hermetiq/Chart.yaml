@@ -7,7 +7,7 @@ icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.8
-appVersion: "0.9.7"
+appVersion: "0.9.8"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
@@ -15,9 +15,11 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
     - kind: changed
-      description: "Update application images to v0.9.7"
+      description: "Update application images to v0.9.8"
     - kind: security
       description: "Pin default container images by SHA-256 digest and include an image inventory in the signed chart package"
+    - kind: security
+      description: "Update the mirrored oauth2-proxy image to v7.15.6 (Go 1.26.10), fixing critical and high Go standard library, grpc and go-jose vulnerabilities in v7.15.4"
     - kind: fixed
       description: "Publisher and API authentication refresh remote JWKS on unknown signing-key IDs and periodically, allowing identity-provider key rotation without restarting pods"
     - kind: changed
