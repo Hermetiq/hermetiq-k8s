@@ -11,6 +11,7 @@ supported full-stack deployment order.
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
   - [Replacing the CRD from scratch](#replacing-the-crd-from-scratch)
+- [Upgrading to 0.3.12](#upgrading-to-0312)
 - [Upgrading to 0.3.11](#upgrading-to-0311)
 - [RbeWorker Pools](#rbeworker-pools)
   - [Configuration modes](#configuration-modes)
@@ -57,8 +58,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.11
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.11
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -67,7 +68,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.11/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -76,7 +77,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.11 \
+  --version 0.3.12 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -125,12 +126,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.11;
+file and wait for Kubernetes to establish it. This example uses release 0.3.12;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.11/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -178,18 +179,32 @@ kubectl delete crd rbeworkers.bb.hermetiq.com --wait=true --ignore-not-found
 
 # 3. Apply the CRD from the release you are installing, and wait for it.
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.11/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 
 # 4. Upgrade or restart the controller on the same release.
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.11 \
+  --version 0.3.12 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
 
 Then re-apply your `RbeWorker` manifests.
+
+## Upgrading to 0.3.12
+
+Chart 0.3.12 deploys the same operator v0.3.13 as 0.3.11 and has the same
+CRD. The default image is now pinned to its SHA-256 manifest digest, so the
+operator Deployment rolls once on upgrade. Worker pools are not restarted.
+
+`image.digest` takes precedence over `image.tag`. If you override `image.tag`,
+also set `image.digest` to that image's digest, or clear it with
+`--set-string image.digest=`. Otherwise the operator keeps running the pinned
+v0.3.13 image. See [image integrity](../../docs/image-integrity.md).
+
+When upgrading from 0.3.10 or earlier, also follow
+[Upgrading to 0.3.11](#upgrading-to-0311).
 
 ## Upgrading to 0.3.11
 
@@ -221,7 +236,7 @@ see the result without changing anything, render against the cluster first:
 
 ```bash
 helm template bb-worker-operator oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.11 --namespace hermetiq --dry-run=server \
+  --version 0.3.12 --namespace hermetiq --dry-run=server \
   --values bb-worker-operator-values.yaml > /dev/null
 ```
 
@@ -235,7 +250,7 @@ skip it.
 
 Pools that use Docker-in-Docker restart once during the upgrade, because dockerd
 now runs as a Kubernetes-native sidecar (Kubernetes 1.29 or newer). Other pools
-keep their pod template. Apply the 0.3.11 CRD first as described in
+keep their pod template. Apply the target release's CRD first as described in
 [CRD Lifecycle](#crd-lifecycle), which adds the
 [FUSE kernel tunables](#kernel-tunables).
 
@@ -758,7 +773,8 @@ network policy or monitoring setup.
 
 `watchNamespace` renders as `--watch-namespace`, so it needs an operator image
 that accepts that flag; older images exit with
-`flag provided but not defined`. Change it together with `image.tag`.
+`flag provided but not defined`. Change it together with `image.tag` and update
+or clear `image.digest`; a digest takes precedence over the tag.
 
 `rbac.managerBindingMode` is retained for existing installs in cluster mode.
 Its `namespace` option binds a **ClusterRole** within one namespace and still

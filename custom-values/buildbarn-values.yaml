@@ -66,8 +66,8 @@ images:
   # need a Buildbarn chart release.
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
-    tag: v0.9.6
-    digest: ""
+    tag: v0.9.8
+    digest: "sha256:fa7e6f9e087ad2e1ea9cfc59aee061d9b4b84a6c583230e284bf343ff1a0c6e3"
     pullPolicy: IfNotPresent
 
 frontend:

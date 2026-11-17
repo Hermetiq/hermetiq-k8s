@@ -30,8 +30,10 @@ tests:
       frontend.grpcCacheProxy.enabled: true
       frontend.grpcCacheProxy.natsUrl: nats://nats.nats-system.svc:4222
       frontend.grpcCacheProxy.cacheEvents.subjectPrefix: dev_cache
-      # Pin the tag so default image bumps don't break this test.
+      # Pin the tag so default image bumps don't break this test. A tag-only
+      # override clears the default digest, which otherwise takes precedence.
       images.grpcCacheProxy.tag: v1.2.3
+      images.grpcCacheProxy.digest: ""
     asserts:
       - equal:
           path: spec.template.spec.containers[0].name
