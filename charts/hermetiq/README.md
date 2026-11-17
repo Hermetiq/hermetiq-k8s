@@ -4,8 +4,8 @@
 to explore Hermetiq and Managed Buildbarn before setting up a Kubernetes
 deployment.
 
-This README is the operator reference packaged with the Hermetiq `0.9.8`
-chart. It covers the services needed before installing Hermetiq and the chart
+This README is the operator reference packaged with the Hermetiq chart. It
+covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for
 the full-stack deployment order and shared services used by the other charts.
@@ -53,7 +53,7 @@ Confirm the following are in place before running `helm install`:
   - A Gateway API controller with `GRPCRoute` support (Envoy Gateway recommended, or GKE Gateway), Contour `HTTPProxy`, or `ingress-nginx`.
   - A TLS Secret (`tls.secretName`, e.g. `hermetiq-wildcard-tls`) or `cert-manager` `ClusterIssuer` covering `dashboard`, `api`, `api-web`, `bep`, and `mcp` (plus `grafana` and `bbcal` when enabled).
 - [ ] **OIDC Identity Provider (Auth0, Okta, Entra ID, etc.)**:
-  - **Interactive SSO client** for Dashboard, Grafana, and Buildbarn Browser, with redirect callbacks registered and `oauth2-proxy-client` Secret created (`client-id`, `client-secret`, `cookie-secret`).
+  - **Interactive SSO client** for Dashboard, Grafana, and Buildbarn Browser, with redirect callbacks registered and `oauth2-proxy-client` Secret created (`OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET`, `OAUTH2_PROXY_COOKIE_SECRET`).
   - **BEP gRPC API / M2M client** with audience `https://bep.<hosts.domainBase>` (and Client Grant authorized) for Bazel `--bes_backend` tokens.
   - **MCP API resource** registered with exact identifier `https://mcp.<hosts.domainBase>/mcp` (and Dynamic Client Registration / third-party client grant enabled for Claude Code, Cursor, Codex, etc.; see [`docs/mcp-auth0-runbook.md`](../../docs/mcp-auth0-runbook.md)).
 - [ ] **Licensing inputs and outbound HTTPS access (or air-gapped license Secret)**:
@@ -61,9 +61,11 @@ Confirm the following are in place before running `helm install`:
   - Kubernetes API access (`serviceAccount.automountServiceAccountToken: true` and `rbac.rules.licenseState: true`) so `grpc-api` and `bep-nats-pub` can read the release Namespace UID and write the `hermetiq-license-state` Secret.
   - Outbound HTTPS (`:443`) from `grpc-api` and `bep-nats-pub` to `https://api.cloud-usc1.hermetiq.io` (trial issuance) and `https://api.keygen.sh` (validation), or a pre-created `hermetiq-license` Secret with `license.airGapped: true`.
 - [ ] **(Recommended for Production Scale) Cloud Object Storage + Workload Identity for BEP progress logs**:
-  - A GCS (`gs://`), S3 (`s3://`), or Azure Blob (`azblob://`) bucket in `app.rawBepExportBucket`, Workload Identity / IRSA bound to the `bep-nats` ServiceAccount, and a bucket lifecycle TTL rule on `<prefix>/progress/` (7–30 days).
-- [ ] **(When Co-Installing with Buildbarn)** Observability & worker CAL prerequisites:
-  - OpenTelemetry Collector reachable at `otel.endpoint` (full URL with scheme and port, e.g. `http://otel-collector.hermetiq.svc.cluster.local:4317`).
+  - A GCS bucket or Azure Blob container, selected per project in Project Settings (not by a chart value), workload identity bound to the `bep-nats` ServiceAccount, and a bucket lifecycle TTL rule on `<prefix>/progress/` (7–30 days).
+- [ ] **OpenTelemetry endpoint and VictoriaMetrics operator CRDs**:
+  - `otel.endpoint` is a required value: an OTLP receiver URL with scheme and port, e.g. `http://otel-collector.hermetiq.svc.cluster.local:4317`.
+  - The chart renders two `VMPodScrape` objects by default, so the VictoriaMetrics operator CRDs (`operator.victoriametrics.com`) must be installed, or set `victoriaMetrics.natsPodScrape.enabled: false` and `victoriaMetrics.dragonflyPodScrape.enabled: false`.
+- [ ] **(When Co-Installing with Buildbarn)** Metrics queries & worker CAL prerequisites:
   - VictoriaMetrics `vmselect` query URL set in `victoriaMetrics.baseUrl` (`/select/0/prometheus` path, **not** `vminsert`) with `victoriaMetrics.projectLabelEnabled: true` and `victoriaMetrics.projectLabel: namespace`.
   - Cluster pod CIDR configured in `publisher.trustedCalCidrs` so Buildbarn workers can stream Completed Action Logs (CAL) to `bep-nats-pub:50091`.
 
@@ -314,8 +316,7 @@ kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
 kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
 ```
 
-Check NATS, the license endpoint, the persisted license-state Secret, and that
-`pg_partman` default catch-all partitions remain empty:
+Check NATS and the persisted license-state Secret:
 
 ```bash
 kubectl -n hermetiq exec -it \
@@ -324,9 +325,22 @@ kubectl -n hermetiq exec -it \
   -- nats stream report
 
 kubectl -n hermetiq get secret hermetiq-license-state
+```
+
+Check the license endpoint. `kubectl port-forward` blocks, so run it in one
+terminal and `curl` in another:
+
+```bash
 kubectl -n hermetiq port-forward deployment/grpc-api 8008
+```
+
+```bash
 curl -fsS localhost:8008/api/v1/license/status
 ```
+
+After the first builds arrive, confirm that the `pg_partman` default catch-all
+partitions remain empty; see
+[Inspect database partitions](#inspect-database-partitions).
 
 Render-time validation is intentionally strict. If installation fails before
 creating resources, run the same values through `helm template --debug` and
@@ -389,9 +403,10 @@ outages do not interrupt requests.
 ### Paid license keys
 
 **Paid keys** go in a Secret named `hermetiq-license` under the data key
-`license.key`. The chart always mounts that Secret name as an optional volume,
-so creating the default-named Secret after install hot-loads the key with no
-values change and no rollout:
+`license.key`. Unless `license.key.existingSecret` names a different Secret,
+the chart mounts `hermetiq-license` as an optional volume, so creating the
+default-named Secret after install hot-loads the key with no values change and
+no rollout:
 
 ```sh
 kubectl -n hermetiq create secret generic hermetiq-license \
@@ -425,11 +440,14 @@ A separate namespaced grant stores license state:
 
 | Value | Grant | If disabled |
 | --- | --- | --- |
-| `rbac.rules.licenseState` | Namespaced Role writing only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). | Trials do not persist across pod restarts and the offline validation cache is lost. |
+| `rbac.rules.licenseState` | Namespaced Role that can read and update only the `hermetiq-license-state` Secret (the auto-issued trial key and the signed validation cache used for offline grace). It also grants `create` on Secrets, which Kubernetes RBAC cannot restrict by name. | Trials do not persist across pod restarts and the offline validation cache is lost. |
 
 The Namespace read and license-state Secret access are exercised in-pod, so
-installs must keep `api.automountServiceAccountToken: true` and
-`publisher.automountServiceAccountToken: true`.
+API and publisher Pods need a mounted ServiceAccount token. By default both
+inherit `serviceAccount.automountServiceAccountToken: true`; set
+`api.automountServiceAccountToken: true` and
+`publisher.automountServiceAccountToken: true` explicitly only if you turn the
+shared default off.
 
 ### Status and expiry
 
@@ -443,6 +461,11 @@ any time (works even while pods are unready):
 
 ```sh
 kubectl -n hermetiq port-forward deploy/grpc-api 8008
+```
+
+In a second terminal:
+
+```sh
 curl localhost:8008/api/v1/license/status
 ```
 
@@ -460,7 +483,7 @@ expressions in `hosts.*`.
 | `api-web.<domainBase>` | `hosts.api` | Hermetiq web/REST API |
 | `mcp.<domainBase>` | `hosts.mcp` | Hermetiq MCP server |
 | `grafana.<domainBase>` | `hosts.grafana` | Grafana behind the SSO proxy; rendered when `gateway.routes.grafanaEnabled=true` |
-| `bbcal.<domainBase>` | `hosts.bbcalGrpc` | Optional Bazel remote-cache endpoint served by the Hermetiq API; rendered when `gateway.routes.bbcalGrpcEnabled=true` |
+| `bbcal.<domainBase>` | `hosts.bbcalGrpc` | Optional Bazel remote-cache endpoint served by the publisher (`bep-nats-pub`); rendered when `gateway.routes.bbcalGrpcEnabled=true` |
 
 Register OIDC callback URLs, DNS records, and TLS certificates for these hosts
 before installing.
@@ -476,7 +499,7 @@ to `require`.
 
 ### Bootstrap job
 
-The schema bootstrap Job is a Helm hook by default. It runs on both install and upgrade so schema migrations are applied before workloads roll forward. Keep `postgres.password.existingSecret` set in hook mode, because pre-install hooks run before normal chart-managed Secrets are created. Successful hook Jobs are kept by default for log inspection and are deleted before the next install or upgrade hook creates a fresh Job. If you want the chart to create the Postgres Secret from `postgres.password.value`, set `bootstrap.hook.enabled=false`.
+The schema bootstrap Job is a Helm hook by default. It runs on both install and upgrade so schema migrations are applied before workloads roll forward. Keep `postgres.password.existingSecret` set in hook mode, because pre-install hooks run before normal chart-managed Secrets are created. Successful hook Jobs are kept by default for log inspection and are deleted before the next install or upgrade hook creates a fresh Job. If you want the chart to create the Postgres Secret from `postgres.password.value`, set `bootstrap.hook.enabled=false` and `postgres.password.existingSecret: ""` (it defaults to `postgres-db`); the chart then creates a Secret named `postgres`.
 
 ### Default project
 
@@ -518,8 +541,9 @@ Set `routing.enabled=false` or `routing.provider=none` when you want the chart t
 
 The chart does not create the Gateway itself. Create the Gateway/listener, DNS,
 and TLS infrastructure before installing this release. Set `gateway.name` and,
-when needed, `gateway.namespace` and listener `sectionName` values to the
-Gateway that should accept the chart's routes.
+when the Gateway is in another namespace, `gateway.namespace` to the Gateway
+that should accept the chart's routes. Routes attach by name and namespace
+only; there is no per-route listener (`sectionName`) setting.
 
 ### TLS certificates
 
@@ -565,11 +589,17 @@ Without the timeout policies, whatever default route timeout your controller
 applies governs long-lived gRPC streams; check that it does not truncate BES
 uploads.
 
+With `assistant.enabled: true` the chart still renders the API gRPC route's
+`BackendTrafficPolicy`, because it carries the assistant's streaming timeout.
+The CORS `SecurityPolicy` named `gateway-cors-policy` and the
+`ClientTrafficPolicy` are created in the Gateway's namespace, not the release
+namespace.
+
 When `routing.provider=gateway`, `gateway.healthChecks.enabled=true` renders Envoy Gateway `BackendTrafficPolicy` resources that health-check gRPC routes with TCP and HTTP routes with unauthenticated readiness/metadata endpoints. When `routing.provider=gateway-httproute-only`, the GKE `HealthCheckPolicy` for the mixed API Service checks `GET /ready` on container port `8008`.
 
 ### Route timeouts
 
-`gateway.timeouts` sets Envoy Gateway stream timeouts on the BEP, API, and optional bbcal gRPC routes (`routing.provider=gateway` only). It is enabled by default. Without it Envoy applies its **15s default route timeout**, which made `gateway` the only routing provider this chart supports that left these routes capped by omission — Contour already applies `contour.httpProxy.responseTimeout` and GKE applies `gateway.gke.backendPolicy.timeoutSec` (both 300s) to the same backends.
+`gateway.timeouts` sets Envoy Gateway timeouts on the BEP, API, and optional bbcal gRPC routes and on the API web and MCP HTTP routes (`routing.provider=gateway` only). It is enabled by default. Without it Envoy applies its **15s default route timeout**. The other providers already bound the same backends: Contour applies `contour.httpProxy.responseTimeout` and GKE applies `gateway.gke.backendPolicy.timeoutSec` (both 300s).
 
 The value that matters is Envoy's route-timeout semantics: it measures from **downstream end-of-stream** — the client's half-close — to the completed upstream response. So it does not cap a bidirectional stream's upload phase, but it does cap everything after the half-close, and it caps a server-streaming response in full, because those clients half-close immediately.
 
@@ -578,6 +608,10 @@ The value that matters is Envoy's route-timeout semantics: it measures from **do
 | `bepGrpc` | `requestTimeout: 0s`, `maxStreamDuration: 0s` | Bazel's BES `PublishBuildToolEventStream` is bidirectional and lives for the whole build, so the upload phase is not exposed — but the drain after Bazel half-closes is. Under the default `--bes_upload_mode=wait_for_upload_complete` Bazel blocks there waiting for the publisher to ack remaining events, and a publisher under NATS backpressure or mid-rollout can exceed 15s, surfacing as a BES upload failure at the end of an otherwise-successful build. `PublishLifecycleEvent` on the same route is unary and capped outright. Bound this with Bazel's `--bes_timeout` instead. |
 | `apiGrpc` | `requestTimeout: 300s` | Unary analytics queries from the dashboard, MCP, and CLI. 15s is a plausible p99 for a wide-time-range Build History or trends query, and an Envoy reset surfaces as a generic gRPC error rather than a query timeout. Bounded rather than disabled, and 300s matches the Contour and GKE providers. |
 | `bbcalGrpc` | `requestTimeout: 0s`, `maxStreamDuration: 0s` | Only rendered when `gateway.routes.bbcalGrpcEnabled=true`. This route is handed to users as their Bazel `--remote_cache` endpoint, so it carries server-streaming `ByteStream/Read`, client-streaming `ByteStream/Write`, and unary CAS/AC calls. `ByteStream/Read` is the worst case — the client half-closes immediately, so a 15s cap covers the entire blob download. Mirrors the buildbarn chart's frontend timeouts. |
+| `apiWeb` | `requestTimeout: 300s` | The dashboard's REST and gRPC-web traffic. The same unary analytics queries that reach `apiGrpc` arrive over this route, so it gets the same bound. |
+| `mcp` | `requestTimeout: 300s`, `maxStreamDuration: 0s` | Streamable-HTTP MCP traffic. A tool call can run a wide-time-range analytics query while the response stream stays open, so it needs the same headroom as `apiGrpc`. |
+
+Every route also sets `connectionIdleTimeout: 1h`.
 
 `"0s"` **disables** a timeout; it does not mean "immediate". An empty string omits the field entirely, leaving Envoy's own default in place — that is how `apiGrpc.maxStreamDuration` ships.
 
@@ -589,9 +623,10 @@ applies the oldest and marks the rest `Overridden=True`. Set
 leaving health checks enabled.
 
 Enabling `assistant.enabled` applies `assistant.streamTimeoutSeconds` (660 by
-default) to API gRPC streaming so a ten-minute Barn Owl turn can finish. This
-assistant setting takes precedence over the API timeout above; see
-[Barn Owl AI Assistant](#barn-owl-assistant) for the other routing providers.
+default) to API gRPC streaming so a ten-minute Barn Owl turn can finish. The
+API route then uses the larger of that value and its own `requestTimeout`, and
+disables `maxStreamDuration` when it is unset; see
+[Barn Owl AI assistant](#barn-owl-ai-assistant) for the other routing providers.
 
 ### Client connection tuning for high-RTT clients
 
@@ -785,10 +820,12 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 The chart then adds the `iam.gke.io/gcp-service-account` annotation to the
 ServiceAccount. On AKS it adds the `azure.workload.identity/use` label to the
-ServiceAccount and Pods and the `azure.workload.identity/client-id` annotation
-to the ServiceAccount.
+ServiceAccount and to the API, publisher, subscriber, bootstrap, and
+maintenance Pods (not the dashboard or Grafana proxy), and the
+`azure.workload.identity/client-id` annotation to the ServiceAccount.
 
-For AWS IRSA or another provider, use `serviceAccount.annotations`. Grant the
+For another identity provider, use `serviceAccount.annotations`. Object-storage
+features support Google Cloud Storage and Azure Blob Storage. Grant the
 resulting identity only the object-storage permissions required by enabled
 features. Progress-log object storage needs subscriber read/write access;
 trace and output-file features may need additional read access.
@@ -809,7 +846,7 @@ oidc:
 ```
 
 This feeds the core's `GRPC_AUTH_*` settings — see
-[gRPC Authentication](#grpc-authentication) for what the core now requires, and
+[gRPC authentication](#grpc-authentication) for what the core requires, and
 for the audiences and CAL CIDRs the issuer cannot supply.
 
 ### gRPC authentication
@@ -820,7 +857,8 @@ environment contract. API pods retain `grpc-auth-proxy` only for gRPC-web
 framing and CORS. The core strips caller-supplied identity headers, including
 `X-Forwarded-User`, before authenticating.
 
-The application does not read the old `JWKS_*` names and provides no aliases.
+The application reads only the `GRPC_AUTH_*` names; `JWKS_*` variables are
+not recognized.
 `GRPC_AUTH_ISSUER` and `GRPC_AUTH_AUDIENCE` are mandatory for the `jwks`
 provider, and Buildbarn CAL calls are admitted only through
 `publisher.trustedCalCidrs`.
@@ -965,7 +1003,7 @@ k8sNodeScheduling:
   tolerations: []
 ```
 
-Set `nodeSelector` or `tolerations` under an individual workload to override the top-level values. Supported workload keys include `api`, `publisher`, `subscriber`, `dashboard`, `bootstrap`, `partitionMaintenance`, `progressesPartitionMaintenance`, and `targetTrendsRefresh`.
+Set `nodeSelector` or `tolerations` under an individual workload to override the top-level values. Supported workload keys include `api`, `publisher`, `subscriber`, `dashboard`, `grafana.oauth2Proxy`, `bootstrap`, `partitionMaintenance`, `progressesPartitionMaintenance`, and `targetTrendsRefresh`.
 
 ### Pod disruption budgets and anti-affinity
 
@@ -986,12 +1024,14 @@ first-class chart values. Supported maps include `api.env`,
 `api.authProxy.env`, `publisher.env`, `publisher.authProxy.env`,
 `subscriber.env`, `dashboard.env`, `dashboard.oauth2Proxy.env`,
 `dashboard.prepareDashboardHtml.env`, `grafana.oauth2Proxy.env`,
-`bootstrap.env`, `partitionMaintenance.env`,
+`assistant.promptRuntime.env`, `bootstrap.env`, `partitionMaintenance.env`,
 `progressesPartitionMaintenance.env`, and `targetTrendsRefresh.env`.
 
 Do not set `INVOCATION_START_EVENT` in a workload map. Use
 `app.invocationStartEvent`; the chart puts it in the shared environment so the
-publisher and subscribers cannot drift into different ingest modes.
+publisher and subscribers cannot drift into different ingest modes. The chart
+does not reject a workload-level entry, and one would override the shared value
+for that workload only.
 
 Only the pass-through maps documented as templated accept Helm expressions.
 Do not use expressions in `hosts.*`, which several templates consume verbatim.
@@ -1025,10 +1065,9 @@ scheduler, pod and node snapshots and core metrics remain available without
 OpenCost or VictoriaLogs. These flags are also managed by the chart and cannot
 be overridden in `dashboard.env`.
 
-Use an updated dashboard image containing the runtime handling for these
-flags. Changing chart values with an older image does not add that behavior;
-the new on-prem assistant and editor defaults require the matching dashboard
-application release.
+The dashboard image reads these flags at runtime. An image older than the
+chart's default does not honor them, so keep `images.dashboard` on the
+application release that matches the chart.
 
 `rbac.rules.rbeFleet` grants the API Kubernetes reads for fleet ownership and
 scaler information. It does not enable the RBE page. `rbe.enabled` controls
@@ -1036,7 +1075,7 @@ page visibility and requires the project's access policy; it does not grant
 Kubernetes permissions. RBE Infrastructure can run with
 `assistant.enabled: false`; granting fleet reads alone leaves it hidden.
 
-BB Config Editor is deferred from this chart release. Its Git-backed bbconfig
+BB Config Editor is not available in this chart. Its Git-backed bbconfig
 service and isolated Jsonnet evaluator are not installed by enabling Barn Owl
 or RBE Infrastructure.
 
@@ -1128,6 +1167,11 @@ Review every rule under `rbac.rules`:
 - keep `leases` only for subscriber leader election (only needed for BEP forwarding)
 - keep `secrets` and `certManager` only for the application features that read
   those resources
+- keep `pods` (enabled by default) for the storage diagnostics' node
+  placement; it grants read-only access to Pods in the release namespace
+- enable `rbeFleet` (disabled by default) for the RBE Infrastructure page; it
+  grants read-only access to ReplicaSets, KEDA ScaledObjects, and
+  HorizontalPodAutoscalers
 
 The chart defaults to `rbac.mode=namespace` and creates only Roles and
 RoleBindings. The [Namespace fingerprint](#license-fingerprint-rbac)
@@ -1172,7 +1216,7 @@ packaged default.
 | `nats.streamConfig` | `files/config/nats_streams.json` | `/config/nats-streams/nats_streams.json` | publisher and subscribers |
 | `cacheTtl` | `files/config/cache_ttl.json` | `/config/cache-ttl/cache_ttl.json` | API |
 | `promqlQueries` | `files/config/promql.json` | `/config/promql/promql.json` | API/MCP tools |
-| `dashboard.quickstartConfig` | rendered from values | `/quickstart-config/quickstart-config.json` | dashboard |
+| `dashboard.quickstartConfig` | rendered from values | `/usr/share/nginx/html/quickstart-config/quickstart-config.json` | dashboard |
 
 For NATS, cache TTL, and PromQL ConfigMaps, set `rolloutChecksum` whenever the
 external content changes. Helm cannot read or hash external ConfigMap data, so
@@ -1223,7 +1267,7 @@ Object-storage mode has three operator-side requirements:
    for build logs. Without one, objects accumulate indefinitely. Keep the rule
    scoped to that prefix so it does not also expire trace profiles stored under
    `<prefix>/<project>/<invocation>/`.
-3. **Retention is now the bucket's TTL, not a database window.** Once objects
+3. **Retention is the bucket's TTL, not a database window.** Once objects
    expire, completed-build log requests return empty logs for those
    invocations, the same way they do after a `progresses` partition ages out.
 
@@ -1236,7 +1280,7 @@ a sustained rate as a storage problem to fix.
 
 ### Retention and sizing
 
-Progress logs are now served from exactly these two places, so **how long users
+Progress logs are served from exactly these two places, so **how long users
 can open a completed build's logs is set by whichever mode the project uses**:
 
 | Mode | Log retention |
@@ -1363,14 +1407,15 @@ then verify a disabled project or insufficient role is denied. Enable
 ## Barn Owl AI assistant
 
 Barn Owl is Hermetiq's AI Agent that optimizes your Bazel and Buildbarn builds; 
-chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime sidecar.
+it is optional, and enabling it adds an Anthropic-backed assistant to the API
+and a DSPy prompt-runtime sidecar to the API Pod.
 
 The API and runtime need outbound HTTPS access to Anthropic or an
 Anthropic-compatible gateway. Create the same namespace-local Secret they will
 both reference, using a file containing only the API key:
 
 ```bash
-kubectl -n hermetiq create secret generic claude-api-key \
+kubectl -n hermetiq create secret generic anthropic-api \
   --from-file=ANTHROPIC_API_KEY=/secure/path/anthropic-api-key
 ```
 
@@ -1382,7 +1427,7 @@ assistant:
   anthropic:
     model: claude-opus-5
     apiKey:
-      existingSecret: claude-api-key
+      existingSecret: anthropic-api
       existingSecretKey: ANTHROPIC_API_KEY
   streamTimeoutSeconds: 660
 ```
@@ -1452,7 +1497,7 @@ shares that Service policy across API ports, including REST and MCP. Publisher
 timeouts are unchanged. Raise the streaming timeout when raising the assistant
 turn deadline, and check any external load balancer's total response timeout.
 
-After upgrading, verify both the ordinary chat provider and a built-in prompt:
+After enabling it, verify both the ordinary chat provider and a built-in prompt:
 
 ```bash
 kubectl -n hermetiq rollout status deployment/grpc-api
@@ -1569,12 +1614,13 @@ pipeline, NATS JetStream, and PostgreSQL across six areas before go-live:
      rows into PostgreSQL `public.progresses`. Under heavy CI concurrency,
      progress rows account for 80–90% of PostgreSQL write throughput, WAL volume,
      and disk I/O.
-   - Configure `app.rawBepExportBucket` (`gs://<bucket>/<prefix>`,
-     `s3://<bucket>/<prefix>`, or `azblob://<container>/<prefix>`), bind cloud
-     Workload Identity (`gcpWorkloadIdentity`, `azureWorkloadIdentity`, or AWS
-     IRSA on `serviceAccount`), enable *Store compressed invocation logs in cloud
-     object storage* in Project Settings, and configure a bucket lifecycle TTL
-     rule on `<prefix>/progress/` (see [Progress log storage](#progress-log-storage)).
+   - Bind cloud workload identity (`gcpWorkloadIdentity` or
+     `azureWorkloadIdentity`), enable *Store compressed invocation logs in cloud
+     object storage* in Project Settings and set the project's GCS bucket or
+     Azure Blob container there, and configure a bucket lifecycle TTL rule on
+     `<prefix>/progress/` (see [Progress log storage](#progress-log-storage)).
+     `app.rawBepExportBucket` does not configure this; it belongs to the
+     separate raw BEP event export.
 2. **Size `app.streamPartitionCount` and align Buildbarn `cacheEvents.numShards`:**
    - Each partition `0..N-1` creates an independent set of JetStream streams
      (`BEP_BUILD_TOOL_<i>`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`,
@@ -1656,7 +1702,8 @@ Kubernetes Benchmark v2.0.1:
 - `readOnlyRootFilesystem: true`
 - all capabilities dropped
 
-Workloads that need scratch space get a `/tmp` emptyDir. Every Pod rendered by
+Workloads that need scratch space mount emptyDir volumes at or under `/tmp`.
+Every Pod rendered by
 this chart therefore satisfies `pod-security.kubernetes.io/enforce: restricted`.
 
 > **Co-installing Buildbarn and `RbeWorker` pools in the same namespace:** While
@@ -1732,7 +1779,8 @@ Egress needs to reach:
 - your OIDC provider
 - VictoriaMetrics (`victoriaMetrics.baseUrl`)
 - the Kubernetes API server
-- the Hermetiq license service (`license.saasUrl`)
+- the Hermetiq license service (`license.saasUrl`) and `https://api.keygen.sh`
+  for license validation
 
 ## Operations
 
