@@ -12,78 +12,9 @@ the full-stack deployment order and shared services used by the other charts.
 
 ## Contents
 
-- [Chart scope](#chart-scope)
-- [Install prerequisites](#install-prerequisites)
-  - [Prerequisites checklist](#prerequisites-checklist)
-  - [PostgreSQL](#postgresql)
-  - [NATS JetStream](#nats-jetstream)
-  - [DragonflyDB](#dragonflydb)
-  - [Shared services and routing](#shared-services-and-routing)
-- [Required external inputs](#required-external-inputs)
-- [Licensing and trials](#licensing-and-trials)
-  - [Required contact and online trial](#required-contact-and-online-trial)
-  - [License fingerprint RBAC](#license-fingerprint-rbac)
-- [Hosts](#hosts)
-- [PostgreSQL and schema management](#postgresql-and-schema-management)
-  - [Bootstrap job](#bootstrap-job)
-  - [Partition policy and maintenance](#partition-policy-and-maintenance)
-- [Routing](#routing)
-  - [Providers](#providers)
-  - [Envoy Gateway policies](#envoy-gateway-policies)
-  - [gRPC route timeouts](#grpc-route-timeouts)
-  - [Tuning the downstream leg for high-RTT clients](#tuning-the-downstream-leg-for-high-rtt-clients)
-- [NATS ingest and stream configuration](#nats-ingest-and-stream-configuration)
-- [Authentication and SSO](#authentication-and-sso)
-  - [OIDC provider](#oidc-provider)
-  - [gRPC authentication](#grpc-authentication)
-  - [MCP Authentication](#mcp-authentication)
-  - [Admin Emails](#admin-emails)
-  - [oauth2-proxy](#oauth2-proxy)
-  - [Grafana SSO](#grafana-sso)
-- [Verify dependencies ready](#verify-dependencies-ready)
-- [Install](#install)
-  - [Verification](#verification)
-  - [Installation checkpoint](#installation-checkpoint)
-- [Advanced Topics](#advanced-topics)
-  - [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
-  - [Progress log storage](#progress-log-storage)
-    - [Retention and sizing](#retention-and-sizing)
-  - [Scheduling, availability, and hardening](#scheduling-availability-and-hardening)
-    - [Pod and container security context](#pod-and-container-security-context)
-    - [Network policies](#network-policies)
-    - [Workload identity](#workload-identity)
-    - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
-    - [Node scheduling](#node-scheduling)
-    - [Pod disruption budgets and anti-affinity](#pod-disruption-budgets-and-anti-affinity)
-    - [Additional environment variables](#additional-environment-variables)
-  - [Dashboard configuration](#dashboard-configuration)
-    - [Quickstart customization](#quickstart-customization)
-  - [External configuration ConfigMaps](#external-configuration-configmaps)
-    - [Cache TTL configuration](#cache-ttl-configuration)
-    - [PromQL query configuration](#promql-query-configuration)
-  - [Metrics-backed infrastructure tools](#metrics-backed-infrastructure-tools)
-  - [Barn Owl AI Assistant](#barn-owl-assistant)
-    - [Optional JEV model routing](#optional-jev-model-routing)
-  - [On-prem RBE Infrastructure](#on-prem-rbe-infrastructure)
-  - [BB Config Editor](#bb-config-editor)
-  - [Stream configuration](#stream-configuration)
-  - [Cost integration](#cost-integration)
-  - [Cache-event analytics](#cache-event-analytics)
-  - [Kubernetes workload discovery](#kubernetes-workload-discovery)
-  - [Paid license keys](#paid-license-keys)
-  - [Air-gapped licenses](#air-gapped-licenses)
-  - [Operations](#operations)
-    - [Inspect Pods and logs](#inspect-pods-and-logs)
-    - [Pause and resume subscribers](#pause-and-resume-subscribers)
-    - [Inspect database partitions](#inspect-database-partitions)
-    - [Inspect NATS and the dead-letter queue](#inspect-nats-and-the-dead-letter-queue)
-    - [Temporary image overrides](#temporary-image-overrides)
-    - [Rotate Secrets](#rotate-secrets)
-  - [Local chart development](#local-chart-development)
-    - [Synchronize PromQL and dashboards](#synchronize-promql-and-dashboards)
-  - [License](#license)
+(regenerated in the final step)
 
-## Chart scope
+## What the chart installs
 
 This chart installs Hermetiq core services and supporting resources, including:
 
@@ -106,7 +37,7 @@ from inside the copied values directory created in the repository's
 [prepare custom values](https://github.com/Hermetiq/hermetiq-k8s#prepare-custom-values)
 step. Use your own namespace if it differs.
 
-### Prerequisites checklist
+### Checklist
 
 Confirm the following are in place before running `helm install`:
 
@@ -135,6 +66,18 @@ Confirm the following are in place before running `helm install`:
   - OpenTelemetry Collector reachable at `otel.endpoint` (full URL with scheme and port, e.g. `http://otel-collector.hermetiq.svc.cluster.local:4317`).
   - VictoriaMetrics `vmselect` query URL set in `victoriaMetrics.baseUrl` (`/select/0/prometheus` path, **not** `vminsert`) with `victoriaMetrics.projectLabelEnabled: true` and `victoriaMetrics.projectLabel: namespace`.
   - Cluster pod CIDR configured in `publisher.trustedCalCidrs` so Buildbarn workers can stream Completed Action Logs (CAL) to `bep-nats-pub:50091`.
+
+### Shared services and routing
+
+Follow the repository guide to [prepare routing, DNS, and TLS](https://github.com/Hermetiq/hermetiq-k8s#prepare-routing-dns-and-tls)
+and [provision shared services](https://github.com/Hermetiq/hermetiq-k8s#provision-shared-services):
+an OIDC identity provider, VictoriaMetrics and OpenTelemetry, and KEDA for
+worker autoscaling. Install the Gateway, Contour, or Ingress controller used by
+`routing.provider`. For chart-managed TLS with Ingress or Contour, install
+cert-manager and configure a matching issuer (`ClusterIssuer` by default).
+This applies to the shared `tls.certificate`, Contour per-route Certificates,
+and cert-manager's Ingress integration; see [Routing](#routing) for issuer
+values and TLS Secret alternatives.
 
 ### PostgreSQL
 
@@ -205,7 +148,7 @@ for retention and partition settings.
 > ingested**; for a single-server test setup, supply an external stream config
 > (`nats.streamConfig.existingConfigMap`) with `"replicas": 1`.
 
-### DragonflyDB
+### DragonflyDB or Redis
 
 DragonflyDB is the Redis-compatible cache used by the starter values. Create
 its password Secret first:
@@ -237,19 +180,11 @@ helm upgrade --install --namespace hermetiq dragonfly \
 Set `redis.host` and the password Secret reference to match the chosen
 deployment.
 
-### Shared services and routing
+### Secrets
 
-Follow the repository guide to [prepare routing, DNS, and TLS](https://github.com/Hermetiq/hermetiq-k8s#prepare-routing-dns-and-tls)
-and [provision shared services](https://github.com/Hermetiq/hermetiq-k8s#provision-shared-services):
-an OIDC identity provider, VictoriaMetrics and OpenTelemetry, and KEDA for
-worker autoscaling. Install the Gateway, Contour, or Ingress controller used by
-`routing.provider`. For chart-managed TLS with Ingress or Contour, install
-cert-manager and configure a matching issuer (`ClusterIssuer` by default).
-This applies to the shared `tls.certificate`, Contour per-route Certificates,
-and cert-manager's Ingress integration; see [Routing](#routing) for issuer
-values and TLS Secret alternatives.
+(new section: filled in a later step)
 
-## Required external inputs
+## Configure your values file
 
 Start with the
 [Hermetiq starter values](https://github.com/Hermetiq/hermetiq-k8s/blob/main/custom-values/hermetiq-values.yaml),
@@ -277,6 +212,16 @@ Replace every placeholder (including `TODO` values), confirm the referenced
 Secrets and services exist, and complete [Verify dependencies ready](#verify-dependencies-ready)
 before running [Install](#install).
 
+### Decide before the first install
+
+(new section: filled in a later step)
+
+### Co-installing with Buildbarn
+
+(new section: filled in a later step)
+
+### Inspect the packaged defaults
+
 Inspect the exact packaged defaults and README before creating advanced
 overrides:
 
@@ -285,15 +230,148 @@ helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
 helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
 ```
 
+## Install
+
+### Pre-flight checks
+
+Check these before installing Hermetiq. Use the namespace and service names
+from your own values when they differ from the starter examples.
+
+1. Confirm the Secrets and Service endpoints referenced by the starter values
+   exist. Every listed endpoint should have at least one ready address:
+
+   ```bash
+   kubectl -n hermetiq get secret postgres-db dragonfly-auth oauth2-proxy-client
+   kubectl -n hermetiq get endpoints nats dragonfly otel-collector vmselect-vmks vminsert-vmks
+   kubectl -n hermetiq rollout status deployment/otel-collector --timeout=5m
+   ```
+
+2. Confirm the NATS server is ready and JetStream is enabled:
+
+   ```bash
+   kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
+   kubectl -n hermetiq exec -it \
+     "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
+       -o jsonpath='{.items[0].metadata.name}')" \
+     -- nats server check jetstream
+   ```
+
+3. Confirm the OIDC issuer's discovery document is reachable, its dashboard
+   callback URL and BEP audience are registered, and the configured routing
+   Gateway or Ingress controller has a ready address. For chart-managed
+   Ingress or Contour certificates, also confirm cert-manager and the matching
+   issuer are ready. KEDA is needed for the subsequent operator-managed
+   worker pools; verify its operator is ready before installing those pools.
+
+Before installing, complete the [starter values review](#required-external-inputs),
+including a real work address for `license.contactEmail`, the
+[Namespace fingerprint behavior](#license-fingerprint-rbac),
+and partition sizing for the expected ingest volume.
+
+### Run the install
+
+Run this only after working through every top-level block in
+`hermetiq-values.yaml`, replacing all placeholders, and completing
+[Verify dependencies ready](#verify-dependencies-ready).
+Then install the pinned OCI release:
+
+```bash
+helm upgrade --install --namespace hermetiq hmq \
+  oci://ghcr.io/hermetiq/hermetiq \
+  --version 0.9.8 \
+  --values hermetiq-values.yaml
+```
+
+### Verify the installation
+
+Wait for the bootstrap hook and core Deployments:
+
+```bash
+helm status hmq -n hermetiq
+kubectl -n hermetiq get jobs
+kubectl -n hermetiq get deploy \
+  -l app.kubernetes.io/part-of=hermetiq
+kubectl -n hermetiq rollout status deployment/grpc-api --timeout=5m
+kubectl -n hermetiq rollout status deployment/bep-nats-pub --timeout=5m
+kubectl -n hermetiq rollout status deployment/web-ui --timeout=5m
+```
+
+The number of `bep-nats-sub-*` Deployments should match
+`app.streamPartitionCount`. Verify each one without relying on hard-coded image
+versions:
+
+```bash
+kubectl -n hermetiq get deploy -l app.kubernetes.io/component=subscriber
+kubectl -n hermetiq get pods \
+  -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.spec.containers[*].image'
+```
+
+Check Services, endpoints, and routing resources:
+
+```bash
+kubectl -n hermetiq get svc,endpoints grpc-api web-ui bep-nats-pub
+kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
+kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
+```
+
+Check NATS, the license endpoint, the persisted license-state Secret, and that
+`pg_partman` default catch-all partitions remain empty:
+
+```bash
+kubectl -n hermetiq exec -it \
+  "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
+    -o jsonpath='{.items[0].metadata.name}')" \
+  -- nats stream report
+
+kubectl -n hermetiq get secret hermetiq-license-state
+kubectl -n hermetiq port-forward deployment/grpc-api 8008
+curl -fsS localhost:8008/api/v1/license/status
+```
+
+Render-time validation is intentionally strict. If installation fails before
+creating resources, run the same values through `helm template --debug` and
+read the validation error before changing a value.
+
+Congratulations — the Hermetiq core is running. Before moving on, take a quick
+look at the workloads in your installation namespace:
+
+```bash
+kubectl -n hermetiq get pods
+```
+
+For the starter setup, expect `bep-nats-pub-*`, `bep-nats-sub-*`, `grpc-api-*`,
+and `web-ui-*` Pods to be `Running` with every container ready. If you installed
+the shared services here too, expect ready Pods for Dragonfly, KEDA, NATS
+JetStream, OpenTelemetry Collector, and VictoriaMetrics (including `vmstorage-*`
+and `vmselect-*`).
+The starter NATS StatefulSet has three Pods (required for the default 3-replica
+`BEP_BUILD_TOOL` stream). Pods from completed Jobs, such as
+`database-schema-bootstrap-*` and a scheduled
+`progresses-partition-maintenance-*` run, show `Completed`; that is healthy.
+Pod suffixes, replica counts, and the services present depend on your values
+and where you installed the dependencies.
+
+### Next steps
+
+Resolve Pods stuck in `Pending` or `CrashLoopBackOff`, containers that are not
+ready, and failed Jobs before continuing. When this checkpoint is healthy, go to
+[installing the BB Worker Operator](../../README.md#install-the-worker-operator)
+and
+[installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
+Come back to the advanced topics below after the deployment is working end to
+end.
+
 ## Licensing and trials
 
-### Required contact and online trial
+### Agreement and contact email
 
 `license.agreement.accepted` must be `true`. The Hermetiq container images
 are proprietary software distributed under the Hermetiq Software License
 Agreement, packaged with this chart as `SOFTWARE-LICENSE-AGREEMENT.md` and
 published at `license.agreement.url`. Templating fails until acceptance is
 confirmed; the starter values set it, and the install notes echo the URL.
+
+### Trial licenses
 
 `license.contactEmail` is **required** — templating fails without a
 syntactically valid email address. With no license key configured, a 30-day
@@ -308,7 +386,35 @@ Trial licenses are tied to the [Namespace fingerprint](#license-fingerprint-rbac
 Validation is off the request path and cached so transient licensing-service
 outages do not interrupt requests.
 
-### License fingerprint RBAC
+### Paid license keys
+
+**Paid keys** go in a Secret named `hermetiq-license` under the data key
+`license.key`. The chart always mounts that Secret name as an optional volume,
+so creating the default-named Secret after install hot-loads the key with no
+values change and no rollout:
+
+```sh
+kubectl -n hermetiq create secret generic hermetiq-license \
+  --from-literal=license.key=<key>
+```
+
+For a customer-managed Secret with different names, set
+`license.key.existingSecret` and `license.key.existingSecretKey` (a values
+change, so it takes a `helm upgrade` and a rollout). `license.key.value` is the
+inline alternative — the chart then creates the `hermetiq-license` Secret
+itself. Converting a trial to a paid license happens server-side against the
+same key; no cluster changes are needed.
+
+### Air-gapped licenses
+
+**Air-gapped installs** set `license.airGapped=true` and must provide
+`license.key.existingSecret` carrying **both** the license key and a
+checked-out license file — data keys `license.key` and `license.lic` by
+default (`license.key.existingSecretKey` / `license.licenseFileSecretKey`).
+Trials are online-only, so `license.trial.enabled` must be `false`; the chart
+refuses to render otherwise. No network calls are made in this mode.
+
+### License identity and state
 
 The chart's runtime RBAC grants the `bep-nats` ServiceAccount `get` on the
 release Namespace object only. On-prem licensing hashes that Namespace UID for
@@ -325,7 +431,7 @@ The Namespace read and license-state Secret access are exercised in-pod, so
 installs must keep `api.automountServiceAccountToken: true` and
 `publisher.automountServiceAccountToken: true`.
 
-#### Status and expiry
+### Status and expiry
 
 The status endpoint and `hermetiq_license_*` metrics expose expiry and grace
 state for operator alerting. Past the grace window, `grpc-api` and
@@ -372,9 +478,11 @@ to `require`.
 
 The schema bootstrap Job is a Helm hook by default. It runs on both install and upgrade so schema migrations are applied before workloads roll forward. Keep `postgres.password.existingSecret` set in hook mode, because pre-install hooks run before normal chart-managed Secrets are created. Successful hook Jobs are kept by default for log inspection and are deleted before the next install or upgrade hook creates a fresh Job. If you want the chart to create the Postgres Secret from `postgres.password.value`, set `bootstrap.hook.enabled=false`.
 
+### Default project
+
 When `bootstrap.projectName` is set, the bootstrap job creates the default project and managed Buildbarn namespace entry. Set `bootstrap.projectId` to pin the default project ID; leave it empty to let dbadmin generate a UUID. `bootstrap.projectNamespace` defaults to the Helm release namespace, which fits installs where Buildbarn is deployed alongside Hermetiq; set it explicitly when Buildbarn lives in a different namespace. The bundled Grafana dashboards use this same namespace for their initial Buildbarn metrics filter. With `hosts.domainBase` set, the chart derives `bootstrap.namespaceBrowserUrl` as `https://browser.<domainBase>` and both `bootstrap.namespaceDashboardUrl` and `victoriaMetrics.dashboardUrl` as `https://grafana.<domainBase>/d/hermetiq-demo`. `hosts.grafana` overrides the derived Grafana host. Set these URLs explicitly only when your deployment uses different addresses.
 
-### Partition policy and maintenance
+### Partition policy
 
 The first successful bootstrap creates time-based partitions with
 `bootstrap.partitionInterval`, `bootstrap.retentionDays`, and
@@ -388,6 +496,8 @@ maintenance command does not use `bootstrap.retentionDays` as a runtime
 override. Update retention or premake in `public.part_config`; do not change
 `partition_interval` in place because changing an interval requires rebuilding
 the affected partition set.
+
+### Maintenance CronJobs
 
 The chart renders `partitionMaintenance` and
 `progressesPartitionMaintenance` CronJobs. Watch their most recent Jobs and
@@ -403,6 +513,15 @@ Set `routing.provider` to `gateway`, `gateway-httproute-only`, `contour`, or
 `gateway-httproute-only` for GKE Gateway, which supports HTTPRoute but not
 GRPCRoute. Use `gateway` for Envoy Gateway and other controllers that support
 GRPCRoute. Gateway modes expect TLS on the referenced Gateway.
+
+Set `routing.enabled=false` or `routing.provider=none` when you want the chart to render only internal Services and application resources while you supply your own Gateway, Ingress, HTTPProxy, service mesh route, or other external routing implementation. Route TLS Certificates, Envoy Gateway policies, and GKE Gateway policies are also skipped in this mode.
+
+The chart does not create the Gateway itself. Create the Gateway/listener, DNS,
+and TLS infrastructure before installing this release. Set `gateway.name` and,
+when needed, `gateway.namespace` and listener `sectionName` values to the
+Gateway that should accept the chart's routes.
+
+### TLS certificates
 
 For Contour or Ingress, provide an existing wildcard TLS Secret through
 `tls.secretName`, or enable `tls.certificate.enabled` to render one shared
@@ -420,15 +539,6 @@ ingress-shim creates per-route Certificates; set
 option is disabled by default. Both per-route modes require cert-manager in
 the cluster. If cert-manager is not used, provide the TLS Secrets referenced by
 the routes yourself.
-
-When `routing.provider=gateway`, `gateway.healthChecks.enabled=true` renders Envoy Gateway `BackendTrafficPolicy` resources that health-check gRPC routes with TCP and HTTP routes with unauthenticated readiness/metadata endpoints. When `routing.provider=gateway-httproute-only`, the GKE `HealthCheckPolicy` for the mixed API Service checks `GET /ready` on container port `8008`.
-
-Set `routing.enabled=false` or `routing.provider=none` when you want the chart to render only internal Services and application resources while you supply your own Gateway, Ingress, HTTPProxy, service mesh route, or other external routing implementation. Route TLS Certificates, Envoy Gateway policies, and GKE Gateway policies are also skipped in this mode.
-
-The chart does not create the Gateway itself. Create the Gateway/listener, DNS,
-and TLS infrastructure before installing this release. Set `gateway.name` and,
-when needed, `gateway.namespace` and listener `sectionName` values to the
-Gateway that should accept the chart's routes.
 
 ### Envoy Gateway policies
 
@@ -455,7 +565,9 @@ Without the timeout policies, whatever default route timeout your controller
 applies governs long-lived gRPC streams; check that it does not truncate BES
 uploads.
 
-### gRPC route timeouts
+When `routing.provider=gateway`, `gateway.healthChecks.enabled=true` renders Envoy Gateway `BackendTrafficPolicy` resources that health-check gRPC routes with TCP and HTTP routes with unauthenticated readiness/metadata endpoints. When `routing.provider=gateway-httproute-only`, the GKE `HealthCheckPolicy` for the mixed API Service checks `GET /ready` on container port `8008`.
+
+### Route timeouts
 
 `gateway.timeouts` sets Envoy Gateway stream timeouts on the BEP, API, and optional bbcal gRPC routes (`routing.provider=gateway` only). It is enabled by default. Without it Envoy applies its **15s default route timeout**, which made `gateway` the only routing provider this chart supports that left these routes capped by omission — Contour already applies `contour.httpProxy.responseTimeout` and GKE applies `gateway.gke.backendPolicy.timeoutSec` (both 300s) to the same backends.
 
@@ -481,7 +593,7 @@ default) to API gRPC streaming so a ten-minute Barn Owl turn can finish. This
 assistant setting takes precedence over the API timeout above; see
 [Barn Owl AI Assistant](#barn-owl-assistant) for the other routing providers.
 
-### Tuning the downstream leg for high-RTT clients
+### Client connection tuning for high-RTT clients
 
 When enabled, the policy advertises `h2` for gRPC and `http/1.1` for browser
 traffic through `spec.tls.alpnProtocols` on TLS listeners.
@@ -496,7 +608,13 @@ frequently runs a single replica, so watch its RSS after enabling. And without
 one listener fully overrides a Gateway-scoped policy rather than combining
 with it.
 
+## Redis-compatible cache
+
+(new section: filled in a later step)
+
 ## NATS ingest and stream configuration
+
+### Stream partitions
 
 `app.streamPartitionCount` controls the number of subscriber Deployments
 (`bep-nats-sub-0` through `bep-nats-sub-(N-1)`) and partitioned JetStream
@@ -517,6 +635,167 @@ and preserves per-build event ordering within that partition.
   higher-numbered streams). See
   [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
   for partition count and NATS memory/disk sizing at scale.
+
+### Stream configuration
+
+The chart renders `files/config/nats_streams.json` into the
+`bep-nats-stream-config` ConfigMap by default.
+
+> ⚠ **Replica counts in the packaged `nats_streams.json`:** The packaged file
+> sets `"replicas": 3` on `bep.buildToolStream` (`BEP_BUILD_TOOL_<i>`) and
+> `"replicas": 1` on `FWD_STREAM`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`, and
+> `ACTION_STREAM_<i>`. Because `BEP_BUILD_TOOL_<i>` uses `"replicas": 3`,
+> JetStream requires a **3+ server NATS cluster** (`config.cluster.enabled: true`,
+> `replicas: 3`) or subscriber startup fails to create the stream and no build
+> events are ingested. For a single-server test NATS, override
+> `nats_streams.json` via `nats.streamConfig.existingConfigMap` with
+> `"replicas": 1`; for full NATS node-loss resilience on action and cache-enrich
+> streams in production, raise `action.stream.replicas` and
+> `cacheEnrich.stream.replicas` to `3` in your custom ConfigMap.
+
+To use an externally managed stream and consumer config, create a ConfigMap
+with your JSON and point the chart at it:
+
+```yaml
+nats:
+  streamConfig:
+    existingConfigMap: hermetiq-nats-stream-config
+    configMapKey: nats_streams.json
+    rolloutChecksum: "sha256-or-version-of-the-config"
+```
+
+The selected key is mounted to `/config/nats-streams/nats_streams.json` for
+publisher and subscriber pods, so the container path stays fixed. Helm cannot
+hash external ConfigMap data; update `rolloutChecksum` when the external
+ConfigMap changes and the publisher/subscriber pods need a rollout.
+
+Per-consumer `workerQueueCapacity`, `pipelineMaxQueuedMessages`, and
+`pipelineMaxQueuedBytes` tune fetch-ahead. Keep `maxAckPending` at or above
+`pipelineMaxQueuedMessages` so the server does not cap the pipeline first.
+`storeBatchMaxEvents`, `storeBatchMaxWait`, and `storeBatchParallelism` tune
+database-call coalescing. These are advanced settings; start with the packaged
+file and change them only with ingest, NATS, and database telemetry in view.
+
+## Observability
+
+### OpenTelemetry
+
+(new section: filled in a later step)
+
+### Metrics-backed infrastructure tools
+
+`victoriaMetrics.metricsEnabled` defaults to `false`. Enable it only when the
+API can reach the configured VictoriaMetrics read endpoint. When disabled, the
+five PromQL-backed Buildbarn health tools and the two VictoriaLogs-backed tools
+are not registered; the remaining MCP tools are unaffected.
+
+`victoriaMetrics.projectLabelEnabled` controls whether the packaged
+PromQL selectors are scoped to the project, and `victoriaMetrics.projectLabel`
+(default `namespace`) names the label. With `namespace`, queries match the
+project's Buildbarn namespace setting, which must name the namespace Buildbarn
+runs in; the Buildbarn chart's recording rules keep that label. Keep it `false`
+for a self-managed, single-tenant Buildbarn whose metrics do not follow those
+rules.
+
+### PromQL query configuration
+
+The MCP infrastructure tools read query templates from
+`/config/promql/promql.json`. The packaged templates target the recording rules
+shipped with the Hermetiq Buildbarn chart. A self-managed Buildbarn with
+different recording-rule names can provide a replacement ConfigMap:
+
+```yaml
+promqlQueries:
+  existingConfigMap: hermetiq-promql-config
+  configMapKey: promql.json
+  rolloutChecksum: "sha256-or-version-of-the-config"
+```
+
+Partial query overrides are supported. Unknown template placeholders and blank
+required queries fail API startup instead of silently returning incomplete
+diagnostics.
+
+Scheduler queue assessments join measurements on `(instance_name_prefix,
+platform, size_class)`. Overrides for executing peaks, saturated minutes, and
+completed actions must preserve all three labels; aggregating away the prefix
+combines shared and private queues and prevents private-pool capacity diagnosis.
+Deploy the prefix-preserving query configuration with the corresponding API
+update. These templates load at startup, so restart the API after an external
+ConfigMap update (or change `promqlQueries.rolloutChecksum`).
+
+### Dashboards and scrape objects
+
+(new section: filled in a later step)
+
+### VictoriaLogs
+
+Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
+Set `api.env.VL_BASE_URL` to its HTTP API endpoint and keep
+`victoriaMetrics.metricsEnabled=true` for the shared metrics/log client.
+For example, to add event history independently of OpenCost:
+
+```yaml
+app:
+  victoriaLogsEnabled: true
+  costReportTickerEnabled: false
+api:
+  env:
+    VL_BASE_URL: http://victorialogs.observability.svc.cluster.local:9428
+victoriaMetrics:
+  metricsEnabled: true
+  baseUrl: http://vmselect.observability.svc.cluster.local:8481/select/0/prometheus
+```
+
+These services are supplied by the operator. Without VictoriaLogs, Barn Owl
+keeps core metrics and Kubernetes evidence and identifies event history as
+unavailable. An enabled source that fails is reported as incomplete coverage;
+it does not establish that there were no events or incidents.
+
+## Workload identity
+
+The chart annotates the shared ServiceAccount for GKE or labels/annotates Pods
+for Azure workload identity:
+
+```yaml
+gcpWorkloadIdentity:
+  enabled: true
+  serviceAccount: hermetiq@project-id.iam.gserviceaccount.com
+
+# Or on AKS:
+azureWorkloadIdentity:
+  enabled: true
+  clientId: <azure-client-id>
+```
+
+On GKE, create the Google service account, grant it the object-storage roles
+the enabled features need, and allow the chart's Kubernetes ServiceAccount
+(`bep-nats` in the release namespace by default) to impersonate it before
+enabling the value:
+
+```bash
+gcloud iam service-accounts create hermetiq-bep \
+  --display-name="Hermetiq BEP NATS" \
+  --project=<gcp-project>
+
+gcloud iam service-accounts add-iam-policy-binding \
+  hermetiq-bep@<gcp-project>.iam.gserviceaccount.com \
+  --role=roles/iam.workloadIdentityUser \
+  --member="serviceAccount:<gcp-project>.svc.id.goog[hermetiq/bep-nats]"
+```
+
+The chart then adds the `iam.gke.io/gcp-service-account` annotation to the
+ServiceAccount. On AKS it adds the `azure.workload.identity/use` label to the
+ServiceAccount and Pods and the `azure.workload.identity/client-id` annotation
+to the ServiceAccount.
+
+For AWS IRSA or another provider, use `serviceAccount.annotations`. Grant the
+resulting identity only the object-storage permissions required by enabled
+features. Progress-log object storage needs subscriber read/write access;
+trace and output-file features may need additional read access.
+
+## Application settings
+
+(new section: filled in a later step)
 
 ## Authentication and SSO
 
@@ -571,7 +850,7 @@ through `app.grpcAuthUserProvider`.
 Custom environment values may be literal scalars or Helm `tpl`
 expressions; those are the only overrides validation can reliably inspect.
 
-#### Buildbarn Completed Action Logger — required for CAL ingest
+### Completed Action Logger trust
 
 Buildbarn workers stream completed actions to `bep-nats-pub:50091` directly and
 present no user credential, so network position is the only thing that can admit
@@ -596,7 +875,7 @@ publisher:
 `x-forwarded-client-cert`) is deliberately never set: nothing in this chart
 terminates mTLS in front of bep-nats, so client-cert identities stay fail-closed.
 
-### MCP Authentication
+### MCP authentication
 
 The MCP server runs in the API Deployment and uses the same OIDC verifier as
 the gRPC API. Set `oidc.issuerUrl`, choose the public MCP host, and enable
@@ -608,7 +887,7 @@ For the values, audience rules, Dynamic Client Registration, and identity
 settings, follow the [MCP authentication guide](../../docs/mcp-authentication.md).
 The [Auth0 runbook](../../docs/mcp-auth0-runbook.md) gives a worked IdP example.
 
-### Admin Emails
+### Admin access
 
 Set `app.adminEmails` to grant the Hermetiq admin role to users by email. The chart joins the YAML list into the comma-delimited `ADMIN_EMAIL_ALLOWLIST` env var used by the app.
 
@@ -619,7 +898,7 @@ app:
     - ops@example.com
 ```
 
-### oauth2-proxy
+### Dashboard sign-in
 
 When dashboard OAuth is enabled, the chart renders `oauth2-proxy-config-web-ui` as reusable provider/session configuration. Deployment-specific oauth2-proxy values such as `OAUTH2_PROXY_REDIRECT_URL` and `OAUTH2_PROXY_UPSTREAMS` are set directly on the dashboard sidecar so other web UI sidecars can reuse the ConfigMap.
 
@@ -668,429 +947,147 @@ If dashboard OAuth is disabled, the shared proxy ConfigMap is still rendered
 when the Grafana proxy consumes it. The Buildbarn Browser proxy can reuse the
 same Secret and ConfigMap after the Hermetiq release is installed.
 
-## Verify dependencies ready
+## Workload sizing, scheduling, and availability
 
-Check these before installing Hermetiq. Use the namespace and service names
-from your own values when they differ from the starter examples.
+### Replicas and resources
 
-1. Confirm the Secrets and Service endpoints referenced by the starter values
-   exist. Every listed endpoint should have at least one ready address:
+(new section: filled in a later step)
 
-   ```bash
-   kubectl -n hermetiq get secret postgres-db dragonfly-auth oauth2-proxy-client
-   kubectl -n hermetiq get endpoints nats dragonfly otel-collector vmselect-vmks vminsert-vmks
-   kubectl -n hermetiq rollout status deployment/otel-collector --timeout=5m
-   ```
+### Node scheduling
 
-2. Confirm the NATS server is ready and JetStream is enabled:
-
-   ```bash
-   kubectl -n hermetiq rollout status statefulset/nats --timeout=5m
-   kubectl -n hermetiq exec -it \
-     "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
-       -o jsonpath='{.items[0].metadata.name}')" \
-     -- nats server check jetstream
-   ```
-
-3. Confirm the OIDC issuer's discovery document is reachable, its dashboard
-   callback URL and BEP audience are registered, and the configured routing
-   Gateway or Ingress controller has a ready address. For chart-managed
-   Ingress or Contour certificates, also confirm cert-manager and the matching
-   issuer are ready. KEDA is needed for the subsequent operator-managed
-   worker pools; verify its operator is ready before installing those pools.
-
-Before installing, complete the [starter values review](#required-external-inputs),
-including a real work address for `license.contactEmail`, the
-[Namespace fingerprint behavior](#license-fingerprint-rbac),
-and partition sizing for the expected ingest volume.
-
-## Install
-
-Run this only after working through every top-level block in
-`hermetiq-values.yaml`, replacing all placeholders, and completing
-[Verify dependencies ready](#verify-dependencies-ready).
-Then install the pinned OCI release:
-
-```bash
-helm upgrade --install --namespace hermetiq hmq \
-  oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.8 \
-  --values hermetiq-values.yaml
-```
-
-### Verification
-
-Wait for the bootstrap hook and core Deployments:
-
-```bash
-helm status hmq -n hermetiq
-kubectl -n hermetiq get jobs
-kubectl -n hermetiq get deploy \
-  -l app.kubernetes.io/part-of=hermetiq
-kubectl -n hermetiq rollout status deployment/grpc-api --timeout=5m
-kubectl -n hermetiq rollout status deployment/bep-nats-pub --timeout=5m
-kubectl -n hermetiq rollout status deployment/web-ui --timeout=5m
-```
-
-The number of `bep-nats-sub-*` Deployments should match
-`app.streamPartitionCount`. Verify each one without relying on hard-coded image
-versions:
-
-```bash
-kubectl -n hermetiq get deploy -l app.kubernetes.io/component=subscriber
-kubectl -n hermetiq get pods \
-  -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.spec.containers[*].image'
-```
-
-Check Services, endpoints, and routing resources:
-
-```bash
-kubectl -n hermetiq get svc,endpoints grpc-api web-ui bep-nats-pub
-kubectl -n hermetiq get httproute,grpcroute,httpproxy,ingress 2>/dev/null
-kubectl -n hermetiq get backendtrafficpolicy,healthcheckpolicy,gcpbackendpolicy 2>/dev/null
-```
-
-Check NATS, the license endpoint, the persisted license-state Secret, and that
-`pg_partman` default catch-all partitions remain empty:
-
-```bash
-kubectl -n hermetiq exec -it \
-  "$(kubectl -n hermetiq get pods -l app.kubernetes.io/component=nats-box \
-    -o jsonpath='{.items[0].metadata.name}')" \
-  -- nats stream report
-
-kubectl -n hermetiq get secret hermetiq-license-state
-kubectl -n hermetiq port-forward deployment/grpc-api 8008
-curl -fsS localhost:8008/api/v1/license/status
-```
-
-Render-time validation is intentionally strict. If installation fails before
-creating resources, run the same values through `helm template --debug` and
-read the validation error before changing a value.
-
-### Installation checkpoint
-
-Congratulations — the Hermetiq core is running. Before moving on, take a quick
-look at the workloads in your installation namespace:
-
-```bash
-kubectl -n hermetiq get pods
-```
-
-For the starter setup, expect `bep-nats-pub-*`, `bep-nats-sub-*`, `grpc-api-*`,
-and `web-ui-*` Pods to be `Running` with every container ready. If you installed
-the shared services here too, expect ready Pods for Dragonfly, KEDA, NATS
-JetStream, OpenTelemetry Collector, and VictoriaMetrics (including `vmstorage-*`
-and `vmselect-*`).
-The starter NATS StatefulSet has three Pods (required for the default 3-replica
-`BEP_BUILD_TOOL` stream). Pods from completed Jobs, such as
-`database-schema-bootstrap-*` and a scheduled
-`progresses-partition-maintenance-*` run, show `Completed`; that is healthy.
-Pod suffixes, replica counts, and the services present depend on your values
-and where you installed the dependencies.
-
-Resolve Pods stuck in `Pending` or `CrashLoopBackOff`, containers that are not
-ready, and failed Jobs before continuing. When this checkpoint is healthy, go to
-[installing the BB Worker Operator](../../README.md#install-the-worker-operator)
-and
-[installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
-Come back to the advanced topics below after the deployment is working end to
-end.
-
-## Advanced Topics
-
-The sections below cover optional tuning, hardening, operations, and chart
-development. Review them earlier when your environment requires a setting.
-
-### Large-scale deployments and high-throughput ingest
-
-For high-concurrency Bazel + RBE environments (thousands of builds per day,
-5–10+ Buildbarn storage shards, and large worker fleets), size the ingest
-pipeline, NATS JetStream, and PostgreSQL across six areas before go-live:
-
-1. **Offload BEP progress logs (`stdout`/`stderr`) to Cloud Object Storage (mandatory at scale):**
-   - By default, build `stdout`/`stderr` progress chunks are written as `BYTEA`
-     rows into PostgreSQL `public.progresses`. Under heavy CI concurrency,
-     progress rows account for 80–90% of PostgreSQL write throughput, WAL volume,
-     and disk I/O.
-   - Configure `app.rawBepExportBucket` (`gs://<bucket>/<prefix>`,
-     `s3://<bucket>/<prefix>`, or `azblob://<container>/<prefix>`), bind cloud
-     Workload Identity (`gcpWorkloadIdentity`, `azureWorkloadIdentity`, or AWS
-     IRSA on `serviceAccount`), enable *Store compressed invocation logs in cloud
-     object storage* in Project Settings, and configure a bucket lifecycle TTL
-     rule on `<prefix>/progress/` (see [Progress log storage](#progress-log-storage)).
-2. **Size `app.streamPartitionCount` and align Buildbarn `cacheEvents.numShards`:**
-   - Each partition `0..N-1` creates an independent set of JetStream streams
-     (`BEP_BUILD_TOOL_<i>`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`,
-     `ACTION_STREAM_<i>`) and a dedicated `bep-nats-sub-<i>` Deployment
-     (`subscriber.replicas: 1` per partition).
-   - Pick `app.streamPartitionCount` **before** production traffic starts
-     (scaling down later strands unconsumed messages on higher-numbered streams)
-     and set Buildbarn's `frontend.grpcCacheProxy.cacheEvents.numShards` to the
-     **exact same integer**:
-
-     | Deployment tier | Typical build volume | Buildbarn shards | Recommended `app.streamPartitionCount` (`== cacheEvents.numShards`) |
-     | :--- | :--- | :--- | :--- |
-     | **Starter / Small** | `<= 500` builds/day | 1–3 shards | `4` (`custom-values/hermetiq-values.yaml` default) |
-     | **Medium Production** | `500–5,000` builds/day | 3–5 shards | `8`–`9` (`charts/hermetiq/values.yaml` default is `9`) |
-     | **Large Scale (10 TiB+ RBE)** | `5,000–25,000+` builds/day | 5–10 shards | `12`–`16` |
-
-   - Keep `subscriber.replicas: 1` (each partition Deployment processes one
-     shard in order; `RollingUpdate` uses `maxSurge: 0, maxUnavailable: 1` to
-     avoid concurrent partition consumers) and raise `subscriber.resources` to
-     `cpu: 1–2`, `memory: 2Gi–4Gi` when enabling large batch coalescing.
-3. **Size NATS JetStream `memoryStore` and `fileStore` for high partition counts:**
-   - In the packaged `files/config/nats_streams.json`, each `CACHE_EVENTS_<i>`
-     partition uses `"storage": "memory"` with `"maxBytes": 134217728`
-     (**128 MiB per partition**), while `BEP_BUILD_TOOL_<i>` (`"replicas": 3`),
-     `ACTION_STREAM_<i>`, and `CACHE_ENRICH_<i>` use `"storage": "file"`.
-   - **Memory math trap:** At `12–16` partitions, `CACHE_EVENTS_0..15` alone can
-     reserve `1.5 GiB–2.0 GiB` of NATS `memoryStore`, exceeding the `1Gi`
-     `memoryStore.maxSize` and `2Gi` container limit in the starter
-     `custom-values/nats-values.yaml`.
-   - For `8–16` partitions, scale `nats-values.yaml` to:
-     - `config.jetstream.memoryStore.maxSize: 4Gi` (or `8Gi` at 16 partitions)
-     - `container.resources.requests/limits`: `cpu: 2000m–4000m`, `memory: 8Gi–16Gi`
-     - `config.jetstream.fileStore.pvc.size: 100Gi–250Gi` on low-latency SSD
-       (`premium-rwo` / `gp3`) so NATS can buffer 30 minutes of BEP and CAL
-       streams during PostgreSQL maintenance windows.
-4. **PostgreSQL sizing, `pg_partman` intervals, connection limits, and read replicas:**
-   - **First-bootstrap immutability:** `bootstrap.partitionInterval` (default
-     `6 hour`) and `bootstrap.retentionDays` (default `30`) seed
-     `public.part_config` **only on the initial bootstrap**. Changing them in
-     `values.yaml` later does not alter existing tables. With 15 time-partitioned
-     analytics tables, `6 hour` creates 60 child partitions per day (`1,800`
-     child tables over 30 days), which keeps active B-tree indexes compact in RAM
-     for high-write clusters. For 60–90+ day retention windows, either choose
-     `bootstrap.partitionInterval: 12 hour` (or `1 day`) before first install or
-     raise PostgreSQL `max_locks_per_transaction` (`>= 256–512`).
-   - **Connection pool math (`max_connections`):** Every `bep-nats-sub-<i>`,
-     `bep-nats-pub`, and `grpc-api` pod opens a PostgreSQL connection pool. With
-     `12–16` subscribers, `4–10` publishers, and `4–8` API pods, total active
-     connections exceed PostgreSQL's stock `max_connections = 100`. Configure
-     PostgreSQL with `max_connections >= 300–500` (and `8–16 vCPU`,
-     `32–64 GiB RAM`, SSD storage with `10,000+` write IOPS).
-   - **Read replica offloading (`postgres.readReplica.host`):** Point
-     `postgres.readReplica.host` at a read replica so expensive dashboard Trends
-     aggregations and MCP/Barn Owl analytical queries do not contend with
-     subscriber batch `INSERT`s on the primary writer.
-5. **Scale `bep-nats-pub` and `grpc-api`:**
-   - Enable `autoscaling.publisher.enabled: true` (e.g. `minReplicas: 4`,
-     `maxReplicas: 12`) so bursty CI BEP and Buildbarn worker CAL streams scale
-     horizontally.
-   - Keep `api.downloadDirSizeLimit` (default `10Gi` `emptyDir`) larger than the
-     biggest concurrent target output `.tgz` download so `grpc-api` pods are not
-     evicted for ephemeral-storage pressure.
-6. **Scale DragonflyDB / Redis when `app.cacheEventsEnabled: true`:**
-   - Cache-event enrichment (`CACHE_ENRICH`) caches digest metadata in
-     DragonflyDB/Redis. For 5–10 Buildbarn shards, raise DragonflyDB memory in
-     `dragonflydb-values.yaml` (or the `Dragonfly` CR) from `2000Mi` to
-     `4Gi–8Gi`.
-
-### Progress log storage
-
-Build stdout/stderr (BEP progress events) is stored one of two ways, chosen per
-project in **Project Settings**, not by a chart value:
-
-- **Postgres (default)** — progress rows land in the partitioned
-  `public.progresses` table and age out with its retention window: **hourly
-  partitions kept for 2 days** (maintained by `progressesPartitionMaintenance`).
-  Nothing extra to configure.
-- **Cloud object storage** — enable *Store compressed invocation logs in cloud
-  object storage* on the project and set its bucket/container. Subscribers then
-  write progress logs directly to the bucket as compressed chunk objects and
-  skip Postgres entirely, which keeps the `progresses` table small on
-  high-volume installs.
-
-Object-storage mode has three operator-side requirements:
-
-1. **Bucket access for subscriber pods.** Subscribers use the shared chart
-   ServiceAccount, so enabling `azureWorkloadIdentity` or `gcpWorkloadIdentity`
-   (or otherwise granting that identity read/write on the bucket) is all the
-   wiring needed. Also confirm subscriber pods have network egress to the
-   storage endpoint; the Postgres-only path does not need it.
-2. **A lifecycle/TTL rule on the `progress/` prefix — required.** Hermetiq never
-   deletes these objects. Scope a lifecycle rule to
-   `<prefix>/progress/` in the bucket's own IaC and pick the retention you want
-   for build logs. Without one, objects accumulate indefinitely. Keep the rule
-   scoped to that prefix so it does not also expire trace profiles stored under
-   `<prefix>/<project>/<invocation>/`.
-3. **Retention is now the bucket's TTL, not a database window.** Once objects
-   expire, completed-build log requests return empty logs for those
-   invocations, the same way they do after a `progresses` partition ages out.
-
-Reads prefer object storage for these projects and fall back to `progresses`
-rows for invocations that have no objects, so invocations from before the
-setting was enabled stay readable. If the bucket is unreachable, subscribers
-keep ingesting by writing progress rows to Postgres rather than dropping
-events; watch `hermetiq_progress_chunk_flush_total{outcome="spilled"}` and treat
-a sustained rate as a storage problem to fix.
-
-#### Retention and sizing
-
-Progress logs are now served from exactly these two places, so **how long users
-can open a completed build's logs is set by whichever mode the project uses**:
-
-| Mode | Log retention |
-|------|---------------|
-| Postgres (default) | 2 days — the `public.progresses` partition window |
-| Cloud object storage | Whatever age your bucket lifecycle rule uses |
-
-For retention beyond two days, use object storage with the desired lifecycle
-age or raise the `public.progresses` retention in `pg_partman` and size
-PostgreSQL for the additional rows:
-
-```sql
-UPDATE public.part_config
-SET retention = '5 days'
-WHERE parent_table = 'public.progresses';
-```
-
-Progress rows are the highest-volume rows Hermetiq writes. Monitor database
-size, I/O, WAL, autovacuum, partition maintenance, and the default partitions
-before increasing database retention.
-
-Chunk sizing is tuned by three optional `subscriber.env` variables — defaults
-suit typical CI volumes and rarely need changing:
-`PROGRESS_BLOB_CHUNK_FLUSH_INTERVAL` (default `20s`; also the delay before a
-running build's newest output appears in live log tailing),
-`PROGRESS_BLOB_CHUNK_MAX_BYTES` (default `262144`), and
-`PROGRESS_BLOB_CHUNK_MAX_EVENTS` (default `1000`).
-
-### Scheduling, availability, and hardening
-
-#### Pod and container security context
-
-Every pod and container sets the Pod Security Standards `restricted` fields
-explicitly, which also covers the securityContext recommendations in the CIS
-Kubernetes Benchmark v2.0.1:
-- non-root UID/GID 65532
-- `seccompProfile: RuntimeDefault`
-- `allowPrivilegeEscalation: false` and `privileged: false`
-- `readOnlyRootFilesystem: true`
-- all capabilities dropped
-
-Workloads that need scratch space get a `/tmp` emptyDir. Every Pod rendered by
-this chart therefore satisfies `pod-security.kubernetes.io/enforce: restricted`.
-
-> **Co-installing Buildbarn and `RbeWorker` pools in the same namespace:** While
-> all `hermetiq` chart Pods comply with `restricted`, FUSE-based `RbeWorker`
-> pods (`mount.mountType: fuse`) and `hostPath` raw-block storage pods require
-> `privileged` containers (and `mount.mountType: host` workers require
-> `baseline` unless `security.Hardened=true`). If you deploy `hermetiq`,
-> `buildbarn`, and FUSE `RbeWorker`s in a single shared `hermetiq` namespace,
-> label that shared namespace `pod-security.kubernetes.io/enforce: privileged`,
-> or deploy Buildbarn and its workers into a separate namespace referenced via
-> `bootstrap.projectNamespace` so the Hermetiq namespace can enforce
-> `restricted`.
-
-On OpenShift, let the `restricted-v2` SCC assign IDs from the namespace range:
+Set top-level defaults with `k8sNodeScheduling`:
 
 ```yaml
-security:
-  pod:
-    runAsUser: null
-    runAsGroup: null
-    fsGroup: null
+k8sNodeScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+  tolerations: []
+```
+
+Set `nodeSelector` or `tolerations` under an individual workload to override the top-level values. Supported workload keys include `api`, `publisher`, `subscriber`, `dashboard`, `bootstrap`, `partitionMaintenance`, `progressesPartitionMaintenance`, and `targetTrendsRefresh`.
+
+### Pod disruption budgets and anti-affinity
+
+API and publisher Pods use preferred hostname anti-affinity and have
+`maxUnavailable: 1` PodDisruptionBudgets enabled by default. Keep at least two
+replicas when a PDB is enabled. Subscriber, dashboard, and Grafana proxy PDBs
+are disabled by default because those workloads commonly start with one
+replica; enable them only after choosing a replica count and disruption policy
+that permits node drains.
+Every rendered PDB sets `unhealthyPodEvictionPolicy: AlwaysAllow`, so a node
+drain can evict an unready Pod even when the healthy Pod budget is exhausted.
+Healthy Pods still follow `maxUnavailable`.
+
+### Additional environment variables
+
+Use workload-specific `env` maps for application flags that are not modeled as
+first-class chart values. Supported maps include `api.env`,
+`api.authProxy.env`, `publisher.env`, `publisher.authProxy.env`,
+`subscriber.env`, `dashboard.env`, `dashboard.oauth2Proxy.env`,
+`dashboard.prepareDashboardHtml.env`, `grafana.oauth2Proxy.env`,
+`bootstrap.env`, `partitionMaintenance.env`,
+`progressesPartitionMaintenance.env`, and `targetTrendsRefresh.env`.
+
+Do not set `INVOCATION_START_EVENT` in a workload map. Use
+`app.invocationStartEvent`; the chart puts it in the shared environment so the
+publisher and subscribers cannot drift into different ingest modes.
+
+Only the pass-through maps documented as templated accept Helm expressions.
+Do not use expressions in `hosts.*`, which several templates consume verbatim.
+
+## Dashboard
+
+### Feature flags
+
+The chart sets dashboard feature flags explicitly for on-prem installations:
+
+| Feature | Chart setting | Default |
+| --- | --- | --- |
+| Barn Owl | `assistant.enabled` | Disabled |
+| RBE Infrastructure | `rbe.enabled` plus an explicit project access policy | Disabled |
+| BB Config Editor | Unavailable in this chart | Disabled |
+
+These settings render `REACT_APP_ENABLE_ASSISTANT`,
+`REACT_APP_ENABLE_RBE_UI`, and `REACT_APP_ENABLE_BB_CONFIG` respectively. The
+BB Config flag is always `false`; this chart does not deploy the editor's
+backend services. Do not override these variables in `dashboard.env`; Helm
+rejects conflicting entries. Other dashboard environment settings remain
+available through that map.
+
+RBE cost allocation is controlled by `app.costReportTickerEnabled`
+(`REACT_APP_COST_INTEGRATION_ENABLED`); Kubernetes Events are controlled by
+`app.victoriaLogsEnabled` (`REACT_APP_ENABLE_VICTORIA_LOGS`). Both default to
+`false` for chart installs. Enable each integration only when its source is
+configured. Disabled integrations make no cost/event requests and hide their
+RBE tabs, links, and allocation/pricing columns. Current Kubernetes fleet,
+scheduler, pod and node snapshots and core metrics remain available without
+OpenCost or VictoriaLogs. These flags are also managed by the chart and cannot
+be overridden in `dashboard.env`.
+
+Use an updated dashboard image containing the runtime handling for these
+flags. Changing chart values with an older image does not add that behavior;
+the new on-prem assistant and editor defaults require the matching dashboard
+application release.
+
+`rbac.rules.rbeFleet` grants the API Kubernetes reads for fleet ownership and
+scaler information. It does not enable the RBE page. `rbe.enabled` controls
+page visibility and requires the project's access policy; it does not grant
+Kubernetes permissions. RBE Infrastructure can run with
+`assistant.enabled: false`; granting fleet reads alone leaves it hidden.
+
+BB Config Editor is deferred from this chart release. Its Git-backed bbconfig
+service and isolated Jsonnet evaluator are not installed by enabling Barn Owl
+or RBE Infrastructure.
+
+### Quickstart customization
+
+The dashboard Quickstart page renders Bazel remote caching instructions from
+`dashboard.remoteCacheUrl`. Leave it empty for the default on-prem Buildbarn
+frontend convention, `grpcs://bb.<hosts.domainBase>`, or set it explicitly when
+Buildbarn uses a separate domain or an overridden frontend gRPC host:
+
+```yaml
 dashboard:
-  security:
-    runAsUser: null
-    runAsGroup: null
+  remoteCacheUrl: grpcs://bb.example.com
 ```
 
-#### Network policies
-
-The chart renders no NetworkPolicy by default. Set `networkPolicy.enabled=true`
-to add ingress-only policies that admit each component's Service target ports
-and nothing else: grpc-api on `50081` (gRPC and gRPC-web), `8008` (REST and
-metrics), and `5150` (MCP); bep-nats-pub on `50081` behind grpc-auth-proxy or
-`50091` without it; subscribers on `8008` (metrics); the dashboard on `8888`
-behind oauth2-proxy or its app port without it; and the Grafana proxy on
-`8888`. Bootstrap and maintenance Jobs accept no ingress.
+The dashboard reads optional static Quickstart customization from `/quickstart-config/quickstart-config.json`. Only Step 1 is customizable. Use `dashboard.quickstartConfig.data` for inline chart-managed JSON:
 
 ```yaml
-networkPolicy:
-  enabled: true
-  ingressFrom:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: envoy-gateway-system
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: buildbarn
-  metricsFrom:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: monitoring
+dashboard:
+  quickstartConfig:
+    data:
+      step1:
+        title: Install Your Company Credential Helper
+        bullets:
+          - Obtain the credential helper script from your platform administrator.
+          - - text: "Save it under "
+            - code: "%workspace%/tools"
+        downloads:
+          bash: false
+          python: false
+        actions:
+          - label: Open Internal Helper Docs
+            href: https://docs.example.com/hermetiq/credential-helper
+        warning:
+          title: Security Warning
+          paragraphs:
+            - Do not commit credential helper scripts or generated credentials.
 ```
 
-An empty `ingressFrom` admits any source on those ports. When you restrict it,
-include every caller:
-- your ingress controller or Gateway, which reaches the API, publisher,
-  dashboard, and Grafana proxy
-- Buildbarn worker pods, which send completed-action logs to the publisher's
-  gRPC Service port (`:50091`)
-
-`metricsFrom` restricts port `8008` on the publisher and subscribers; leave it
-empty to admit any source. grpc-api also serves its REST API on `8008`, so
-there the port admits `ingressFrom` plus `metricsFrom`, and any source while
-`ingressFrom` is empty.
-
-For egress rules or other selectors, add policies through `extraObjects` or
-alongside the release. Select pods by `app.kubernetes.io/component`: `api`,
-`publisher`, `subscriber`, `dashboard`, `grafana-auth-proxy`, `maintenance`, or
-`bootstrap`.
-
-Egress needs to reach:
-- PostgreSQL, DragonflyDB, NATS, and the OTLP collector
-- your OIDC provider
-- VictoriaMetrics (`victoriaMetrics.baseUrl`)
-- the Kubernetes API server
-- the Hermetiq license service (`license.saasUrl`)
-
-#### Workload identity
-
-The chart annotates the shared ServiceAccount for GKE or labels/annotates Pods
-for Azure workload identity:
+Or mount an externally managed ConfigMap:
 
 ```yaml
-gcpWorkloadIdentity:
-  enabled: true
-  serviceAccount: hermetiq@project-id.iam.gserviceaccount.com
-
-# Or on AKS:
-azureWorkloadIdentity:
-  enabled: true
-  clientId: <azure-client-id>
+dashboard:
+  quickstartConfig:
+    existingConfigMap: web-ui-quickstart-config
+    configMapKey: quickstart-config.json
 ```
 
-On GKE, create the Google service account, grant it the object-storage roles
-the enabled features need, and allow the chart's Kubernetes ServiceAccount
-(`bep-nats` in the release namespace by default) to impersonate it before
-enabling the value:
+`existingConfigMap` and `data` are mutually exclusive. The dashboard ignores unknown fields and never renders raw HTML from this file.
 
-```bash
-gcloud iam service-accounts create hermetiq-bep \
-  --display-name="Hermetiq BEP NATS" \
-  --project=<gcp-project>
-
-gcloud iam service-accounts add-iam-policy-binding \
-  hermetiq-bep@<gcp-project>.iam.gserviceaccount.com \
-  --role=roles/iam.workloadIdentityUser \
-  --member="serviceAccount:<gcp-project>.svc.id.goog[hermetiq/bep-nats]"
-```
-
-The chart then adds the `iam.gke.io/gcp-service-account` annotation to the
-ServiceAccount. On AKS it adds the `azure.workload.identity/use` label to the
-ServiceAccount and Pods and the `azure.workload.identity/client-id` annotation
-to the ServiceAccount.
-
-For AWS IRSA or another provider, use `serviceAccount.annotations`. Grant the
-resulting identity only the object-storage permissions required by enabled
-features. Progress-log object storage needs subscriber read/write access;
-trace and output-file features may need additional read access.
-
-#### ServiceAccount tokens and RBAC
+## ServiceAccount tokens and RBAC
 
 The shared `bep-nats` ServiceAccount mounts a token by default. Per-workload
 `automountServiceAccountToken` values override the shared setting.
@@ -1153,135 +1150,18 @@ capabilities, disables privilege escalation, uses a read-only root filesystem,
 and applies `RuntimeDefault` seccomp. Test overrides with server-side dry-run
 and the target cluster's admission policies.
 
-#### Node scheduling
+The API's Buildbarn diagnostics inspect namespaced Deployments, StatefulSets,
+and ConfigMaps. The default `rbac.rules.deployments=true` and
+`rbac.rules.configMaps=true` grants are read-only (`get` and `list`) and are
+bound with a namespaced RoleBinding. They cannot read another namespace,
+Secrets, or modify resources.
 
-Set top-level defaults with `k8sNodeScheduling`:
+Disabling these grants leaves metrics queries available but removes the
+installed-component inventory and Buildbarn configuration context from MCP
+diagnostics. The API needs a mounted ServiceAccount token to use workload and
+`RbeWorker` discovery.
 
-```yaml
-k8sNodeScheduling:
-  nodeSelector:
-    kubernetes.io/arch: amd64
-    kubernetes.io/os: linux
-  tolerations: []
-```
-
-Set `nodeSelector` or `tolerations` under an individual workload to override the top-level values. Supported workload keys include `api`, `publisher`, `subscriber`, `dashboard`, `bootstrap`, `partitionMaintenance`, `progressesPartitionMaintenance`, and `targetTrendsRefresh`.
-
-#### Pod disruption budgets and anti-affinity
-
-API and publisher Pods use preferred hostname anti-affinity and have
-`maxUnavailable: 1` PodDisruptionBudgets enabled by default. Keep at least two
-replicas when a PDB is enabled. Subscriber, dashboard, and Grafana proxy PDBs
-are disabled by default because those workloads commonly start with one
-replica; enable them only after choosing a replica count and disruption policy
-that permits node drains.
-Every rendered PDB sets `unhealthyPodEvictionPolicy: AlwaysAllow`, so a node
-drain can evict an unready Pod even when the healthy Pod budget is exhausted.
-Healthy Pods still follow `maxUnavailable`.
-
-#### Additional environment variables
-
-Use workload-specific `env` maps for application flags that are not modeled as
-first-class chart values. Supported maps include `api.env`,
-`api.authProxy.env`, `publisher.env`, `publisher.authProxy.env`,
-`subscriber.env`, `dashboard.env`, `dashboard.oauth2Proxy.env`,
-`dashboard.prepareDashboardHtml.env`, `grafana.oauth2Proxy.env`,
-`bootstrap.env`, `partitionMaintenance.env`,
-`progressesPartitionMaintenance.env`, and `targetTrendsRefresh.env`.
-
-Do not set `INVOCATION_START_EVENT` in a workload map. Use
-`app.invocationStartEvent`; the chart puts it in the shared environment so the
-publisher and subscribers cannot drift into different ingest modes.
-
-Only the pass-through maps documented as templated accept Helm expressions.
-Do not use expressions in `hosts.*`, which several templates consume verbatim.
-
-### Dashboard configuration
-
-The chart sets dashboard feature flags explicitly for on-prem installations:
-
-| Feature | Chart setting | Default |
-| --- | --- | --- |
-| Barn Owl | `assistant.enabled` | Disabled |
-| RBE Infrastructure | `rbe.enabled` plus an explicit project access policy | Disabled |
-| BB Config Editor | Unavailable in this chart | Disabled |
-
-These settings render `REACT_APP_ENABLE_ASSISTANT`,
-`REACT_APP_ENABLE_RBE_UI`, and `REACT_APP_ENABLE_BB_CONFIG` respectively. The
-BB Config flag is always `false`; this chart does not deploy the editor's
-backend services. Do not override these variables in `dashboard.env`; Helm
-rejects conflicting entries. Other dashboard environment settings remain
-available through that map.
-
-RBE cost allocation is controlled by `app.costReportTickerEnabled`
-(`REACT_APP_COST_INTEGRATION_ENABLED`); Kubernetes Events are controlled by
-`app.victoriaLogsEnabled` (`REACT_APP_ENABLE_VICTORIA_LOGS`). Both default to
-`false` for chart installs. Enable each integration only when its source is
-configured. Disabled integrations make no cost/event requests and hide their
-RBE tabs, links, and allocation/pricing columns. Current Kubernetes fleet,
-scheduler, pod and node snapshots and core metrics remain available without
-OpenCost or VictoriaLogs. These flags are also managed by the chart and cannot
-be overridden in `dashboard.env`.
-
-Use an updated dashboard image containing the runtime handling for these
-flags. Changing chart values with an older image does not add that behavior;
-the new on-prem assistant and editor defaults require the matching dashboard
-application release.
-
-`rbac.rules.rbeFleet` grants the API Kubernetes reads for fleet ownership and
-scaler information. It does not enable the RBE page. `rbe.enabled` controls
-page visibility and requires the project's access policy; it does not grant
-Kubernetes permissions. RBE Infrastructure can run with
-`assistant.enabled: false`; granting fleet reads alone leaves it hidden.
-
-#### Quickstart customization
-
-The dashboard Quickstart page renders Bazel remote caching instructions from
-`dashboard.remoteCacheUrl`. Leave it empty for the default on-prem Buildbarn
-frontend convention, `grpcs://bb.<hosts.domainBase>`, or set it explicitly when
-Buildbarn uses a separate domain or an overridden frontend gRPC host:
-
-```yaml
-dashboard:
-  remoteCacheUrl: grpcs://bb.example.com
-```
-
-The dashboard reads optional static Quickstart customization from `/quickstart-config/quickstart-config.json`. Only Step 1 is customizable. Use `dashboard.quickstartConfig.data` for inline chart-managed JSON:
-
-```yaml
-dashboard:
-  quickstartConfig:
-    data:
-      step1:
-        title: Install Your Company Credential Helper
-        bullets:
-          - Obtain the credential helper script from your platform administrator.
-          - - text: "Save it under "
-            - code: "%workspace%/tools"
-        downloads:
-          bash: false
-          python: false
-        actions:
-          - label: Open Internal Helper Docs
-            href: https://docs.example.com/hermetiq/credential-helper
-        warning:
-          title: Security Warning
-          paragraphs:
-            - Do not commit credential helper scripts or generated credentials.
-```
-
-Or mount an externally managed ConfigMap:
-
-```yaml
-dashboard:
-  quickstartConfig:
-    existingConfigMap: web-ui-quickstart-config
-    configMapKey: quickstart-config.json
-```
-
-`existingConfigMap` and `data` are mutually exclusive. The dashboard ignores unknown fields and never renders raw HTML from this file.
-
-### External configuration ConfigMaps
+## External configuration ConfigMaps
 
 Several JSON configuration files can be supplied by a ConfigMap owned outside
 the Helm release. The selected key is mounted at the same container path as the
@@ -1302,7 +1182,7 @@ The dashboard Quickstart ConfigMap uses a Pod checksum when its data comes
 from chart values. For `dashboard.quickstartConfig.existingConfigMap`, change a
 `commonAnnotations` value on the next Helm upgrade to roll the dashboard pod.
 
-#### Cache TTL configuration
+### Cache TTL configuration
 
 The API reads cache TTL settings from `/config/cache-ttl/cache_ttl.json`. By default, the chart renders `files/config/cache_ttl.json` into the `bep-cache-ttl-config` ConfigMap. To override it with an externally managed ConfigMap, provide the ConfigMap name and key:
 
@@ -1315,71 +1195,172 @@ cacheTtl:
 
 The selected key is always mounted to `/config/cache-ttl/cache_ttl.json`, so the API container path does not change. Helm cannot hash data from an external ConfigMap; update `rolloutChecksum` when the ConfigMap contents change and the API pods need a rollout.
 
-#### PromQL query configuration
+## Progress log storage
 
-The MCP infrastructure tools read query templates from
-`/config/promql/promql.json`. The packaged templates target the recording rules
-shipped with the Hermetiq Buildbarn chart. A self-managed Buildbarn with
-different recording-rule names can provide a replacement ConfigMap:
+Build stdout/stderr (BEP progress events) is stored one of two ways, chosen per
+project in **Project Settings**, not by a chart value:
 
-```yaml
-promqlQueries:
-  existingConfigMap: hermetiq-promql-config
-  configMapKey: promql.json
-  rolloutChecksum: "sha256-or-version-of-the-config"
+- **Postgres (default)** — progress rows land in the partitioned
+  `public.progresses` table and age out with its retention window: **hourly
+  partitions kept for 2 days** (maintained by `progressesPartitionMaintenance`).
+  Nothing extra to configure.
+- **Cloud object storage** — enable *Store compressed invocation logs in cloud
+  object storage* on the project and set its bucket/container. Subscribers then
+  write progress logs directly to the bucket as compressed chunk objects and
+  skip Postgres entirely, which keeps the `progresses` table small on
+  high-volume installs.
+
+Object-storage mode has three operator-side requirements:
+
+1. **Bucket access for subscriber pods.** Subscribers use the shared chart
+   ServiceAccount, so enabling `azureWorkloadIdentity` or `gcpWorkloadIdentity`
+   (or otherwise granting that identity read/write on the bucket) is all the
+   wiring needed. Also confirm subscriber pods have network egress to the
+   storage endpoint; the Postgres-only path does not need it.
+2. **A lifecycle/TTL rule on the `progress/` prefix — required.** Hermetiq never
+   deletes these objects. Scope a lifecycle rule to
+   `<prefix>/progress/` in the bucket's own IaC and pick the retention you want
+   for build logs. Without one, objects accumulate indefinitely. Keep the rule
+   scoped to that prefix so it does not also expire trace profiles stored under
+   `<prefix>/<project>/<invocation>/`.
+3. **Retention is now the bucket's TTL, not a database window.** Once objects
+   expire, completed-build log requests return empty logs for those
+   invocations, the same way they do after a `progresses` partition ages out.
+
+Reads prefer object storage for these projects and fall back to `progresses`
+rows for invocations that have no objects, so invocations from before the
+setting was enabled stay readable. If the bucket is unreachable, subscribers
+keep ingesting by writing progress rows to Postgres rather than dropping
+events; watch `hermetiq_progress_chunk_flush_total{outcome="spilled"}` and treat
+a sustained rate as a storage problem to fix.
+
+### Retention and sizing
+
+Progress logs are now served from exactly these two places, so **how long users
+can open a completed build's logs is set by whichever mode the project uses**:
+
+| Mode | Log retention |
+|------|---------------|
+| Postgres (default) | 2 days — the `public.progresses` partition window |
+| Cloud object storage | Whatever age your bucket lifecycle rule uses |
+
+For retention beyond two days, use object storage with the desired lifecycle
+age or raise the `public.progresses` retention in `pg_partman` and size
+PostgreSQL for the additional rows:
+
+```sql
+UPDATE public.part_config
+SET retention = '5 days'
+WHERE parent_table = 'public.progresses';
 ```
 
-Partial query overrides are supported. Unknown template placeholders and blank
-required queries fail API startup instead of silently returning incomplete
-diagnostics.
+Progress rows are the highest-volume rows Hermetiq writes. Monitor database
+size, I/O, WAL, autovacuum, partition maintenance, and the default partitions
+before increasing database retention.
 
-Scheduler queue assessments join measurements on `(instance_name_prefix,
-platform, size_class)`. Overrides for executing peaks, saturated minutes, and
-completed actions must preserve all three labels; aggregating away the prefix
-combines shared and private queues and prevents private-pool capacity diagnosis.
-Deploy the prefix-preserving query configuration with the corresponding API
-update. These templates load at startup, so restart the API after an external
-ConfigMap update (or change `promqlQueries.rolloutChecksum`).
+Chunk sizing is tuned by three optional `subscriber.env` variables — defaults
+suit typical CI volumes and rarely need changing:
+`PROGRESS_BLOB_CHUNK_FLUSH_INTERVAL` (default `20s`; also the delay before a
+running build's newest output appears in live log tailing),
+`PROGRESS_BLOB_CHUNK_MAX_BYTES` (default `262144`), and
+`PROGRESS_BLOB_CHUNK_MAX_EVENTS` (default `1000`).
 
+## Cache-event analytics
 
-### Metrics-backed infrastructure tools
+Cache events come from the Buildbarn chart's grpc-cache-proxy sidecar, which
+publishes Action Cache hits and misses to the NATS this chart uses. For them to
+be stored and shown:
 
-`victoriaMetrics.metricsEnabled` defaults to `false`. Enable it only when the
-API can reach the configured VictoriaMetrics read endpoint. When disabled, the
-five PromQL-backed Buildbarn health tools and the two VictoriaLogs-backed tools
-are not registered; the remaining MCP tools are unaffected.
+- The sidecar's `cacheEvents.numShards` must equal `app.streamPartitionCount`
+  (`4` in `custom-values/hermetiq-values.yaml` and `charts/buildbarn/values.yaml`;
+  `9` in `charts/hermetiq/values.yaml`),
+  and its `cacheEvents.subjectPrefix` must equal `cache.subjectPrefix` in the
+  NATS stream config (`cache` in the packaged file). Events published to
+  subjects nothing consumes are discarded.
+- **Action Cache Hit Tracker** must be on in the project's settings. It decides
+  whether the project's events are stored at all. New projects start with it
+  on.
+- `app.cacheEventsEnabled: true` turns on the cache-event queries and MCP tools
+  by setting `CACHE_EVENTS_ENABLED` on the API. It defaults to `false` and does
+  not affect ingestion, which follows `cache.enabled` in the stream config
+  (`true` in the packaged file).
 
-`victoriaMetrics.projectLabelEnabled` controls whether the packaged
-PromQL selectors are scoped to the project, and `victoriaMetrics.projectLabel`
-(default `namespace`) names the label. With `namespace`, queries match the
-project's Buildbarn namespace setting, which must name the namespace Buildbarn
-runs in; the Buildbarn chart's recording rules keep that label. Keep it `false`
-for a self-managed, single-tenant Buildbarn whose metrics do not follow those
-rules.
+The publisher keeps each project's Action Cache Hit Tracker setting in a
+JetStream KV bucket named `<cache.subjectPrefix>_tracking_policy`, so the
+sidecar can stop sending a disabled project's events before they reach NATS.
+The publisher creates the bucket on first start with file storage and the
+cache stream's replica count (`1` in the packaged file). To change either, add
+a `policyBucket` block to `cache` in your stream config:
 
-Set `app.victoriaLogsEnabled=true` only when VictoriaLogs is deployed and reachable.
-Set `api.env.VL_BASE_URL` to its HTTP API endpoint and keep
-`victoriaMetrics.metricsEnabled=true` for the shared metrics/log client.
-For example, to add event history independently of OpenCost:
+```json
+"cache": {
+  "policyBucket": { "storage": "file", "replicas": 3 }
+}
+```
+
+As with the streams, an existing bucket keeps its settings, and replicas above
+1 need a clustered NATS. Sidecar configuration, including per-invocation
+opt-in, lives in the Buildbarn chart reference.
+
+## RBE Infrastructure
+
+RBE Infrastructure is separately opt-in and can run without paid assistant
+calls. Enable it for explicit **project IDs**, matching the IDs in Hermetiq;
+the policy keys are not Kubernetes namespace names:
 
 ```yaml
-app:
-  victoriaLogsEnabled: true
-  costReportTickerEnabled: false
-api:
-  env:
-    VL_BASE_URL: http://victorialogs.observability.svc.cluster.local:9428
+rbe:
+  enabled: true
+  accessPolicy:
+    projects:
+      "0":
+        enabled: true
+        minimum_role: viewer
+rbac:
+  rules:
+    rbeFleet: true
 victoriaMetrics:
   metricsEnabled: true
-  baseUrl: http://vmselect.observability.svc.cluster.local:8481/select/0/prometheus
+  projectLabelEnabled: true
+  projectLabel: namespace
 ```
 
-These services are supplied by the operator. Without VictoriaLogs, Barn Owl
-keeps core metrics and Kubernetes evidence and identifies event history as
-unavailable. An enabled source that fails is reported as incomplete coverage;
-it does not establish that there were no events or incidents.
+The example uses `bootstrap.projectId: "0"`. Every project still passes the
+server's access policy and role checks. `minimum_role` accepts `viewer`,
+`builder`, or `admin`; authenticated on-prem readers without stored membership
+have viewer access. An administrator cannot bypass a disabled project rule.
+The page and all live assistant/MCP infrastructure reads share this policy.
 
-### Barn Owl AI Assistant
+An external policy can instead be selected using
+`rbe.accessPolicy.existingConfigMap`, `configMapKey`, and `rolloutChecksum`.
+Its JSON is `{"version":1,"projects":{"0":{"enabled":true,"minimum_role":"viewer"}}}`.
+Do not also set inline `projects`. RBE policy can be mounted independently of
+assistant enablement; changing managed policy rolls API pods automatically.
+
+Configure the VictoriaMetrics read endpoint with `victoriaMetrics.baseUrl`.
+RBE metrics and namespace-scoped assistant evidence require
+`victoriaMetrics.projectLabelEnabled: true` and `projectLabel: namespace`;
+unscoped metrics are reported as unavailable. The project's saved Buildbarn
+namespace must match the metrics' `namespace` label
+and the Kubernetes resources being inspected. For a new install,
+`bootstrap.projectNamespace` defaults to the release namespace; verify the
+project settings when upgrading an existing database. VictoriaLogs and OpenCost
+remain optional, configured through their existing values.
+
+The existing workload, Pod, ConfigMap, and RbeWorker reads remain necessary.
+`rbac.rules.rbeFleet` adds only namespaced `get/list` access to ReplicaSets,
+KEDA ScaledObjects, and HorizontalPodAutoscalers. This permission setting is
+independent of `rbe.enabled`; it cannot enable the page or bypass its project
+access policy. For Buildbarn in a different
+namespace, grant the API ServiceAccount equivalent reads there. No node,
+`pods/exec`, or infrastructure-write grants are added. Missing grants are
+reported as unavailable or not permitted.
+
+Verify that an allowed project shows RBE Infrastructure and its fleet data;
+then verify a disabled project or insufficient role is denied. Enable
+`assistant.enabled` as well to use Barn Owl from the page and worker pools.
+
+## Barn Owl AI assistant
 
 Barn Owl is Hermetiq's AI Agent that optimizes your Bazel and Buildbarn builds; 
 chart 0.9.6 adds optional Anthropic-backed Barn Owl and its DSPy prompt-runtime sidecar.
@@ -1488,7 +1469,7 @@ release/mirror tag and architecture. For turns cut off near five minutes,
 inspect the effective route and external load-balancer timeouts. Rotate the
 API-key Secret and restart the API Deployment so both containers read it again.
 
-#### Optional JEV model routing
+### JEV model routing
 
 JEV can classify a freeform turn and select a model tier. It is disabled by
 default. The existing API handles classification; prompt-runtime, the browser,
@@ -1557,111 +1538,7 @@ after rotating the Secret so API pods restart with the new key. Changes to the
 Secret reference or endpoint also roll the API pods; inline policy changes
 use the existing assistant-policy checksum.
 
-### On-prem RBE Infrastructure
-
-RBE Infrastructure is separately opt-in and can run without paid assistant
-calls. Enable it for explicit **project IDs**, matching the IDs in Hermetiq;
-the policy keys are not Kubernetes namespace names:
-
-```yaml
-rbe:
-  enabled: true
-  accessPolicy:
-    projects:
-      "0":
-        enabled: true
-        minimum_role: viewer
-rbac:
-  rules:
-    rbeFleet: true
-victoriaMetrics:
-  metricsEnabled: true
-  projectLabelEnabled: true
-  projectLabel: namespace
-```
-
-The example uses `bootstrap.projectId: "0"`. Every project still passes the
-server's access policy and role checks. `minimum_role` accepts `viewer`,
-`builder`, or `admin`; authenticated on-prem readers without stored membership
-have viewer access. An administrator cannot bypass a disabled project rule.
-The page and all live assistant/MCP infrastructure reads share this policy.
-
-An external policy can instead be selected using
-`rbe.accessPolicy.existingConfigMap`, `configMapKey`, and `rolloutChecksum`.
-Its JSON is `{"version":1,"projects":{"0":{"enabled":true,"minimum_role":"viewer"}}}`.
-Do not also set inline `projects`. RBE policy can be mounted independently of
-assistant enablement; changing managed policy rolls API pods automatically.
-
-Configure the VictoriaMetrics read endpoint with `victoriaMetrics.baseUrl`.
-RBE metrics and namespace-scoped assistant evidence require
-`victoriaMetrics.projectLabelEnabled: true` and `projectLabel: namespace`;
-unscoped metrics are reported as unavailable. The project's saved Buildbarn
-namespace must match the metrics' `namespace` label
-and the Kubernetes resources being inspected. For a new install,
-`bootstrap.projectNamespace` defaults to the release namespace; verify the
-project settings when upgrading an existing database. VictoriaLogs and OpenCost
-remain optional, configured through their existing values.
-
-The existing workload, Pod, ConfigMap, and RbeWorker reads remain necessary.
-`rbac.rules.rbeFleet` adds only namespaced `get/list` access to ReplicaSets,
-KEDA ScaledObjects, and HorizontalPodAutoscalers. This permission setting is
-independent of `rbe.enabled`; it cannot enable the page or bypass its project
-access policy. For Buildbarn in a different
-namespace, grant the API ServiceAccount equivalent reads there. No node,
-`pods/exec`, or infrastructure-write grants are added. Missing grants are
-reported as unavailable or not permitted.
-
-Verify that an allowed project shows RBE Infrastructure and its fleet data;
-then verify a disabled project or insufficient role is denied. Enable
-`assistant.enabled` as well to use Barn Owl from the page and worker pools.
-
-### BB Config Editor
-
-BB Config Editor is deferred from this chart release. Its Git-backed bbconfig
-service and isolated Jsonnet evaluator are not installed by enabling Barn Owl
-or RBE Infrastructure.
-
-### Stream configuration
-
-The chart renders `files/config/nats_streams.json` into the
-`bep-nats-stream-config` ConfigMap by default.
-
-> ⚠ **Replica counts in the packaged `nats_streams.json`:** The packaged file
-> sets `"replicas": 3` on `bep.buildToolStream` (`BEP_BUILD_TOOL_<i>`) and
-> `"replicas": 1` on `FWD_STREAM`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`, and
-> `ACTION_STREAM_<i>`. Because `BEP_BUILD_TOOL_<i>` uses `"replicas": 3`,
-> JetStream requires a **3+ server NATS cluster** (`config.cluster.enabled: true`,
-> `replicas: 3`) or subscriber startup fails to create the stream and no build
-> events are ingested. For a single-server test NATS, override
-> `nats_streams.json` via `nats.streamConfig.existingConfigMap` with
-> `"replicas": 1`; for full NATS node-loss resilience on action and cache-enrich
-> streams in production, raise `action.stream.replicas` and
-> `cacheEnrich.stream.replicas` to `3` in your custom ConfigMap.
-
-To use an externally managed stream and consumer config, create a ConfigMap
-with your JSON and point the chart at it:
-
-```yaml
-nats:
-  streamConfig:
-    existingConfigMap: hermetiq-nats-stream-config
-    configMapKey: nats_streams.json
-    rolloutChecksum: "sha256-or-version-of-the-config"
-```
-
-The selected key is mounted to `/config/nats-streams/nats_streams.json` for
-publisher and subscriber pods, so the container path stays fixed. Helm cannot
-hash external ConfigMap data; update `rolloutChecksum` when the external
-ConfigMap changes and the publisher/subscriber pods need a rollout.
-
-Per-consumer `workerQueueCapacity`, `pipelineMaxQueuedMessages`, and
-`pipelineMaxQueuedBytes` tune fetch-ahead. Keep `maxAckPending` at or above
-`pipelineMaxQueuedMessages` so the server does not cap the pipeline first.
-`storeBatchMaxEvents`, `storeBatchMaxWait`, and `storeBatchParallelism` tune
-database-call coalescing. These are advanced settings; start with the packaged
-file and change them only with ingest, NATS, and database telemetry in view.
-
-### Cost integration
+## Cost reporting
 
 `app.costReportTickerEnabled` is the single switch for OpenCost-backed cost
 reporting. It defaults to `false`, which disables OpenCost reads and the API cost report ticker
@@ -1681,90 +1558,188 @@ mounting enabled (the API inherits
 `serviceAccount.automountServiceAccountToken=true` by default) so grpc-api can
 use the grant, or disable this rule if RbeWorker discovery is not needed.
 
-### Cache-event analytics
+## Large-scale deployments and high-throughput ingest
 
-Cache events come from the Buildbarn chart's grpc-cache-proxy sidecar, which
-publishes Action Cache hits and misses to the NATS this chart uses. For them to
-be stored and shown:
+For high-concurrency Bazel + RBE environments (thousands of builds per day,
+5–10+ Buildbarn storage shards, and large worker fleets), size the ingest
+pipeline, NATS JetStream, and PostgreSQL across six areas before go-live:
 
-- The sidecar's `cacheEvents.numShards` must equal `app.streamPartitionCount`
-  (`4` in `custom-values/hermetiq-values.yaml` and `charts/buildbarn/values.yaml`;
-  `9` in `charts/hermetiq/values.yaml`),
-  and its `cacheEvents.subjectPrefix` must equal `cache.subjectPrefix` in the
-  NATS stream config (`cache` in the packaged file). Events published to
-  subjects nothing consumes are discarded.
-- **Action Cache Hit Tracker** must be on in the project's settings. It decides
-  whether the project's events are stored at all. New projects start with it
-  on.
-- `app.cacheEventsEnabled: true` turns on the cache-event queries and MCP tools
-  by setting `CACHE_EVENTS_ENABLED` on the API. It defaults to `false` and does
-  not affect ingestion, which follows `cache.enabled` in the stream config
-  (`true` in the packaged file).
+1. **Offload BEP progress logs (`stdout`/`stderr`) to Cloud Object Storage (mandatory at scale):**
+   - By default, build `stdout`/`stderr` progress chunks are written as `BYTEA`
+     rows into PostgreSQL `public.progresses`. Under heavy CI concurrency,
+     progress rows account for 80–90% of PostgreSQL write throughput, WAL volume,
+     and disk I/O.
+   - Configure `app.rawBepExportBucket` (`gs://<bucket>/<prefix>`,
+     `s3://<bucket>/<prefix>`, or `azblob://<container>/<prefix>`), bind cloud
+     Workload Identity (`gcpWorkloadIdentity`, `azureWorkloadIdentity`, or AWS
+     IRSA on `serviceAccount`), enable *Store compressed invocation logs in cloud
+     object storage* in Project Settings, and configure a bucket lifecycle TTL
+     rule on `<prefix>/progress/` (see [Progress log storage](#progress-log-storage)).
+2. **Size `app.streamPartitionCount` and align Buildbarn `cacheEvents.numShards`:**
+   - Each partition `0..N-1` creates an independent set of JetStream streams
+     (`BEP_BUILD_TOOL_<i>`, `CACHE_EVENTS_<i>`, `CACHE_ENRICH_<i>`,
+     `ACTION_STREAM_<i>`) and a dedicated `bep-nats-sub-<i>` Deployment
+     (`subscriber.replicas: 1` per partition).
+   - Pick `app.streamPartitionCount` **before** production traffic starts
+     (scaling down later strands unconsumed messages on higher-numbered streams)
+     and set Buildbarn's `frontend.grpcCacheProxy.cacheEvents.numShards` to the
+     **exact same integer**:
 
-The publisher keeps each project's Action Cache Hit Tracker setting in a
-JetStream KV bucket named `<cache.subjectPrefix>_tracking_policy`, so the
-sidecar can stop sending a disabled project's events before they reach NATS.
-The publisher creates the bucket on first start with file storage and the
-cache stream's replica count (`1` in the packaged file). To change either, add
-a `policyBucket` block to `cache` in your stream config:
+     | Deployment tier | Typical build volume | Buildbarn shards | Recommended `app.streamPartitionCount` (`== cacheEvents.numShards`) |
+     | :--- | :--- | :--- | :--- |
+     | **Starter / Small** | `<= 500` builds/day | 1–3 shards | `4` (`custom-values/hermetiq-values.yaml` default) |
+     | **Medium Production** | `500–5,000` builds/day | 3–5 shards | `8`–`9` (`charts/hermetiq/values.yaml` default is `9`) |
+     | **Large Scale (10 TiB+ RBE)** | `5,000–25,000+` builds/day | 5–10 shards | `12`–`16` |
 
-```json
-"cache": {
-  "policyBucket": { "storage": "file", "replicas": 3 }
-}
+   - Keep `subscriber.replicas: 1` (each partition Deployment processes one
+     shard in order; `RollingUpdate` uses `maxSurge: 0, maxUnavailable: 1` to
+     avoid concurrent partition consumers) and raise `subscriber.resources` to
+     `cpu: 1–2`, `memory: 2Gi–4Gi` when enabling large batch coalescing.
+3. **Size NATS JetStream `memoryStore` and `fileStore` for high partition counts:**
+   - In the packaged `files/config/nats_streams.json`, each `CACHE_EVENTS_<i>`
+     partition uses `"storage": "memory"` with `"maxBytes": 134217728`
+     (**128 MiB per partition**), while `BEP_BUILD_TOOL_<i>` (`"replicas": 3`),
+     `ACTION_STREAM_<i>`, and `CACHE_ENRICH_<i>` use `"storage": "file"`.
+   - **Memory math trap:** At `12–16` partitions, `CACHE_EVENTS_0..15` alone can
+     reserve `1.5 GiB–2.0 GiB` of NATS `memoryStore`, exceeding the `1Gi`
+     `memoryStore.maxSize` and `2Gi` container limit in the starter
+     `custom-values/nats-values.yaml`.
+   - For `8–16` partitions, scale `nats-values.yaml` to:
+     - `config.jetstream.memoryStore.maxSize: 4Gi` (or `8Gi` at 16 partitions)
+     - `container.resources.requests/limits`: `cpu: 2000m–4000m`, `memory: 8Gi–16Gi`
+     - `config.jetstream.fileStore.pvc.size: 100Gi–250Gi` on low-latency SSD
+       (`premium-rwo` / `gp3`) so NATS can buffer 30 minutes of BEP and CAL
+       streams during PostgreSQL maintenance windows.
+4. **PostgreSQL sizing, `pg_partman` intervals, connection limits, and read replicas:**
+   - **First-bootstrap immutability:** `bootstrap.partitionInterval` (default
+     `6 hour`) and `bootstrap.retentionDays` (default `30`) seed
+     `public.part_config` **only on the initial bootstrap**. Changing them in
+     `values.yaml` later does not alter existing tables. With 15 time-partitioned
+     analytics tables, `6 hour` creates 60 child partitions per day (`1,800`
+     child tables over 30 days), which keeps active B-tree indexes compact in RAM
+     for high-write clusters. For 60–90+ day retention windows, either choose
+     `bootstrap.partitionInterval: 12 hour` (or `1 day`) before first install or
+     raise PostgreSQL `max_locks_per_transaction` (`>= 256–512`).
+   - **Connection pool math (`max_connections`):** Every `bep-nats-sub-<i>`,
+     `bep-nats-pub`, and `grpc-api` pod opens a PostgreSQL connection pool. With
+     `12–16` subscribers, `4–10` publishers, and `4–8` API pods, total active
+     connections exceed PostgreSQL's stock `max_connections = 100`. Configure
+     PostgreSQL with `max_connections >= 300–500` (and `8–16 vCPU`,
+     `32–64 GiB RAM`, SSD storage with `10,000+` write IOPS).
+   - **Read replica offloading (`postgres.readReplica.host`):** Point
+     `postgres.readReplica.host` at a read replica so expensive dashboard Trends
+     aggregations and MCP/Barn Owl analytical queries do not contend with
+     subscriber batch `INSERT`s on the primary writer.
+5. **Scale `bep-nats-pub` and `grpc-api`:**
+   - Enable `autoscaling.publisher.enabled: true` (e.g. `minReplicas: 4`,
+     `maxReplicas: 12`) so bursty CI BEP and Buildbarn worker CAL streams scale
+     horizontally.
+   - Keep `api.downloadDirSizeLimit` (default `10Gi` `emptyDir`) larger than the
+     biggest concurrent target output `.tgz` download so `grpc-api` pods are not
+     evicted for ephemeral-storage pressure.
+6. **Scale DragonflyDB / Redis when `app.cacheEventsEnabled: true`:**
+   - Cache-event enrichment (`CACHE_ENRICH`) caches digest metadata in
+     DragonflyDB/Redis. For 5–10 Buildbarn shards, raise DragonflyDB memory in
+     `dragonflydb-values.yaml` (or the `Dragonfly` CR) from `2000Mi` to
+     `4Gi–8Gi`.
+
+## Security hardening
+
+### Pod and container security context
+
+Every pod and container sets the Pod Security Standards `restricted` fields
+explicitly, which also covers the securityContext recommendations in the CIS
+Kubernetes Benchmark v2.0.1:
+- non-root UID/GID 65532
+- `seccompProfile: RuntimeDefault`
+- `allowPrivilegeEscalation: false` and `privileged: false`
+- `readOnlyRootFilesystem: true`
+- all capabilities dropped
+
+Workloads that need scratch space get a `/tmp` emptyDir. Every Pod rendered by
+this chart therefore satisfies `pod-security.kubernetes.io/enforce: restricted`.
+
+> **Co-installing Buildbarn and `RbeWorker` pools in the same namespace:** While
+> all `hermetiq` chart Pods comply with `restricted`, FUSE-based `RbeWorker`
+> pods (`mount.mountType: fuse`) and `hostPath` raw-block storage pods require
+> `privileged` containers (and `mount.mountType: host` workers require
+> `baseline` unless `security.Hardened=true`). If you deploy `hermetiq`,
+> `buildbarn`, and FUSE `RbeWorker`s in a single shared `hermetiq` namespace,
+> label that shared namespace `pod-security.kubernetes.io/enforce: privileged`,
+> or deploy Buildbarn and its workers into a separate namespace referenced via
+> `bootstrap.projectNamespace` so the Hermetiq namespace can enforce
+> `restricted`.
+
+On OpenShift, let the `restricted-v2` SCC assign IDs from the namespace range:
+
+```yaml
+security:
+  pod:
+    runAsUser: null
+    runAsGroup: null
+    fsGroup: null
+dashboard:
+  security:
+    runAsUser: null
+    runAsGroup: null
 ```
 
-As with the streams, an existing bucket keeps its settings, and replicas above
-1 need a clustered NATS. Sidecar configuration, including per-invocation
-opt-in, lives in the Buildbarn chart reference.
+### Network policies
 
-### Kubernetes workload discovery
+The chart renders no NetworkPolicy by default. Set `networkPolicy.enabled=true`
+to add ingress-only policies that admit each component's Service target ports
+and nothing else: grpc-api on `50081` (gRPC and gRPC-web), `8008` (REST and
+metrics), and `5150` (MCP); bep-nats-pub on `50081` behind grpc-auth-proxy or
+`50091` without it; subscribers on `8008` (metrics); the dashboard on `8888`
+behind oauth2-proxy or its app port without it; and the Grafana proxy on
+`8888`. Bootstrap and maintenance Jobs accept no ingress.
 
-The API's Buildbarn diagnostics inspect namespaced Deployments, StatefulSets,
-and ConfigMaps. The default `rbac.rules.deployments=true` and
-`rbac.rules.configMaps=true` grants are read-only (`get` and `list`) and are
-bound with a namespaced RoleBinding. They cannot read another namespace,
-Secrets, or modify resources.
-
-Disabling these grants leaves metrics queries available but removes the
-installed-component inventory and Buildbarn configuration context from MCP
-diagnostics. The API needs a mounted ServiceAccount token to use workload and
-`RbeWorker` discovery.
-
-### Paid license keys
-
-**Paid keys** go in a Secret named `hermetiq-license` under the data key
-`license.key`. The chart always mounts that Secret name as an optional volume,
-so creating the default-named Secret after install hot-loads the key with no
-values change and no rollout:
-
-```sh
-kubectl -n hermetiq create secret generic hermetiq-license \
-  --from-literal=license.key=<key>
+```yaml
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: buildbarn
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
 ```
 
-For a customer-managed Secret with different names, set
-`license.key.existingSecret` and `license.key.existingSecretKey` (a values
-change, so it takes a `helm upgrade` and a rollout). `license.key.value` is the
-inline alternative — the chart then creates the `hermetiq-license` Secret
-itself. Converting a trial to a paid license happens server-side against the
-same key; no cluster changes are needed.
+An empty `ingressFrom` admits any source on those ports. When you restrict it,
+include every caller:
+- your ingress controller or Gateway, which reaches the API, publisher,
+  dashboard, and Grafana proxy
+- Buildbarn worker pods, which send completed-action logs to the publisher's
+  gRPC Service port (`:50091`)
 
-### Air-gapped licenses
+`metricsFrom` restricts port `8008` on the publisher and subscribers; leave it
+empty to admit any source. grpc-api also serves its REST API on `8008`, so
+there the port admits `ingressFrom` plus `metricsFrom`, and any source while
+`ingressFrom` is empty.
 
-**Air-gapped installs** set `license.airGapped=true` and must provide
-`license.key.existingSecret` carrying **both** the license key and a
-checked-out license file — data keys `license.key` and `license.lic` by
-default (`license.key.existingSecretKey` / `license.licenseFileSecretKey`).
-Trials are online-only, so `license.trial.enabled` must be `false`; the chart
-refuses to render otherwise. No network calls are made in this mode.
+For egress rules or other selectors, add policies through `extraObjects` or
+alongside the release. Select pods by `app.kubernetes.io/component`: `api`,
+`publisher`, `subscriber`, `dashboard`, `grafana-auth-proxy`, `maintenance`, or
+`bootstrap`.
 
-### Operations
+Egress needs to reach:
+- PostgreSQL, DragonflyDB, NATS, and the OTLP collector
+- your OIDC provider
+- VictoriaMetrics (`victoriaMetrics.baseUrl`)
+- the Kubernetes API server
+- the Hermetiq license service (`license.saasUrl`)
+
+## Operations
 
 Commands below specify `-n hermetiq` so they do not depend on the current
 kubectl namespace.
 
-#### Inspect Pods and logs
+### Inspect Pods and logs
 
 ```bash
 kubectl -n hermetiq get pods
@@ -1791,7 +1766,7 @@ done
 gzip "$LOG"
 ```
 
-#### Pause and resume subscribers
+### Pause and resume subscribers
 
 Pausing subscribers leaves new events queued in JetStream, subject to each
 stream's retention limits:
@@ -1816,7 +1791,7 @@ done
 
 A later `helm upgrade` restores the replica count from values.
 
-#### Inspect database partitions
+### Inspect database partitions
 
 In `psql`, inspect table size and `pg_partman` state:
 
@@ -1854,7 +1829,7 @@ kubectl -n hermetiq create job \
   --from=cronjob/progresses-partition-maintenance
 ```
 
-#### Inspect NATS and the dead-letter queue
+### Inspect NATS and the dead-letter queue
 
 ```bash
 NATS_BOX=$(kubectl -n hermetiq get pods \
@@ -1874,28 +1849,7 @@ kubectl -n hermetiq exec -it "$NATS_BOX" \
   -- nats stream purge BEP_DLQ_STREAM --force
 ```
 
-#### Temporary image overrides
-
-For short-lived diagnosis, patch running Deployments with `kubectl set image`:
-
-```bash
-CORE_IMAGE=us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats:<tag>
-WEB_IMAGE=us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui:<tag>
-
-kubectl -n hermetiq set image deployment/grpc-api api="$CORE_IMAGE"
-kubectl -n hermetiq set image deployment/bep-nats-pub bep-nats="$CORE_IMAGE"
-kubectl -n hermetiq set image deployment/web-ui web-ui="$WEB_IMAGE"
-
-for deployment in $(kubectl -n hermetiq get deploy \
-  -l app.kubernetes.io/component=subscriber -o name); do
-  kubectl -n hermetiq set image "$deployment" bep-nats-sub="$CORE_IMAGE"
-done
-```
-
-These changes drift from Helm state and are reverted by the next upgrade. Put
-long-lived image changes under `images.*` in values.
-
-#### Rotate Secrets
+### Rotate Secrets
 
 Secrets injected as environment variables require a workload restart after
 their contents change. Changes to chart-managed Secret values change the
@@ -1933,7 +1887,36 @@ Coordinate database and cache credential changes with the corresponding
 external service. Rotating `OAUTH2_PROXY_COOKIE_SECRET` invalidates active UI
 sessions.
 
-### Local chart development
+### Temporary image overrides
+
+For short-lived diagnosis, patch running Deployments with `kubectl set image`:
+
+```bash
+CORE_IMAGE=us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats:<tag>
+WEB_IMAGE=us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui:<tag>
+
+kubectl -n hermetiq set image deployment/grpc-api api="$CORE_IMAGE"
+kubectl -n hermetiq set image deployment/bep-nats-pub bep-nats="$CORE_IMAGE"
+kubectl -n hermetiq set image deployment/web-ui web-ui="$WEB_IMAGE"
+
+for deployment in $(kubectl -n hermetiq get deploy \
+  -l app.kubernetes.io/component=subscriber -o name); do
+  kubectl -n hermetiq set image "$deployment" bep-nats-sub="$CORE_IMAGE"
+done
+```
+
+These changes drift from Helm state and are reverted by the next upgrade. Put
+long-lived image changes under `images.*` in values.
+
+### Upgrade and uninstall
+
+(new section: filled in a later step)
+
+## Troubleshooting
+
+(new section: filled in a later step)
+
+## Local chart development
 
 OCI releases are the supported customer installation path. Contributors can
 render and install the checked-out chart from the copied values directory:
@@ -1955,7 +1938,7 @@ Before installing locally, review the repository's
 for private registries, digest pinning, common metadata, `extraObjects`, and
 templated pass-through values.
 
-#### Synchronize PromQL and dashboards
+### Synchronize PromQL and dashboards
 
 The companion `cloud-native` repository owns the PromQL defaults and shared
 Grafana dashboards. With the repositories checked out as siblings, run its
@@ -1981,7 +1964,7 @@ datasource references. Adding another dashboard requires an explicit manifest
 and portability review. Helm's Dragonfly dashboard, NATS stream settings,
 cache TTL settings, and other unmanaged files are preserved.
 
-### License
+## License
 
 The chart source in this package is licensed under the Apache License 2.0;
 see the packaged `LICENSE` file. The Hermetiq container images it deploys are
