@@ -12,10 +12,18 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: security
+      description: "Turn the scheduler admin UI routes (ingress.rbeWeb, gateway.httpRoutes.rbeWeb) off by default, and fail the render when one would publish :7982 while scheduler.adminHttpServers.authenticationPolicy is allow; set scheduler.adminHttpServers.allowUnauthenticatedRoute=true to keep such a route"
+    - kind: security
+      description: "Starter values enable the storage and scheduler NetworkPolicies, and the chart README documents security.grpcMtls as the step that also keeps build actions in worker pods off :8981 and :8983; the chart defaults stay off"
+    - kind: added
+      description: "frontend.jwks.allowedClientIds and clientIdClaim bind frontend JWTs to named clients, ANDed onto the claims expression; the starter values bind to the Bazel machine-to-machine client"
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
     - kind: fixed
       description: "Preserve custom router common imports and scheduler root references during reload, format IPv6 scheduler handover endpoints, and reject handover configurations with disabled API credentials or conflicting listener ports"
+    - kind: changed
+      description: "With scheduler.networkPolicy enabled, the admin UI :7982 admits only scheduler.networkPolicy.adminPeers (none by default); the render fails when an rbeWeb route is enabled with no adminPeers"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

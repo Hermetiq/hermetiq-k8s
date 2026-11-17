@@ -165,3 +165,39 @@ spec:
   policyTypes:
     - Ingress
 {{- end }}
+{{- /* Grafana's auth.proxy takes the login from X-Forwarded-User, so only the
+     oauth2-proxy that sets it (and the metrics scraper) may reach Grafana.
+     Independent of networkPolicy.enabled: see grafana.networkPolicy. */}}
+{{- if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") .Values.gateway.routes.grafanaEnabled .Values.grafana.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-from-oauth2-proxy
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+    {{- include "hermetiq-core.componentLabel" (dict "component" "grafana") | nindent 4 }}
+spec:
+  {{- $selector := .Values.grafana.networkPolicy.podSelector | default (dict "matchLabels" (dict "app.kubernetes.io/name" "grafana")) }}
+  {{- if not (or $selector.matchLabels $selector.matchExpressions) }}
+  {{- fail "grafana.networkPolicy.podSelector must set matchLabels or matchExpressions: an empty selector applies the Grafana policy to every pod in the namespace" }}
+  {{- end }}
+  podSelector:
+    {{- toYaml $selector | nindent 4 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          {{- /* A string names the Grafana container port. */}}
+          {{- $port := required "grafana.networkPolicy.port is required" .Values.grafana.networkPolicy.port }}
+          port: {{ kindIs "string" $port | ternary (quote $port) (int $port) }}
+      from:
+        - podSelector:
+            matchLabels:
+              app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+        {{- with .Values.grafana.networkPolicy.scrapersFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

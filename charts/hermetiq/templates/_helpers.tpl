@@ -162,6 +162,22 @@ imagePullSecrets:
 {{- include "hermetiq-core.host" (dict "root" . "value" .Values.hosts.bbcalGrpc "subdomain" "bbcal" "name" "hosts.bbcalGrpc") -}}
 {{- end -}}
 
+{{/* gRPC services the public BEP route forwards, as a JSON array. An empty
+     list would render a route with no matches, which matches every method,
+     so it fails instead. */}}
+{{- define "hermetiq-core.bepGrpcServices" -}}
+{{- $services := .Values.gateway.routes.bepGrpcServices -}}
+{{- if not $services -}}
+{{- fail "gateway.routes.bepGrpcServices must list at least one gRPC service (default: google.devtools.build.v1.PublishBuildEvent)" -}}
+{{- end -}}
+{{- range $services -}}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$" (toString .)) -}}
+{{- fail (printf "gateway.routes.bepGrpcServices entry %q is not a fully qualified gRPC service name" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $services -}}
+{{- end -}}
+
 {{- define "hermetiq-core.dashboardRemoteCacheUrl" -}}
 {{- if .Values.dashboard.remoteCacheUrl -}}
 {{- tpl .Values.dashboard.remoteCacheUrl . -}}

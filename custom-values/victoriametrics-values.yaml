@@ -43,22 +43,33 @@ grafana:
       enabled: true
       # oauth2-proxy with PASS_USER_HEADERS=true sets X-Forwarded-User
       # (sub/preferred_username) and X-Forwarded-Email on the upstream
-      # request. Grafana keys the account on the User header.
+      # request. Grafana keys the account on the User header and believes it
+      # from any caller in the whitelist, so the hermetiq chart's
+      # grafana-from-oauth2-proxy NetworkPolicy (grafana.networkPolicy) must
+      # keep every other pod away from Grafana.
       header_name: X-Forwarded-User
       header_property: username
       # Pass email and groups through as additional Grafana fields.
       headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
       auto_sign_up: true
-      auto_assign_org_role: Admin
+      # New SSO users start as Viewers. Grafana OSS cannot map IdP groups to
+      # org roles under auth.proxy, so promote editors and admins with the
+      # grafana-admin credentials (the login form is disabled; use Grafana's
+      # HTTP API over kubectl port-forward). Set Admin here only if every SSO
+      # user should administer Grafana.
+      auto_assign_org_role: Viewer
       # Mint a Grafana session cookie on first authenticated request so the
       # frontend's /api/user/auth-tokens/rotate calls succeed instead of
       # 401-looping. With this false, Grafana re-authenticates every request
       # via the proxy header but the rotate endpoint has nothing to rotate
       # and returns 401, sending the frontend into a redirect loop.
       enable_login_token: true
-      # Empty whitelist disables IP allowlisting. Safe because the only
-      # ingress path is through the grafana-oauth2-proxy Service.
-      whitelist: ""
+      # Source addresses allowed to assert X-Forwarded-User. Empty accepts
+      # them from any address, which leaves the NetworkPolicy above as the
+      # control. Setting your cluster's pod CIDR (where grafana-oauth2-proxy
+      # runs) adds a second check; a range that misses the proxy's pod IP
+      # rejects every SSO login.
+      whitelist: "" # TODO: optionally your pod CIDR, e.g. 10.244.0.0/16 on kind
     log:
       level: info
       mode: console
@@ -73,7 +84,7 @@ grafana:
     users:
       allow_sign_up: true
       auto_assign_org: true
-      auto_assign_org_role: Admin
+      auto_assign_org_role: Viewer
   resources:
     limits:
       cpu: 700m

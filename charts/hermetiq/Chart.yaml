@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.7
+version: 0.9.8
 appVersion: "0.9.6"
 annotations:
   artifacthub.io/license: Apache-2.0
@@ -14,34 +14,14 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: changed
-      description: "Update application images to v0.9.6"
-    - kind: added
-      description: "Change impact analysis: upload bazel-diff snapshots from CI to see which targets a commit range impacted, why, and whether CI ran the affected tests"
-    - kind: added
-      description: "Project admins can cancel pending invitations and remove members from the Users page"
-    - kind: added
-      description: "Project admins can promote selected --build_metadata keys into tags for Build History and Trends filters"
-    - kind: added
-      description: "CI context and BUILD_URL build grouping can now come from Bazel's --workspace_status_command output"
-    - kind: added
-      description: "Barn Owl explains what limited a worker pool (slots, CPU, memory or demand) and reports pools that hit their slot ceiling instead of calling the fleet mostly idle"
-    - kind: fixed
-      description: "Barn Owl scopes RBE answers to the project's own pools and namespace, treats a shared Buildbarn namespace as shared, and finds queues for operator-generated worker pools without a Jsonnet evaluator"
-    - kind: fixed
-      description: "Add a startup probe and 30-second health check timeouts to the Barn Owl prompt-runtime sidecar so slow starts no longer cause restarts"
-    - kind: fixed
-      description: "The Quickstart Download Skill ZIP button now links to the v0.9.12-beta release by default (dashboard.env.REACT_APP_HERMETIQ_AI_PLUGIN_VERSION)"
-    - kind: fixed
-      description: "Build History keeps paging, sorting, grouping and scroll position when returning from details or comparisons, and ignores stale responses"
-    - kind: fixed
-      description: "Cache events and completed-action logs from non-Bazel clients no longer fail ingestion batches or retry when no invocation matches"
-    - kind: fixed
-      description: "Invitations by GitHub username now resolve an email address to send to"
-    - kind: fixed
-      description: "MCP clients such as Claude Code now show why a tool call was refused"
     - kind: security
-      description: "Stop returning CAS and ByteStream mTLS private keys to project readers, and update dependencies for published CVEs"
+      description: "Admit only grafana-oauth2-proxy and vmagent to the Grafana pod with a new grafana-from-oauth2-proxy NetworkPolicy, rendered with the Grafana proxy (opt out with grafana.networkPolicy.enabled=false), because Grafana's auth.proxy trusts X-Forwarded-User from any caller"
+    - kind: security
+      description: "Forward only gateway.routes.bepGrpcServices (default google.devtools.build.v1.PublishBuildEvent) on the public BEP route for every routing provider, so a gateway or ingress proxy can no longer relay internet CompletedActionLogger calls into the publisher's trustedCalCidrs exemption"
+    - kind: security
+      description: "Remove caller-supplied X-Forwarded-User, X-Forwarded-Email, X-Forwarded-Groups, X-Forwarded-Preferred-Username and X-Hermetiq-Project-Id on the public api-web route (gateway.routes.apiWebRemoveRequestHeaders; opt in on Ingress with ingress.apiWeb.stripIdentityHeaders)"
+    - kind: changed
+      description: "Document that publisher.trustedCalCidrs must name only the Buildbarn worker range and exclude gateway and ingress proxy pods"
 keywords:
   - hermetiq
   - MCP

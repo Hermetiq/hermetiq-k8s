@@ -29,13 +29,19 @@ spec:
     - host: {{ include "hermetiq-core.bepGrpcHost" . }}
       http:
         paths:
+          {{- /* Only gateway.routes.bepGrpcServices: see gateway-routes.yaml.
+               ImplementationSpecific because ingress-nginx's strict path
+               validation rejects the dots of a gRPC service in a Prefix path;
+               nginx still matches it as a path prefix. */}}
+          {{- range (include "hermetiq-core.bepGrpcServices" . | fromJsonArray) }}
           - backend:
               service:
-                name: {{ include "hermetiq-core.publisherName" . }}
+                name: {{ include "hermetiq-core.publisherName" $ }}
                 port:
                   name: grpc
-            path: /
-            pathType: Prefix
+            path: {{ printf "/%s/" . }}
+            pathType: ImplementationSpecific
+          {{- end }}
   tls:
     - hosts:
         - {{ include "hermetiq-core.bepGrpcHost" . }}
@@ -150,6 +156,14 @@ metadata:
     {{- include "hermetiq-core.nginxCorsAnnotations" . | nindent 4 }}
     {{- end }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- if and .Values.ingress.apiWeb.stripIdentityHeaders .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+    {{- /* Opt-in: ingress-nginx rejects snippet annotations unless the
+         controller allows them. Empty proxy_set_header drops the header. */}}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      {{- range .Values.gateway.routes.apiWebRemoveRequestHeaders }}
+      proxy_set_header {{ . }} "";
+      {{- end }}
+    {{- end }}
     {{- with .Values.ingress.apiWeb.annotations }}
     {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
     {{- end }}

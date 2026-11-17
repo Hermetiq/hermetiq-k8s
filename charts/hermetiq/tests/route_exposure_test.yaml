@@ -1,0 +1,185 @@
+suite: public route exposure
+# The public BEP route forwards only gateway.routes.bepGrpcServices: the
+# publisher's CompletedActionLogger admits callers by source address, and a
+# gateway or ingress proxy relaying an internet request presents its own pod
+# IP. The public api-web route drops caller-supplied identity headers, which
+# several /api/v1 handlers read.
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: limits the BEP GRPCRoute to the PublishBuildEvent service
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.rules[0].matches
+          value:
+            - method:
+                service: google.devtools.build.v1.PublishBuildEvent
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - notExists:
+          path: spec.rules[1]
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+
+  - it: limits the BEP HTTPRoute to the PublishBuildEvent path
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.rules[0].matches
+          value:
+            - path:
+                type: PathPrefix
+                value: /google.devtools.build.v1.PublishBuildEvent/
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - notExists:
+          path: spec.rules[1]
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+
+  - it: limits the BEP HTTPProxy to the PublishBuildEvent path
+    template: templates/contour-routes.yaml
+    asserts:
+      - equal:
+          path: spec.routes[0].conditions
+          value:
+            - prefix: /google.devtools.build.v1.PublishBuildEvent/
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: bep.ci.hermetiq.test
+      - notExists:
+          path: spec.routes[1]
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: bep.ci.hermetiq.test
+
+  - it: limits the BEP Ingress to the PublishBuildEvent path
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /google.devtools.build.v1.PublishBuildEvent/
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+      - notExists:
+          path: spec.rules[0].http.paths[1]
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+
+  - it: forwards each listed BEP service
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.routes.bepGrpcServices:
+        - google.devtools.build.v1.PublishBuildEvent
+        - buildbarn.completedactionlogger.CompletedActionLogger
+    asserts:
+      - equal:
+          path: spec.rules[0].matches[1].method.service
+          value: buildbarn.completedactionlogger.CompletedActionLogger
+        documentSelector:
+          path: metadata.name
+          value: bep-cloud-grpc
+
+  - it: removes caller identity headers on the api-web HTTPRoute (gateway)
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    asserts:
+      - equal:
+          path: spec.rules[0].filters[0]
+          value:
+            type: RequestHeaderModifier
+            requestHeaderModifier:
+              remove:
+                - X-Forwarded-User
+                - X-Forwarded-Email
+                - X-Forwarded-Groups
+                - X-Forwarded-Preferred-Username
+                - X-Hermetiq-Project-Id
+        documentSelector:
+          path: metadata.name
+          value: api-web
+
+  - it: removes caller identity headers on the api-web HTTPRoute (gateway-httproute-only)
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: test-gateway
+    asserts:
+      - contains:
+          path: spec.rules[0].filters[0].requestHeaderModifier.remove
+          content: X-Forwarded-User
+        documentSelector:
+          path: metadata.name
+          value: api-web
+
+  - it: removes caller identity headers on the api-web HTTPProxy
+    template: templates/contour-routes.yaml
+    asserts:
+      - contains:
+          path: spec.routes[0].requestHeadersPolicy.remove
+          content: X-Forwarded-User
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: api-web.ci.hermetiq.test
+      - contains:
+          path: spec.routes[0].requestHeadersPolicy.remove
+          content: X-Hermetiq-Project-Id
+        documentSelector:
+          path: spec.virtualhost.fqdn
+          value: api-web.ci.hermetiq.test
+
+  - it: leaves the api-web Ingress without a snippet by default
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+    asserts:
+      - notExists:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+        documentSelector:
+          path: metadata.name
+          value: api-web
+
+  - it: clears caller identity headers on the api-web Ingress when opted in
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+      ingress.apiWeb.stripIdentityHeaders: true
+    asserts:
+      - matchRegex:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+          pattern: 'proxy_set_header X-Forwarded-User "";'
+        documentSelector:
+          path: metadata.name
+          value: api-web
+
+  - it: keeps caller headers when the removal list is emptied
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.routes.apiWebRemoveRequestHeaders: []
+    asserts:
+      - notExists:
+          path: spec.rules[0].filters
+        documentSelector:
+          path: metadata.name
+          value: api-web
