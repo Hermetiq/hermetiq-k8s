@@ -23,27 +23,27 @@ images:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
     apiTag: "v0.9.7"
-    apiDigest: ""
+    apiDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
     pubTag: "v0.9.7"
-    pubDigest: ""
+    pubDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
     subTag: "v0.9.7"
-    subDigest: ""
+    subDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
     bootstrapTag: "v0.9.7"
-    bootstrapDigest: ""
+    bootstrapDigest: "sha256:65c1d2b8f77ffc064e47cdb4a2bbcc80edd98750e5f715d3888a343f24aaeb22"
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
     tag: "v0.9.7"
-    digest: ""
+    digest: "sha256:038186935cef844a5c466b4f6ae50aa78411ce7304eb164ec845ba414f2d751d"
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
     tag: "v0.9.7"
-    digest: ""
+    digest: "sha256:633267f434700e1bd2f825031676cd6da708909b8485372b96f091ec5ff79b6f"
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
     tag: "v0.9.7"
-    digest: ""
+    digest: "sha256:896c674e2885fce9f802cc71bec4e22cf9bf77e6773ea71cb3a5a3deba13e2c4"
     pullPolicy: IfNotPresent
   oauth2Proxy:
     # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public

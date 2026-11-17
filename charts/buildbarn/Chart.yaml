@@ -13,7 +13,7 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Update the Hermetiq grpc-cache-proxy default to v0.9.7; application release image values can update the sidecar independently of the Buildbarn chart version"
+      description: "Update the Hermetiq grpc-cache-proxy default to v0.9.7, pinned to its signed digest; application release image values can update the sidecar independently of the Buildbarn chart version"
     - kind: changed
       description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
     - kind: fixed

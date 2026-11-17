@@ -140,7 +140,7 @@ images:
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
     tag: v0.9.7
-    digest: ""
+    digest: "sha256:a2f848fb4ace6931760b42fd244b60e67d11858cfe35d6743f23a7caf6afbf3d"
     pullPolicy: IfNotPresent
   # bb-portal build-event dashboard (portal.enabled). One image: the Go binary
   # serves the embedded web UI, the gRPC-Web APIs, and the BES gRPC endpoint.

@@ -4,7 +4,7 @@
 to explore Hermetiq and Managed Buildbarn before setting up a Kubernetes
 deployment.
 
-This README is the operator reference packaged with the Hermetiq `0.9.7`
+This README is the operator reference packaged with the Hermetiq `0.9.8`
 chart. It covers the services needed before installing Hermetiq and the chart
 installation itself. Use the repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#installation) for
@@ -44,7 +44,6 @@ the full-stack deployment order and shared services used by the other charts.
 - [Install](#install)
   - [Verification](#verification)
   - [Installation checkpoint](#installation-checkpoint)
-- [Upgrade to 0.9.8](#upgrade-to-098)
 - [Advanced Topics](#advanced-topics)
   - [Large-scale deployments and high-throughput ingest](#large-scale-deployments-and-high-throughput-ingest)
   - [Progress log storage](#progress-log-storage)
@@ -282,8 +281,8 @@ Inspect the exact packaged defaults and README before creating advanced
 overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.7
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.7
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
 ```
 
 ## Licensing and trials
@@ -715,7 +714,7 @@ Then install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.7 \
+  --version 0.9.8 \
   --values hermetiq-values.yaml
 ```
 
@@ -797,13 +796,6 @@ and
 [installing Buildbarn and its worker pools](../../README.md#install-buildbarn-and-worker-pools).
 Come back to the advanced topics below after the deployment is working end to
 end.
-
-## Upgrade to 0.9.8
-
-Chart 0.9.8 uses application v0.9.7. Review custom image overrides: update or
-clear old digest fields when changing tags, because a digest takes precedence
-over the tag. Newly published chart packages pin their default images; see
-[image integrity](../../docs/image-integrity.md).
 
 ## Advanced Topics
 

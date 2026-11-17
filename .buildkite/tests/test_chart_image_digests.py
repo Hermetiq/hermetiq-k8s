@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -170,6 +171,13 @@ images:
         with tempfile.TemporaryDirectory() as tmp:
             chart = Path(tmp) / "hermetiq"
             shutil.copytree(ROOT / "charts/hermetiq", chart)
+            # Release preparation pins the source values, and an existing digest
+            # stays authoritative. Start this copy from an unpinned API image so
+            # the test proves --pin writes the resolved digest either way.
+            values = chart / "values.yaml"
+            unpinned, count = re.subn(r'(?m)^(\s+apiDigest:).*$', r'\1 ""', values.read_text())
+            self.assertEqual(count, 1)
+            values.write_text(unpinned)
             with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
                 inventory, "inspect_reference", side_effect=lambda ref: ref.partition("@")[2] or digest
             ):
