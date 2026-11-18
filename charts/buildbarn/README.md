@@ -2602,6 +2602,28 @@ sidecar, when enabled, attributes the lookups to that project.
 
 ## Hermetiq grpc-cache-proxy sidecar
 
+### Update the sidecar independently of the chart
+
+Hermetiq application releases publish `artifacts/buildbarn-image-values.yaml`
+in the cloud-native Buildkite release build. It contains the verified
+`images.grpcCacheProxy.repository`, `tag` and SHA-256 `digest`. Download this
+file from the release build's image-inventory annotation, then upgrade using
+the **same Buildbarn chart version you already run**:
+
+```bash
+helm upgrade <buildbarn-release> oci://ghcr.io/hermetiq/buildbarn \
+  --namespace <namespace> --version <installed-chart-version> \
+  --reuse-values --values buildbarn-image-values.yaml
+```
+
+This changes the cache-proxy image pin and rolls the frontend pods when the
+sidecar is enabled. It does not enable the sidecar or require publishing another
+Buildbarn chart version. Chart source defaults are updated for the next chart
+release; previously published chart packages stay unchanged. Keep the override
+file with your deployment values, and update tag and digest together on future
+application releases. See [image integrity](../../docs/image-integrity.md) for
+signature verification.
+
 > **Experimental.** Treat the sidecar as an advanced option. Install Hermetiq
 > and Buildbarn first, complete both charts' verification steps, and confirm
 > that builds run successfully against the remote cache before enabling it.

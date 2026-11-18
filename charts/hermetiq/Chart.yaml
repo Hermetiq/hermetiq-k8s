@@ -7,13 +7,57 @@ icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.9.8
-appVersion: "0.9.6"
+appVersion: "0.9.8"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Update application images to v0.9.8"
+    - kind: security
+      description: "Pin default container images by SHA-256 digest and include an image inventory in the signed chart package"
+    - kind: security
+      description: "Update the mirrored oauth2-proxy image to v7.15.6 (Go 1.26.10), fixing critical and high Go standard library, grpc and go-jose vulnerabilities in v7.15.4"
+    - kind: fixed
+      description: "Publisher and API authentication refresh remote JWKS on unknown signing-key IDs and periodically, allowing identity-provider key rotation without restarting pods"
+    - kind: changed
+      description: "Cache analytics count every lookup in compact rollups and retain reusable action fingerprints; individual cache hits are retained only during full capture"
+    - kind: added
+      description: "Project Settings controls timed and target-specific cache capture, and individual builds can request full capture with x-hermetiq-cache-capture=full"
+    - kind: added
+      description: "MCP investigates cache misses outside a change's impacted targets using matching prior-hit and build-configuration evidence"
+    - kind: fixed
+      description: "Cache views distinguish counted lookups from retained event details, report capture and retention gaps, and improve previous-hit selection and cache-miss explanations"
+    - kind: changed
+      description: "Expensive cross-build cache digest reuse analysis runs only when explicitly requested"
+    - kind: added
+      description: "Quickstart includes optional bb_clientd setup for faster local builds on Linux and macOS"
+    - kind: changed
+      description: "Quickstart and MCP share one downloadable workspace-status script that detects CI versus developer builds and supplies consistent repository, branch and commit metadata"
+    - kind: fixed
+      description: "First-build setup resumes reliably, preserves credential setup progress, and selects the default project correctly in on-prem installations"
+    - kind: security
+      description: "Project-private worker pools and their configuration, logs, metrics and history are isolated across RBE Operations, Barn Owl and MCP"
+    - kind: fixed
+      description: "Scheduler peak metrics preserve instance-name prefixes so private queues remain distinct"
+    - kind: fixed
+      description: "BEP ingestion handles duplicate deliveries, retries and subscriber backpressure more reliably, bounds trace-profile memory, and supports long output-file paths"
+    - kind: fixed
+      description: "Completed build logs include progress segments spilled to PostgreSQL during object-storage failures, and failed-test search retains bounded log beginnings and endings"
+    - kind: fixed
+      description: "Build History and Trends preserve live charts during refresh and partial analytics failures, apply filters consistently, and prevent stale detail responses after navigation"
+    - kind: fixed
+      description: "Build Details corrects critical-path and test-timing displays, preserves action selection, and improves output downloads and Buildbarn Browser links"
+    - kind: fixed
+      description: "Barn Owl improves cache and RBE evidence grounding, handles missing telemetry explicitly, and validates proposed authentication configuration more strictly"
+    - kind: security
+      description: "Strengthen project-bound BEP authorization, credential redaction and authentication cache isolation, and update vulnerable application dependencies"
+    - kind: added
+      description: "Publish container-image verification keys and document verification of signed release images"
+    - kind: changed
+      description: "Expand installation prerequisites, NATS shard-sizing and high-throughput guidance, and document Anthropic-compatible gateway configuration for Barn Owl"
     - kind: fixed
       description: "Preserve security defaults on upgrades reusing pre-hardening values, and validate custom ingress snippets only when generated header stripping would conflict"
     - kind: security
