@@ -18,6 +18,14 @@ The Envoy example also uses `spec.autoscaling.idleReplicas`; install a matching
 operator and CRD that support this field, as packaged by the current
 [operator chart](../../charts/bb-worker-operator/README.md#crd-lifecycle).
 
+The manifests do not set `spec.images.worker` or `spec.images.runnerInstaller`.
+Operator v0.3.14 and later (chart 0.3.13) then use the `workerImage` and
+`runnerInstallerImage` that the Buildbarn chart publishes in
+`buildbarn-worker-config`, so each pool's `bb-worker` always matches the
+Buildbarn release and its worker configuration. Set them only to run a
+different build, and update them in the same change as every Buildbarn
+upgrade.
+
 ## Pools
 
 Standard bundle:
