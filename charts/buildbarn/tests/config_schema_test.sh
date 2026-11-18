@@ -322,6 +322,23 @@ def validate_message(fqn, obj, registry, path=""):
             validate_scalar(field, val, registry, field_path)
 
 
+# These are copies of cloud-native bep-nats/bbproto/buildbarn_descriptors*.pb,
+# which bep-nats validates against at runtime (buildbarn-forms ships the same
+# bytes). A refreshed copy must come from there, with these hashes updated in
+# the same change, so the chart is never tested against a different schema.
+import hashlib
+EXPECTED_DESCRIPTOR_SHA256 = {
+    "buildbarn_descriptors.pb": "3c7760bcddbc0516efdfc33f667a5e2c2382e461dac91713d87bfdeeaab60aa0",
+    "buildbarn_descriptors_cdc.pb": "e08e0b969d71f8dd41f52063de2e252a9ac77c85a5e3681d62109ab20f73b5b4",
+}
+for name, expected in EXPECTED_DESCRIPTOR_SHA256.items():
+    actual = hashlib.sha256((testdata / name).read_bytes()).hexdigest()
+    if actual != expected:
+        raise AssertionError(
+            f"tests/testdata/{name} has sha256 {actual}, expected {expected}; copy it from "
+            "cloud-native bep-nats/bbproto and update EXPECTED_DESCRIPTOR_SHA256"
+        )
+
 cdc_registry = load_descriptor_set(testdata / "buildbarn_descriptors_cdc.pb")
 pre_cdc_registry = load_descriptor_set(testdata / "buildbarn_descriptors.pb")
 

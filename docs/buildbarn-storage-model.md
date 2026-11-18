@@ -277,3 +277,28 @@ Two of the limits above fail at startup rather than degrade, so the BB Config Ed
 
 The division of labour is deliberate: the assistant owns the structural rules, which are checkable and verified against bb-storage source; this document owns the sizing arithmetic, worked examples and runbooks, which are what a generated rule list cannot give you. A test in the assistant's repository asserts that every rule identifier appears here, so a new rule cannot ship without a place to read about it.
 
+## Upgrading Configurations to CDC
+
+The chart's own templates and values already use the CDC schema, so installs that configure Buildbarn only through `values.yaml` need no edits. Raw Jsonnet you supply yourself does: `configOverrides`, a custom `common.libsonnet`, `scheduler.actionRouter.custom`, raw worker configs in `RbeWorker` `spec.config.files`, and worker ConfigMaps. The chart rejects the old fields in those during `helm upgrade` and links here. Until a migration tool exists, make these edits by hand:
+
+| Old (pre-CDC) | New (CDC) |
+| --- | --- |
+| `contentAddressableStorage: { ... }` at the top level of `storage.jsonnet`, `frontend.jsonnet` or `portal.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: ..., chunkMappingStorage: ... }, getAuthorizer, putAuthorizer, findMissingAuthorizer, maximumChunkCount: 100000 }` |
+| A single-store `blobstore.contentAddressableStorage` (for example `sharding: {...}`) in `common.libsonnet`, `scheduler.jsonnet` or `asset.jsonnet` | `{ chunkStorage: <the old backend>, chunkMappingStorage: { chunkMappingValidating: { backend: ... } }, cdcParameterCache: { cacheSize: 1000, cacheDuration: '60s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' } }` |
+| `dataIntegrityValidationCache: { ... }` | Remove it. Chunks are validated individually, and chunk mappings by `chunkMappingValidating`. |
+| `keyLocationMapInMemory` or `keyLocationMapOnBlockDevice` | `keyLocationMap: { inMemory: ... }` or `keyLocationMap: { onBlockDevice: ... }` |
+| `keyLocationMapMaximumGetAttempts`, `keyLocationMapMaximumPutAttempts` | `maximumGetAttempts` and `maximumPutAttempts` inside `keyLocationMap` |
+| `browserUrl` (worker, noop worker) | `portalUrl`; in `scheduler.jsonnet`, `deprecatedPortalUrl` |
+| `adminHttpServers` (scheduler) | `deprecatedAdminHttpServers` |
+| `adminRoutePrefix` (scheduler) | Remove it. |
+| `zstdPool` (scheduler, worker, noop worker, remote asset) | Remove it. |
+
+The worker in `RbeWorker` and the image pins also move together. A pinned pre-CDC `bb-worker` or `bb-runner-installer` image rejects the CDC worker config, so remove the pin (the operator then uses the images the chart publishes) or update it to the CDC release in the same change.
+
+Before the chart switches a cluster to CDC, `helm upgrade` also checks that:
+
+- `bb-worker-operator` is v0.3.14 (chart 0.3.13) or later, because older operators generate pre-CDC worker configs. Set `upgradeChecks.operatorNamespace` when the operator runs outside this release's namespace.
+- When bep-nats runs in this namespace, its hermetiq release is newer than 0.9.8, so it validates both schemas. A bep-nats image that does, deployed with an older chart, can declare it with the hermetiq chart's `buildbarnCdcCompatible: true`.
+- Scheduler handover and `configurationReloadInterval` are off. The fork scheduler that implements them still reads the pre-CDC single-store CAS; `scheduler.handover.cdcCompatibleFork: true` re-enables them for a fork image that supports CDC.
+
+These cluster checks use `lookup`, so offline `helm template` and GitOps renders skip them. Check those configurations against this table before upgrading.

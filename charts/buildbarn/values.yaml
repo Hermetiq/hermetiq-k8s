@@ -44,6 +44,18 @@ serviceAccount:
 # you need directly in your override.
 configOverrides: {}
 
+# Cluster checks that run during `helm upgrade` (they are skipped by offline
+# `helm template`, where lookup returns nothing). Before switching to CDC, the
+# chart requires a bb-worker-operator that emits CDC worker configs (v0.3.14 or
+# later, or annotated hermetiq.com/cdc-compatible=true) and, when bep-nats runs
+# in this namespace, a hermetiq release whose bep-nats validates both schemas.
+upgradeChecks:
+  # Namespace of the bb-worker-operator Deployment. Empty means this release's
+  # namespace. One operator serves the whole cluster, so set this when it runs
+  # elsewhere (for example "hermetiq"). Listing Deployments there needs read
+  # access to that namespace.
+  operatorNamespace: ""
+
 # Shared Buildbarn configuration knobs templated into files/config/*.
 config:
   # Maximum gRPC message size in bytes, applied across all Buildbarn components
@@ -1221,6 +1233,12 @@ scheduler:
   # relaying in-flight Execute / WaitExecution streams.
   handover:
     enabled: false
+    # This chart emits the CDC blobstore. The fork scheduler's handover and
+    # configuration reload still expect the pre-CDC single-store CAS
+    # (legacyContentAddressableStorage), so both are rejected unless the fork
+    # image supports CDC. Set true only for such an image; this flag also
+    # covers scheduler.configurationReloadInterval.
+    cdcCompatibleFork: false
     # TLS identity shared by scheduler certificates. Peer connections dial
     # Pod IPs but verify this DNS SAN, including the coordinator's local Ping.
     peerServerName: scheduler

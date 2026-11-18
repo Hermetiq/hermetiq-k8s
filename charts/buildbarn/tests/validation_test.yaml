@@ -383,12 +383,31 @@ tests:
       - failedTemplate:
           errorPattern: "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork"
 
-  - it: accepts configurationReloadInterval with a fork scheduler image
+  - it: accepts configurationReloadInterval with a CDC-compatible fork scheduler image
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects configurationReloadInterval with the CDC blobstore unless the fork supports CDC
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
     asserts:
-      - notFailedTemplate: {}
+      - failedTemplate:
+          errorPattern: "scheduler.configurationReloadInterval is not supported with the CDC blobstore yet"
+
+  - it: rejects scheduler.handover with the CDC blobstore unless the fork supports CDC
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.enabled is not supported with the CDC blobstore yet"
 
   - it: rejects scheduler.handover with the upstream scheduler image
     set:
@@ -504,6 +523,7 @@ tests:
       scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.automountServiceAccountToken: true
       scheduler.handover.port: 9999
+      scheduler.handover.cdcCompatibleFork: true
     asserts:
       - notFailedTemplate: {}
 
@@ -585,20 +605,95 @@ tests:
       - failedTemplate:
           errorPattern: 'live RbeWorker .*/worker-old-img pins pre-CDC image .* in spec\.images\.worker'
 
-  - it: rejects live pre-CDC bb-worker-operator Deployment
+  # Operator: one per cluster. upgradeChecks.operatorNamespace points at it;
+  # the mock lookup stands in for that namespace's Deployments.
+  - it: rejects the bb-worker-operator release that runs today (v0.3.13)
+    set:
+      upgradeChecks.operatorNamespace: hermetiq
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.12
+                  app.kubernetes.io/version: v0.3.13
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment hermetiq/bb-worker-operator runs bb-worker-operator v0\.3\.13, which generates pre-CDC worker configs'
+
+  - it: accepts bb-worker-operator v0.3.14 or later
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.13
+                  app.kubernetes.io/version: v0.3.14
+            - metadata:
+                name: bb-worker-operator-controller-manager
+                labels:
+                  app.kubernetes.io/version: v0.4.0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts an operator annotated as CDC-compatible regardless of version
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+                labels:
+                  app.kubernetes.io/version: bb-upgrade-22b7d82
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: fails closed when the operator version cannot be read
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.12
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bb-worker-operator has no readable app\.kubernetes\.io/version'
+
+  - it: ignores unrelated Deployments in the operator namespace
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: keda-operator
+                labels:
+                  app.kubernetes.io/version: 2.19.0
+    asserts:
+      - notFailedTemplate: {}
+
+  # bep-nats: only grpc-api and bep-nats-pub validate ConfigSets.
+  - it: rejects bep-nats from hermetiq 0.9.8, the latest release without dual-descriptor validation
     set:
       _testLookup:
         deployments:
           items:
             - metadata:
-                name: bb-worker-operator
+                name: grpc-api
                 labels:
-                  helm.sh/chart: bb-worker-operator-0.1.0
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment .*/bb-worker-operator .* predates the CDC-compatible bb-worker-operator release'
+          errorPattern: 'live Deployment .*/grpc-api comes from hermetiq chart 0\.9\.8, whose bep-nats validates only pre-CDC'
 
-  - it: rejects live pre-0a bep-nats Deployment but allows absent or CDC-ready bep-nats
+  - it: accepts bep-nats from a hermetiq release after 0.9.8, and ignores subscribers
     set:
       _testLookup:
         deployments:
@@ -606,10 +701,41 @@ tests:
             - metadata:
                 name: bep-nats-pub
                 labels:
-                  helm.sh/chart: hermetiq-0.8.0
+                  helm.sh/chart: hermetiq-0.9.9
+                  app.kubernetes.io/component: publisher
+            - metadata:
+                name: bep-nats-sub-0
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: subscriber
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts hermetiq 0.9.8 bep-nats annotated as CDC-compatible (buildbarnCdcCompatible)
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: grpc-api
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: fails closed when a bep-nats Deployment has no readable hermetiq chart version
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-pub
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment .*/bep-nats-pub .* predates the Phase 0a dual-descriptor bep-nats release'
+          errorPattern: 'live Deployment .*/bep-nats-pub has no readable hermetiq chart version'
 
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any

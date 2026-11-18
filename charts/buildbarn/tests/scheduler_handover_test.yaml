@@ -1,4 +1,8 @@
 suite: scheduler zero-downtime handover (Phase 1)
+# The CDC chart rejects handover unless the fork image supports CDC; these
+# tests cover the handover templates themselves.
+set:
+  scheduler.handover.cdcCompatibleFork: true
 templates:
   - templates/deployment-scheduler.yaml
   - templates/rbac-scheduler.yaml

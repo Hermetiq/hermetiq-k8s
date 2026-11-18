@@ -14,6 +14,13 @@
     "standardLabels": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "configOverrides": { "type": "object" },
+    "upgradeChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operatorNamespace": { "type": "string" }
+      }
+    },
     "config": {
       "type": "object",
       "properties": {
@@ -244,6 +251,7 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "cdcCompatibleFork": { "type": "boolean" },
             "peerServerName": { "type": "string", "minLength": 1 },
             "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },

@@ -5,6 +5,11 @@ metadata:
   namespace: {{ include "bb-worker-operator.namespace" . }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
+  annotations:
+    # This operator emits CDC worker configs when the Buildbarn chart's
+    # common.libsonnet has the CDC shape. The buildbarn chart's upgrade guard
+    # looks for this annotation before switching a cluster to CDC.
+    hermetiq.com/cdc-compatible: "true"
 spec:
   replicas: {{ .Values.replicaCount }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
