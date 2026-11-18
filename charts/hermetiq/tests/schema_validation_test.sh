@@ -30,6 +30,10 @@ expect_schema_failure 'rbe.accessPolicy.projects={"0":{"enabled":"yes","minimum_
   "projects\.0\.enabled: Invalid type\. Expected: boolean|projects/0/enabled': got string, want boolean"
 expect_schema_failure 'assistant.streamTimeoutSeconds=0' \
   "streamTimeoutSeconds: Must be greater than or equal to 1|streamTimeoutSeconds': minimum: got 0, want 1"
+for setting in maxLookbackHours maxSamples maxRecords timeoutSeconds maxActionBytes; do
+  expect_schema_failure "rbe.sizeClassTraining.${setting}=0" \
+    "${setting}: Must be greater than or equal to 1|${setting}': minimum: got 0, want 1"
+done
 expect_schema_failure 'gateway.timeouts.apiWeb.requestTimeout="five-minutes"' \
   "apiWeb\.requestTimeout: Does not match pattern|apiWeb/requestTimeout': .* does not match pattern"
 expect_schema_failure 'gateway.timeouts.mcp.maxStreamDuration="forever"' \
