@@ -94,7 +94,27 @@ There are two placements:
 - **In memory**: `keyLocationMap.entries` for filesystem stores, or `blockDevice.keyLocationMapInMemoryEntries` for raw block stores. Budget about 64 bytes per entry of eager Go heap.
 - **On disk**: `keyLocationMapSizeMi` for the filesystem CAS, `keyLocationMap: { type: blockDevice, sizeMi: ... }` for the other filesystem stores, or `blockDevice.keyLocationMap: file` for raw block stores. Budget about 66 bytes per entry.
 
-Disk-backed maps are required for restart persistence. On `backend: filesystem`, the CAS is disk-backed by default. CMS also defaults to a file-backed index when its shared CAS has a filesystem or metadata volume. AC, ISCC and FSAC default to in-memory unless you opt in. For raw block stores, `keyLocationMap: inMemory` is the default and means cache-only behavior even when the blocks device is durable.
+Disk-backed maps are required for restart persistence. On `backend: filesystem`,
+CAS uses a disk-backed map by default; AC, ISCC, and FSAC default to in-memory
+maps. CMS also defaults to a file-backed index when its shared CAS has a
+filesystem or metadata volume. Dedicated raw block stores default to
+`keyLocationMap: inMemory`; a raw CAS with that setting also keeps its shared CMS
+in memory.
+
+The [persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
+selects disk-backed indexes for CS, CMS, AC, ISCC, and FSAC without changing their
+configured sizes or enabling optional stores. With raw CAS, it also moves the
+default shared CMS from memory to files on the CAS metadata volume; budget for
+both CMS blocks and its index there. An in-memory map means cache-only behavior
+even when the blocks device is durable. Disk-backed maps also require retained
+blocks and `persistent_state`; see
+[What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart).
+
+The profile does not convert the storage format. When upgrading a pre-CDC
+release, follow the [all-store cold-cache cutover](#storage-format-cutover-and-rollback)
+even if some stores already use persistent indexes. A persistence-only change
+within the CDC format can retain already-persistent stores when their paths,
+sizes, geometry, and backing volumes stay unchanged.
 
 Use this sizing rule:
 
@@ -222,7 +242,13 @@ A worker's CAS is the one place this shape appears without an existence cache, a
 
 ## Worked Example 1: One Local-NVMe Shard (680 GiB)
 
-Suppose one cache-only shard uses raw block devices carved by `partition_ephemeral_disks` and in-memory maps, as configured in `custom-values/buildbarn-values-local-ssd-block.yaml`.
+Suppose one cache-only shard uses raw block devices carved by
+`partition_ephemeral_disks` and in-memory maps, as configured in
+`custom-values/buildbarn-values-local-ssd-block.yaml`. CS, shared CMS, AC, ISCC,
+and FSAC start empty on storage-process restart. Applying the persistent profile
+requires metadata directories for the four raw devices and room for the shared
+CMS blocks and index in the CAS metadata directory; see the
+[migration runbook](buildbarn-storage-operations.md#migrate-to-persistent-indexes).
 
 **1. Block geometry.** A 680 GiB CAS device with `3 + 8 + 30 + 3 = 44` total blocks gives a block size of about 15.5 GiB. That is also the largest storable blob. Usable capacity is `41/44`, or about 634 GiB.
 
@@ -253,7 +279,10 @@ ISCC  8M entries * 64 B ~= 0.5 GiB  (for a 2 GiB LV)
 FSAC  8M entries * 64 B ~= 0.5 GiB  (for a 6 GiB LV)
 ```
 
-That is about 7.3 GiB before Go garbage collector headroom, gRPC buffers, and in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and `limits.memory: 24Gi`.
+That is about 7.2 GiB before Go garbage collector headroom, gRPC buffers, and
+in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and
+`limits.memory: 24Gi`. A file-backed index needs 66 bytes per record and also
+consumes page-cache memory; switching index types does not remove its RAM budget.
 
 ## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
 
@@ -263,9 +292,9 @@ Suppose you are sizing a **10 TiB persistent CAS** across either **`10 shards ×
 - **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~21.6 GiB`. At `17,408` B/blob, each shard holds **~54.6 million** CAS objects.
 - **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~43.2 GiB`. At `17,408` B/blob, each shard holds **~109.2 million** CAS objects.
 
-**2. Map entries.** At a `2.3x` ratio, a 1 TiB shard needs **~125.8M entries (`7,680 MiB` = `7.5 GiB`)** and a 2 TiB shard needs **~251.6M entries (`15,360 MiB` = `15 GiB`)**. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` every 300s, so the index survives restarts. Keep CMS persistent too, and include its blocks and index when sizing the shared volume.
+**2. Map entries.** At 66 bytes per disk record, a **`7,680 MiB` (`7.5 GiB`)** map holds **~122.0M entries** for a 1 TiB shard, and a **`15,360 MiB` (`15 GiB`)** map holds **~244.0M entries** for a 2 TiB shard. Both give about `2.23x` the estimated live object count. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` with a 300s minimum sync interval, so the index survives restarts. Delayed syncs can leave a longer window of unsynchronized writes. Keep CMS persistent too, and include its blocks and index when sizing the shared volume.
 
-**3. Memory.** Each lookup makes up to 16 random 64-byte probes into the mmap'd map, so it must stay resident in the page cache. Budget the total KLM size across CS, CMS, AC, ISCC and FSAC plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards. Remeasure average chunk and mapping sizes after migration rather than assuming the old whole-blob distribution remains unchanged.
+**3. Memory.** Each lookup makes up to 16 random 66-byte probes into the mmap'd map, so budget page-cache memory for its working set. Budget the total KLM size across CS, CMS, AC, ISCC and FSAC plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards. Remeasure average chunk and mapping sizes after migration rather than assuming the old whole-blob distribution remains unchanged.
 
 **4. The other stores.** Scale AC to `20Gi–32Gi` per shard (`keyLocationMap` `sizeMi: 2688–4096`), ISCC to `1Gi–2Gi` blocks (`sizeMi: 256–512`), and FSAC to `8Gi–12Gi` (`sizeMi: 1024–1536`), all with persistent KLMs. Complete values for both shard layouts, plus frontend, scheduler, and gateway settings, are in the chart README's [Large-scale deployments](../charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards) section; shutdown and grace-period behaviour is covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md#what-survives-a-restart).
 
@@ -296,7 +325,7 @@ With `storage.persistence.cms.backend: sharedCas` (the default), CMS uses the CA
 
 The `blockDevice` CMS index setting refers to Buildbarn's block-device abstraction; here it opens a regular file. Persistence lasts only as long as the underlying volume: an `emptyDir` does not survive pod replacement. Shared placement adds no PVC. Dedicated CMS volumes/devices are opt-ins for new installations; Kubernetes cannot add a volume claim template to an existing StatefulSet in place.
 
-Customers can explicitly choose `storage.persistence.cms.keyLocationMap.type: inMemory`. On filesystem CAS this retains the CMS blocks file but loses its mapping index on restart, so large blobs may need uploading again. The default file-backed index avoids that extra loss.
+Customers can explicitly choose `storage.persistence.cms.keyLocationMap.type: inMemory`. On filesystem CAS this retains the CMS blocks file but loses its mapping index on restart, so large blobs may need uploading again. The default file-backed index avoids that extra loss. Applying the persistent profile after deployment values overrides that choice and also selects a file-backed index for a dedicated raw CMS, if configured; it preserves the chosen CMS backend.
 
 ## Upgrading Configurations to CDC
 

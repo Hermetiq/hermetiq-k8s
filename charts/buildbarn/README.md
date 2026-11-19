@@ -47,6 +47,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Operator-managed workers](#operator-managed-workers)
   - [Overrides](#overrides)
 - [Storage](#storage)
+  - [Opt-in persistent indexes](#opt-in-persistent-indexes)
   - [Raw block-device storage](#raw-block-device-storage)
   - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
   - [Large-scale deployments (10 TiB cache / 5–10 shards)](#large-scale-deployments-10-tib-cache--510-shards)
@@ -866,6 +867,46 @@ storage:
 Storage pods are resource intensive in production. Make sure the target namespace
 has quota for the configured CPU, memory, disk, or ephemeral-storage requests.
 
+### Opt-in persistent indexes
+
+Without this profile, the CDC chart's index defaults remain unchanged:
+filesystem CAS and its shared CMS are persistent; filesystem AC/ISCC/FSAC and
+all dedicated raw-block stores use in-memory indexes. Shared CMS also becomes
+volatile when raw CAS has no metadata filesystem. Optional ISCC and FSAC stores
+remain disabled by default.
+
+To select disk-backed indexes for CAS, CMS, AC, ISCC, and FSAC, apply
+[`custom-values/buildbarn-values-persistent.yaml`](../../custom-values/buildbarn-values-persistent.yaml)
+**after** your deployment values.
+
+This companion file lives in the repository's `custom-values` directory, outside
+the packaged OCI chart; OCI consumers must fetch it separately. The commands
+below run from a repository checkout.
+
+```bash
+helm template buildbarn ./charts/buildbarn --namespace hermetiq \
+  -f deployment-values.yaml \
+  -f custom-values/buildbarn-values-persistent.yaml
+```
+
+The profile only selects index types. It preserves store enablement, backends,
+volume mode, sizes, paths, StorageClasses, and resources. Later values files can
+supply environment-specific metadata paths or sizing. An earlier `inMemory`
+setting is intentionally overridden by this profile.
+
+CMS keeps its configured backend. With the default `sharedCas`, its blocks,
+index, and state share the CAS filesystem or raw CAS metadata volume; budget
+space for both stores. Dedicated CMS backends get persistent indexes too.
+
+For an existing release, follow [Migrate to persistent indexes](../../docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes)
+before applying it: filesystem stores need free space, raw-block PVC stores gain
+immutable claim templates, and raw hostPath stores need metadata directories.
+Previously volatile stores start cold once. If upgrading from pre-CDC Buildbarn,
+also follow the [storage-format cutover](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback):
+the new encoding requires a cold reset even for previously persistent stores.
+Persistence requires the blocks, index, and state to survive together; hostPath
+stays node-local and `emptyDir` stays pod-lifetime storage.
+
 ### Raw block-device storage
 
 Each store can instead put its blocks on a **raw block device** (`volumeMode: Block`)
@@ -875,12 +916,14 @@ rather than a file on a filesystem, avoiding the filesystem layer. Set a store's
 becomes the block store — Buildbarn auto-infers the block size, so `blocksSizeGi` is
 ignored in this mode.
 
-The key-location map (KLM) defaults to **in memory** (`keyLocationMap: inMemory`),
-which is simplest but **not persistent** — the store is empty after a storage-pod
-restart. RAM use scales with `keyLocationMapInMemoryEntries` (~64 bytes/entry), so
-size it against the pod memory limit. To persist across restarts, set
-`keyLocationMap: file`: the KLM file and the `persistent_state` directory then live on
-a small companion `volumeMode: Filesystem` PVC (claim `<store>-meta`).
+The raw-block key-location map (KLM) defaults to **in memory**
+(`keyLocationMap: inMemory`) for all five dedicated raw-block stores. Those
+stores are empty after a storage-pod restart, even when the blocks survive. RAM use scales with
+`keyLocationMapInMemoryEntries` (~64 bytes/entry), so size it against the pod memory
+limit. Opt in with `keyLocationMap: file`, or use the [persistent profile](#opt-in-persistent-indexes).
+With `file`, the KLM and `persistent_state` directory live on a companion
+`volumeMode: Filesystem` PVC (claim `<store>-meta`); the blocks and metadata must
+both survive for the store to recover.
 
 ```yaml
 storage:
@@ -1070,6 +1113,16 @@ The chart validates these dependencies (e.g. `sizeClassAnalysis` requires
 `iscc.enabled`; a worker's `prefetching` requires `fsac.enabled` and its
 `virtualBuildDirectory`).
 
+Enabling either store alone retains the legacy in-memory index default, so its
+learned history is lost on storage-process restart. To preserve history, set
+`keyLocationMap.type: blockDevice` for filesystem storage or
+`blockDevice.keyLocationMap: file` for raw blocks. The [persistent profile](#opt-in-persistent-indexes)
+sets these choices for both stores without enabling them. See the
+[ISCC-only hostPath example](../../docs/iscc-size-classes.md#1-enable-iscc-storage)
+when only scheduling history should persist, and
+[What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart)
+for the volume-lifetime limits.
+
 ### Large-scale deployments (10 TiB cache / 5–10 shards)
 
 When scaling `bb-storage` to a **10 TiB CAS** across **5 to 10 shards**
@@ -1094,7 +1147,7 @@ because their KLMs live on disk.
 | **Max storable single blob** (`usable / 41` data blocks) | ~21.6 GiB (with default `8+30+3+3 = 44` blocks) | ~43.2 GiB (with default `44` blocks) |
 | **Single-shard loss impact** | Losing 1 shard evicts **10%** of cached blobs | Losing 1 shard evicts **20%** of cached blobs |
 | **Nodes whose loss stalls uploads** (see note below) | Any 1 of 10 | Any 1 of 5 |
-| **Per-shard CAS KLM size** (at 17.4 KiB avg blob, `2.3x` ratio) | ~54.6M objects/shard -> **`7680 MiB` (`7.5 GiB`, ~125.8M entries)** | ~109.2M objects/shard -> **`15360 MiB` (`15 GiB`, ~251.6M entries)** |
+| **Per-shard CAS KLM size** (at 17,408 B avg object, `2.23x` ratio) | ~54.6M objects/shard -> **`7680 MiB` (`7.5 GiB`, ~122.0M entries)** | ~109.2M objects/shard -> **`15360 MiB` (`15 GiB`, ~244.0M entries)** |
 | **Recommended pod memory (`requests` / `limits`)** | `16Gi` / `24Gi` per storage pod | `28Gi` / `40Gi` per storage pod |
 
 > [!IMPORTANT]
@@ -1115,7 +1168,7 @@ At the measured `17,408`-byte average CAS blob size
 holds ~54.6M objects and a `2 TiB` shard holds ~109.2M objects. With
 `minimumRatio: 2` (and `2.2x–2.5x` recommended as hash-table displacement
 headroom), each shard's CAS KLM needs **`7.5 GiB` (1 TiB shard)** to
-**`15 GiB` (2 TiB shard)** of 64-byte slot records:
+**`15 GiB` (2 TiB shard)** of 66-byte disk records:
 
 - **Prefer a disk-backed KLM (`keyLocationMap: file` or `backend: filesystem`)
   for 1–2 TiB persistent shards.** A `15 GiB` KLM in `inMemory` mode sits on
@@ -1123,11 +1176,11 @@ headroom), each shard's CAS KLM needs **`7.5 GiB` (1 TiB shard)** to
   index on every pod restart**. With a file-backed KLM (`backend: blockDevice`
   plus `blockDevice.keyLocationMap: file` on a companion `<store>-meta` PVC, or
   `backend: filesystem`), `bb-storage` `mmap`s `cdc-v1/keys.db` and writes epoch
-  state to `cdc-v1/persistent_state` every 300s. Together with persistent CMS,
-  cached blobs survive ordinary restarts. Format-changing upgrades require the
-  explicit cutover described above.
+  state to `cdc-v1/persistent_state` with a 300s minimum sync interval. Together
+  with persistent CMS, cached blobs survive ordinary restarts. Format-changing
+  upgrades require the explicit cutover described above.
 - **Size pod RAM so the mmap'd KLM stays resident in the page cache.** Every
-  `Get` and `FindMissingBlobs` lookup probes up to 16 random 64-byte slots in
+  `Get` and `FindMissingBlobs` lookup probes up to 16 random 66-byte slots in
   the file. If the node cannot keep `cdc-v1/keys.db` in page cache, each lookup
   becomes a random disk read. Rule of thumb: set
   `storage.resources.requests.memory` to at least **the total KLM size across
@@ -1273,7 +1326,8 @@ and `storage.resources.requests.memory: 28Gi` / `limits.memory: 40Gi`.
   a clean `bb-storage` shutdown syncs the blocks device twice and writes
   `persistent_state`. On a 1–2 TiB network volume under load that can exceed
   the 30s Kubernetes default, in which case the shard falls back to crash
-  recovery and loses up to the last 300s of writes as ordinary cache misses.
+  recovery and may lose recent unsynchronized writes as ordinary cache misses.
+  The 300s minimum sync interval is not a maximum loss window.
   See [What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart).
 - **Frontend memory & read cache**: when `config.maximumMessageSizeBytes` is
   raised (for example to `838860800` / 800 MiB), size

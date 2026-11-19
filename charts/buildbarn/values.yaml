@@ -385,10 +385,14 @@ storage:
   resources:
     requests:
       cpu: 500m
-      # Covers the default in-memory key-location maps as they fill. With
-      # backend=blockDevice the defaults total 54M entries x 64 B = ~3.5 GiB;
-      # the filesystem defaults keep their maps on disk and need far less. Raise
-      # this whenever you raise keyLocationMapInMemoryEntries.
+      # With CAS/AC/ISCC/FSAC enabled and backend=blockDevice, their default RAM
+      # maps total 54M entries x 64 B = ~3.2 GiB. Shared CMS additionally needs
+      # ~256 MiB for its RAM map and 264 MiB for blocks when raw CAS has no
+      # metadata filesystem. Filesystem CAS and shared CMS keep maps on disk;
+      # AC, ISCC, and FSAC keep their maps in memory by default.
+      # Opting into persistent indexes uses file page cache instead of RAM maps.
+      # Budget for both heap and file page cache; raise this whenever you
+      # increase key-location-map capacity.
       memory: 4Gi
     limits:
       cpu: 7100m
@@ -452,8 +456,17 @@ storage:
       iscc: 512  # PreviousExecutionStats protos
       fsac: 2048 # path bloom filters, capped by bloomFilterMaximumSizeBytes
   persistence:
+    # Volume retention alone does not make a store recoverable. The KLM and
+    # persistent_state must survive with its blocks. Filesystem CAS and CMS
+    # on a filesystem use disk-backed KLMs by default. AC/ISCC/FSAC and dedicated
+    # raw-block defaults are volatile. Shared CMS is also volatile when raw CAS
+    # has no metadata filesystem. Opt in with custom-values/buildbarn-values-persistent.yaml
+    # after reviewing capacity and the migration steps; it changes index modes
+    # for all five stores without enabling optional stores or resizing data devices.
+    # See docs/buildbarn-storage-operations.md for the full restart matrix.
     # Supported modes:
-    # - pvc: durable PersistentVolumeClaims via volumeClaimTemplates.
+    # - pvc: PersistentVolumeClaims via volumeClaimTemplates. Durability across
+    #   node replacement depends on the StorageClass (local PVs remain local).
     # - emptyDir: pod-lifetime ephemeral storage; on GKE, pair with Local
     #   SSD-backed ephemeral storage node pools.
     # - hostPath: node-local path, typically backed by mounted Local SSD/NVMe.
@@ -665,19 +678,26 @@ storage:
     # Initial Size Class Cache (ISCC): consumed by bb-scheduler for size-class
     # analysis. Only useful when worker platforms declare multiple size classes.
     # Enable together with scheduler.sizeClassAnalysis.enabled.
+    # The compatible default is an in-memory KLM: learned history is lost on
+    # every storage-process restart. To retain it, opt into a disk-backed KLM
+    # below or use custom-values/buildbarn-values-persistent.yaml. This also
+    # enables persistent_state; blocks, KLM, and state must survive together.
+    # Durable PVCs can survive node replacement; hostPath requires the same
+    # retained node and disks; emptyDir loses history when the pod is replaced.
     iscc:
       enabled: false
       backend: filesystem
       storageClassName: premium-rwo
       # ISCC objects are small PreviousExecutionStats protos and there is at most
-      # one per distinct action, so this store is deliberately SMALL. Giving it a
-      # large device just means millions of indexable slots the key-location map
+      # one per command/platform shape, so this store is deliberately SMALL.
+      # A large device means millions of indexable slots the key-location map
       # would have to cover (see storage.keyLocationMapSizing above).
       size: 2Gi
       blocksSizeGi: 1
       keyLocationMap:
-        type: inMemory # inMemory or blockDevice
+        type: inMemory # opt into blockDevice for a file-backed KLM on this filesystem
         entries: 4000000
+        # ~4.07M disk records; fits alongside the 1Gi blocks file in the 2Gi volume.
         sizeMi: 256
       oldBlocks: 8
       currentBlocks: 24
@@ -695,6 +715,10 @@ storage:
         size: 2Gi
         # Deprecated alias for storage.persistence.iscc.writeConcurrencyLimit.
         writeConcurrencyLimit: null
+        # With file, KLM + persistent_state live on a companion metadata volume.
+        # Switching an existing raw-block PVC store from inMemory adds an
+        # iscc-meta claim template and requires a StatefulSet recreate (README).
+        # The old volatile index cannot be recovered by switching to file.
         keyLocationMap: inMemory
         keyLocationMapInMemoryEntries: 8000000
         metadata:
@@ -702,6 +726,9 @@ storage:
           size: 1Gi
           keyLocationMapSizeMi: 512
           hostPath:
+            # Required in mode=hostPath: choose a retained, writable node-local
+            # directory for the KLM and state. Local SSD blocks still disappear
+            # on node replacement even if this directory survives.
             path: ""
             type: DirectoryOrCreate
         hostPath:
@@ -773,8 +800,9 @@ storage:
   # Pod terminationGracePeriodSeconds (null => Kubernetes default, 30s).
   # Persistent stores flush on shutdown with two full syncs of the blocks
   # device plus a state write; on large network-attached volumes give this
-  # enough headroom or up to minimumEpochInterval (300s) of recent writes
-  # degrade to the crash-recovery bound.
+  # enough headroom or recent unsynchronized writes may be lost. The 300s
+  # minimumEpochInterval is not a maximum loss window: slow or failed syncs
+  # can delay persistence further.
   terminationGracePeriodSeconds: null
   # Optional NetworkPolicy for the storage tier. Storage gRPC (:8981) accepts
   # unauthenticated traffic — authentication and cache-write authorization
@@ -974,8 +1002,10 @@ frontend:
     # this is enabled, or the first symptom of overcommit is eviction rather than
     # a Pending pod.
     #
-    # hostPath survives a pod restart on the same node but escapes sizeLimit
-    # entirely, leaving the node's eviction thresholds as the only ceiling.
+    # A hostPath directory survives pod replacement on the same node, but this
+    # read cache still starts empty after every process restart: its index is
+    # always in memory. hostPath also escapes sizeLimit, leaving the node's
+    # eviction thresholds as the only ceiling.
     volume:
       emptyDir: {}
       hostPath:

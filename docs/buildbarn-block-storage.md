@@ -18,7 +18,10 @@ For each raw block store, the chart creates a dedicated blocks claim named `<sto
 
 The whole device becomes the block store. Buildbarn derives the block size from the device size and block counts, so `blocksSizeGi` is ignored in `backend: blockDevice` mode. For PVC-backed raw block storage, `blockDevice.size` is the PVC request. For hostPath raw block storage, the device size comes from the host device.
 
-The key-location map defaults to memory:
+The raw-block key-location map defaults to memory for CS, AC, ISCC, FSAC, and a
+dedicated raw CMS. These
+defaults remain unchanged unless you explicitly select `file` or apply the
+[persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes):
 
 ```yaml
 storage:
@@ -40,6 +43,14 @@ keyLocationMap: file
 ```
 
 The chart then creates a small companion filesystem PVC named `<store>-meta` for the KLM file and `persistent_state` directory. Treat that metadata claim as part of the store. If either the metadata claim or the blocks claim is lost, the store starts empty.
+
+CMS defaults to `backend: sharedCas`, so it does not need its own raw device or
+PVC. With a file-backed raw CAS index, shared CMS uses the CAS metadata volume
+for its blocks, index, and checkpoint state under `cdc-v1/`. Budget an additional
+`1 GiB` for CMS blocks and `256 MiB` for its index at the default sizes, plus
+filesystem/state headroom. With an in-memory raw CAS index, shared CMS keeps its
+blocks and index in memory too. Losing CMS makes composite CAS blobs unreadable
+even when their chunks survive.
 
 ## Device Access and Pod Security
 
@@ -67,6 +78,13 @@ Switching a live release from filesystem storage to raw block storage creates ne
 StatefulSet `volumeClaimTemplates` are effectively immutable, and Kubernetes retains StatefulSet PVCs. Raw block mode also uses different claim names (`<store>-blocks` and `<store>-meta` instead of the old filesystem claims). After the new storage pods are healthy, delete the old `cas` and `ac` claims manually so they stop billing.
 
 Helm cannot patch the volume claim templates in place. Plan a reviewed StatefulSet recreate.
+
+If this change also upgrades a pre-CDC release, follow the
+[storage-format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback)
+before starting the new storage image. That migration stops clients and storage
+and resets all pre-CDC stores, including persisted ISCC/FSAC. Adding disk-backed
+indexes does not convert the old encoding or preserve the old history through
+that format change.
 
 ## GKE Example A: Persistent Disk or Hyperdisk
 
@@ -203,7 +221,22 @@ storage:
 
 This path is cache-only by design. A node loss drops that shard, and builds refill it. The storage container is privileged, and the partitioning DaemonSet is privileged too, so use a namespace that permits that model.
 
-If you set `keyLocationMap: file` on local SSD, place the metadata on the same local SSD with `blockDevice.metadata.hostPath.path`. Do not put raw local blocks beside metadata on a network PVC. Losing either the blocks or metadata empties the store, so splitting them across durability tiers makes recovery behavior harder to reason about.
+For `keyLocationMap: file`, explicitly choose a retained filesystem directory with
+`blockDevice.metadata.hostPath.path`. A filesystem on Local SSD works; for the
+small ISCC map, the [ISCC-only example](iscc-size-classes.md#1-enable-iscc-storage)
+uses the node boot filesystem at `/mnt/stateful_partition/buildbarn-storage/iscc-meta`.
+Reserve at least 1 GiB there for the 512 MiB map and state-file headroom;
+`metadata.size` does not enforce
+a hostPath quota. This protects same-node pod restarts only. Losing either the
+blocks or metadata empties the store, and durable metadata alone cannot rescue
+blocks lost with a Local SSD node. Node replacement requires durable storage for
+both pieces; see the [ISCC guide](iscc-size-classes.md#1-enable-iscc-storage).
+
+When applying the persistent profile to all four raw devices, provide a metadata
+directory for each one and include shared CMS capacity in the CAS directory.
+The profile changes index modes without resizing their configured files; CAS's
+default `7360 MiB` index plus shared CMS's `1280 MiB` files already require
+`8640 MiB` before filesystem and checkpoint headroom.
 
 ## GKE Example C: TopoLVM CSI
 

@@ -10,19 +10,77 @@ The ISCC key is a reduced action digest: command digest plus platform. It intent
 
 ## 1. Enable ISCC Storage
 
-ISCC is an extra bb-storage store served by the storage pod. It is disabled by default and is configured like the other stores.
+ISCC is an extra bb-storage store served by the storage pod. It is disabled by
+default and retains the legacy in-memory index default when enabled. To preserve
+scheduling history, explicitly set `keyLocationMap.type: blockDevice` for filesystem
+storage or `blockDevice.keyLocationMap: file` for raw blocks. The
+[persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
+selects disk indexes for CAS, CMS, AC, ISCC, and FSAC without enabling ISCC or FSAC.
 
 ```yaml
 storage:
   persistence:
     iscc:
       enabled: true
+      keyLocationMap:
+        type: blockDevice # filesystem backend; preserve learned history
       # backend / blockDevice / size like the other stores.
       # Sizing: buildbarn-storage-model.md
       # Raw devices: buildbarn-block-storage.md
 ```
 
-On a PVC-backed release, enabling ISCC or FSAC adds a claim to the storage StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place. The `helm upgrade` fails until you delete the StatefulSet and run it again; existing `cas` and `ac` PVCs are retained and reattached.
+On a PVC-backed release, enabling ISCC or FSAC adds a claim to the storage
+StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place.
+Render and inspect the change, then follow the
+[StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset)
+before upgrading; existing PVCs are retained and reattached.
+
+Persistence requires the **blocks, key-location map, and `persistent_state`** to
+survive together. Changing an `inMemory` setting cannot recover an index already
+lost on restart. The first switch starts empty, then future restarts can reuse
+the history. Filesystem ISCC needs
+no new claim for this switch. Raw-block ISCC on `mode: pvc` adds an `iscc-meta`
+claim; follow the [StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset).
+
+This persistence-only change assumes the existing release already uses CDC.
+Upgrading a pre-CDC release also changes the ISCC object encoding and requires
+the coordinated [storage format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+including a cold reset of any persistent ISCC history. The profile cannot
+convert that old history in place.
+
+For the raw Local SSD layout, this ISCC override preserves history across pod
+restarts on the same node:
+
+```yaml
+storage:
+  persistence:
+    mode: hostPath
+    blockDevice:
+      allowHostPath: true
+    iscc:
+      enabled: true
+      backend: blockDevice
+      blockDevice:
+        keyLocationMap: file
+        size: 2Gi
+        hostPath:
+          devicePath: /dev/ephemeral/iscc
+        metadata:
+          size: 1Gi
+          keyLocationMapSizeMi: 512
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/iscc-meta
+```
+
+The metadata path here deliberately uses the node's boot filesystem and must be
+writable and retain at least 512 MiB plus state-file headroom. In hostPath mode,
+`metadata.size` does not provision or limit that filesystem. Both the raw Local
+SSD device and this directory are tied to the node: rescheduling onto another
+node or replacing it can still lose history. To survive node replacement, use
+durable storage for both blocks and metadata. `storage.persistence.mode` is
+global, so this chart cannot put only ISCC on PVCs while other stores use
+hostPath. See [What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart)
+for the persistence limits and shutdown behavior.
 
 FSAC, the File System Access Cache, is the sibling store used for input prefetching. Enable it with:
 
@@ -119,7 +177,12 @@ Point a build at the size-class platform:
 --remote_default_exec_properties=pool=sizeclass
 ```
 
-With an empty ISCC, the scheduler sends every action to the largest class. That is expected and safe. The largest class is the fallback class, so the first runs favor correctness over cost.
+Cold-history behavior depends on the scheduler version; do not assume every
+action starts on the largest class. PageRank implementations that probe missing
+samples first try the smallest class without samples, with a timeout equal to
+the smaller of the action's original timeout and `pageRank.minimumExecutionTimeout`.
+Failed foreground probes fall back to the largest class. Losing ISCC history
+therefore repeats exploration and fallback work instead of reusing learned choices.
 
 The analyzer only learns from executions. Cache hits do not teach it anything. A one-shot build where each action runs once will populate little useful history, and a fully cached rerun will not move the model forward. Repeated real executions of the same action shapes do.
 

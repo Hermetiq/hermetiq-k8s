@@ -1,0 +1,274 @@
+suite: opt-in persistent storage profile
+templates:
+  - templates/configmaps.yaml
+  - templates/statefulset-storage.yaml
+values:
+  - ../../../custom-values/buildbarn-values-persistent.yaml
+tests:
+  - it: does not enable optional stores or create their claims
+    template: templates/statefulset-storage.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 2
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "iscc")]
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "fsac")]
+
+  - it: persists all five enabled stores on the existing filesystem volumes
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.fsac.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cas/cdc-v1/keys.db'.*stateDirectoryPath: '/storage-cas/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cas/cdc-v1/cms-keys.db'.*path: '/storage-cas/cdc-v1/cms-blocks.db'.*stateDirectoryPath: '/storage-cas/cdc-v1/cms_persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-ac/cdc-v1/ac-keys.db'.*stateDirectoryPath: '/storage-ac/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-iscc/cdc-v1/iscc-keys.db'.*stateDirectoryPath: '/storage-iscc/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-fsac/cdc-v1/fsac-keys.db'.*stateDirectoryPath: '/storage-fsac/cdc-v1/persistent_state'"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "inMemory:|blocksInMemory:|devicePath:|storage-.*-meta"
+
+  - it: filesystem persistence keeps the four existing claim names
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.fsac.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 4
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "ac")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "iscc")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "fsac")]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "iscc")].mountPath
+          value: /storage-iscc
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "fsac")].mountPath
+          value: /storage-fsac
+
+  - it: persists four raw stores and shared CMS with file indexes and companion state
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cas-meta/cdc-v1/keys.db'.*devicePath: '/dev/bb/cas'.*stateDirectoryPath: '/storage-cas-meta/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cas-meta/cdc-v1/cms-keys.db'.*path: '/storage-cas-meta/cdc-v1/cms-blocks.db'.*stateDirectoryPath: '/storage-cas-meta/cdc-v1/cms_persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-ac-meta/cdc-v1/ac-keys.db'.*devicePath: '/dev/bb/ac'.*stateDirectoryPath: '/storage-ac-meta/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-iscc-meta/cdc-v1/iscc-keys.db'.*devicePath: '/dev/bb/iscc'.*stateDirectoryPath: '/storage-iscc-meta/cdc-v1/persistent_state'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-fsac-meta/cdc-v1/fsac-keys.db'.*devicePath: '/dev/bb/fsac'.*stateDirectoryPath: '/storage-fsac-meta/cdc-v1/persistent_state'"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "inMemory:|blocksInMemory:|(cas|ac|iscc|fsac)-blocks.db"
+
+  - it: raw persistence adds and mounts metadata claims for all four stores
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 8
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-meta")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "ac-meta")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "iscc-meta")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "fsac-meta")]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
+          value: /storage-cas-meta
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "ac-meta")].mountPath
+          value: /storage-ac-meta
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "iscc-meta")].mountPath
+          value: /storage-iscc-meta
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "fsac-meta")].mountPath
+          value: /storage-fsac-meta
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)mkdir -p /storage-cas-meta/cdc-v1/persistent_state.*mkdir -p /storage-ac-meta/cdc-v1/persistent_state.*mkdir -p /storage-iscc-meta/cdc-v1/persistent_state.*mkdir -p /storage-fsac-meta/cdc-v1/persistent_state"
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "mkdir -p /storage-cas-meta/cdc-v1/cms_persistent_state"
+
+  - it: persists a dedicated CMS filesystem without changing its backend
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cms.backend: filesystem
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cms/cms-keys.db'.*path: '/storage-cms/cms-blocks.db'.*stateDirectoryPath: '/storage-cms/persistent_state'"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/cdc-v1/cms-"
+
+  - it: persists a dedicated raw CMS with a companion metadata volume
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cms.backend: blockDevice
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(?s)path: '/storage-cms-meta/cms-keys.db'.*devicePath: '/dev/bb/cms'.*stateDirectoryPath: '/storage-cms-meta/persistent_state'"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms-blocks.db|blocksInMemory:"
+
+  - it: dedicated raw CMS creates and mounts its metadata claim
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.cms.backend: blockDevice
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 4
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-blocks")]
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-meta")]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cms-meta")].mountPath
+          value: /storage-cms-meta
+
+  - it: later CMS inMemory overrides opt shared CMS out
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cms.keyLocationMap.type: inMemory
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms-keys.db|cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "path: '/storage-cas/cdc-v1/cms-blocks.db'"
+
+  - it: later filesystem inMemory overrides opt individual stores out
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.keyLocationMap.type: inMemory
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "iscc-keys.db|storage-iscc/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac/cdc-v1/persistent_state"
+
+  - it: later raw inMemory overrides omit the metadata claim
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.keyLocationMap: inMemory
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "iscc-meta")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "iscc-meta")]
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "storage-iscc-meta"
+
+  - it: raw hostPath persistence requires an explicit metadata directory
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.hostPath.devicePath: /dev/ephemeral/iscc
+    asserts:
+      - failedTemplate:
+          errorMessage: storage.persistence.iscc.blockDevice.metadata.hostPath.path is required for keyLocationMap=file with mode=hostPath
+
+  - it: raw hostPath persistence mounts and prepares retained metadata without claims
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.hostPath.devicePath: /dev/ephemeral/iscc
+      storage.persistence.iscc.blockDevice.metadata.hostPath.path: /mnt/buildbarn/iscc-meta
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: iscc-meta
+            hostPath:
+              path: /mnt/buildbarn/iscc-meta
+              type: DirectoryOrCreate
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "iscc-meta")].mountPath
+          value: /storage-iscc-meta
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].volumeMounts[?(@.name == "iscc-meta")].mountPath
+          value: /storage-iscc-meta
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "chown 65534:65534 /storage-iscc-meta/cdc-v1/persistent_state"
