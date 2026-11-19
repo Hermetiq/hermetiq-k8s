@@ -36,7 +36,8 @@ How this README is organized:
 - [Licensing and trials](#licensing-and-trials)
 - [Hosts](#hosts)
 - [PostgreSQL and schema management](#postgresql-and-schema-management)
-- [Routing](#routing): providers, TLS, Envoy Gateway policies, timeouts
+- [Routing](#routing): providers, what the public routes forward, TLS,
+  Envoy Gateway policies, timeouts
 - [Redis-compatible cache](#redis-compatible-cache)
 - [NATS ingest and stream configuration](#nats-ingest-and-stream-configuration)
 - [Observability](#observability): OpenTelemetry, VictoriaMetrics, dashboards
@@ -375,7 +376,9 @@ Change whichever of these does not match your cluster:
 
 When the Buildbarn chart runs in the same cluster:
 
-- Set `publisher.trustedCalCidrs` to the pod CIDR its workers run in.
+- Set `publisher.trustedCalCidrs` to the pod range its workers run in, which
+  must not contain gateway or ingress proxy pods; see
+  [Completed Action Logger trust](#completed-action-logger-trust).
 - Keep `app.streamPartitionCount` equal to Buildbarn's
   `frontend.grpcCacheProxy.cacheEvents.numShards`.
 - Keep the starter's `victoriaMetrics` settings, with `baseUrl` at your
@@ -867,6 +870,44 @@ policies in the Gateway's namespace; see
 
 With `gateway-httproute-only`, the GKE `HealthCheckPolicy` for the API Service,
 which mixes gRPC and HTTP ports, checks `GET /ready` on container port `8008`.
+
+### What the public routes forward
+
+Upgrades using `--reuse-values` get the new BEP service and identity-header
+restrictions even when those keys are absent from the previous release's
+values. Explicit service lists and empty header-removal lists keep their
+configured meaning.
+
+The public BEP route forwards only the gRPC services in
+`gateway.routes.bepGrpcServices`, by default Bazel's Build Event Service
+(`google.devtools.build.v1.PublishBuildEvent`). It is a method match on the
+`gateway` GRPCRoute and a `/<service>/` path prefix on the other providers. The
+publisher also serves Buildbarn's CompletedActionLogger, which it admits by
+source address (`publisher.trustedCalCidrs`); relayed by a gateway or ingress
+proxy, an internet caller would present the proxy's pod IP. Workers reach CAL
+in-cluster and need no route. Add a service to the list only if clients outside
+the cluster need it.
+
+The public api-web route removes the request headers in
+`gateway.routes.apiWebRemoveRequestHeaders` (`X-Forwarded-User`,
+`X-Forwarded-Email`, `X-Forwarded-Groups`, `X-Forwarded-Preferred-Username`,
+and `X-Hermetiq-Project-Id`), because several `/api/v1` handlers take the
+caller's identity from `X-Forwarded-User`. Gateway modes use a
+`RequestHeaderModifier` filter and Contour a `requestHeadersPolicy`. Ingress
+needs an nginx `configuration-snippet`, which ingress-nginx rejects unless the
+controller sets `allow-snippet-annotations: "true"` and
+`annotations-risk-level: Critical`, so it is opt-in:
+`ingress.apiWeb.stripIdentityHeaders=true`. Otherwise clear these headers in
+the controller's `proxy-set-headers` ConfigMap or in a proxy in front of it. Set
+the list to `[]` only when a trusted proxy in front of the route sets these
+headers. If `ingress.apiWeb.annotations` or `commonAnnotations` already supplies
+a `configuration-snippet`, combine the header-removal directives into that
+snippet and leave `stripIdentityHeaders=false` to avoid duplicate annotations.
+
+> ⚠ Header removal is defence in depth. Authentication of the on-prem REST API
+> (`/api/v1` on `api-web`) depends on bep-nats itself rejecting unauthenticated
+> requests; until your bep-nats release does, keep the `api-web` host on a
+> network you trust.
 
 ### TLS certificates
 
@@ -1468,13 +1509,22 @@ allowed) whose peers may call it. The chart renders it as
 > silently stops arriving. The chart cannot guess a safe default, so the value
 > ships empty.
 
-Set it to the cluster's pod CIDR, or to the narrower range the Buildbarn
-workers run in:
+Set it to the range the Buildbarn worker pods run in, such as the pod range of
+a dedicated worker node pool:
 
 ```yaml
 publisher:
-  trustedCalCidrs: "10.244.0.0/16"
+  trustedCalCidrs: "10.244.8.0/21"
 ```
+
+The range must not contain gateway or ingress proxy pods (Envoy Gateway,
+Contour Envoy, ingress-nginx). The core checks the immediate TCP peer, so a
+request one of them relays from the internet arrives from the proxy's pod IP.
+The public BEP route forwards only `gateway.routes.bepGrpcServices` (see
+[What the public routes forward](#what-the-public-routes-forward)), but
+`gateway.routes.bbcalGrpcEnabled=true` publishes every publisher method, CAL
+included. If the workers cannot get a range of their own, the whole pod CIDR is
+acceptable only while no route forwards CAL.
 
 `GRPC_AUTH_TRUSTED_XFCC_CIDRS`, which would let peers assert
 `x-forwarded-client-cert`, is deliberately never set. Nothing in this chart
@@ -1612,7 +1662,38 @@ grafana:
       headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
       auto_sign_up: true
       enable_login_token: true
+      # Your cluster's pod CIDR, where grafana-oauth2-proxy runs; a range that
+      # misses the proxy's pod IP rejects every SSO login. "" accepts any caller.
+      whitelist: "10.244.0.0/16"
+    users:
+      auto_assign_org_role: Viewer
 ```
+
+Grafana then logs in whatever user `X-Forwarded-User` names, for any caller in
+`whitelist` (an empty whitelist means any caller). The pod CIDR also holds other
+pods, including RBE runners, so the chart renders a
+`grafana-from-oauth2-proxy` NetworkPolicy while
+`grafana.oauth2Proxy.enabled=true`, including upgrades that reuse older values
+without a `grafana.networkPolicy` block. Disabling only the public Grafana route
+keeps this policy: Grafana is installed separately and still trusts proxy
+headers after the route and proxy are removed. It selects the
+Grafana pods (`grafana.networkPolicy.podSelector`, default
+`app.kubernetes.io/name: grafana`; a selector you set replaces the default) and
+admits only `grafana-oauth2-proxy` and
+`grafana.networkPolicy.scrapersFrom` (default: the VictoriaMetrics `vmagent`)
+on port `grafana.networkPolicy.port` (`3000`). It renders independently of
+`networkPolicy.enabled`, in the release namespace, so Grafana must run there.
+Add any other in-cluster Grafana client to `scrapersFrom`. For a scraper in
+another namespace, put its `namespaceSelector` and `podSelector` in the same
+entry: a `namespaceSelector` on its own admits every pod in that namespace.
+Set `grafana.networkPolicy.enabled=false` only if something else restricts who
+can reach Grafana. Turning off `grafana.oauth2Proxy.enabled` omits the policy
+and routes directly to Grafana; configure Grafana's own authentication before
+switching to that mode.
+
+New SSO users start as Viewers: Grafana OSS cannot map IdP groups to org roles
+under `auth.proxy`. Promote editors and admins with the Grafana admin
+credentials.
 
 ## Workload sizing, scheduling, and availability
 
@@ -2461,7 +2542,8 @@ dashboard:
 
 ### Network policies
 
-The chart renders no NetworkPolicy by default. `networkPolicy.enabled: true`
+Apart from the Grafana policy described in [Grafana SSO](#grafana-sso), the
+chart renders no NetworkPolicy by default. `networkPolicy.enabled: true`
 adds ingress-only policies that admit each component's Service target ports
 and nothing else:
 

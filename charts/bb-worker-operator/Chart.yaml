@@ -15,6 +15,12 @@ annotations:
       description: "Pin the operator v0.3.13 image to its immutable SHA-256 manifest digest; the operator Deployment rolls once on upgrade"
     - kind: changed
       description: "image.digest now has a default and takes precedence over image.tag; set or clear image.digest when overriding image.tag"
+    - kind: changed
+      description: "The repository's starter values now install the operator namespace-scoped (rbac.mode=namespace, metrics.secure=false), matching the installation guide. The chart default stays rbac.mode=cluster"
+    - kind: security
+      description: "Document that RbeWorker editor and admin roles control privileged worker pods subject to specPolicy, and that cluster mode grants the operator ServiceAccount Deployment create in every namespace"
+    - kind: added
+      description: "Install notes warn when the operator runs with a cluster-wide manager binding"
 keywords:
   - buildbarn
   - bazel

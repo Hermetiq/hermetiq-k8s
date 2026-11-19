@@ -28,6 +28,7 @@ supported full-stack deployment order.
 - [RbeWorker Spec Policy](#rbeworker-spec-policy)
   - [Keeping the previous behavior](#keeping-the-previous-behavior)
 - [RBAC Scope](#rbac-scope)
+  - [RbeWorker roles](#rbeworker-roles)
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
 - [License](#license)
@@ -62,9 +63,12 @@ helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
 helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
 ```
 
-For a namespace-scoped install, set `rbac.mode=namespace` and
-`metrics.secure=false` in the values file. Have a cluster administrator apply
-the CRD from the matching release tag:
+The starter values install the operator namespace-scoped, with
+`rbac.mode=namespace` and `metrics.secure=false`. The chart's own default is
+still `rbac.mode=cluster`, so keep those two settings in any values file you
+write yourself unless you want the cluster-wide grant described in
+[RBAC Scope](#rbac-scope). Have a cluster administrator apply the CRD from the
+matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
@@ -714,7 +718,11 @@ The chart passes these settings to the manager as environment variables
 `ALLOWED_HOST_PATH_PREFIXES`, `ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS`) rather
 than flags, and sets `POD_SERVICE_ACCOUNT` so the operator knows its own
 ServiceAccount. Operator images older than v0.3.13 ignore the variables, so
-the values are safe to set before the image changes.
+the values are safe to set before the image changes. Empty lists and `false`
+are sent explicitly, so clearing an allowlist also clears the operator's
+policy. Do not run the operator as the `default` ServiceAccount in a namespace
+that holds `RbeWorker`s: those pools use `default` unless they name another
+ServiceAccount, and the policy would reject them.
 
 ### Keeping the previous behavior
 
@@ -744,15 +752,21 @@ any value that would make an existing `RbeWorker` `SpecInvalid`.
 
 ## RBAC Scope
 
-By default, the operator watches all namespaces and uses a manager
-`ClusterRole` and `ClusterRoleBinding`:
+The chart default, kept for existing installs, is cluster mode: the operator
+watches all namespaces and uses a manager `ClusterRole` and
+`ClusterRoleBinding`:
 
 ```yaml
 rbac:
   mode: cluster
 ```
 
-For an install managed entirely within one namespace, use:
+In cluster mode the operator ServiceAccount can create, update, and delete
+Deployments, ConfigMaps, and KEDA `ScaledObject` resources in every namespace.
+A Deployment can run any ServiceAccount of its namespace, so treat that token
+as equivalent to cluster administrator. The starter values and the
+installation guide use namespace mode instead. For an install managed entirely
+within one namespace, use:
 
 ```yaml
 rbac:
@@ -789,13 +803,48 @@ empty. The operator watches one namespace or all namespaces, not an arbitrary
 list of namespaces. Each `RbeWorker` must still share a namespace with the
 Buildbarn installation it uses.
 
+When updating an existing installation with the starter values, check the
+namespaces of all its `RbeWorker` objects first (`kubectl get rbeworkers -A`).
+Switching to namespace mode stops reconciling every pool outside the release
+namespace, including updates and deletions. Keep `rbac.mode=cluster` and
+`metrics.secure=true` in your values until those pools have their own operator
+or have been migrated. The spec-policy preflight checks only the new watched
+scope; it does not detect pools abandoned by this scope change.
+
 Switching an existing release to namespace mode removes its old ClusterRoles
 and ClusterRoleBindings, so that upgrade requires permission to delete them.
+Recreate any externally managed RoleBindings for the RbeWorker
+admin/editor/viewer roles with references to the new namespaced Roles; their
+`roleRef` cannot be patched. Existing bindings that still reference the removed
+ClusterRoles no longer grant access.
 The `RbeWorker` CRD also needs cluster-level installation; a platform team can
 install it separately before a namespace-scoped chart install.
 
 To manage all RBAC outside the chart, set `rbac.create=false` and supply
 `serviceAccount.name`.
+
+### RbeWorker roles
+
+`rbac.rbeWorkerRoles.create=true`, the default, creates unbound admin,
+editor, and viewer roles, such as `bb-worker-operator-rbeworker-editor`, for
+people and CI.
+They are ClusterRoles in cluster mode and Roles in namespace mode.
+
+Binding the editor or admin role lets a subject control worker Pod commands,
+containers and volumes in that namespace, subject to the
+[RbeWorker Spec Policy](#rbeworker-spec-policy). Operator v0.3.13 and newer
+refuse the operator's own ServiceAccount; other non-`default` ServiceAccounts,
+mounted ServiceAccount tokens, privileged extra containers and most `hostPath`
+volumes need explicit allowlist entries.
+
+Privileged worker and runner containers and namespaced Secret/ConfigMap
+mounts remain allowed. Bind these roles only to subjects you would also trust
+to create privileged Pods in that namespace, and use Pod Security admission
+to limit those privileges. The viewer role is read-only. Set
+`rbac.rbeWorkerRoles.create=false` if you do not delegate `RbeWorker`
+management. Older operator images without the spec policy also allow worker
+Pods to run as the operator's ServiceAccount, so avoid delegating these roles
+when running such images.
 
 ## Observability
 
