@@ -397,8 +397,9 @@ attempt and any failure.
 A pool with a virtual build directory serves every concurrent action in a Pod
 from one FUSE mount, and the Linux defaults for that mount are sized for light
 use. Two optional fields under `virtualBuildDirectory.fuse` raise those limits.
-Both are omitted by default, so pools that do not set them keep the worker
-config they had before.
+The operator leaves both unset by default, so pools that do not set them keep
+the worker config they had before. The [example FUSE pools](../../custom-values/rbeworkers/README.md#fuse-kernel-tuning)
+set both explicitly and document the node prerequisites and how to opt out.
 
 ```yaml
 spec:

@@ -60,6 +60,14 @@ spec:
         bloomFilterBitsPerPath: 14
         bloomFilterMaximumSizeBytes: 65536
       virtualBuildDirectory:
+        fuse:
+          # 128 x max(13 runner vCPUs, 24 concurrent actions); resize with the pool.
+          maximumBackgroundTasks: 3072
+          # Writeback tuning needs Linux >= 6.2 and writable /sys; otherwise omit
+          # this map. Failed writes stop bb_worker. See the RBE worker README.
+          linuxBackingDevInfoTunables:
+            max_ratio: "10"
+            strict_limit: "0"
         filePoolPath: /storage-worker-cas/file_pool
         filePoolSizeBytes: 34359738368
         maximumFilePoolFileCount: 200000
