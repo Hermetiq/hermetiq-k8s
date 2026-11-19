@@ -6,13 +6,14 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.9
+version: 0.9.8
 appVersion: "0.9.8"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
+  # Keep track 0.9.9 changes here (we'll bump the chart version in the release PR when we're ready to release 0.9.9)
   artifacthub.io/changes: |
     - kind: fixed
       description: "Bound worker-pool CPU and memory queries during pod churn"
