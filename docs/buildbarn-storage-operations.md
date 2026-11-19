@@ -21,7 +21,8 @@ An in-memory key-location map means cache-only behavior. This is true even if th
 To opt into persistence:
 
 - filesystem CAS: already disk-backed through `keyLocationMapSizeMi`
-- other filesystem stores: set `keyLocationMap.type: blockDevice`
+- shared-CAS CMS: already file-backed on the CAS filesystem or metadata volume; raw CAS with an in-memory index falls back to an in-memory CMS
+- other filesystem stores (AC, ISCC, FSAC): set `keyLocationMap.type: blockDevice`
 - raw block stores: set `blockDevice.keyLocationMap: file`
 
 Barn Owl's `store_not_persistent` advisory identifies storage-tier stores whose

@@ -94,7 +94,7 @@ There are two placements:
 - **In memory**: `keyLocationMap.entries` for filesystem stores, or `blockDevice.keyLocationMapInMemoryEntries` for raw block stores. Budget about 64 bytes per entry of eager Go heap.
 - **On disk**: `keyLocationMapSizeMi` for the filesystem CAS, `keyLocationMap: { type: blockDevice, sizeMi: ... }` for the other filesystem stores, or `blockDevice.keyLocationMap: file` for raw block stores. Budget about 66 bytes per entry.
 
-Disk-backed maps are required for restart persistence. On `backend: filesystem`, the CAS is disk-backed by default. The other stores default to in-memory unless you opt in. For raw block stores, `keyLocationMap: inMemory` is the default and means cache-only behavior even when the blocks device is durable.
+Disk-backed maps are required for restart persistence. On `backend: filesystem`, the CAS is disk-backed by default. CMS also defaults to a file-backed index when its shared CAS has a filesystem or metadata volume. AC, ISCC and FSAC default to in-memory unless you opt in. For raw block stores, `keyLocationMap: inMemory` is the default and means cache-only behavior even when the blocks device is durable.
 
 Use this sizing rule:
 
@@ -283,6 +283,20 @@ Two of the limits above fail at startup rather than degrade, so the BB Config Ed
 
 The division of labour is deliberate: the assistant owns the structural rules, which are checkable and verified against bb-storage source; this document owns the sizing arithmetic, worked examples and runbooks, which are what a generated rule list cannot give you. A test in the assistant's repository asserts that every rule identifier appears here, so a new rule cannot ship without a place to read about it.
 
+## CMS Placement and Persistence
+
+With `storage.persistence.cms.backend: sharedCas` (the default), CMS uses the CAS's existing mounts:
+
+| CAS layout | CMS blocks, index and checkpoint state |
+| --- | --- |
+| Filesystem CAS | `/storage-cas/cms-blocks.db`, `/storage-cas/cms-keys.db`, `/storage-cas/cms_persistent_state` |
+| Raw CAS with file-backed index | The same names under `/storage-cas-meta` |
+| Raw CAS with in-memory index | In memory; mappings are lost on restart |
+
+The `blockDevice` CMS index setting refers to Buildbarn's block-device abstraction; here it opens a regular file. Persistence lasts only as long as the underlying volume: an `emptyDir` does not survive pod replacement. Shared placement adds no PVC. Dedicated CMS volumes/devices are opt-ins for new installations; Kubernetes cannot add a volume claim template to an existing StatefulSet in place.
+
+Customers can explicitly choose `storage.persistence.cms.keyLocationMap.type: inMemory`. On filesystem CAS this retains the CMS blocks file but loses its mapping index on restart, so large blobs may need uploading again. The default file-backed index avoids that extra loss.
+
 ## Upgrading Configurations to CDC
 
 The chart's templates generate CDC configuration. Existing data still requires
@@ -291,7 +305,8 @@ configured only through values. Raw Jsonnet also needs edits: `configOverrides`,
 custom common libraries, `scheduler.actionRouter.custom`, and the ConfigMaps
 referenced by `RbeWorker.spec.config.files` or `config.generated`. The chart
 checks referenced source keys rather than assuming ConfigMap names or labels.
-Until a migration tool exists, make these schema edits by hand:
+Migrate custom files before upgrading, using a compatible migration-tool release
+when available, or make these schema edits by hand:
 
 | Old (pre-CDC) | New (CDC) |
 | --- | --- |
@@ -305,6 +320,20 @@ Until a migration tool exists, make these schema edits by hand:
 | `adminHttpServers` (scheduler) | `deprecatedAdminHttpServers` |
 | `adminRoutePrefix` (scheduler) | Remove it. |
 | `zstdPool` (scheduler, worker, noop worker, remote asset) | Remove it. |
+
+The migration command is `bep-nats buildbarn-config migrate`. It edits local files, not a live namespace. Use a released bep-nats binary/image that includes `--storage-cms=shared-cas`; do not assume an older image has this option. Keep a backup of your values and custom configs, and render the target chart with your actual values into a local `target-chart` directory. Copy mounted worker ConfigMaps into the input set too; an RbeWorker references their names rather than containing their file contents.
+
+For example, with the compatible binary on PATH and custom files in `custom-configs`:
+
+```sh
+bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
+bep-nats buildbarn-config migrate --storage-cms=shared-cas --chart-dir target-chart custom-configs
+bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
+```
+
+The first check exits 1 when changes are needed; the write and final check must exit 0. Exit 2 needs manual attention. Inspect the diff and apply the migrated files to your values/ConfigMaps before `helm upgrade`. Use the migration-tool release containing automatic chunk-storage path isolation from cloud-native `cdc-followup`. It rewrites filesystem CAS blocks/index/state to `/storage-cas/cdc-v1/{blocks.db,keys.db,persistent_state}`; for raw CAS with a file-backed index it uses `/storage-cas-meta/cdc-v1/{keys.db,persistent_state}` and keeps the raw blocks device unchanged. Custom files remain on their original parent mounts; custom state directories keep new state under `<old-state-directory>/cdc-v1/persistent_state` so a mounted state directory stays usable. The rewrite applies with either CMS option; CMS retains the shared-CAS paths listed above. Ambiguous paths stop with a diagnostic rather than reusing legacy bytes. Follow the explicit reset below and provision generated checkpoint directories with storage-pod ownership. The chart handles conventional paths; custom mounts need equivalent directory provisioning. Verification checks configuration, not available disk space or live startup. No Docker connection to Kubernetes is needed: if using Docker, mount these local input and rendered-chart directories into the container and invoke the same command there.
+
+The CDC cutover starts cold. An earlier lab run reused legacy files and observed 0/2571 hits on the first build and 2571/2571 on the repeat, with a data-integrity error logged once per node. That experiment does not establish a safe in-place upgrade: the chart now refuses legacy files and requires the explicit [storage cutover](#storage-format-cutover-and-rollback) below. Budget for cache refill; do not bypass the guard based on those lab results.
 
 The worker in `RbeWorker` and the image pins also move together. A pinned pre-CDC `bb-worker` or `bb-runner-installer` image rejects the CDC worker config, so remove the pin (the operator then uses the images the chart publishes) or update it to the CDC release in the same change.
 

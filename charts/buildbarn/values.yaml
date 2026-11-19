@@ -575,13 +575,13 @@ storage:
       # cas.blockDevice.keyLocationMap=inMemory (no filesystem volume mounted).
       blocksInMemoryBlockSizeBytes: 1048576 # 1 MiB per block x 36 blocks = 36 MiB
       keyLocationMap:
-        # Persist mappings alongside durable CAS chunks. inMemory explicitly
-        # makes composite blobs unreadable after a storage process restart.
-        # A raw CAS device without a metadata filesystem still uses memory.
+        # blockDevice uses a regular file on the shared CAS filesystem/metadata
+        # volume, with checkpoint state beside it. Raw CAS with an in-memory
+        # index always uses an in-memory CMS. No extra PVC is needed.
         type: blockDevice # inMemory or blockDevice
-        # ~0.92 GiB usable at averageObjectSizeBytes.cms (512 B) holds ~1.9M
-        # chunk mappings; 4194304 entries (~256 MiB) gives ~2.2x headroom.
+        # inMemory loses mappings on storage restart. Explicit override: ~64 bytes per entry of Go heap.
         entries: 4194304
+        # File-backed index: ~66 bytes per entry; 256 MiB holds ~4M entries.
         sizeMi: 256
       # CMS is a mutable store (chunk mappings can be rewritten with valid chunk
       # lists); bb-storage enforces newBlocks == 1.

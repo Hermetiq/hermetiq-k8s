@@ -530,3 +530,72 @@ tests:
       - matchRegex:
           path: data["storage.jsonnet"]
           pattern: 'deny: "storage is draining",'
+
+  - it: CMS placement for filesystem
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas/cms-keys.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas/cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas/cms-blocks.db"
+
+  - it: CMS placement for raw file index
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas-meta/cms-keys.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas-meta/cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas-meta/cms-blocks.db"
+
+  - it: CMS placement for raw memory index
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms-keys.db"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "blockSizeBytes: 1048576"
+
+  - it: CMS placement for explicit CMS memory index
+    set:
+      storage.persistence.cms.keyLocationMap.type: inMemory
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms-keys.db"
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cas/cms-blocks.db"

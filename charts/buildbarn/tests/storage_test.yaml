@@ -247,3 +247,60 @@ tests:
       - notMatchRegex:
           path: spec.template.spec.initContainers[0].command[2]
           pattern: chown
+
+  - it: CMS placement for filesystem
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "/storage-cas/cms_persistent_state"
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  - it: CMS placement for raw file index
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "/storage-cas-meta/cms_persistent_state"
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  - it: CMS placement for raw memory index
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "cms_persistent_state"
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  - it: CMS placement for explicit CMS memory index
+    set:
+      storage.persistence.cms.keyLocationMap.type: inMemory
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "cms_persistent_state"
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
