@@ -12,14 +12,20 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Isolate CDC CAS files in cdc-v1 and refuse legacy data until an explicit maintenance reset; persist shared CMS mappings by default so composite blobs survive restarts"
+    - kind: fixed
+      description: "Use the CDC scheduler field for fork features, validate actual worker ConfigMap references and binary capability declarations, and require the internal browser route when the cache proxy enforces auth"
+    - kind: fixed
+      description: "Preserve legacy CAS and CDC CS/CMS observability; validate protobuf semantics and add real storage upgrade/restart and PromQL regressions"
     - kind: changed
-      description: "Update Buildbarn images and Jsonnet configurations to the FastCDC chunked CAS storage model (chunkStorage, chunkMappingStorage, nested keyLocationMap, bb-portal top-level database and authorizers, and workerImage/runnerInstallerImage defaults in buildbarn-worker-config)"
+      description: "Update Buildbarn images and Jsonnet configurations to the RepMaxCDC chunked CAS storage model (chunkStorage, chunkMappingStorage, nested keyLocationMap, bb-portal top-level database and authorizers, and workerImage/runnerInstallerImage defaults in buildbarn-worker-config)"
     - kind: changed
       description: "Breaking: raw Jsonnet supplied through configOverrides, a custom common.libsonnet or RbeWorker spec.config.files must use the CDC schema; upgrades fail with the field to change and a link to the manual steps"
     - kind: added
-      description: "helm upgrade requires bb-worker-operator v0.3.14 or later and, when bep-nats runs in the release namespace, a hermetiq release after 0.9.8; upgradeChecks.operatorNamespace locates an operator in another namespace"
+      description: "helm upgrade requires verified CDC capability declarations on the operator and co-located bep-nats Deployments; upgradeChecks.operatorNamespace locates an operator in another namespace"
     - kind: changed
-      description: "Scheduler handover and configurationReloadInterval are rejected with the CDC blobstore until the fork scheduler supports CDC (scheduler.handover.cdcCompatibleFork)"
+      description: "Scheduler handover and configurationReloadInterval require a compatible fork image and scheduler.handover.cdcCompatibleFork; their accepted configuration uses the CDC schema"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

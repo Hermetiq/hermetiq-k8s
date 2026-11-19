@@ -335,6 +335,9 @@
 {{- if and .Values.frontend.grpcCacheProxy.enforceAuth (or (not .Values.frontend.grpcCacheProxy.stytch.apiHost) (not .Values.frontend.grpcCacheProxy.stytch.existingSecret)) -}}
 {{- fail "frontend.grpcCacheProxy.stytch.apiHost and frontend.grpcCacheProxy.stytch.existingSecret are required when frontend.grpcCacheProxy.enforceAuth=true" -}}
 {{- end -}}
+{{- if and .Values.frontend.grpcCacheProxy.enforceAuth (not .Values.frontend.internalService.enabled) -}}
+{{- fail "frontend.internalService.enabled must be true when frontend.grpcCacheProxy.enforceAuth=true: bb-browser reads CAS through the frontend without proxy credentials and cannot use the authenticated frontend-grpc fallback" -}}
+{{- end -}}
 {{- end -}}
 {{- if and .Values.browser.oauth2Proxy.enabled .Values.browser.service.targetPortOverride -}}
 {{- fail "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled — both claim the browser Service port" -}}
@@ -390,15 +393,14 @@
 {{- end -}}
 {{/* --- CDC schema upgrade guardrails (render-time values & cluster lookup) --- */}}
 {{- $cdcGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#upgrading-configurations-to-cdc" -}}
-{{- /* The fork scheduler's handover and reload read Actions through
-       legacyContentAddressableStorage, a pre-CDC single-store CAS. This chart
-       now passes it the CDC blobstore, which that field cannot parse. */ -}}
+{{- /* Handover and reload require a fork built with the CDC CAS schema.
+       Older fork images only support the pre-CDC configuration. */ -}}
 {{- if not $.Values.scheduler.handover.cdcCompatibleFork -}}
 {{- if $.Values.scheduler.handover.enabled -}}
-{{- fail "scheduler.handover.enabled is not supported with the CDC blobstore yet: the fork scheduler's legacyContentAddressableStorage expects the pre-CDC single-store CAS. Disable scheduler.handover for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
+{{- fail "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC: disable scheduler.handover for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
 {{- end -}}
 {{- if $.Values.scheduler.configurationReloadInterval -}}
-{{- fail "scheduler.configurationReloadInterval is not supported with the CDC blobstore yet: the fork scheduler that implements it expects the pre-CDC single-store CAS. Leave it empty for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
+{{- fail "scheduler.configurationReloadInterval is not supported with the CDC blobstore unless the fork supports CDC: leave it empty for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
 {{- end -}}
 {{- end -}}
 {{- $removedCdcFields := list
@@ -410,11 +412,11 @@
       (dict "field" "browserUrl" "pattern" "(^|[^a-zA-Z0-9_])browserUrl([[:space:]]*:|[^a-zA-Z0-9_])" "hint" "replace browserUrl with portalUrl (or deprecatedPortalUrl in scheduler.jsonnet)")
       (dict "field" "adminHttpServers" "pattern" "(^|[^a-zA-Z0-9_])adminHttpServers[[:space:]]*:" "hint" "replace adminHttpServers with deprecatedAdminHttpServers")
       (dict "field" "adminRoutePrefix" "pattern" "adminRoutePrefix[[:space:]]*:" "hint" "remove adminRoutePrefix (removed upstream in bb-scheduler)")
-      (dict "field" "zstdPool" "pattern" "zstdPool[[:space:]]*:" "hint" "remove zstdPool (removed upstream in CDC Buildbarn)") -}}
+      (dict "field" "zstdPool" "pattern" "zstdPool[[:space:]]*:" "configFiles" (list "scheduler.jsonnet" "asset.jsonnet") "hint" "remove zstdPool (removed from scheduler, worker, and remote-asset configurations; still supported by bb-storage)") -}}
 {{- range $name, $content := default (dict) $.Values.configOverrides -}}
 {{- $text := $content | toString -}}
 {{- range $rule := $removedCdcFields -}}
-{{- if regexMatch $rule.pattern $text -}}
+{{- if and (or (not (hasKey $rule "configFiles")) (has $name $rule.configFiles)) (regexMatch $rule.pattern $text) -}}
 {{- fail (printf "configOverrides[%q] contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s; see %s" $name $rule.field $rule.hint $cdcGuide) -}}
 {{- end -}}
 {{- end -}}
@@ -434,53 +436,88 @@
 {{- end -}}
 {{- $ns := include "buildbarn.namespace" . -}}
 {{- $mockLookup := default (dict) $.Values._testLookup -}}
+{{- $configMaps := default (lookup "v1" "ConfigMap" $ns "") (index $mockLookup "configMaps") -}}
+{{- $configMapsByName := dict -}}
+{{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
+{{- $_ := set $configMapsByName $cm.metadata.name $cm -}}
+{{- end -}}
+{{- $chartConfigNames := list (include "buildbarn.configName" $) (include "buildbarn.workerConfigName" $) -}}
+{{- $referencedConfigMaps := dict -}}
 {{- $rbeWorkers := default (lookup "bb.hermetiq.com/v1" "RbeWorker" $ns "") (index $mockLookup "rbeWorkers") -}}
 {{- range $worker := default (list) (index (default (dict) $rbeWorkers) "items") -}}
 {{- $wName := (default (dict) $worker.metadata).name | default "<unknown>" -}}
 {{- $wSpec := default (dict) $worker.spec -}}
 {{- $wConfig := default (dict) $wSpec.config -}}
-{{- range $fName, $fContent := default (dict) $wConfig.files -}}
-{{- range $rule := $removedCdcFields -}}
-{{- if regexMatch $rule.pattern ($fContent | toString) -}}
-{{- fail (printf "live RbeWorker %s/%s spec.config.files[%q] contains pre-CDC field %q (%s); migrate the RbeWorker configuration before upgrading the buildbarn chart" $ns $wName $fName $rule.field $rule.hint) -}}
+{{- $refName := "" -}}
+{{- $refItems := list -}}
+{{- if $wConfig.files -}}
+{{- $refName = default "" $wConfig.files.configMapName -}}
+{{- $refItems = default (list) $wConfig.files.items -}}
+{{- else if $wConfig.generated -}}
+{{- $refName = default "" $wConfig.generated.commonConfigMapName -}}
+{{- $refItems = default (list (dict "key" "common.libsonnet" "path" "common.libsonnet")) $wConfig.generated.commonItems -}}
 {{- end -}}
+{{- $refData := dict -}}
+{{- if and $refName (not (has $refName $chartConfigNames)) -}}
+{{- if not (hasKey $configMapsByName $refName) -}}
+{{- fail (printf "live RbeWorker %s/%s references missing ConfigMap %q; restore and migrate that configuration before upgrading the buildbarn chart" $ns $wName $refName) -}}
 {{- end -}}
+{{- $refData = default (dict) (index $configMapsByName $refName).data -}}
+{{- $selected := default (dict "all" false "keys" (dict)) (index $referencedConfigMaps $refName) -}}
+{{- if not $refItems -}}
+{{- $_ := set $selected "all" true -}}
+{{- end -}}
+{{- range $item := $refItems -}}
+{{- $_ := set $selected.keys $item.key true -}}
+{{- end -}}
+{{- $_ := set $referencedConfigMaps $refName $selected -}}
 {{- end -}}
 {{- $wImages := default (dict) $wSpec.images -}}
+{{- $installerEnabled := ne (default "" (default (dict) $wSpec.docker).mode) "sysbox" -}}
+{{- $runner := default (dict) $wSpec.runner -}}
+{{- if hasKey $runner "installerEnabled" -}}
+{{- $installerEnabled = $runner.installerEnabled -}}
+{{- end -}}
 {{- range $imgField, $imgVal := dict
       "spec.workerImage" (default "" $wSpec.workerImage)
       "spec.runnerInstallerImage" (default "" $wSpec.runnerInstallerImage)
-      "spec.images.worker" (default "" (index $wImages "worker"))
-      "spec.images.runnerInstaller" (default "" (index $wImages "runnerInstaller")) -}}
-{{- if and $imgVal (regexMatch ":(202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" ($imgVal | toString)) -}}
-{{- fail (printf "live RbeWorker %s/%s pins pre-CDC image %q in %s; remove the pin so the worker inherits buildbarn-worker-config's CDC image or update it to >= 20261102T before upgrading the buildbarn chart" $ns $wName ($imgVal | toString) $imgField) -}}
+      "spec.images.worker" (default (default "" (index $refData "workerImage")) (index $wImages "worker"))
+      "spec.images.runnerInstaller" (default (default "" (index $refData "runnerInstallerImage")) (index $wImages "runnerInstaller")) -}}
+{{- if and (or $installerEnabled (not (contains "runnerInstaller" $imgField))) $imgVal (regexMatch ":(202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" ($imgVal | toString)) -}}
+{{- fail (printf "live RbeWorker %s/%s pins pre-CDC image %q in %s (including ConfigMap image defaults); remove the pin so the worker inherits buildbarn-worker-config's CDC image or update it to >= 20261102T before upgrading the buildbarn chart" $ns $wName ($imgVal | toString) $imgField) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $configMaps := default (lookup "v1" "ConfigMap" $ns "") (index $mockLookup "configMaps") -}}
 {{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
 {{- $cmMeta := default (dict) $cm.metadata -}}
 {{- $cmName := $cmMeta.name | default "" -}}
 {{- $cmLabels := default (dict) $cmMeta.labels -}}
-{{- $isChartCm := has $cmName (list (include "buildbarn.configName" $) (include "buildbarn.workerConfigName" $)) -}}
+{{- $isChartCm := has $cmName $chartConfigNames -}}
+{{- $isReferenced := hasKey $referencedConfigMaps $cmName -}}
+{{- $selected := default (dict "all" true "keys" (dict)) (index $referencedConfigMaps $cmName) -}}
 {{- $isOperatorOwned := false -}}
 {{- range $owner := default (list) $cmMeta.ownerReferences -}}
 {{- if eq (default "" $owner.kind) "RbeWorker" -}}{{- $isOperatorOwned = true -}}{{- end -}}
 {{- end -}}
-{{- if and (not $isChartCm) (not $isOperatorOwned) (or (hasKey $cmLabels "hermetiq.com/worker-pool") (hasSuffix "-worker-config" $cmName)) -}}
+{{- if and (not $isChartCm) (or $isReferenced (and (not $isOperatorOwned) (or (hasKey $cmLabels "hermetiq.com/worker-pool") (hasSuffix "-worker-config" $cmName)))) -}}
 {{- range $fName, $fContent := default (dict) $cm.data -}}
+{{- if or $selected.all (hasKey $selected.keys $fName) -}}
 {{- range $rule := $removedCdcFields -}}
 {{- if regexMatch $rule.pattern ($fContent | toString) -}}
 {{- fail (printf "live worker ConfigMap %s/%s data[%q] contains pre-CDC field %q (%s); migrate the ConfigMap before upgrading the buildbarn chart" $ns $cmName $fName $rule.field $rule.hint) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (regexMatch "contentAddressableStorage[[:space:]]*:" ($fContent | toString)) (not (regexMatch "(chunkStorage[[:space:]]*:|common\\.blobstore\\.contentAddressableStorage)" ($fContent | toString))) -}}
+{{- fail (printf "live worker ConfigMap %s/%s data[%q] defines a pre-CDC single-store contentAddressableStorage without chunkStorage; migrate the referenced configuration before upgrading the buildbarn chart" $ns $cmName $fName) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- /* Components that must understand CDC before this chart switches to it.
-       A Deployment passes with hermetiq.com/cdc-compatible=true, or with a
-       semantic version at or above the first CDC-capable release. A version
-       that cannot be read fails closed. Absent components are not required:
+       Chart/app-version labels describe packaging, not the selected image.
+       Require a capability declaration verified against the effective image.
+       Absent components are not required:
        Buildbarn-only installs have no bep-nats, and SaaS runs it elsewhere. */ -}}
 {{- $operatorNs := default $ns $.Values.upgradeChecks.operatorNamespace -}}
 {{- $operatorDeployments := default (lookup "apps/v1" "Deployment" $operatorNs "") (index $mockLookup "operatorDeployments") -}}
@@ -490,13 +527,8 @@
 {{- $dLabels := default (dict) $dMeta.labels -}}
 {{- $chartLabel := default "" (index $dLabels "helm.sh/chart") -}}
 {{- if or (has $dName (list "bb-worker-operator" "bb-worker-operator-controller-manager")) (regexMatch "^bb-worker-operator-[0-9]" $chartLabel) -}}
-{{- $appVer := default "" (index $dLabels "app.kubernetes.io/version") -}}
 {{- if ne (default "" (index (default (dict) $dMeta.annotations) "hermetiq.com/cdc-compatible")) "true" -}}
-{{- if not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $appVer) -}}
-{{- fail (printf "live Deployment %s/%s has no readable app.kubernetes.io/version (%q), so its CDC support is unknown; upgrade bb-worker-operator to chart 0.3.13 (operator v0.3.14) or later before switching Buildbarn to CDC" $operatorNs $dName $appVer) -}}
-{{- else if semverCompare "<0.3.14" $appVer -}}
-{{- fail (printf "live Deployment %s/%s runs bb-worker-operator %s, which generates pre-CDC worker configs; upgrade bb-worker-operator to chart 0.3.13 (operator v0.3.14) or later before switching Buildbarn to CDC" $operatorNs $dName $appVer) -}}
-{{- end -}}
+{{- fail (printf "live Deployment %s/%s has no hermetiq.com/cdc-compatible=true declaration for its operator image; upgrade bb-worker-operator to the chart's pinned CDC-capable image, or set buildbarnCdcCompatible=true in the operator chart after verifying a custom image" $operatorNs $dName) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -510,12 +542,7 @@
        subscribers only ingest builds. */ -}}
 {{- if or (has $dName (list "grpc-api" "bep-nats-pub" "bep-nats")) (and (hasPrefix "hermetiq-" $chartLabel) (has (default "" (index $dLabels "app.kubernetes.io/component")) (list "api" "publisher"))) -}}
 {{- if ne (default "" (index (default (dict) $dMeta.annotations) "hermetiq.com/cdc-compatible")) "true" -}}
-{{- $hermetiqVer := trimPrefix "hermetiq-" $chartLabel -}}
-{{- if not (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" $hermetiqVer) -}}
-{{- fail (printf "live Deployment %s/%s has no readable hermetiq chart version (helm.sh/chart=%q), so it may not validate CDC Buildbarn configurations; upgrade the hermetiq chart to a release after 0.9.8, or set buildbarnCdcCompatible=true there when its bep-nats image validates both schemas" $ns $dName $chartLabel) -}}
-{{- else if semverCompare "<=0.9.8" $hermetiqVer -}}
-{{- fail (printf "live Deployment %s/%s comes from hermetiq chart %s, whose bep-nats validates only pre-CDC Buildbarn configurations; upgrade the hermetiq chart to a release after 0.9.8, or set buildbarnCdcCompatible=true there when its bep-nats image validates both schemas" $ns $dName $hermetiqVer) -}}
-{{- end -}}
+{{- fail (printf "live Deployment %s/%s has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image; deploy an image that validates both pre-CDC and CDC configurations and set buildbarnCdcCompatible=true in the hermetiq chart (chart version alone does not establish compatibility)" $ns $dName) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

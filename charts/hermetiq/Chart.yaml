@@ -14,6 +14,10 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: added
+      description: "Add an explicit buildbarnCdcCompatible declaration for verified dual-schema bep-nats images; existing default images are not automatically declared compatible"
+    - kind: fixed
+      description: "Keep Buildbarn dashboards usable with legacy CAS and CDC chunk storage, add separate chunk-mapping views, and test shipped queries against old/new/mixed metrics"
     - kind: changed
       description: "Update application images to v0.9.8"
     - kind: security

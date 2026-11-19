@@ -26,6 +26,23 @@ Buildbarn release and its worker configuration. Set them only to run a
 different build, and update them in the same change as every Buildbarn
 upgrade.
 
+For an existing pre-CDC installation, upgrade the CRD and operator first while
+keeping the existing image pins. Its older `buildbarn-worker-config` lacks the
+two image keys: populate them with the exact current worker and runner-installer
+images before applying these unpinned examples. Verify the pools reconcile,
+then upgrade Buildbarn so the shared Jsonnet and inherited images switch to
+CDC together. Otherwise the operator reports `SpecInvalid` during the gap.
+See the [operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-0313).
+
+Custom pools using `spec.config.files` reference a ConfigMap through
+`configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.
+The Buildbarn upgrade checks the referenced ConfigMap's selected source keys,
+regardless of its name or labels. Generated pools using a custom
+`commonConfigMapName`/`commonItems` must also migrate those selected libraries.
+Only the Buildbarn chart's own ConfigMaps are exempt because the upgrade
+replaces their contents. ConfigMap image defaults must also be CDC-capable;
+removing a CR image pin does not update a separate custom ConfigMap.
+
 ## Pools
 
 Standard bundle:

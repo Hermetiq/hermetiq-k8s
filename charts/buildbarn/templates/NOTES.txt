@@ -11,6 +11,13 @@
 {{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
 
+CDC STORAGE: upgrading pre-CDC storage requires a maintenance cutover and
+explicit cache reset. volume-init refuses legacy CAS files without modifying
+them. Snapshot the old cache if rollback is required; follow:
+https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback
+Shared CMS mappings persist by default. Explicit inMemory mappings make
+composite blobs unavailable after a storage process restart.
+
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}
 {{- if $browserExposed }}

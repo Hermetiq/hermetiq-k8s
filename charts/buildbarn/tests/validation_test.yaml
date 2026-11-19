@@ -63,6 +63,35 @@ tests:
       - failedTemplate:
           errorPattern: "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled"
 
+  - it: rejects browser fallback through a proxy that requires credentials
+    set:
+      frontend.internalService.enabled: false
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: https://api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: proxy-auth
+    asserts:
+      - failedTemplate:
+          errorPattern: "bb-browser reads CAS through the frontend without proxy credentials"
+
+  - it: permits browser fallback through an unauthenticated proxy
+    set:
+      frontend.internalService.enabled: false
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: false
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: permits an authenticated proxy when the browser has its internal Service
+    set:
+      frontend.internalService.enabled: true
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: https://api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: proxy-auth
+    asserts:
+      - notFailedTemplate: {}
+
   - it: rejects frontend autoscaling to zero because its metric is pull-based
     set:
       keda.frontend.enabled: true
@@ -397,7 +426,7 @@ tests:
       scheduler.configurationReloadInterval: 30s
     asserts:
       - failedTemplate:
-          errorPattern: "scheduler.configurationReloadInterval is not supported with the CDC blobstore yet"
+          errorPattern: "scheduler.configurationReloadInterval is not supported with the CDC blobstore unless the fork supports CDC"
 
   - it: rejects scheduler.handover with the CDC blobstore unless the fork supports CDC
     set:
@@ -407,7 +436,7 @@ tests:
       scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
       - failedTemplate:
-          errorPattern: "scheduler.handover.enabled is not supported with the CDC blobstore yet"
+          errorPattern: "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC"
 
   - it: rejects scheduler.handover with the upstream scheduler image
     set:
@@ -561,6 +590,31 @@ tests:
       - failedTemplate:
           errorPattern: 'configOverrides\["storage\.jsonnet"\] uses pre-CDC top-level field "contentAddressableStorage"'
 
+  - it: permits zstdPool in CDC storage frontend and portal configurations
+    set:
+      configOverrides:
+        storage.jsonnet: "{ zstdPool: {} }"
+        frontend.jsonnet: "{ zstdPool: {} }"
+        portal.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects zstdPool in a CDC scheduler configuration
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  - it: rejects zstdPool in a CDC remote asset configuration
+    set:
+      configOverrides:
+        asset.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["asset\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
   - it: rejects configOverrides with pre-CDC single-store contentAddressableStorage in common.libsonnet
     set:
       configOverrides:
@@ -576,7 +630,9 @@ tests:
       - failedTemplate:
           errorPattern: 'configOverrides\["common\.libsonnet"\] defines a pre-CDC single-store "contentAddressableStorage" without "chunkStorage"'
 
-  - it: rejects live RbeWorker CR with pre-CDC field in spec.config.files
+  # files is a ConfigMap reference, not inline Jsonnet. Use the shipped CRD's
+  # real shape so this guard exercises the data a live worker actually mounts.
+  - it: rejects a files-mode worker referencing legacy config under an arbitrary ConfigMap name
     set:
       _testLookup:
         rbeWorkers:
@@ -586,10 +642,21 @@ tests:
               spec:
                 config:
                   files:
-                    worker.jsonnet: "browserUrl: 'https://browser.example.com',"
+                    configMapName: arbitrary-config
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: arbitrary-config
+              data:
+                worker.jsonnet: "{ browserUrl: 'https://browser.example.com' }"
+                runner.jsonnet: "{}"
     asserts:
       - failedTemplate:
-          errorPattern: 'live RbeWorker .*/worker-legacy spec\.config\.files\["worker\.jsonnet"\] contains pre-CDC field "browserUrl"'
+          errorPattern: 'live worker ConfigMap .*/arbitrary-config data\["worker\.jsonnet"\] contains pre-CDC field "browserUrl"'
 
   - it: rejects live RbeWorker CR pinning a pre-CDC bb-worker image
     set:
@@ -604,6 +671,180 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'live RbeWorker .*/worker-old-img pins pre-CDC image .* in spec\.images\.worker'
+
+  - it: checks source keys projected under a different worker filename
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: mapped-worker
+              spec:
+                config:
+                  files:
+                    configMapName: mapped-input
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                    items:
+                      - {key: worker-source, path: worker.jsonnet}
+                      - {key: runner-source, path: runner.jsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: mapped-input
+              data:
+                worker-source: "{ contentAddressableStorage: { grpc: {} } }"
+                runner-source: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'mapped-input data\["worker-source"\] defines a pre-CDC single-store contentAddressableStorage'
+
+  - it: does not scan unrelated keys omitted from the worker projection
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: mapped-worker
+              spec:
+                config:
+                  files:
+                    configMapName: mapped-input
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                    items:
+                      - {key: worker-source, path: worker.jsonnet}
+                      - {key: runner-source, path: runner.jsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: mapped-input
+              data:
+                worker-source: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+                runner-source: "{}"
+                unused-legacy: "{ browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks a generated worker custom common library from an arbitrary ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                    commonItems:
+                      - {key: custom-common, path: common.libsonnet}
+                      - {key: worker-helper, path: worker-common.libsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                custom-common: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+                worker-helper: "{ workerConfig(config):: { browserUrl: 'old' } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'custom-libraries data\["worker-helper"\] contains pre-CDC field "browserUrl"'
+
+  - it: rejects pre-CDC worker images inherited from a referenced ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{}"
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'generated-worker pins pre-CDC image .*ConfigMap image defaults'
+
+  - it: ignores legacy chart ConfigMap data that this upgrade replaces
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: buildbarn-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: buildbarn-worker-config
+              data:
+                common.libsonnet: "{ browserUrl: 'old' }"
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a missing referenced worker ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: missing-input
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - failedTemplate:
+          errorPattern: 'generated-worker references missing ConfigMap "missing-input"'
+
+  - it: ignores an inherited runner installer image when the installer is disabled
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                images:
+                  runner: example.com/runner:latest
+                runner:
+                  installerEnabled: false
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{}"
+                runnerInstallerImage: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
 
   # Operator: one per cluster. upgradeChecks.operatorNamespace points at it;
   # the mock lookup stands in for that namespace's Deployments.
@@ -620,9 +861,9 @@ tests:
                   app.kubernetes.io/version: v0.3.13
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment hermetiq/bb-worker-operator runs bb-worker-operator v0\.3\.13, which generates pre-CDC worker configs'
+          errorPattern: 'live Deployment hermetiq/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
 
-  - it: accepts bb-worker-operator v0.3.14 or later
+  - it: rejects operator chart version labels without image compatibility evidence
     set:
       _testLookup:
         operatorDeployments:
@@ -637,7 +878,8 @@ tests:
                 labels:
                   app.kubernetes.io/version: v0.4.0
     asserts:
-      - notFailedTemplate: {}
+      - failedTemplate:
+          errorPattern: 'has no hermetiq.com/cdc-compatible=true declaration for its operator image'
 
   - it: accepts an operator annotated as CDC-compatible regardless of version
     set:
@@ -664,7 +906,7 @@ tests:
                   helm.sh/chart: bb-worker-operator-0.3.12
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment .*/bb-worker-operator has no readable app\.kubernetes\.io/version'
+          errorPattern: 'live Deployment .*/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
 
   - it: ignores unrelated Deployments in the operator namespace
     set:
@@ -691,9 +933,9 @@ tests:
                   app.kubernetes.io/component: api
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment .*/grpc-api comes from hermetiq chart 0\.9\.8, whose bep-nats validates only pre-CDC'
+          errorPattern: 'live Deployment .*/grpc-api has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
 
-  - it: accepts bep-nats from a hermetiq release after 0.9.8, and ignores subscribers
+  - it: rejects newer hermetiq chart labels without evidence for the selected bep-nats image
     set:
       _testLookup:
         deployments:
@@ -709,7 +951,8 @@ tests:
                   helm.sh/chart: hermetiq-0.9.8
                   app.kubernetes.io/component: subscriber
     asserts:
-      - notFailedTemplate: {}
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
 
   - it: accepts hermetiq 0.9.8 bep-nats annotated as CDC-compatible (buildbarnCdcCompatible)
     set:
@@ -726,6 +969,19 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  - it: ignores subscribers because they do not validate configurations
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-sub-0
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: subscriber
+    asserts:
+      - notFailedTemplate: {}
+
   - it: fails closed when a bep-nats Deployment has no readable hermetiq chart version
     set:
       _testLookup:
@@ -735,7 +991,7 @@ tests:
                 name: bep-nats-pub
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment .*/bep-nats-pub has no readable hermetiq chart version'
+          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
 
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any

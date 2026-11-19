@@ -631,17 +631,35 @@ pvc and emptyDir volumes do get fsGroup, so there the mkdir runs unprivileged.
 {{- define "buildbarn.storage.volumeInitScript" -}}
 set -eu
 {{- $hostPath := eq .Values.storage.persistence.mode "hostPath" -}}
+{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
+{{- if not $casNoFs }}
+{{- $casDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
+# The pre-CDC CAS stored raw bytes; CDC stores compressed chunks. Never open
+# its index or allocate another full blocks file alongside the legacy cache.
+if [ -e {{ $casDir }}/cas-keys.db ] || [ -e {{ $casDir }}/cas-blocks.db ] || [ -e {{ $casDir }}/persistent_state ]; then
+  echo 'Pre-CDC CAS files detected in {{ $casDir }}. Stop all cache clients and storage, snapshot the old cache if rollback is required, then explicitly retire the legacy CAS files before upgrading. No data has been removed. See docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback' >&2
+  exit 1
+fi
+{{- end }}
 {{- range $dir := splitList " " (include "buildbarn.storage.fsDirs" .) }}
 {{- if $hostPath }}
 chown 65534:65534 {{ $dir }}
 {{- end }}
-mkdir -p {{ $dir }}/persistent_state
-chmod 0700 {{ $dir }}/persistent_state
+{{- $stateDir := printf "%s/persistent_state" $dir -}}
+{{- if has $dir (list "/storage-cas" "/storage-cas-meta") -}}
+{{- $stateDir = printf "%s/cdc-v1/persistent_state" $dir }}
+mkdir -p {{ $dir }}/cdc-v1
+chmod 0700 {{ $dir }}/cdc-v1
 {{- if $hostPath }}
-chown 65534:65534 {{ $dir }}/persistent_state
+chown 65534:65534 {{ $dir }}/cdc-v1
 {{- end }}
 {{- end }}
-{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
+mkdir -p {{ $stateDir }}
+chmod 0700 {{ $stateDir }}
+{{- if $hostPath }}
+chown 65534:65534 {{ $stateDir }}
+{{- end }}
+{{- end }}
 {{- if and (eq .Values.storage.persistence.cms.backend "sharedCas") (not $casNoFs) (eq .Values.storage.persistence.cms.keyLocationMap.type "blockDevice") }}
 {{- $sharedCasDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
 mkdir -p {{ $sharedCasDir }}/cms_persistent_state

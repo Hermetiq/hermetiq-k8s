@@ -16,7 +16,7 @@ annotations:
     - kind: added
       description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap"
     - kind: added
-      description: "The operator Deployment carries hermetiq.com/cdc-compatible=true, which the buildbarn chart's CDC upgrade guard requires"
+      description: "Declare CDC compatibility for the known pinned operator digest; custom images require explicit buildbarnCdcCompatible confirmation before the Buildbarn upgrade guard accepts them"
     - kind: changed
       description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed; pre-CDC worker configs evaluate unchanged"
 keywords:

@@ -68,7 +68,7 @@ tests:
       # CAS on filesystem always uses a file-backed KLM => stays persistent.
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-cas/persistent_state"
+          pattern: "storage-cas/cdc-v1/persistent_state"
       - notMatchRegex:
           path: data["storage.jsonnet"]
           pattern: "storage-ac/persistent_state"
@@ -160,6 +160,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
     documentSelector:
       path: metadata.name
       value: buildbarn-config
@@ -172,10 +173,10 @@ tests:
           pattern: 'deprecatedAdminHttpServers:'
       - matchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: 'legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,'
+          pattern: '(?m)^  contentAddressableStorage: common.blobstore.contentAddressableStorage,'
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: '(?m)^  contentAddressableStorage:'
+          pattern: 'legacyContentAddressableStorage:'
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
           pattern: 'adminHttpServers:|browserUrl:|deprecatedPortalUrl:'

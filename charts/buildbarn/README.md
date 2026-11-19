@@ -14,12 +14,20 @@ and `RbeWorker` pools need the operator's CRD. The repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) gives the
 supported full-stack deployment order and external dependencies.
 
+Upgrading an existing cache to chart 0.10.0 requires the
+[CDC storage cutover](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
+The new storage encoding cannot read the old CAS files. Plan a maintenance
+window, snapshot for rollback, and an explicit cold-cache reset. The chart
+refuses legacy files rather than rewriting or deleting them automatically.
+CMS mappings now persist alongside durable CAS storage by default.
+
 ![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
 
 For Buildbarn upstream background, see https://github.com/buildbarn.
 
 ## Contents
 
+- [CDC upgrade behavior and regression coverage](#cdc-upgrade-behavior-and-regression-coverage)
 - [What The Chart Deploys](#what-the-chart-deploys)
 - [Install](#install)
   - [Prerequisites checklist](#prerequisites-checklist)
@@ -77,6 +85,63 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Hermetiq side](#hermetiq-side)
   - [Verify the sidecar](#verify-the-sidecar)
 - [License](#license)
+
+## CDC upgrade behavior and regression coverage
+
+- CAS data now lives in `cdc-v1/` on the existing CAS filesystem or metadata
+  volume. Existing PVC names and claim templates are preserved. `volume-init`
+  fails while legacy `cas-keys.db`, `cas-blocks.db`, or `persistent_state` exist;
+  follow the [cutover procedure](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
+- `storage.persistence.cms.keyLocationMap.type` defaults to `blockDevice`
+  (a file-backed index). On a durable filesystem, both chunks and mappings
+  survive process restarts. Explicit `inMemory` CMS and raw CAS devices without
+  a metadata filesystem retain their documented ephemeral behavior. An
+  `emptyDir` still disappears when its Pod is replaced.
+- Operator and co-located bep-nats Deployments must declare
+  `hermetiq.com/cdc-compatible: "true"` for the actual selected binaries.
+  The operator chart recognizes its pinned CDC image digest; custom operator
+  images require its `buildbarnCdcCompatible` setting. The Hermetiq chart's
+  current default bep-nats v0.9.8 is **not** declared compatible: deploy a
+  verified dual-descriptor image before enabling its declaration. Bumping a
+  chart version or setting the flag alone does not upgrade the binary.
+- Workers using custom ConfigMaps are checked through their actual CRD
+  references and projected keys. Stage existing image defaults before removing
+  old CR image pins; see the [worker upgrade notes](../../custom-values/rbeworkers/README.md).
+- Browser needs `frontend.internalService.enabled=true` whenever the cache
+  proxy enforces authentication. Its completeness checks have no proxy
+  credentials. The authenticated public service is no longer accepted as a
+  fallback for this combination.
+- Dashboards distinguish CDC chunk storage (`cs`) and chunk mappings (`cms`),
+  while continuing to display old `cas` metrics during a mixed rollout.
+  Removed invalid-put metrics are retired rather than renamed to nonexistent
+  series. Separate CMS retention/index views show mapping pressure even when
+  chunk capacity is healthy.
+
+The schema suite uses the official protobuf parser, pinned descriptors and
+negative controls. Existing routing, rollout, permissions and configuration
+regressions remain. Scheduler field and checksum expectations changed because
+the accepted fork configuration now uses the CDC field. The worker fixture was
+corrected to a real ConfigMap reference, and version-only compatibility tests
+now reject misleading labels. The old fake “in-memory” scenario now verifies
+an actual in-memory CMS backend. None of these changes drops the original
+behavioral requirement to make the upgrade pass.
+
+Run the storage regressions locally (requires Helm, Docker and Python packages
+`PyYAML`, `jsonnet`, `protobuf`, and `grpcio`):
+
+```bash
+bash charts/buildbarn/tests/storage_migration_test.sh
+python3 charts/buildbarn/tests/storage_integration.py
+```
+
+The container tests use isolated volumes and a private Docker network in CI
+(localhost-only ports when run directly). They verify
+that a rejected upgrade preserves old readable data, an explicit reset yields
+clean misses/reuploads, durable CMS survives restart, and Action Cache
+completeness hides outputs lost by an explicitly ephemeral CMS. A dedicated
+Buildkite step runs these tests. `metrics_compatibility_test.sh` evaluates the
+shipped recording rules and dashboard queries with `promtool` against legacy,
+CDC and mixed samples.
 
 ## What The Chart Deploys
 
@@ -1060,15 +1125,16 @@ headroom), each shard's CAS KLM needs **`7.5 GiB` (1 TiB shard)** to
   the Go heap, needs 32–48 GiB container limits, and **loses the whole shard
   index on every pod restart**. With a file-backed KLM (`backend: blockDevice`
   plus `blockDevice.keyLocationMap: file` on a companion `<store>-meta` PVC, or
-  `backend: filesystem`), `bb-storage` `mmap`s `cas-keys.db` and writes epoch
-  state to `persistent_state` every 300s, so cached blobs survive pod restarts
-  and upgrades.
+  `backend: filesystem`), `bb-storage` `mmap`s `cdc-v1/keys.db` and writes epoch
+  state to `cdc-v1/persistent_state` every 300s. Together with persistent CMS,
+  cached blobs survive ordinary restarts. Format-changing upgrades require the
+  explicit cutover described above.
 - **Size pod RAM so the mmap'd KLM stays resident in the page cache.** Every
   `Get` and `FindMissingBlobs` lookup probes up to 16 random 64-byte slots in
-  the file. If the node cannot keep `cas-keys.db` in page cache, each lookup
+  the file. If the node cannot keep `cdc-v1/keys.db` in page cache, each lookup
   becomes a random disk read. Rule of thumb: set
   `storage.resources.requests.memory` to at least **the total KLM size across
-  CAS, AC, ISCC, and FSAC plus 6 GiB** (`16Gi` for `1 TiB` shards;
+  CS, CMS, AC, ISCC, and FSAC plus 6 GiB** (`16Gi` for `1 TiB` shards;
   `28Gi–32Gi` for `2 TiB` shards).
 
 #### 3. Proportionate AC, ISCC, and FSAC sizing for a 10 TiB CAS
@@ -2009,9 +2075,9 @@ for matching worker examples, KEDA settings, and verification.
 
 ### Optional configuration reload and scheduler handover
 
-Both features are disabled by default. A chart upgrade keeps the existing
-scheduler image, inline configuration, pod permissions, and restart behavior
-unless you explicitly opt in:
+Both features are disabled by default. They retain inline routing, the normal
+pod permissions and restart strategy unless you explicitly opt in. The CDC
+upgrade itself changes the default scheduler image and configuration:
 
 ```yaml
 scheduler:
@@ -2028,18 +2094,14 @@ Hermetiq's `bb-remote-execution` fork. Handover also needs a matching
 separate environment override; publishing or upgrading the chart alone does
 not activate them.
 
-The opt-in configuration requires a fork image with
-`legacyContentAddressableStorage` support. It uses that field to read Actions
-from the existing, non-CDC storage deployment without changing storage,
-frontend, or worker configuration. Legacy Action reads use uncompressed
-`BatchReadBlobs` requests, even when the shared backend enables compression,
-to avoid the newer client's CDC capability negotiation. Digest validation,
-message-size bounds, and configured storage decorators still apply.
-It also uses the fork's renamed
-`deprecatedAdminHttpServers` field and omits the removed `browserUrl` field.
-With both features disabled the chart retains the configuration schema for its
-pinned upstream scheduler image. If you run a newer image without either
-feature, supply a matching `configOverrides."scheduler.jsonnet"`.
+The opt-in image must implement CDC `contentAddressableStorage` as well as
+the selected fork features. Set `scheduler.handover.cdcCompatibleFork=true`
+only for such an image. The chart uses the CDC field for all scheduler modes;
+the old single-store `legacyContentAddressableStorage` shape is incompatible.
+Schema regressions cover reload only, handover only, and both using the pinned
+[fork descriptor](tests/testdata/schema-descriptors.md). This verifies the
+configuration contract; it does not substitute for testing the particular
+scheduler/coordinator binaries selected in your environment.
 
 ```yaml
 # Environment-specific opt-in; replace the repositories and digests with your
@@ -2052,6 +2114,7 @@ scheduler:
   configurationReloadInterval: 30s
   handover:
     enabled: true
+    cdcCompatibleFork: true
     coordinator:
       image:
         repository: REGISTRY/bb-scheduler-coordinator

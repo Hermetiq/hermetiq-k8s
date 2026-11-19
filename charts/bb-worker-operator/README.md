@@ -208,10 +208,25 @@ upgrading the Buildbarn chart to 0.10.0, whose upgrade checks require it.
   the `workerImage` and `runnerInstallerImage` keys of the referenced config
   ConfigMap, which the Buildbarn chart publishes, so worker images follow the
   Buildbarn release.
+- Keep existing image pins while upgrading the operator. Before removing them
+  on a pre-CDC Buildbarn installation, populate those two ConfigMap keys with
+  the exact **currently running pre-CDC images**, including their digests.
+  The older Buildbarn chart does not publish the keys itself. Removing pins
+  without this staging step makes the operator report `SpecInvalid` until the
+  Buildbarn upgrade supplies the keys. After staging, remove the pins and
+  verify the pools reconcile; the CDC Buildbarn upgrade then changes the
+  shared configuration and inherited images together. Do not update worker
+  images to CDC while their shared configuration is still pre-CDC.
 - Every generated-config worker pool restarts once, because the embedded
   `worker-common.libsonnet` changed. Pre-CDC worker configs evaluate unchanged.
-- The operator Deployment carries `hermetiq.com/cdc-compatible: "true"`, which
-  the Buildbarn chart's upgrade check looks for.
+- The operator Deployment carries `hermetiq.com/cdc-compatible: "true"` when
+  its effective image digest matches the chart's known CDC-capable default.
+  Registry mirrors and tag changes that retain that digest preserve the
+  declaration. Other digests and tag-only images do not automatically receive
+  it: set `buildbarnCdcCompatible: true` only after verifying that your custom
+  operator handles both configuration schemas. The Buildbarn upgrade check
+  requires this declaration; chart and app-version labels alone do not prove
+  that an overridden image supports CDC.
 
 When upgrading from 0.3.11 or earlier, also follow
 [Upgrading to 0.3.12](#upgrading-to-0312).

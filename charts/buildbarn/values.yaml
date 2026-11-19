@@ -46,9 +46,10 @@ configOverrides: {}
 
 # Cluster checks that run during `helm upgrade` (they are skipped by offline
 # `helm template`, where lookup returns nothing). Before switching to CDC, the
-# chart requires a bb-worker-operator that emits CDC worker configs (v0.3.14 or
-# later, or annotated hermetiq.com/cdc-compatible=true) and, when bep-nats runs
-# in this namespace, a hermetiq release whose bep-nats validates both schemas.
+# chart requires hermetiq.com/cdc-compatible=true on the operator and, when
+# bep-nats runs in this namespace, on its api/publisher Deployments. These
+# declarations must match the selected binaries; chart version labels alone
+# do not prove support. The operator chart recognizes its pinned CDC digest.
 upgradeChecks:
   # Namespace of the bb-worker-operator Deployment. Empty means this release's
   # namespace. One operator serves the whole cluster, so set this when it runs
@@ -487,7 +488,10 @@ storage:
       storageClassName: premium-rwo
       size: 1000Gi
       # Size of the CAS blocks file in GiB. Must be smaller than `size` to leave
-      # headroom for cas-keys.db and persistent state — typically ~10% smaller.
+      # headroom for cdc-v1/keys.db and persistent state — typically ~10% smaller.
+      # CDC uses a separate cdc-v1 directory. volume-init refuses to start while
+      # legacy cas-keys.db, cas-blocks.db or persistent_state still exist; follow
+      # docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback.
       blocksSizeGi: 950
       # 7168 MiB / 64 B = ~117M indexable objects, ~2.1x the ~57M objects that
       # 885 GiB usable holds at keyLocationMapSizing.averageObjectSizeBytes.cas.
@@ -549,10 +553,10 @@ storage:
         hostPath:
           devicePath: ""         # e.g. /dev/ephemeral/cas
     # Chunk Mapping Storage (CMS): maps whole-blob CAS digests to their ordered
-    # list of FastCDC chunks. Required by CDC-enabled bb-storage.
+    # list of RepMaxCDC chunks. Required by CDC-enabled bb-storage.
     #
     # backend:
-    #   sharedCas   (default; upgrade-safe) places CMS blocks on the existing
+    #   sharedCas   (default) places CMS blocks on the existing
     #               CAS filesystem volume (/storage-cas/cms-blocks.db), or on
     #               the CAS metadata volume (/storage-cas-meta/cms-blocks.db)
     #               when cas.backend=blockDevice and cas.blockDevice.keyLocationMap=file,
@@ -571,7 +575,10 @@ storage:
       # cas.blockDevice.keyLocationMap=inMemory (no filesystem volume mounted).
       blocksInMemoryBlockSizeBytes: 1048576 # 1 MiB per block x 36 blocks = 36 MiB
       keyLocationMap:
-        type: inMemory # inMemory or blockDevice
+        # Persist mappings alongside durable CAS chunks. inMemory explicitly
+        # makes composite blobs unreadable after a storage process restart.
+        # A raw CAS device without a metadata filesystem still uses memory.
+        type: blockDevice # inMemory or blockDevice
         # ~0.92 GiB usable at averageObjectSizeBytes.cms (512 B) holds ~1.9M
         # chunk mappings; 4194304 entries (~256 MiB) gives ~2.2x headroom.
         entries: 4194304
@@ -737,7 +744,7 @@ storage:
           devicePath: ""
   # Deprecated no-op: dataIntegrityValidationCache was removed from
   # local.BlobAccessConfiguration in CDC bb-storage (integrity validation now
-  # happens per FastCDC chunk and via chunkMappingValidating). Retained so
+  # happens per RepMaxCDC chunk and via chunkMappingValidating). Retained so
   # existing user values files pass schema validation; NOTES.txt prints a
   # deprecation notice when set.
   dataIntegrityValidationCache:
@@ -1208,8 +1215,9 @@ scheduler:
   # seconds notation; empty disables reloading. Zero, ms, m, and h are rejected.
   #
   # REQUIRES a bb-scheduler image built from Hermetiq's fork of
-  # bb-remote-execution, including legacyContentAddressableStorage support
-  # for the chart's existing storage. The upstream ghcr.io/buildbarn/bb-scheduler image
+  # bb-remote-execution, including CDC contentAddressableStorage support.
+  # Also set scheduler.handover.cdcCompatibleFork=true for that verified image.
+  # The upstream ghcr.io/buildbarn/bb-scheduler image
   # rejects the configurationReloadInterval option and will not start.
   #
   # When set, those two settings move out of the scheduler's checksum/config
@@ -1233,11 +1241,10 @@ scheduler:
   # relaying in-flight Execute / WaitExecution streams.
   handover:
     enabled: false
-    # This chart emits the CDC blobstore. The fork scheduler's handover and
-    # configuration reload still expect the pre-CDC single-store CAS
-    # (legacyContentAddressableStorage), so both are rejected unless the fork
-    # image supports CDC. Set true only for such an image; this flag also
-    # covers scheduler.configurationReloadInterval.
+    # This chart emits CDC contentAddressableStorage, including for handover
+    # and reload. Set true only after selecting a fork image that implements
+    # both CDC and the requested fork features. It also covers
+    # scheduler.configurationReloadInterval; no fork image is selected for you.
     cdcCompatibleFork: false
     # TLS identity shared by scheduler certificates. Peer connections dial
     # Pod IPs but verify this DNS SAN, including the coordinator's local Ping.

@@ -117,6 +117,44 @@ tests:
           path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
           value: /storage-cas-meta
 
+  - it: prepares separate CDC CAS and durable shared CMS state without adding PVCs
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 2
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas/cms_persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'Pre-CDC CAS files detected'
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'rm |truncate |dd '
+
+  - it: prepares CDC and CMS state on the existing raw CAS metadata volume
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas-meta/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas-meta/cms_persistent_state'
+
+  - it: retains explicit ephemeral CMS without creating persistent mapping state
+    set:
+      storage.persistence.cms.keyLocationMap.type: inMemory
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'cms_persistent_state'
+
   # --- hostPath mode with a raw block device (node-local NVMe LV) ---
   - it: hostPath block mode bind-mounts the device node and goes privileged
     set:

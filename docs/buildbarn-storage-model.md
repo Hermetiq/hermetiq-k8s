@@ -1,13 +1,19 @@
 # Buildbarn Storage Model and Sizing
 
-Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both FastCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
+Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both RepMaxCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
 
 - a fixed-size key-location map, which is the index from digest to location
 - a ring of fixed-size blocks, which holds the bytes
 
-With FastCDC content-defined chunking (`contentAddressableStorageServer`), the CAS is split into two stores:
-- **`chunkStorage` (CS)**: holds raw FastCDC chunks (64 KiB–1 MiB, 256 KiB average) plus unchunked small blobs (`storage.persistence.cas`).
-- **`chunkMappingStorage` (CMS)**: maps whole-blob CAS digests to their ordered list of chunk digests (`storage.persistence.cms`, defaulting to `backend: sharedCas` on the existing CAS filesystem/metadata volume so upgrades do not require new `volumeClaimTemplates`).
+With RepMaxCDC content-defined chunking (`contentAddressableStorageServer`), the CAS is split into two stores:
+- **`chunkStorage` (CS)**: holds compressed chunks plus small blobs (`storage.persistence.cas`). Defaults configure a 256 KiB minimum chunk size and a 2 MiB horizon; these are chunking parameters, not a claim that every chunk has that size.
+- **`chunkMappingStorage` (CMS)**: maps whole-blob CAS digests to their ordered list of chunk digests (`storage.persistence.cms`, defaulting to `backend: sharedCas` on the existing CAS filesystem/metadata volume). Its file-backed index and persistent state survive process restarts by default. This preserves `volumeClaimTemplates`, but upgrading the old CAS encoding still requires the explicit cutover below.
+
+With the default chunking parameters, blobs at least 512 KiB require mappings.
+Setting CMS `keyLocationMap.type: inMemory` makes those blobs unavailable after
+a process restart even if their chunks remain on disk. A raw CAS device with
+an in-memory index has no metadata filesystem, so `sharedCas` intentionally
+keeps CMS in memory too. `emptyDir` storage lasts only for the Pod's lifetime.
 
 Most surprising behavior comes from those two structures being fixed-size and tightly coupled. If the map is too small, writes can become invisible even though bytes are still on disk. If the block geometry changes, a persistent store starts empty. If the map lives in memory, durable disks do not make the store durable.
 
@@ -210,7 +216,7 @@ Two more settings that are easy to copy wrongly from the storage tier:
   ```
 
   Spare blocks hold no data, so they do not count toward capacity — but they still divide the block size, so they shrink both numbers at once. And the mean size of a blob that *enters* the cache is not the mean size of a blob that is *requested*: the first is what the replicator actually copied, and it is the one this formula wants. Raise `blocksSizeGi` without raising `entries` and the map fills before the disk does, which is the `TooManyAttempts` failure above — blobs on disk that the index can no longer reach.
-- Note: `dataIntegrityValidationCache` was removed from `local.BlobAccessConfiguration` in CDC `bb-storage` (integrity validation is now performed per FastCDC chunk and via `chunkMappingValidating`).
+- Note: `dataIntegrityValidationCache` was removed from `local.BlobAccessConfiguration` in CDC `bb-storage` (integrity validation is now performed per RepMaxCDC chunk and via `chunkMappingValidating`).
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 
@@ -256,9 +262,9 @@ Suppose you are sizing a **10 TiB persistent CAS** across either **`10 shards ×
 - **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~21.6 GiB`. At `17,408` B/blob, each shard holds **~54.6 million** CAS objects.
 - **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~43.2 GiB`. At `17,408` B/blob, each shard holds **~109.2 million** CAS objects.
 
-**2. Map entries.** At a `2.3x` ratio, a 1 TiB shard needs **~125.8M entries (`7,680 MiB` = `7.5 GiB`)** and a 2 TiB shard needs **~251.6M entries (`15,360 MiB` = `15 GiB`)**. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cas-keys.db` and checkpoints `persistent_state` every 300s, so the index survives restarts.
+**2. Map entries.** At a `2.3x` ratio, a 1 TiB shard needs **~125.8M entries (`7,680 MiB` = `7.5 GiB`)** and a 2 TiB shard needs **~251.6M entries (`15,360 MiB` = `15 GiB`)**. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` every 300s, so the index survives restarts. Keep CMS persistent too, and include its blocks and index when sizing the shared volume.
 
-**3. Memory.** Each lookup makes up to 16 random 64-byte probes into the mmap'd map, so it must stay resident in the page cache. Budget the total KLM size across all four stores plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards.
+**3. Memory.** Each lookup makes up to 16 random 64-byte probes into the mmap'd map, so it must stay resident in the page cache. Budget the total KLM size across CS, CMS, AC, ISCC and FSAC plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards. Remeasure average chunk and mapping sizes after migration rather than assuming the old whole-blob distribution remains unchanged.
 
 **4. The other stores.** Scale AC to `20Gi–32Gi` per shard (`keyLocationMap` `sizeMi: 2688–4096`), ISCC to `1Gi–2Gi` blocks (`sizeMi: 256–512`), and FSAC to `8Gi–12Gi` (`sizeMi: 1024–1536`), all with persistent KLMs. Complete values for both shard layouts, plus frontend, scheduler, and gateway settings, are in the chart README's [Large-scale deployments](../charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards) section; shutdown and grace-period behaviour is covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md#what-survives-a-restart).
 
@@ -279,13 +285,20 @@ The division of labour is deliberate: the assistant owns the structural rules, w
 
 ## Upgrading Configurations to CDC
 
-The chart's own templates and values already use the CDC schema, so installs that configure Buildbarn only through `values.yaml` need no edits. Raw Jsonnet you supply yourself does: `configOverrides`, a custom `common.libsonnet`, `scheduler.actionRouter.custom`, raw worker configs in `RbeWorker` `spec.config.files`, and worker ConfigMaps. The chart rejects the old fields in those during `helm upgrade` and links here. Until a migration tool exists, make these edits by hand:
+The chart's templates generate CDC configuration. Existing data still requires
+the [storage cutover](#storage-format-cutover-and-rollback), including installs
+configured only through values. Raw Jsonnet also needs edits: `configOverrides`,
+custom common libraries, `scheduler.actionRouter.custom`, and the ConfigMaps
+referenced by `RbeWorker.spec.config.files` or `config.generated`. The chart
+checks referenced source keys rather than assuming ConfigMap names or labels.
+Until a migration tool exists, make these schema edits by hand:
 
 | Old (pre-CDC) | New (CDC) |
 | --- | --- |
-| `contentAddressableStorage: { ... }` at the top level of `storage.jsonnet`, `frontend.jsonnet` or `portal.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: ..., chunkMappingStorage: ... }, getAuthorizer, putAuthorizer, findMissingAuthorizer, maximumChunkCount: 100000 }` |
+| `contentAddressableStorage: { ... }` at the top level of `storage.jsonnet` or `frontend.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: ..., chunkMappingStorage: ... }, getAuthorizer, putAuthorizer, findMissingAuthorizer, maximumChunkCount: 100000 }` |
+| Top-level `contentAddressableStorage` in `portal.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: ..., readAuthorizer: ... }` |
 | A single-store `blobstore.contentAddressableStorage` (for example `sharding: {...}`) in `common.libsonnet`, `scheduler.jsonnet` or `asset.jsonnet` | `{ chunkStorage: <the old backend>, chunkMappingStorage: { chunkMappingValidating: { backend: ... } }, cdcParameterCache: { cacheSize: 1000, cacheDuration: '60s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' } }` |
-| `dataIntegrityValidationCache: { ... }` | Remove it. Chunks are validated individually, and chunk mappings by `chunkMappingValidating`. |
+| `dataIntegrityValidationCache: { ... }` | Remove it. Chunks are validated individually, and client-side chunk mappings by `chunkMappingValidating`. |
 | `keyLocationMapInMemory` or `keyLocationMapOnBlockDevice` | `keyLocationMap: { inMemory: ... }` or `keyLocationMap: { onBlockDevice: ... }` |
 | `keyLocationMapMaximumGetAttempts`, `keyLocationMapMaximumPutAttempts` | `maximumGetAttempts` and `maximumPutAttempts` inside `keyLocationMap` |
 | `browserUrl` (worker, noop worker) | `portalUrl`; in `scheduler.jsonnet`, `deprecatedPortalUrl` |
@@ -297,8 +310,71 @@ The worker in `RbeWorker` and the image pins also move together. A pinned pre-CD
 
 Before the chart switches a cluster to CDC, `helm upgrade` also checks that:
 
-- `bb-worker-operator` is v0.3.14 (chart 0.3.13) or later, because older operators generate pre-CDC worker configs. Set `upgradeChecks.operatorNamespace` when the operator runs outside this release's namespace.
-- When bep-nats runs in this namespace, its hermetiq release is newer than 0.9.8, so it validates both schemas. A bep-nats image that does, deployed with an older chart, can declare it with the hermetiq chart's `buildbarnCdcCompatible: true`.
-- Scheduler handover and `configurationReloadInterval` are off. The fork scheduler that implements them still reads the pre-CDC single-store CAS; `scheduler.handover.cdcCompatibleFork: true` re-enables them for a fork image that supports CDC.
+- The operator declares `hermetiq.com/cdc-compatible=true` for its selected image. Chart 0.3.13 automatically recognizes its pinned v0.3.14 digest; verified custom builds can use the operator chart's `buildbarnCdcCompatible: true`. Version labels alone do not establish support. Set `upgradeChecks.operatorNamespace` when the operator runs elsewhere.
+- When bep-nats runs in this namespace, API and publisher Deployments declare the same capability. Deploy a verified dual-descriptor image and set the Hermetiq chart's `buildbarnCdcCompatible: true`. The currently bundled v0.9.8 image is not declared compatible; this flag does not add functionality to it. Do not proceed with a combined deployment until that prerequisite is actually available and verified.
+- Scheduler handover and `configurationReloadInterval` are off unless the selected fork implements CDC and those features. `scheduler.handover.cdcCompatibleFork: true` explicitly declares this. The chart emits CDC `contentAddressableStorage` in every mode.
 
 These cluster checks use `lookup`, so offline `helm template` and GitOps renders skip them. Check those configurations against this table before upgrading.
+
+### Storage format cutover and rollback
+
+The pre-CDC image (`db62041`) stores raw CAS bytes. The CDC image (`8d2acac`)
+stores compressed chunks. Reusing the old index can report a blob as present
+and then fail to decode it, invalidating its entire block. This chart does not
+perform an in-place conversion. The supported cutover is an explicit
+**cold-cache reset during a maintenance window**.
+
+1. Verify the compatible operator and bep-nats prerequisites above. Update the
+   operator CRD separately as required by Helm's CRD lifecycle. Keep existing
+   worker image pins until the operator is ready. If using inherited images,
+   stage the exact current worker and runner-installer image references into
+   the existing `buildbarn-worker-config` before removing pins. This prevents
+   a `SpecInvalid` interval while the old chart lacks image keys.
+2. Stop new builds/cache clients, let active work finish, and pause worker and
+   frontend autoscaling. Record replicas and autoscaling settings. Stop the
+   workers, scheduler, frontend, browser/portal and remote-asset clients before
+   stopping storage. Do not mix old and CDC writers during this cutover.
+3. Stop **all** storage processes and snapshot the cache if rollback is needed.
+   For persistent raw block CAS, snapshot both the device and its metadata
+   volume together. Snapshot other durable stores and retain the old Helm
+   values, rendered configurations, worker manifests and image digests.
+4. Explicitly retire the legacy CAS entries listed below. Move them to a
+   separate backup volume or delete them only after the snapshot is verified.
+   Renaming them elsewhere on the same PVC does not free capacity; the new
+   blocks file must fit alongside CMS, indices and filesystem overhead.
+
+   | Backend | Legacy entries to retire | New location |
+   | --- | --- | --- |
+   | Filesystem CAS | `/storage-cas/cas-keys.db`, `cas-blocks.db`, `persistent_state/` | `/storage-cas/cdc-v1/{keys.db,blocks.db,persistent_state/}` |
+   | Raw CAS with persistent metadata | `/storage-cas-meta/cas-keys.db`, `persistent_state/` | `/storage-cas-meta/cdc-v1/{keys.db,persistent_state/}`; blocks remain on `/dev/bb/cas` |
+   | Raw CAS with an in-memory index | No persistent index to retire | Starts empty as before; the device is reused |
+
+   For raw CAS, resetting the metadata starts an empty logical store; a full
+   device wipe is unnecessary. CDC writes overwrite the old device contents,
+   so rollback requires the device snapshot, not just the old metadata. The
+   init container refuses any remaining legacy file/directory before creating
+   CDC storage. It never deletes, moves or converts user data, including on
+   repeated failed starts.
+5. Migrate custom Jsonnet and worker ConfigMaps while their consumers remain
+   stopped. Apply the CDC chart/configurations and inherited worker image keys.
+   Keep the original PVC names; the default shared CMS adds no claims. Start
+   storage first and verify its init completed, then start frontend, scheduler
+   and workers. Restart clients to discard old existence caches before resuming
+   traffic. Restore recorded replica and autoscaling settings after validation.
+6. Verify a small and a multi-megabyte CAS upload/read, then restart one shard
+   and read both again. Verify a real remote build and an Action Cache hit with
+   retained outputs. Expect old CAS entries to miss and rebuild/reupload; there
+   must be no ZSTD decoding or data-integrity errors. Check separate CS/CMS
+   retention and KLM panels as the cache warms.
+
+For rollback, stop all CDC clients and storage again. Restore a consistent
+pre-CDC snapshot and its matching old configurations/images before restarting.
+Without a snapshot, perform another explicit cold-cache reset; **never** point
+the old binary at CDC data or restore an old raw-device index over a device
+that CDC has modified. Independent `helm rollback` cannot restore the storage
+format or worker resources outside the release.
+
+An explicit ephemeral CMS remains supported, but losing its mappings on restart
+is intentional and tested; it is not suitable when composite CAS blobs must
+survive restarts. Custom `storage.jsonnet` overrides must implement an equivalent
+format boundary and persistence policy.

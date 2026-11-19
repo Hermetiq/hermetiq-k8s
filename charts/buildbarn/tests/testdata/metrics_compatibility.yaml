@@ -1,0 +1,61 @@
+# Metric names/labels emitted by bb-storage db62041 (legacy) and 8d2acac
+# (CDC). Counter increments below are synthetic and intentionally distinct,
+# so the PromQL tests detect dropped stores, merged CS/CMS, and double counts.
+key_location_metrics:
+  - legacy: buildbarn_blobstore_hashing_key_location_map_get_attempts_count
+    cdc: buildbarn_lossymap_hash_map_get_attempts_count
+    labels: {outcome: Found}
+    record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m
+  - legacy: buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+    cdc: buildbarn_lossymap_hash_map_get_too_many_attempts_total
+    labels: {}
+    record: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m
+  - legacy: buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket
+    cdc: buildbarn_lossymap_hash_map_get_attempts_bucket
+    labels: {le: '+Inf', outcome: Found}
+    record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m
+  - legacy: buildbarn_blobstore_hashing_key_location_map_put_iterations_count
+    cdc: buildbarn_lossymap_hash_map_put_iterations_count
+    labels: {outcome: Inserted}
+    record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m
+  - legacy: buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
+    cdc: buildbarn_lossymap_hash_map_put_too_many_iterations_total
+    labels: {}
+    record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m
+  - legacy: buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket
+    cdc: buildbarn_lossymap_hash_map_put_iterations_bucket
+    labels: {le: '+Inf', outcome: Inserted}
+    record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m
+scenarios:
+  - name: legacy
+    stores:
+      - {version: legacy, type: cas, rate: 2}
+      - {version: legacy, type: ac, rate: 7}
+      - {version: legacy, type: iscc, rate: 11}
+      - {version: legacy, type: fsac, rate: 13}
+    # The dashboard must retain legacy data, including its backend dropdown.
+    expected_data_rate: 2
+    expected_data_stores: 1
+    expected_mapping_rate: 0
+  - name: cdc
+    stores:
+      - {version: cdc, type: cs, rate: 3}
+      - {version: cdc, type: cms, rate: 5}
+      - {version: cdc, type: ac, rate: 7}
+      - {version: cdc, type: iscc, rate: 11}
+      - {version: cdc, type: fsac, rate: 13}
+    expected_data_rate: 3
+    expected_data_stores: 1
+    expected_mapping_rate: 5
+  - name: mixed
+    stores:
+      - {version: legacy, type: cas, rate: 2}
+      - {version: cdc, type: cs, rate: 3}
+      - {version: cdc, type: cms, rate: 5}
+      - {version: legacy, type: ac, rate: 7}
+      - {version: cdc, type: ac, rate: 17}
+      - {version: legacy, type: iscc, rate: 11}
+      - {version: cdc, type: fsac, rate: 13}
+    expected_data_rate: 5
+    expected_data_stores: 2
+    expected_mapping_rate: 5

@@ -29,19 +29,22 @@ spec:
         - record: kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min
           expr: min(kubernetes_replica_kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds) by (kubernetes_shard, namespace, storage_type)
         - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_attempts_count[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_count[1m])) by (namespace, storage_type, outcome)
+          # Keep the recording names for existing dashboards, while retaining
+          # distinct cas (legacy), cs (chunks), and cms (mappings) labels. Other
+          # lossy maps must not leak into these storage-only recording rules.
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_attempts_count{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_count[1m])) by (namespace, storage_type, outcome)
         - record: storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_too_many_attempts_total[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total[1m])) by (namespace, storage_type)
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_too_many_attempts_total{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total[1m])) by (namespace, storage_type)
         - record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_attempts_bucket[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket[1m])) by (namespace, le, storage_type)
-        - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_ignored_invalid_total[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid_total[1m])) by (namespace, storage_type)
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_get_attempts_bucket{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket[1m])) by (namespace, le, storage_type)
+        # put_ignored_invalid_total is not emitted by either pinned storage
+        # release. Report the real put outcomes and dropped puts below instead.
         - record: outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_iterations_count[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_count[1m])) by (namespace, outcome, storage_type)
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_iterations_count{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_count[1m])) by (namespace, outcome, storage_type)
         - record: storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_too_many_iterations_total[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total[1m])) by (namespace, storage_type)
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_too_many_iterations_total{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total[1m])) by (namespace, storage_type)
         - record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m
-          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_iterations_bucket[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket[1m])) by (namespace, le, storage_type)
+          expr: sum(label_replace(irate(buildbarn_lossymap_hash_map_put_iterations_bucket{name=~"KeyLocationMap:.+"}[1m]), "storage_type", "$1", "name", "^KeyLocationMap:(.*)$") or irate(buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket[1m])) by (namespace, le, storage_type)
         - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_queued:irate1m
           expr: sum(irate(buildbarn_builder_in_memory_build_queue_tasks_scheduled_total[1m])) by (namespace, instance_name_prefix, platform, size_class)
         - record: instance_name_prefix_platform_size_class:buildbarn_builder_in_memory_build_queue_tasks_executing:irate1m

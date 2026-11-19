@@ -63,7 +63,7 @@ local podHost = if std.length(std.findSubstr(':', podIP)) > 0 then '[' + podIP +
   {{- if not (or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled) }}
   deprecatedPortalUrl: common.portalUrl,
   {{- end }}
-  {{ if or .Values.scheduler.configurationReloadInterval .Values.scheduler.handover.enabled }}legacyContentAddressableStorage{{ else }}contentAddressableStorage{{ end }}: common.blobstore.contentAddressableStorage,
+  contentAddressableStorage: common.blobstore.contentAddressableStorage,
   {{- if .Values.scheduler.sizeClassAnalysis.enabled }}
   initialSizeClassCache: common.initialSizeClassCache,
   {{- end }}

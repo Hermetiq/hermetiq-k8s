@@ -172,10 +172,10 @@ tests:
           pattern: "deprecatedAdminHttpServers:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,"
+          pattern: "(?m)^  contentAddressableStorage: common.blobstore.contentAddressableStorage,"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "(?m)^  contentAddressableStorage:"
+          pattern: "legacyContentAddressableStorage:"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "adminHttpServers:|browserUrl:|deprecatedPortalUrl:"
