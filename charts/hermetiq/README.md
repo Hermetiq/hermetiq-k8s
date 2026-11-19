@@ -1235,6 +1235,17 @@ saturated minutes, and completed actions must preserve all three labels.
 Aggregating the prefix away combines shared and private queues and prevents
 private-pool capacity diagnosis.
 
+Worker-pool CPU and memory request charts use `rbePoolPods` to select pods
+through their ReplicaSet and Deployment owners, excluding pods created before
+the current Deployment. The ownership selection is fixed at the requested
+window end; query length does not grow with pod churn. Custom overrides of
+`rbeContainerCpuRequestPercent` and `rbeContainerMemoryRequestPercent` must
+use the `${poolPods}` expression in both usage and request sums, replacing
+the former `${pods}` name-list matcher. Exact prior packaged defaults are
+upgraded automatically by the API; refresh customized legacy keys from the
+packaged file when upgrading an external ConfigMap. Override `rbePoolPods` too if your
+installation renames the Kubernetes ownership metrics or labels.
+
 The templates load at API startup. After changing an external ConfigMap,
 change `promqlQueries.rolloutChecksum` or restart the API; see
 [External configuration ConfigMaps](#external-configuration-configmaps).
