@@ -11,6 +11,39 @@
     "watchNamespace": {
       "type": "string"
     },
+    "specPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checkExistingRbeWorkers": {
+          "type": "boolean"
+        },
+        "allowedPodServiceAccounts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*|[a-z0-9]([-a-z0-9.]*[a-z0-9])?)$"
+          }
+        },
+        "allowPrivilegedExtraContainers": {
+          "type": "boolean"
+        },
+        "allowedHostPathPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/[^,]*$"
+          }
+        },
+        "allowedClusterTriggerAuthentications": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*|[a-z0-9]([-a-z0-9.]*[a-z0-9])?)$"
+          }
+        }
+      }
+    },
     "global": {
       "type": "object"
     },

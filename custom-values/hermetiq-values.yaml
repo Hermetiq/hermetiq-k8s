@@ -103,9 +103,10 @@ app:
   # Enable Action Cache Hit Tracker queries and MCP cache-event tools:
   cacheEventsEnabled: true
   normalizeRepoUrls: true
-  # Recommended for production scale: offload BEP stdout/stderr progress chunks
-  # to cloud object storage (requires a bucket lifecycle TTL rule on <prefix>/progress/):
-  # rawBepExportBucket: gs://<bucket>/<prefix>
+  # Recommended for production scale: store build stdout/stderr (progress logs)
+  # in Google Cloud Storage or Azure Blob. This is enabled per project in
+  # Project Settings, not by a chart value; see "Progress log storage" in the
+  # Hermetiq chart README for the identity and bucket lifecycle requirements.
 
 oidc:
   # Shared OIDC issuer for API, publisher, and dashboard. Use the exact issuer

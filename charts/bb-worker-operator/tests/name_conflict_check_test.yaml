@@ -1,0 +1,143 @@
+suite: existing RbeWorker NameConflict check
+templates:
+  - templates/validate.yaml
+release:
+  name: o
+  namespace: hermetiq
+capabilities:
+  apiVersions:
+    - bb.hermetiq.com/v1/RbeWorker
+    - keda.sh/v1alpha1/ScaledObject
+tests:
+  - it: accepts objects the RbeWorker controls
+    kubernetesProvider:
+      scheme:
+        "bb.hermetiq.com/v1/RbeWorker":
+          gvr: {group: bb.hermetiq.com, version: v1, resource: rbeworkers}
+          namespaced: true
+        "keda.sh/v1alpha1/ScaledObject":
+          gvr: {group: keda.sh, version: v1alpha1, resource: scaledobjects}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn, uid: uid-pool}
+          spec:
+            config:
+              generated: {commonConfigMapName: buildbarn-worker-config}
+            autoscaling: {enabled: true}
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: pool
+            namespace: buildbarn
+            ownerReferences:
+              - {apiVersion: bb.hermetiq.com/v1, kind: RbeWorker, name: pool, uid: uid-pool, controller: true}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: pool-config
+            namespace: buildbarn
+            ownerReferences:
+              - {apiVersion: bb.hermetiq.com/v1, kind: RbeWorker, name: pool, uid: uid-pool, controller: true}
+        - apiVersion: keda.sh/v1alpha1
+          kind: ScaledObject
+          metadata:
+            name: pool
+            namespace: buildbarn
+            ownerReferences:
+              - {apiVersion: bb.hermetiq.com/v1, kind: RbeWorker, name: pool, uid: uid-pool, controller: true}
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses an upgrade when an RbeWorker would hit NameConflict
+    kubernetesProvider:
+      scheme:
+        "bb.hermetiq.com/v1/RbeWorker":
+          gvr: {group: bb.hermetiq.com, version: v1, resource: rbeworkers}
+          namespaced: true
+        "keda.sh/v1alpha1/ScaledObject":
+          gvr: {group: keda.sh, version: v1alpha1, resource: scaledobjects}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        # Recreated after a --cascade=orphan delete: its objects still point
+        # at the old RbeWorker UID.
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn, uid: uid-new}
+          spec:
+            config:
+              generated: {}
+            autoscaling: {enabled: true}
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: pool
+            namespace: buildbarn
+            ownerReferences:
+              - {apiVersion: bb.hermetiq.com/v1, kind: RbeWorker, name: pool, uid: uid-old, controller: true}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: pool-config, namespace: buildbarn}
+        - apiVersion: keda.sh/v1alpha1
+          kind: ScaledObject
+          metadata: {name: pool, namespace: buildbarn}
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: shared, namespace: buildbarn, uid: uid-shared}
+          spec:
+            config:
+              generated: {commonConfigMapName: shared-config}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'buildbarn/pool: Deployment "pool" exists but is not controlled by this RbeWorker \(NameConflict\)'
+      - failedTemplate:
+          errorPattern: 'buildbarn/pool: ConfigMap "pool-config" exists but is not controlled'
+      - failedTemplate:
+          errorPattern: 'buildbarn/pool: ScaledObject "pool" exists but is not controlled'
+      - failedTemplate:
+          errorPattern: 'buildbarn/shared: spec.config.generated.commonConfigMapName "shared-config" is the ConfigMap the operator generates'
+
+  - it: ignores a ScaledObject or ConfigMap the operator would not manage
+    kubernetesProvider:
+      scheme:
+        "bb.hermetiq.com/v1/RbeWorker":
+          gvr: {group: bb.hermetiq.com, version: v1, resource: rbeworkers}
+          namespaced: true
+        "keda.sh/v1alpha1/ScaledObject":
+          gvr: {group: keda.sh, version: v1alpha1, resource: scaledobjects}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn, uid: uid-pool}
+          spec:
+            config:
+              files: {configMapName: mine}
+            autoscaling: {enabled: false}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: pool-config, namespace: buildbarn}
+        - apiVersion: keda.sh/v1alpha1
+          kind: ScaledObject
+          metadata: {name: pool, namespace: buildbarn}
+    asserts:
+      - notFailedTemplate: {}

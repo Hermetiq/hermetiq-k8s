@@ -18,14 +18,20 @@ metadata:
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
 data:
+{{- if and .Values.scheduler.handover.enabled .Values.security.grpcMtls.enabled .Values.security.grpcMtls.certificateAuthorities }}
+  scheduler-coordinator-ca.pem: |-
+{{ .Values.security.grpcMtls.certificateAuthorities | nindent 4 }}
+{{- end }}
 {{- range $path, $_ := .Files.Glob "files/config/*" }}
 {{- $name := base $path -}}
+{{- if or (ne $name "scheduler-routing.libsonnet") $root.Values.scheduler.configurationReloadInterval }}
 {{- $override := index $configOverrides $name | default "" }}
   {{ $name }}: |-
 {{- if $override }}
 {{ $override | nindent 4 }}
 {{- else }}
 {{ tpl ($root.Files.Get $path) $root | nindent 4 }}
+{{- end }}
 {{- end }}
 {{- end }}
 ---
