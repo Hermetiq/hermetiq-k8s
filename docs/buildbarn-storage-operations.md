@@ -58,7 +58,7 @@ Treat these as scheduled cache flushes:
 | `storage.replicas` increased by 1 | Roughly `1/N` of keys remap to the new shard; temporary miss-rate dip |
 | `storage.replicas` decreased by 1 | Removed shard's cache share is lost |
 | `mode` or `backend` switch | New empty volumes; old PVCs may be retained and orphaned |
-| Enabling `iscc` or `fsac` on `mode: pvc` | Adds a StatefulSet claim template; requires a [StatefulSet recreate](#recreate-the-storage-statefulset) |
+| Enabling `iscc`, `fsac`, or a dedicated `cms` (`filesystem`/`blockDevice`) on `mode: pvc` | Adds a StatefulSet claim template; requires a [StatefulSet recreate](#recreate-the-storage-statefulset) |
 
 Volatile stores do not lose anything extra from these changes because they already restart empty.
 
@@ -72,11 +72,14 @@ time() - buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_
 
 The gauge holds the time at which the most recently discarded block entered the old range. Every blob in that block was written before then, so the value is a lower bound on how long the most recently discarded data survived. It is not a guarantee for any particular blob, and it keeps growing until the next block is discarded. bb-storage sets the gauge to the process start time on startup, so after a restart it reads as uptime until a block filled since the restart is discarded. Keep it comfortably above your longest build, plus any window where Bazel may still need remote outputs. A low value is a strong sign the store is too small; a high value alone does not prove it is big enough. The chart records per-shard min/max values and ships a `BuildbarnCacheRetentionLow` alert at 24 hours.
 
-Watch the key-location map separately:
+Watch the key-location map separately (CDC `bb-storage` exposes these under
+`buildbarn_lossymap_hash_map_*` with `name="KeyLocationMap:<storage_type>"`;
+the chart's recording rules preserve the legacy `buildbarn_blobstore_hashing_key_location_map_*`
+rule names across mixed rollouts):
 
 ```text
-buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
-buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+buildbarn_lossymap_hash_map_put_too_many_iterations_total{name=~"KeyLocationMap:.+"}
+buildbarn_lossymap_hash_map_get_too_many_attempts_total{name=~"KeyLocationMap:.+"}
 ```
 
 Any sustained nonzero rate means the map is too small or too crowded. Grow the map. If it is in memory, grow the storage pod memory request at the same time. These counters reset on restart, so a quiet dashboard immediately after a deploy is not proof that the map is healthy.
@@ -115,7 +118,7 @@ There is no built-in data migration between filesystem and raw block stores.
 
 ### Recreate the Storage StatefulSet
 
-Kubernetes rejects any change to a StatefulSet's `volumeClaimTemplates`, so `helm upgrade` fails after you enable `iscc` or `fsac` on `mode: pvc`, switch a store's `backend`, or change a store's `size`. Existing PVCs are kept throughout; only the StatefulSet object is replaced.
+Kubernetes rejects any change to a StatefulSet's `volumeClaimTemplates`, so `helm upgrade` fails after you enable `iscc`, `fsac`, or a dedicated `cms` (`filesystem`/`blockDevice`) on `mode: pvc`, switch a store's `backend`, or change a store's `size`. Existing PVCs are kept throughout; only the StatefulSet object is replaced.
 
 1. Run `helm upgrade` with the new values. It fails with `StatefulSet.apps "storage" is invalid: spec: Forbidden: updates to statefulset spec for fields other than ...`. Confirm that is the only error, then delete the StatefulSet while leaving its pods and PVCs running:
 

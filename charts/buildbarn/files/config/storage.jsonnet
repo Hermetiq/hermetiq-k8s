@@ -93,7 +93,7 @@ local common = import 'common.libsonnet';
             {{- else if and (eq $cms.backend "sharedCas") (not $casNoFs) (eq $cms.keyLocationMap.type "blockDevice") }}
             onBlockDevice: {
               file: {
-                path: '{{ $sharedCasDir }}/cms-keys.db',
+                path: '{{ $sharedCasDir }}/cdc-v1/cms-keys.db',
                 sizeBytes: {{ $cms.keyLocationMap.sizeMi }} * 1024 * 1024,
               },
             },
@@ -126,7 +126,7 @@ local common = import 'common.libsonnet';
               devicePath: '/dev/bb/cms',
               {{- else if eq $cms.backend "sharedCas" }}
               file: {
-                path: '{{ $sharedCasDir }}/cms-blocks.db',
+                path: '{{ $sharedCasDir }}/cdc-v1/cms-blocks.db',
                 sizeBytes: {{ $cms.blocksSizeGi }} * 1024 * 1024 * 1024,
               },
               {{- else }}
@@ -151,7 +151,7 @@ local common = import 'common.libsonnet';
             {{- if eq $cms.backend "blockDevice" }}
             stateDirectoryPath: '/storage-cms-meta/persistent_state',
             {{- else if eq $cms.backend "sharedCas" }}
-            stateDirectoryPath: '{{ $sharedCasDir }}/cms_persistent_state',
+            stateDirectoryPath: '{{ $sharedCasDir }}/cdc-v1/cms_persistent_state',
             {{- else }}
             stateDirectoryPath: '/storage-cms/persistent_state',
             {{- end }}
@@ -175,7 +175,7 @@ local common = import 'common.libsonnet';
           {{- if eq .Values.storage.persistence.ac.blockDevice.keyLocationMap "file" }}
           onBlockDevice: {
             file: {
-              path: '/storage-ac-meta/ac-keys.db',
+              path: '/storage-ac-meta/cdc-v1/ac-keys.db',
               sizeBytes: {{ .Values.storage.persistence.ac.blockDevice.metadata.keyLocationMapSizeMi }} * 1024 * 1024,
             },
           },
@@ -187,7 +187,7 @@ local common = import 'common.libsonnet';
           {{- else if eq .Values.storage.persistence.ac.keyLocationMap.type "blockDevice" }}
           onBlockDevice: {
             file: {
-              path: '/storage-ac/ac-keys.db',
+              path: '/storage-ac/cdc-v1/ac-keys.db',
               sizeBytes: {{ .Values.storage.persistence.ac.keyLocationMap.sizeMi }} * 1024 * 1024,
             },
           },
@@ -208,7 +208,7 @@ local common = import 'common.libsonnet';
             devicePath: '/dev/bb/ac',
             {{- else }}
             file: {
-              path: '/storage-ac/ac-blocks.db',
+              path: '/storage-ac/cdc-v1/ac-blocks.db',
               sizeBytes: {{ .Values.storage.persistence.ac.blocksSizeGi }} * 1024 * 1024 * 1024,
             },
             {{- end }}
@@ -229,9 +229,9 @@ local common = import 'common.libsonnet';
         {{- if or (and (eq .Values.storage.persistence.ac.backend "blockDevice") (eq .Values.storage.persistence.ac.blockDevice.keyLocationMap "file")) (and (ne .Values.storage.persistence.ac.backend "blockDevice") (eq .Values.storage.persistence.ac.keyLocationMap.type "blockDevice")) }}
         persistent: {
           {{- if eq .Values.storage.persistence.ac.backend "blockDevice" }}
-          stateDirectoryPath: '/storage-ac-meta/persistent_state',
+          stateDirectoryPath: '/storage-ac-meta/cdc-v1/persistent_state',
           {{- else }}
-          stateDirectoryPath: '/storage-ac/persistent_state',
+          stateDirectoryPath: '/storage-ac/cdc-v1/persistent_state',
           {{- end }}
           minimumEpochInterval: '300s',
         },
@@ -251,7 +251,7 @@ local common = import 'common.libsonnet';
           {{- if eq .Values.storage.persistence.iscc.blockDevice.keyLocationMap "file" }}
           onBlockDevice: {
             file: {
-              path: '/storage-iscc-meta/iscc-keys.db',
+              path: '/storage-iscc-meta/cdc-v1/iscc-keys.db',
               sizeBytes: {{ .Values.storage.persistence.iscc.blockDevice.metadata.keyLocationMapSizeMi }} * 1024 * 1024,
             },
           },
@@ -263,7 +263,7 @@ local common = import 'common.libsonnet';
           {{- else if eq .Values.storage.persistence.iscc.keyLocationMap.type "blockDevice" }}
           onBlockDevice: {
             file: {
-              path: '/storage-iscc/iscc-keys.db',
+              path: '/storage-iscc/cdc-v1/iscc-keys.db',
               sizeBytes: {{ .Values.storage.persistence.iscc.keyLocationMap.sizeMi }} * 1024 * 1024,
             },
           },
@@ -284,7 +284,7 @@ local common = import 'common.libsonnet';
             devicePath: '/dev/bb/iscc',
             {{- else }}
             file: {
-              path: '/storage-iscc/iscc-blocks.db',
+              path: '/storage-iscc/cdc-v1/iscc-blocks.db',
               sizeBytes: {{ .Values.storage.persistence.iscc.blocksSizeGi }} * 1024 * 1024 * 1024,
             },
             {{- end }}
@@ -301,9 +301,9 @@ local common = import 'common.libsonnet';
         {{- if or (and (eq .Values.storage.persistence.iscc.backend "blockDevice") (eq .Values.storage.persistence.iscc.blockDevice.keyLocationMap "file")) (and (ne .Values.storage.persistence.iscc.backend "blockDevice") (eq .Values.storage.persistence.iscc.keyLocationMap.type "blockDevice")) }}
         persistent: {
           {{- if eq .Values.storage.persistence.iscc.backend "blockDevice" }}
-          stateDirectoryPath: '/storage-iscc-meta/persistent_state',
+          stateDirectoryPath: '/storage-iscc-meta/cdc-v1/persistent_state',
           {{- else }}
-          stateDirectoryPath: '/storage-iscc/persistent_state',
+          stateDirectoryPath: '/storage-iscc/cdc-v1/persistent_state',
           {{- end }}
           minimumEpochInterval: '300s',
         },
@@ -324,7 +324,7 @@ local common = import 'common.libsonnet';
           {{- if eq .Values.storage.persistence.fsac.blockDevice.keyLocationMap "file" }}
           onBlockDevice: {
             file: {
-              path: '/storage-fsac-meta/fsac-keys.db',
+              path: '/storage-fsac-meta/cdc-v1/fsac-keys.db',
               sizeBytes: {{ .Values.storage.persistence.fsac.blockDevice.metadata.keyLocationMapSizeMi }} * 1024 * 1024,
             },
           },
@@ -336,7 +336,7 @@ local common = import 'common.libsonnet';
           {{- else if eq .Values.storage.persistence.fsac.keyLocationMap.type "blockDevice" }}
           onBlockDevice: {
             file: {
-              path: '/storage-fsac/fsac-keys.db',
+              path: '/storage-fsac/cdc-v1/fsac-keys.db',
               sizeBytes: {{ .Values.storage.persistence.fsac.keyLocationMap.sizeMi }} * 1024 * 1024,
             },
           },
@@ -357,7 +357,7 @@ local common = import 'common.libsonnet';
             devicePath: '/dev/bb/fsac',
             {{- else }}
             file: {
-              path: '/storage-fsac/fsac-blocks.db',
+              path: '/storage-fsac/cdc-v1/fsac-blocks.db',
               sizeBytes: {{ .Values.storage.persistence.fsac.blocksSizeGi }} * 1024 * 1024 * 1024,
             },
             {{- end }}
@@ -374,9 +374,9 @@ local common = import 'common.libsonnet';
         {{- if or (and (eq .Values.storage.persistence.fsac.backend "blockDevice") (eq .Values.storage.persistence.fsac.blockDevice.keyLocationMap "file")) (and (ne .Values.storage.persistence.fsac.backend "blockDevice") (eq .Values.storage.persistence.fsac.keyLocationMap.type "blockDevice")) }}
         persistent: {
           {{- if eq .Values.storage.persistence.fsac.backend "blockDevice" }}
-          stateDirectoryPath: '/storage-fsac-meta/persistent_state',
+          stateDirectoryPath: '/storage-fsac-meta/cdc-v1/persistent_state',
           {{- else }}
-          stateDirectoryPath: '/storage-fsac/persistent_state',
+          stateDirectoryPath: '/storage-fsac/cdc-v1/persistent_state',
           {{- end }}
           minimumEpochInterval: '300s',
         },

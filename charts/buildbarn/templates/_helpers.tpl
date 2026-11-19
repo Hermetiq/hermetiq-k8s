@@ -631,41 +631,58 @@ pvc and emptyDir volumes do get fsGroup, so there the mkdir runs unprivileged.
 {{- define "buildbarn.storage.volumeInitScript" -}}
 set -eu
 {{- $hostPath := eq .Values.storage.persistence.mode "hostPath" -}}
-{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
-{{- if not $casNoFs }}
-{{- $casDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
-# The pre-CDC CAS stored raw bytes; CDC stores compressed chunks. Never open
-# its index or allocate another full blocks file alongside the legacy cache.
-if [ -e {{ $casDir }}/cas-keys.db ] || [ -e {{ $casDir }}/cas-blocks.db ] || [ -e {{ $casDir }}/persistent_state ]; then
-  echo 'Pre-CDC CAS files detected in {{ $casDir }}. Stop all cache clients and storage, snapshot the old cache if rollback is required, then explicitly retire the legacy CAS files before upgrading. No data has been removed. See docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback' >&2
+{{- $pod := .Values.security.pod -}}
+{{- $uid := ternary 65534 $pod.runAsUser (kindIs "invalid" $pod.runAsUser) -}}
+{{- $gid := ternary 65534 $pod.runAsGroup (kindIs "invalid" $pod.runAsGroup) -}}
+{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") }}
+# Pre-CDC CAS stored raw bytes and pre-CDC AC/ISCC/FSAC stored unsuffixed
+# protobufs; CDC stores compressed chunks and SHA256-suffixed records. Refuse
+# legacy files across all stores before creating any CDC directory.
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) }}
+{{- if ne $store "cms" }}
+{{- $s := index $.Values.storage.persistence $store }}
+{{- if or (ne $s.backend "blockDevice") (eq $s.blockDevice.keyLocationMap "file") }}
+{{- $dir := ternary (printf "/storage-%s-meta" $store) (printf "/storage-%s" $store) (eq $s.backend "blockDevice") }}
+if [ -e {{ $dir }}/{{ $store }}-keys.db ] || [ -L {{ $dir }}/{{ $store }}-keys.db ] || [ -e {{ $dir }}/{{ $store }}-blocks.db ] || [ -L {{ $dir }}/{{ $store }}-blocks.db ] || [ -e {{ $dir }}/persistent_state ] || [ -L {{ $dir }}/persistent_state ]; then
+  echo 'Pre-CDC {{ upper $store }} files detected in {{ $dir }}. Stop all cache clients and storage, snapshot the old cache if rollback is required, then explicitly retire the legacy {{ upper $store }} files before upgrading. No data has been removed. See docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback' >&2
   exit 1
 fi
 {{- end }}
-{{- range $dir := splitList " " (include "buildbarn.storage.fsDirs" .) }}
-{{- if $hostPath }}
-chown 65534:65534 {{ $dir }}
 {{- end }}
-{{- $stateDir := printf "%s/persistent_state" $dir -}}
-{{- if has $dir (list "/storage-cas" "/storage-cas-meta") -}}
-{{- $stateDir = printf "%s/cdc-v1/persistent_state" $dir }}
+{{- end }}
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) }}
+{{- $s := index $.Values.storage.persistence $store }}
+{{- if or (ne $s.backend "blockDevice") (eq $s.blockDevice.keyLocationMap "file") }}
+{{- $dir := ternary (printf "/storage-%s-meta" $store) (printf "/storage-%s" $store) (eq $s.backend "blockDevice") }}
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}
+{{- end }}
+{{- if ne $store "cms" }}
 mkdir -p {{ $dir }}/cdc-v1
 chmod 0700 {{ $dir }}/cdc-v1
 {{- if $hostPath }}
-chown 65534:65534 {{ $dir }}/cdc-v1
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/cdc-v1
 {{- end }}
-{{- end }}
-mkdir -p {{ $stateDir }}
-chmod 0700 {{ $stateDir }}
+mkdir -p {{ $dir }}/cdc-v1/persistent_state
+chmod 0700 {{ $dir }}/cdc-v1/persistent_state
 {{- if $hostPath }}
-chown 65534:65534 {{ $stateDir }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/cdc-v1/persistent_state
+{{- end }}
+{{- else }}
+mkdir -p {{ $dir }}/persistent_state
+chmod 0700 {{ $dir }}/persistent_state
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/persistent_state
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if and (eq .Values.storage.persistence.cms.backend "sharedCas") (not $casNoFs) (eq .Values.storage.persistence.cms.keyLocationMap.type "blockDevice") }}
 {{- $sharedCasDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
-mkdir -p {{ $sharedCasDir }}/cms_persistent_state
-chmod 0700 {{ $sharedCasDir }}/cms_persistent_state
+mkdir -p {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
+chmod 0700 {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
 {{- if $hostPath }}
-chown 65534:65534 {{ $sharedCasDir }}/cms_persistent_state
+chown {{ $uid }}:{{ $gid }} {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -770,6 +787,9 @@ securityContext:
 {{/* Privileged-lite init container that chowns raw device nodes (deviceAccess=chownInit). Column 0. */}}
 {{- define "buildbarn.storage.deviceChownInit" -}}
 {{- $bd := .Values.storage.persistence.blockDevice }}
+{{- $pod := .Values.security.pod -}}
+{{- $uid := ternary 65534 $pod.runAsUser (kindIs "invalid" $pod.runAsUser) -}}
+{{- $gid := ternary 65534 $pod.runAsGroup (kindIs "invalid" $pod.runAsGroup) -}}
 - name: device-chown
   image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.busybox" "image" .Values.images.busybox.image) | quote }}
   imagePullPolicy: {{ .Values.images.busybox.pullPolicy }}
@@ -780,7 +800,7 @@ securityContext:
       set -eu
       for dev in {{ range $store := splitList " " (include "buildbarn.storage.storeList" .) }}{{ $s := index $.Values.storage.persistence $store }}{{ if eq $s.backend "blockDevice" }}/dev/bb/{{ $store }} {{ end }}{{ end }}; do
         if [ -b "$dev" ]; then
-          chown 65534:65534 "$dev"
+          chown {{ $uid }}:{{ $gid }} "$dev"
           chmod 0600 "$dev"
         fi
       done

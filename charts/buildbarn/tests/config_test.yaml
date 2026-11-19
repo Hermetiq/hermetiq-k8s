@@ -49,10 +49,10 @@ tests:
       - matchRegex:
           path: data["storage.jsonnet"]
           pattern: "devicePath: '/dev/bb/cas'"
-      # in-memory KLM (default) => no persistent block, no cas-blocks.db file
+      # in-memory KLM (default) => no persistent block, no filesystem CAS blocks file
       - notMatchRegex:
           path: data["storage.jsonnet"]
-          pattern: "cas-blocks.db"
+          pattern: "storage-cas/cdc-v1/blocks\\.db|cas-blocks\\.db"
 
   # Persistence requires a persistent key-location map: an in-memory KLM store
   # must not carry a `persistent` block (its blocks would reattach after a
@@ -71,13 +71,13 @@ tests:
           pattern: "storage-cas/cdc-v1/persistent_state"
       - notMatchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-ac/persistent_state"
+          pattern: "storage-ac/(cdc-v1/)?persistent_state"
       - notMatchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-iscc/persistent_state"
+          pattern: "storage-iscc/(cdc-v1/)?persistent_state"
       - notMatchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-fsac/persistent_state"
+          pattern: "storage-fsac/(cdc-v1/)?persistent_state"
 
   - it: a disk-backed AC key-location map turns persistence back on
     set:
@@ -88,10 +88,10 @@ tests:
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-ac/ac-keys.db"
+          pattern: "storage-ac/cdc-v1/ac-keys\\.db"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "storage-ac/persistent_state"
+          pattern: "storage-ac/cdc-v1/persistent_state"
 
   # writeConcurrencyLimit is a blockdevice.Configuration field: it must render
   # inside `source`, or bb-storage rejects the config at startup.
@@ -177,9 +177,12 @@ tests:
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
           pattern: 'legacyContentAddressableStorage:'
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: 'deprecatedPortalUrl: common\.portalUrl,'
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: 'adminHttpServers:|browserUrl:|deprecatedPortalUrl:'
+          pattern: 'adminHttpServers:|browserUrl:'
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "local routing = import 'scheduler-routing.libsonnet';"
@@ -467,7 +470,7 @@ tests:
       - notExists:
           path: data["worker-ubuntu22-04.jsonnet"]
 
-  - it: renders FastCDC chunkStorage, chunkMappingStorage, and nested keyLocationMap across configs
+  - it: renders RepMaxCDC chunkStorage, chunkMappingStorage, and nested keyLocationMap across configs
     documentSelector:
       path: metadata.name
       value: buildbarn-config
@@ -492,7 +495,10 @@ tests:
           pattern: "chunkingParameters:"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "path: '/storage-cas/cms-blocks.db'"
+          pattern: "path: '/storage-cas/cdc-v1/cms-blocks.db'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "path: '/storage-ac/cdc-v1/ac-blocks.db'"
       - notMatchRegex:
           path: data["storage.jsonnet"]
           pattern: "dataIntegrityValidationCache|keyLocationMapInMemory|keyLocationMapOnBlockDevice"
@@ -538,13 +544,13 @@ tests:
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas/cms-keys.db"
+          pattern: "/storage-cas/cdc-v1/cms-keys.db"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas/cms_persistent_state"
+          pattern: "/storage-cas/cdc-v1/cms_persistent_state"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas/cms-blocks.db"
+          pattern: "/storage-cas/cdc-v1/cms-blocks.db"
 
   - it: CMS placement for raw file index
     set:
@@ -557,13 +563,13 @@ tests:
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas-meta/cms-keys.db"
+          pattern: "/storage-cas-meta/cdc-v1/cms-keys.db"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas-meta/cms_persistent_state"
+          pattern: "/storage-cas-meta/cdc-v1/cms_persistent_state"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas-meta/cms-blocks.db"
+          pattern: "/storage-cas-meta/cdc-v1/cms-blocks.db"
 
   - it: CMS placement for raw memory index
     set:
@@ -581,7 +587,7 @@ tests:
           pattern: "cms_persistent_state"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "blockSizeBytes: 1048576"
+          pattern: "blockSizeBytes: 8388608"
 
   - it: CMS placement for explicit CMS memory index
     set:
@@ -598,4 +604,58 @@ tests:
           pattern: "cms_persistent_state"
       - matchRegex:
           path: data["storage.jsonnet"]
-          pattern: "/storage-cas/cms-blocks.db"
+          pattern: "/storage-cas/cdc-v1/cms-blocks.db"
+
+  - it: renders dedicated CMS filesystem and blockDevice file-KLM configurations
+    set:
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.cms.blockDevice.storageClassName: bb-block
+      storage.persistence.cms.blockDevice.keyLocationMap: file
+      storage.persistence.cms.writeConcurrencyLimit: 16
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.keyLocationMap.type: blockDevice
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.keyLocationMap.type: blockDevice
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/cms'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cms-meta/cms-keys\\.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-cms-meta/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "writeConcurrencyLimit: 16"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-iscc/cdc-v1/iscc-keys\\.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-iscc/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-fsac/cdc-v1/fsac-keys\\.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "/storage-fsac/cdc-v1/persistent_state"
+
+  - it: renders frontend readCache inside CDC chunkStorage and browser fallback when internalService is disabled
+    set:
+      frontend.readCache.enabled: true
+      frontend.internalService.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "(?s)chunkStorage:.*existenceCaching:.*readCaching:"
+      - matchRegex:
+          path: data["browser.jsonnet"]
+          pattern: "address: 'frontend-grpc:8980'"

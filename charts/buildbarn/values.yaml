@@ -56,6 +56,9 @@ upgradeChecks:
   # elsewhere (for example "hermetiq"). Listing Deployments there needs read
   # access to that namespace.
   operatorNamespace: ""
+  # Namespace of the Hermetiq API/publisher (bep-nats) Deployments when running
+  # in a separate namespace from Buildbarn. Empty means this release's namespace.
+  hermetiqNamespace: ""
 
 # Shared Buildbarn configuration knobs templated into files/config/*.
 config:
@@ -154,7 +157,7 @@ images:
     pullPolicy: IfNotPresent
   # Default worker and runner-installer images published into the
   # buildbarn-worker-config ConfigMap (workerImage / runnerInstallerImage) so
-  # RbeWorker CRs without explicit spec.workerImage / spec.runnerInstallerImage
+  # RbeWorker CRs without explicit spec.images.worker / spec.images.runnerInstaller
   # stay lockstep-aligned with the chart's storage and scheduler protocol.
   worker:
     repository: ghcr.io/buildbarn/bb-worker
@@ -408,7 +411,7 @@ storage:
   #
   # Every bb-storage `local` store keeps a hash table mapping digest -> location
   # on the blocks device. It is a FIXED-SIZE open-addressed table: writes probe
-  # up to keyLocationMapMaximumPutAttempts (64) slots, and once live records
+  # up to keyLocationMap.maximumPutAttempts (64) slots, and once live records
   # approach the table's capacity those probes start failing. A blob whose
   # location record could not be stored is written to disk but is UNREACHABLE —
   # FindMissingBlobs reports it absent while the bytes sit there. Clients see
@@ -556,9 +559,9 @@ storage:
     # list of RepMaxCDC chunks. Required by CDC-enabled bb-storage.
     #
     # backend:
-    #   sharedCas   (default) places CMS blocks on the existing
-    #               CAS filesystem volume (/storage-cas/cms-blocks.db), or on
-    #               the CAS metadata volume (/storage-cas-meta/cms-blocks.db)
+    #   sharedCas   (default) places CMS blocks on the existing CAS filesystem
+    #               volume (/storage-cas/cdc-v1/cms-blocks.db), or on the CAS
+    #               metadata volume (/storage-cas-meta/cdc-v1/cms-blocks.db)
     #               when cas.backend=blockDevice and cas.blockDevice.keyLocationMap=file,
     #               or in memory (blocksInMemory) when cas.backend=blockDevice
     #               has no filesystem mount (keyLocationMap=inMemory). Keeps the
@@ -573,7 +576,11 @@ storage:
       blocksSizeGi: 1
       # Used when backend=sharedCas and cas.backend=blockDevice with
       # cas.blockDevice.keyLocationMap=inMemory (no filesystem volume mounted).
-      blocksInMemoryBlockSizeBytes: 1048576 # 1 MiB per block x 36 blocks = 36 MiB
+      # blocksInMemory does not use spareBlocks, so total memory is
+      # (oldBlocks + currentBlocks + newBlocks) x blocksInMemoryBlockSizeBytes
+      # (33 x 8 MiB = 264 MiB usable by default). Each block must also hold the
+      # largest single ChunkMapping (up to config.contentAddressableStorage.maximumChunkCount).
+      blocksInMemoryBlockSizeBytes: 8388608 # 8 MiB per block x 33 blocks = 264 MiB
       keyLocationMap:
         # blockDevice uses a regular file on the shared CAS filesystem/metadata
         # volume, with checkpoint state beside it. Raw CAS with an in-memory
@@ -933,7 +940,8 @@ frontend:
     #   entries          = 2 to 10 * objects that fit
     # Raise blocksSizeGi without raising this and the map fills before the disk
     # does -- blobs on disk the index can no longer reach, visible as
-    # buildbarn_blobstore_hashing_key_location_map_*_too_many_* going nonzero.
+    # buildbarn_lossymap_hash_map_*_too_many_* (or the preserved recording rules)
+    # going nonzero.
     keyLocationMapInMemoryEntries: 20971520
     # Total bytes across ALL blocks below, so block size is
     # blocksSizeGi / (old+current+new+spare). A blob larger than one block fails
@@ -949,11 +957,10 @@ frontend:
     # blocksSizeGi, so they shrink the block size too.
     spareBlocks: 3
     # Deprecated no-op: dataIntegrityValidationCache was removed from
-    # local.BlobAccessConfiguration in CDC bb-storage. Retained so existing
-    # user values files pass schema validation.
-    dataIntegrityValidationCache:
-      cacheSize: 100000
-      cacheDuration: 14400s
+    # local.BlobAccessConfiguration in CDC bb-storage. Retained as an empty map
+    # so existing user values files pass schema validation and trigger the
+    # NOTES.txt deprecation notice when populated.
+    dataIntegrityValidationCache: {}
     # emptyDir draws from the node's allocatable ephemeral-storage (the kubelet
     # root filesystem). Which disk that is comes from the node pool: a GKE pool
     # created with --ephemeral-storage-local-ssd puts the kubelet root on a
@@ -991,8 +998,9 @@ frontend:
   # the frontend-grpc Service targetPort switches from the frontend container
   # (8980) to this sidecar, so externally routed traffic (Contour, Gateway,
   # Ingress) flows through it with no route changes; the sidecar forwards to
-  # the frontend on 127.0.0.1:8980. Chart components (browser, portal, remote
-  # asset) read the storage shards directly and are unaffected.
+  # the frontend on 127.0.0.1:8980. bb-portal and bb-remote-asset read the
+  # storage shards directly; bb-browser reads CAS through frontend-internal:8980
+  # (bypassing this proxy) so the frontend reassembles multi-chunk CDC blobs.
   grpcCacheProxy:
     enabled: false
     # gRPC listen port of the sidecar (GRPC_PORT). Becomes the frontend-grpc

@@ -6,10 +6,12 @@ All mounts are named Docker volumes, so this also works with a Docker socket
 inside the CI container without assuming identical host/container paths.
 """
 import base64
+import copy
 import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -107,13 +109,23 @@ class StorageMigrationTest(unittest.TestCase):
             docker('network', 'connect', self.network, self.client_container)
             self.addCleanup(docker, 'network', 'disconnect', self.network,
                             self.client_container, check=False)
-        self.config, self.image, self.init = render_config(self.directory)
+        self.config = self.image = self.init = None
         self.mounts = []
         for store in ('cas', 'ac'):
             volume = self.prefix + '-' + store
             docker('volume', 'create', volume)
             self.addCleanup(docker, 'volume', 'rm', volume, check=False)
             self.mounts += ['--mount', f'type=volume,source={volume},target=/storage-{store}']
+        # Ensure SIGTERM (e.g. CI timeout) runs addCleanup hooks instead of leaking Docker resources.
+        self._prev_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
+        self.addCleanup(signal.signal, signal.SIGTERM, self._prev_sigterm)
+
+    def _handle_signal(self, signum, _frame):
+        self.doCleanups()
+        raise SystemExit(128 + signum)
+
+    def configure(self, ephemeral=False):
+        self.config, self.image, self.init = render_config(self.directory, ephemeral=ephemeral)
         # Kubernetes normally supplies fsGroup ownership; emulate it here, then
         # run both the rendered init and storage as the chart's non-root UID.
         self.shell('chown 65534:65534 /storage-cas /storage-ac', user='0:0')
@@ -130,27 +142,43 @@ class StorageMigrationTest(unittest.TestCase):
         port = '8980' if frontend else '8981'
         alias = 'frontend' if frontend else 'storage-0.storage.integration'
         publish = [] if self.client_container else ['-p', '127.0.0.1::' + port]
+        mounts = [] if frontend else self.mounts
         docker('create', '--name', name, '--user', '65534:65534',
                '--network', self.network, '--network-alias', alias,
-               *publish, *self.mounts,
+               *publish, *mounts,
                image or self.image, '/storage.json')
         self.addCleanup(docker, 'rm', '-f', name, check=False)
         docker('cp', str(config or self.config), name + ':/storage.json')
         docker('start', name)
         return name, self.channel(name, port)
 
+    def container_logs(self, name):
+        logs = docker('logs', name, check=False)
+        return (logs.stdout or '') + (logs.stderr or '')
+
+    def assert_no_storage_errors(self, name):
+        logs = self.container_logs(name)
+        for needle in ('data integrity error', 'SHA-256', 'Failed to decode ZSTD'):
+            self.assertNotIn(needle, logs, logs)
+
     def channel(self, name, port='8981'):
         if self.client_container:
             info = json.loads(docker('inspect', name).stdout)[0]
-            address = info['NetworkSettings']['Networks'][self.network]['IPAddress'] + ':' + port
+            ip = info['NetworkSettings']['Networks'][self.network]['IPAddress']
+            if not ip:
+                self.fail(f'container {name} exited before receiving IP:\n{self.container_logs(name)}')
+            address = ip + ':' + port
         else:
-            address = docker('port', name, port + '/tcp').stdout.strip()
+            port_result = docker('port', name, port + '/tcp', check=False)
+            address = port_result.stdout.strip()
+            if port_result.returncode != 0 or not address:
+                self.fail(f'container {name} did not expose port {port}:\n{self.container_logs(name)}')
         channel = grpc.insecure_channel(address)
         self.addCleanup(channel.close)
         try:
             grpc.channel_ready_future(channel).result(timeout=30)
         except grpc.FutureTimeoutError:
-            self.fail(docker('logs', name, check=False).stderr)
+            self.fail(self.container_logs(name))
         return channel
 
     def rpc(self, channel, method, data, service='ContentAddressableStorage'):
@@ -195,41 +223,78 @@ class StorageMigrationTest(unittest.TestCase):
         docker('start', name)
         return self.channel(name)
 
+    def legacy_persistent_config(self):
+        # Derive a persistent-AC variant from the pinned pre-CDC fixture so the
+        # upgrade guard is also proven against pre-CDC persistent AC (which
+        # lacked SHA256SuffixCoder before bb-storage 8d2acac).
+        cfg = copy.deepcopy(json.loads((CHART / 'tests/testdata/pre_cdc_storage.json').read_text()))
+        ac_local = cfg['actionCache']['backend']['local']
+        ac_local.pop('keyLocationMapInMemory')
+        ac_local['keyLocationMapOnBlockDevice'] = {
+            'file': {'path': '/storage-ac/ac-keys.db', 'sizeBytes': 1048576},
+        }
+        ac_local['persistent'] = {
+            'minimumEpochInterval': '300s',
+            'stateDirectoryPath': '/storage-ac/persistent_state',
+        }
+        path = self.directory / 'pre_cdc_storage_persistent_ac.json'
+        path.write_text(json.dumps(cfg))
+        return path
+
     def test_legacy_format_requires_explicit_reset_and_clean_reupload(self):
+        self.configure()
         self.shell('mkdir -p /storage-cas/persistent_state /storage-ac/persistent_state')
-        name, channel = self.start_storage(CHART / 'tests/testdata/pre_cdc_storage.json', LEGACY_IMAGE)
+        name, channel = self.start_storage(self.legacy_persistent_config(), LEGACY_IMAGE)
         blobs = [b'legacy raw CAS bytes ' * 5000, os.urandom(3 * 1024 * 1024)]
         for blob in blobs:
             self.put(channel, blob)
             self.assert_read(channel, blob)
+        legacy_action = self.put_action(channel, blobs[1])
         channel.close()
         docker('stop', '--time', '20', name)
-        # A failed upgrade must not alter any old data. Restart the old image
-        # after the guard fails and verify both blobs are still readable.
+        # A failed upgrade must not alter any old CAS or AC data. Restart the
+        # old image after the guard fails and verify blobs and AC remain readable.
         result = self.initialize(check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Pre-CDC CAS files detected', result.stderr)
-        self.shell('test ! -e /storage-cas/cdc-v1')
+        self.shell('test ! -e /storage-cas/cdc-v1 && test ! -e /storage-ac/cdc-v1 && test ! -e /storage-cas/cms_persistent_state')
         docker('start', name)
         channel = self.channel(name)
         for blob in blobs:
             self.assert_read(channel, blob)
+        legacy_ac_hit = self.rpc(channel, 'GetActionResult', {'actionDigest': legacy_action}, service='ActionCache')
+        self.assertEqual(legacy_ac_hit.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
         channel.close()
         docker('stop', '--time', '20', name)
-        # Model the explicit maintenance step on these disposable test volumes.
-        # Production init must never automatically delete or move these files.
+        # Retiring only CAS while legacy AC remains must STILL be refused without
+        # creating cdc-v1 on either volume, leaving legacy AC readable on rollback.
         self.shell('rm -rf /storage-cas/cas-keys.db /storage-cas/cas-blocks.db /storage-cas/persistent_state')
+        result = self.initialize(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Pre-CDC AC files detected', result.stderr)
+        self.shell('test ! -e /storage-cas/cdc-v1 && test ! -e /storage-ac/cdc-v1')
+        # Now explicitly retire legacy AC files as documented and start CDC.
+        self.shell('rm -rf /storage-ac/ac-keys.db /storage-ac/ac-blocks.db /storage-ac/persistent_state')
         self.initialize()
         new, channel = self.start_storage()
+        _, frontend = self.start_storage(self.directory / 'frontend.json', frontend=True)
+        # Exercise CAS FindMissing/Put/Get and AC Update/Get through the real frontend.
         for blob in blobs:
-            self.assert_missing(channel, blob)
-            self.put(channel, blob)
-            self.assert_read(channel, blob)
+            self.assert_missing(frontend, blob)
+            self.put(frontend, blob)
+            self.assert_read(frontend, blob)
+        action = self.put_action(frontend, blobs[1])
+        ac_hit = self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
+        self.assertEqual(ac_hit.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
         channel = self.restart(new, channel)
         for blob in blobs:
-            self.assert_read(channel, blob)
+            self.assert_read(frontend, blob)
+        ac_hit = self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
+        self.assertEqual(ac_hit.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
+        self.assert_no_storage_errors(new)
 
     def test_default_persistent_cms_survives_restart(self):
+        self.configure()
         self.initialize()
         name, channel = self.start_storage()
         blobs = [b'small blob' * 1024, os.urandom(3 * 1024 * 1024)]
@@ -243,12 +308,14 @@ class StorageMigrationTest(unittest.TestCase):
         # Exercise the chart's real completeness-checking frontend rather than
         # only reading an unchecked ActionResult directly from storage.
         _, frontend = self.start_storage(self.directory / 'frontend.json', frontend=True)
+        for blob in blobs:
+            self.assert_read(frontend, blob)
         result = self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
         self.assertEqual(result.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
-        self.assertNotIn('data integrity error', docker('logs', name).stderr)
+        self.assert_no_storage_errors(name)
 
     def test_explicit_ephemeral_cms_loses_only_composite_blobs(self):
-        self.config, self.image, self.init = render_config(self.directory, ephemeral=True)
+        self.configure(ephemeral=True)
         self.initialize()
         name, channel = self.start_storage()
         small, large = b'small blob' * 1024, os.urandom(3 * 1024 * 1024)
@@ -263,6 +330,7 @@ class StorageMigrationTest(unittest.TestCase):
         with self.assertRaises(grpc.RpcError) as failure:
             self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
         self.assertEqual(failure.exception.code(), grpc.StatusCode.NOT_FOUND)
+        self.assert_no_storage_errors(name)
 
 
 if __name__ == '__main__':

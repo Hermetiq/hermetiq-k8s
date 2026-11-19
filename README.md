@@ -204,6 +204,14 @@ The following versions form the first tested bundle in this repository:
 | Buildbarn |      `0.10.0` |  `20261112T085002Z` |
 | BB Worker Operator |      `0.3.13` |           `v0.3.14` |
 
+> **CDC compatibility note:** The bundled Hermetiq `0.9.8` `bep-nats` image is
+> **not** dual-schema CDC compatible and is not declared with
+> `hermetiq.com/cdc-compatible: "true"`. Co-installing or upgrading Buildbarn
+> `0.10.0` alongside Hermetiq requires deploying a verified dual-schema
+> `bep-nats` image and setting `buildbarnCdcCompatible: true` in the Hermetiq
+> chart (or waiting for the next Hermetiq chart release that bundles it). See
+> [docs/buildbarn-storage-model.md](docs/buildbarn-storage-model.md#upgrading-configurations-to-cdc).
+
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
 both version sets unchanged and describe their user-visible change in the

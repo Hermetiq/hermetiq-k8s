@@ -175,7 +175,7 @@ expect_invalid(
 print("PASS protobuf negative controls")
 
 
-def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_registry=None):
+def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_registry=None, expected_files=None):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = pathlib.Path(tmpdir)
         cmd = ["helm", "template", "buildbarn", str(chart), "--namespace", "buildbarn"]
@@ -215,9 +215,9 @@ def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_
                 reg = scheduler_registry
             validate_message(fqn, rendered_json, reg, f"{label}:{filename}")
             validated[filename] = rendered_json
-        assert "storage.jsonnet" in validated and "frontend.jsonnet" in validated and "scheduler.jsonnet" in validated, (
-            f"{label}: missing expected core jsonnet files: {validated}"
-        )
+        required = set(expected_files or ("storage.jsonnet", "frontend.jsonnet", "scheduler.jsonnet", "browser.jsonnet"))
+        missing = required - set(validated)
+        assert not missing, f"{label}: missing expected jsonnet files {sorted(missing)} (validated: {sorted(validated)})"
         print(f"PASS {label}: {', '.join(validated)}")
         return validated
 
@@ -244,6 +244,7 @@ render_and_validate(
         "frontend": {"readCache": {"enabled": True}},
         "config": {"blobstore": {"deadlineEnforcing": {"timeout": "60s"}}},
     },
+    expected_files=("storage.jsonnet", "frontend.jsonnet", "scheduler.jsonnet", "browser.jsonnet", "portal.jsonnet", "asset.jsonnet"),
 )
 
 # 3. Dedicated CMS filesystem PVC mode
@@ -259,9 +260,10 @@ render_and_validate(
             }
         },
     },
+    expected_files=("storage.jsonnet", "frontend.jsonnet", "scheduler.jsonnet", "browser.jsonnet", "portal.jsonnet", "asset.jsonnet"),
 )
 
-# 4. Dedicated CMS raw block-device PVC mode
+# 4. Dedicated CMS raw block-device PVC mode (both inMemory and file KLM)
 render_and_validate(
     "cms-block-device-pvc",
     value_files=[ci_values],
@@ -273,8 +275,40 @@ render_and_validate(
         },
     },
 )
+render_and_validate(
+    "cms-block-device-file-klm",
+    value_files=[ci_values],
+    inline_overrides={
+        "storage": {
+            "persistence": {
+                "cms": {
+                    "backend": "blockDevice",
+                    "blockDevice": {"size": "10Gi", "keyLocationMap": "file"},
+                },
+            }
+        },
+    },
+)
 
-# 5. Raw CAS without a filesystem mount uses the actual in-memory CMS fallback.
+# 5. Raw CAS with persistent file-backed KLM + sharedCas CMS
+raw_file_configs = render_and_validate(
+    "raw-cas-file-klm-shared-cms",
+    value_files=[ci_values],
+    inline_overrides={
+        "storage": {
+            "persistence": {
+                "cas": {"backend": "blockDevice", "blockDevice": {"keyLocationMap": "file"}},
+                "cms": {"backend": "sharedCas"},
+            }
+        },
+    },
+)
+raw_cas = raw_file_configs["storage.jsonnet"]["contentAddressableStorageServer"]["contentAddressableStorage"]
+assert raw_cas["chunkStorage"]["local"]["keyLocationMap"]["onBlockDevice"]["file"]["path"] == "/storage-cas-meta/cdc-v1/keys.db"
+assert raw_cas["chunkMappingStorage"]["local"]["keyLocationMap"]["onBlockDevice"]["file"]["path"] == "/storage-cas-meta/cdc-v1/cms-keys.db"
+assert raw_cas["chunkMappingStorage"]["local"]["persistent"]["stateDirectoryPath"] == "/storage-cas-meta/cdc-v1/cms_persistent_state"
+
+# 6. Raw CAS without a filesystem mount uses the actual in-memory CMS fallback.
 # cas.enabled/ac.enabled are not chart settings: the old "in-memory" scenario
 # set those ignored keys and only retested the default filesystem configuration.
 memory_configs = render_and_validate(
@@ -295,13 +329,59 @@ cms = cas["chunkMappingStorage"]["local"]
 assert "blocksInMemory" in cms and "blocksOnBlockDevice" not in cms, cms
 assert "inMemory" in cms["keyLocationMap"] and "persistent" not in cms, cms
 
-# 6. Every custom-values/buildbarn-values*.yaml file in the repository
+# 7. Frontend existenceCaching=false branches (with and without readCache)
+render_and_validate(
+    "frontend-no-existence-cache-readcache",
+    value_files=[ci_values],
+    inline_overrides={
+        "frontend": {
+            "contentAddressableStorage": {"existenceCaching": {"enabled": False}},
+            "readCache": {"enabled": True},
+        }
+    },
+)
+render_and_validate(
+    "frontend-no-existence-cache-bare",
+    value_files=[ci_values],
+    inline_overrides={
+        "frontend": {
+            "contentAddressableStorage": {"existenceCaching": {"enabled": False}},
+            "readCache": {"enabled": False},
+        }
+    },
+)
+
+# 8. In-cluster mTLS + tracing + browser internalService=false + actionResultExpiring
+render_and_validate(
+    "mtls-tracing-browser-fallback",
+    value_files=[ci_values],
+    inline_overrides={
+        "portal": {"enabled": True},
+        "remoteAsset": {"enabled": True},
+        "tracing": {"enabled": True},
+        "frontend": {"internalService": {"enabled": False}},
+        "config": {"actionCache": {"actionResultExpiring": {"enabled": True}}},
+        "security": {
+            "grpcMtls": {
+                "enabled": True,
+                "certificateAuthorities": "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n",
+            }
+        },
+    },
+    expected_files=("storage.jsonnet", "frontend.jsonnet", "scheduler.jsonnet", "browser.jsonnet", "portal.jsonnet", "asset.jsonnet"),
+)
+
+# 9. Every custom-values/buildbarn-values*.yaml file (standalone + documented overlay)
 custom_files = sorted((repo_root / "custom-values").glob("buildbarn-values*.yaml"))
 assert custom_files, "expected at least one custom-values/buildbarn-values*.yaml file"
 for cf in custom_files:
     render_and_validate(cf.name, value_files=[cf])
+base_values = repo_root / "custom-values" / "buildbarn-values.yaml"
+ssd_overlay = repo_root / "custom-values" / "buildbarn-values-local-ssd-block.yaml"
+if base_values.exists() and ssd_overlay.exists():
+    render_and_validate("overlay-buildbarn-values+local-ssd-block", value_files=[base_values, ssd_overlay])
 
-# 7. Validate all supported combinations against the pinned CDC fork schema.
+# 10. Validate all supported combinations against the pinned CDC fork schema.
 # Parsing against the upstream descriptor would reject the fork-only fields;
 # checking only Jsonnet syntax previously missed CDC data under the legacy CAS.
 for reload_enabled, handover_enabled in [(True, False), (False, True), (True, True)]:
@@ -326,6 +406,7 @@ for reload_enabled, handover_enabled in [(True, False), (False, True), (True, Tr
     )
     scheduler = configs["scheduler.jsonnet"]
     assert "legacyContentAddressableStorage" not in scheduler, scheduler
+    assert "deprecatedPortalUrl" in scheduler, scheduler
     assert {"chunkStorage", "chunkMappingStorage", "cdcParameterCache"} <= set(scheduler["contentAddressableStorage"])
     assert ("configurationReloadInterval" in scheduler) == reload_enabled
     assert ("handoverGrpcServers" in scheduler) == handover_enabled

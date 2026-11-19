@@ -1237,7 +1237,7 @@
               "refId": "A"
             }
           ],
-          "title": "Chunk Storage / legacy CAS",
+          "title": "Chunk Storage / legacy CAS (Put Size)",
           "type": "heatmap",
           "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
         },
@@ -1321,7 +1321,7 @@
               "refId": "A"
             }
           ],
-          "title": "Chunk Mapping Storage (CMS)",
+          "title": "Chunk Mapping Storage (CMS) (Put Size)",
           "type": "heatmap",
           "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
         },

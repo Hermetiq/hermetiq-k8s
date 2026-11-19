@@ -389,6 +389,13 @@ When the Buildbarn chart runs in the same cluster:
 - If FUSE-based workers share the Hermetiq namespace, that namespace needs the
   `privileged` Pod Security level; see
   [Pod and container security context](#pod-and-container-security-context).
+- When running Buildbarn `0.10.0` (RepMaxCDC), `buildbarn`'s upgrade check
+  requires `hermetiq.com/cdc-compatible: "true"` on the Hermetiq API (`grpc-api`)
+  and publisher (`bep-nats-pub`) Deployments. The default `bep-nats v0.9.8`
+  image is not dual-schema compatible; only set `buildbarnCdcCompatible: true`
+  after selecting a verified dual-schema `bep-nats` image. When Buildbarn runs
+  in a different namespace from Hermetiq, pass Buildbarn's
+  `upgradeChecks.hermetiqNamespace` so its upgrade guard checks that namespace.
 
 ### Inspect the packaged defaults
 

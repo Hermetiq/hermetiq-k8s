@@ -88,60 +88,57 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 
 ## CDC upgrade behavior and regression coverage
 
-- CAS data now lives in `cdc-v1/` on the existing CAS filesystem or metadata
-  volume. Existing PVC names and claim templates are preserved. `volume-init`
-  fails while legacy `cas-keys.db`, `cas-blocks.db`, or `persistent_state` exist;
-  follow the [cutover procedure](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
+- CAS, shared CMS, AC, ISCC, and FSAC on-disk data now live under `cdc-v1/` on
+  each store's existing filesystem or metadata volume. Existing PVC names and
+  claim templates are preserved. `volume-init` fails before modifying any volume
+  while legacy `*-keys.db`, `*-blocks.db`, or `persistent_state` exist; follow
+  the [cutover procedure](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
 - `storage.persistence.cms.keyLocationMap.type` defaults to `blockDevice`
-  (a file-backed index). On a durable filesystem, both chunks and mappings
-  survive process restarts. Explicit `inMemory` CMS and raw CAS devices without
-  a metadata filesystem retain their documented ephemeral behavior. An
-  `emptyDir` still disappears when its Pod is replaced.
-- Operator and co-located bep-nats Deployments must declare
+  (a file-backed index under `cdc-v1/`). On a durable filesystem, both chunks
+  and mappings survive process restarts. Explicit `inMemory` CMS and raw CAS
+  devices without a metadata filesystem retain their documented ephemeral
+  behavior. An `emptyDir` still disappears when its Pod is replaced.
+- Operator and co-located `bep-nats` Deployments must declare
   `hermetiq.com/cdc-compatible: "true"` for the actual selected binaries.
   The operator chart recognizes its pinned CDC image digest; custom operator
-  images require its `buildbarnCdcCompatible` setting. The Hermetiq chart's
-  current default bep-nats v0.9.8 is **not** declared compatible: deploy a
-  verified dual-descriptor image before enabling its declaration. Bumping a
-  chart version or setting the flag alone does not upgrade the binary.
+  images require its `buildbarnCdcCompatible` setting. Set
+  `upgradeChecks.operatorNamespace` and `upgradeChecks.hermetiqNamespace` when
+  those components run in another namespace. The Hermetiq chart's current
+  default `bep-nats v0.9.8` is **not** declared compatible: deploy a verified
+  dual-descriptor image before enabling its declaration.
 - Workers using custom ConfigMaps are checked through their actual CRD
   references and projected keys. Stage existing image defaults before removing
   old CR image pins; see the [worker upgrade notes](../../custom-values/rbeworkers/README.md).
-- Browser needs `frontend.internalService.enabled=true` whenever the cache
-  proxy enforces authentication. Its completeness checks have no proxy
-  credentials. The authenticated public service is no longer accepted as a
-  fallback for this combination.
+- When `bb-browser` is enabled (`browser.replicas > 0`) and the cache proxy
+  enforces authentication (`frontend.grpcCacheProxy.enforceAuth=true`),
+  `frontend.internalService.enabled=true` is required because `bb-browser`
+  reads CAS blobs through the frontend (for multi-chunk CDC reassembly) without
+  proxy credentials.
 - Dashboards distinguish CDC chunk storage (`cs`) and chunk mappings (`cms`),
   while continuing to display old `cas` metrics during a mixed rollout.
   Removed invalid-put metrics are retired rather than renamed to nonexistent
   series. Separate CMS retention/index views show mapping pressure even when
   chunk capacity is healthy.
 
-The schema suite uses the official protobuf parser, pinned descriptors and
-negative controls. Existing routing, rollout, permissions and configuration
-regressions remain. Scheduler field and checksum expectations changed because
-the accepted fork configuration now uses the CDC field. The worker fixture was
-corrected to a real ConfigMap reference, and version-only compatibility tests
-now reject misleading labels. The old fake “in-memory” scenario now verifies
-an actual in-memory CMS backend. None of these changes drops the original
-behavioral requirement to make the upgrade pass.
-
-Run the storage regressions locally (requires Helm, Docker and Python packages
-`PyYAML`, `jsonnet`, `protobuf`, and `grpcio`):
+The schema validation suite (`config_schema_test.sh`) uses the official protobuf
+JSON parser with pinned upstream and CDC fork descriptors plus negative controls.
+Run the storage and metrics regressions locally (requires Helm, Docker, `promtool`,
+and Python packages `PyYAML`, `jsonnet`, `protobuf`, and `grpcio`):
 
 ```bash
 bash charts/buildbarn/tests/storage_migration_test.sh
 python3 charts/buildbarn/tests/storage_integration.py
+bash charts/buildbarn/tests/metrics_compatibility_test.sh
 ```
 
 The container tests use isolated volumes and a private Docker network in CI
-(localhost-only ports when run directly). They verify
-that a rejected upgrade preserves old readable data, an explicit reset yields
-clean misses/reuploads, durable CMS survives restart, and Action Cache
-completeness hides outputs lost by an explicitly ephemeral CMS. A dedicated
-Buildkite step runs these tests. `metrics_compatibility_test.sh` evaluates the
-shipped recording rules and dashboard queries with `promtool` against legacy,
-CDC and mixed samples.
+(localhost-only ports when run directly). They verify that a rejected upgrade
+preserves old readable CAS and persistent AC data, an explicit reset yields
+clean misses and reuploads (including through `frontend`), durable CMS survives
+restart, and Action Cache completeness hides outputs lost by an explicitly
+ephemeral CMS. A dedicated Buildkite step runs these tests.
+`metrics_compatibility_test.sh` evaluates the shipped recording rules, alerts,
+and dashboard queries with `promtool` against legacy, CDC, and mixed samples.
 
 ## What The Chart Deploys
 
@@ -1320,25 +1317,34 @@ The recipe, using chart values only:
    ring B points at the StatefulSet you add in step 2:
 
    ```jsonnet
-   contentAddressableStorage: {
+   local mirroredShards = {
      mirrored: {
        backendA: { sharding: { shards: { /* storage-{i}.storage.<ns>:8981 */ } } },
        backendB: { sharding: { shards: { /* storage-b-{i}.storage-b.<ns>:8981 */ } } },
        replicatorAToB: { 'local': {} },
        replicatorBToA: { 'local': {} },
      },
+   };
+   contentAddressableStorage: {
+     chunkStorage: mirroredShards,
+     chunkMappingStorage: { chunkMappingValidating: { backend: mirroredShards } },
+     cdcParameterCache: {
+       cacheSize: 1000,
+       cacheDuration: '3600s',
+       cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+     },
    },
    ```
 
-   Apply the same wrapper to the Action Cache *inside* `completenessChecking`
-   (keeping `actionResultExpiring` outermost when enabled) and to
-   `initialSizeClassCache`/`fileSystemAccessCache` when enabled. The Action
-   Cache, ISCC, and FSAC accept only `local`-family replicators
-   (`local`/`queued`/`concurrencyLimiting`/`noop`); `remote` and
-   `deduplicating` are CAS-only, and bb-storage rejects anything else at
-   startup. The override must keep exporting every key consumers splat:
+   Apply the same `mirroredShards` wrapper to the Action Cache *inside*
+   `completenessChecking` (keeping `actionResultExpiring` outermost when
+   enabled) and to `initialSizeClassCache`/`fileSystemAccessCache` when
+   enabled. The Action Cache, CMS, ISCC, and FSAC accept only `local`-family
+   replicators (`local`/`queued`/`concurrencyLimiting`/`noop`); `remote` and
+   `deduplicating` are chunk-storage-only, and bb-storage rejects anything else
+   at startup. The override must keep exporting every key consumers splat:
    `blobstore`, `initialSizeClassCache`/`fileSystemAccessCache` (only when
-   enabled), `browserUrl`, `maximumMessageSizeBytes`, and `global`. The
+   enabled), `portalUrl`, `maximumMessageSizeBytes`, and `global`. The
    override propagates to both ConfigMaps, so every client (frontend,
    scheduler, workers, browser, remote asset, portal) inherits the mirror,
    and the checksum annotations roll them all when it changes. Overrides are
@@ -1662,14 +1668,14 @@ mean that is ~1.4M objects, so `4194304` entries (256 MiB) sits at about 3x.
 After the first real build, three things confirm the sizing:
 
 ```text
-buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
-buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+buildbarn_lossymap_hash_map_put_too_many_iterations_total{name="KeyLocationMap:cs"}
+buildbarn_lossymap_hash_map_get_too_many_attempts_total{name="KeyLocationMap:cs"}
 ```
 
 Any sustained nonzero rate means the map is too small for the live object count —
 go up a power of two. The probe budgets that produce it are rendered into the
-config as `keyLocationMapMaximumGetAttempts: 16` and
-`keyLocationMapMaximumPutAttempts: 64`.
+config inside `keyLocationMap` as `maximumGetAttempts: 16` and
+`maximumPutAttempts: 64`.
 
 Then confirm the block clears your largest blob, scoping the histogram by **both**
 `pod` and `backend_type`. Every worker runs its own `readCaching` local CAS, so an

@@ -247,12 +247,13 @@ storage:
 
 ```text
 CAS  80M entries * 64 B ~= 4.8 GiB
+CMS  4.2M entries * 64 B (256 MiB) + 33 * 8 MiB blocksInMemory (264 MiB) ~= 0.5 GiB
 AC   16M entries * 64 B ~= 1.0 GiB  (for an 8 GiB LV, 2.34x ratio)
 ISCC  8M entries * 64 B ~= 0.5 GiB  (for a 2 GiB LV)
 FSAC  8M entries * 64 B ~= 0.5 GiB  (for a 6 GiB LV)
 ```
 
-That is about 6.7 GiB before Go garbage collector headroom, gRPC buffers, and in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and `limits.memory: 24Gi`.
+That is about 7.3 GiB before Go garbage collector headroom, gRPC buffers, and in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and `limits.memory: 24Gi`.
 
 ## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
 
@@ -285,13 +286,13 @@ The division of labour is deliberate: the assistant owns the structural rules, w
 
 ## CMS Placement and Persistence
 
-With `storage.persistence.cms.backend: sharedCas` (the default), CMS uses the CAS's existing mounts:
+With `storage.persistence.cms.backend: sharedCas` (the default), CMS uses the CAS's existing mounts under the same `cdc-v1/` boundary:
 
 | CAS layout | CMS blocks, index and checkpoint state |
 | --- | --- |
-| Filesystem CAS | `/storage-cas/cms-blocks.db`, `/storage-cas/cms-keys.db`, `/storage-cas/cms_persistent_state` |
-| Raw CAS with file-backed index | The same names under `/storage-cas-meta` |
-| Raw CAS with in-memory index | In memory; mappings are lost on restart |
+| Filesystem CAS | `/storage-cas/cdc-v1/cms-blocks.db`, `/storage-cas/cdc-v1/cms-keys.db`, `/storage-cas/cdc-v1/cms_persistent_state` |
+| Raw CAS with file-backed index | The same names under `/storage-cas-meta/cdc-v1/` |
+| Raw CAS with in-memory index | In memory (`blocksInMemory`, default `8 MiB × 33 = 264 MiB`); mappings are lost on restart |
 
 The `blockDevice` CMS index setting refers to Buildbarn's block-device abstraction; here it opens a regular file. Persistence lasts only as long as the underlying volume: an `emptyDir` does not survive pod replacement. Shared placement adds no PVC. Dedicated CMS volumes/devices are opt-ins for new installations; Kubernetes cannot add a volume claim template to an existing StatefulSet in place.
 
@@ -310,20 +311,22 @@ when available, or make these schema edits by hand:
 
 | Old (pre-CDC) | New (CDC) |
 | --- | --- |
-| `contentAddressableStorage: { ... }` at the top level of `storage.jsonnet` or `frontend.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: ..., chunkMappingStorage: ... }, getAuthorizer, putAuthorizer, findMissingAuthorizer, maximumChunkCount: 100000 }` |
-| Top-level `contentAddressableStorage` in `portal.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: ..., readAuthorizer: ... }` |
-| A single-store `blobstore.contentAddressableStorage` (for example `sharding: {...}`) in `common.libsonnet`, `scheduler.jsonnet` or `asset.jsonnet` | `{ chunkStorage: <the old backend>, chunkMappingStorage: { chunkMappingValidating: { backend: ... } }, cdcParameterCache: { cacheSize: 1000, cacheDuration: '60s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' } }` |
+| `contentAddressableStorage: { ... }` at the top level of `storage.jsonnet` or `frontend.jsonnet` | `contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: ..., chunkMappingStorage: ..., cdcParameterCache: ... }, getAuthorizer, putAuthorizer, findMissingAuthorizer, maximumChunkCount: 100000 }` (and `chunkingParameters` inside `storage.jsonnet`'s `chunkStorage.local`) |
+| `portal.jsonnet` (`contentAddressableStorage`, `besServiceConfiguration.database`, `databaseCleanupConfiguration`, `instanceNameAuthorizer`, `enableGraphqlPlayground`, flat `actionCache`/ISCC/FSAC) | `contentAddressableStorageServer: { contentAddressableStorage: ..., readAuthorizer: ... }`, top-level `database` + `cleanupConfiguration`, `graphqlApiServiceConfiguration`, `blobstoreServiceConfiguration: {}`, per-service `readAuthorizer`/`publishAuthorizer`, and wrapped `{ backend, readAuthorizer }` for `actionCache`, `initialSizeClassCache`, and `fileSystemAccessCache` |
+| `browser.jsonnet` (`blobstore: common.blobstore`) | `bb-browser` remains pre-CDC: set `blobstore: { contentAddressableStorage: { grpc: { client: { address: 'frontend-internal:8980' } } }, actionCache: common.blobstore.actionCache }` |
+| Single-store `contentAddressableStorage` (in `common.libsonnet`'s `blobstore.contentAddressableStorage`, or top-level `contentAddressableStorage` in `scheduler.jsonnet` / `asset.jsonnet`) | `{ chunkStorage: <the old backend>, chunkMappingStorage: { chunkMappingValidating: { backend: ... } }, cdcParameterCache: { cacheSize: 1000, cacheDuration: '3600s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' } }` |
+| `legacyContentAddressableStorage` (fork `scheduler.jsonnet`) | `contentAddressableStorage` with the CDC `{ chunkStorage, chunkMappingStorage, cdcParameterCache }` shape |
 | `dataIntegrityValidationCache: { ... }` | Remove it. Chunks are validated individually, and client-side chunk mappings by `chunkMappingValidating`. |
 | `keyLocationMapInMemory` or `keyLocationMapOnBlockDevice` | `keyLocationMap: { inMemory: ... }` or `keyLocationMap: { onBlockDevice: ... }` |
 | `keyLocationMapMaximumGetAttempts`, `keyLocationMapMaximumPutAttempts` | `maximumGetAttempts` and `maximumPutAttempts` inside `keyLocationMap` |
 | `browserUrl` (worker, noop worker) | `portalUrl`; in `scheduler.jsonnet`, `deprecatedPortalUrl` |
 | `adminHttpServers` (scheduler) | `deprecatedAdminHttpServers` |
-| `adminRoutePrefix` (scheduler) | Remove it. |
-| `zstdPool` (scheduler, worker, noop worker, remote asset) | Remove it. |
+| `adminRoutePrefix` (scheduler) | `deprecatedAdminRoutePrefix` (or remove it) |
+| `zstdPool` (scheduler, worker, noop worker, remote asset) | Remove it (still supported by `bb-storage` and `bb-portal`). |
 
-The migration command is `bep-nats buildbarn-config migrate`. It edits local files, not a live namespace. Use a released bep-nats binary/image that includes `--storage-cms=shared-cas`; do not assume an older image has this option. Keep a backup of your values and custom configs, and render the target chart with your actual values into a local `target-chart` directory. Copy mounted worker ConfigMaps into the input set too; an RbeWorker references their names rather than containing their file contents.
+The migration command is `bep-nats buildbarn-config migrate`. It edits local files, not a live namespace. Use a released `bep-nats` binary/image that includes `--storage-cms=shared-cas` and automatic `cdc-v1/` path isolation; do not assume an older image has these options. Keep a backup of your values and custom configs, and render the target chart with your actual values into a local `target-chart` directory. Copy mounted worker ConfigMaps into the input set too; an `RbeWorker` references their names rather than containing their file contents.
 
-For example, with the compatible binary on PATH and custom files in `custom-configs`:
+For example, with the compatible binary on `PATH` and custom files in `custom-configs`:
 
 ```sh
 bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
@@ -331,7 +334,7 @@ bep-nats buildbarn-config migrate --storage-cms=shared-cas --chart-dir target-ch
 bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
 ```
 
-The first check exits 1 when changes are needed; the write and final check must exit 0. Exit 2 needs manual attention. Inspect the diff and apply the migrated files to your values/ConfigMaps before `helm upgrade`. Use the migration-tool release containing automatic chunk-storage path isolation from cloud-native `cdc-followup`. It rewrites filesystem CAS blocks/index/state to `/storage-cas/cdc-v1/{blocks.db,keys.db,persistent_state}`; for raw CAS with a file-backed index it uses `/storage-cas-meta/cdc-v1/{keys.db,persistent_state}` and keeps the raw blocks device unchanged. Custom files remain on their original parent mounts; custom state directories keep new state under `<old-state-directory>/cdc-v1/persistent_state` so a mounted state directory stays usable. The rewrite applies with either CMS option; CMS retains the shared-CAS paths listed above. Ambiguous paths stop with a diagnostic rather than reusing legacy bytes. Follow the explicit reset below and provision generated checkpoint directories with storage-pod ownership. The chart handles conventional paths; custom mounts need equivalent directory provisioning. Verification checks configuration, not available disk space or live startup. No Docker connection to Kubernetes is needed: if using Docker, mount these local input and rendered-chart directories into the container and invoke the same command there.
+The first check exits 1 when changes are needed; the write and final check must exit 0. Exit 2 needs manual attention. Inspect the diff and apply the migrated files to your values/ConfigMaps before `helm upgrade`. Confirm all store paths (CAS, shared CMS, AC, ISCC, FSAC) use `cdc-v1/` on their parent mounts and follow the explicit reset below so legacy files are retired before starting CDC storage. Verification checks configuration, not available disk space or live startup. No Docker connection to Kubernetes is needed: if using Docker, mount these local input and rendered-chart directories into the container and invoke the same command there.
 
 The CDC cutover starts cold. An earlier lab run reused legacy files and observed 0/2571 hits on the first build and 2571/2571 on the repeat, with a data-integrity error logged once per node. That experiment does not establish a safe in-place upgrade: the chart now refuses legacy files and requires the explicit [storage cutover](#storage-format-cutover-and-rollback) below. Budget for cache refill; do not bypass the guard based on those lab results.
 
@@ -339,71 +342,50 @@ The worker in `RbeWorker` and the image pins also move together. A pinned pre-CD
 
 Before the chart switches a cluster to CDC, `helm upgrade` also checks that:
 
-- The operator declares `hermetiq.com/cdc-compatible=true` for its selected image. Chart 0.3.13 automatically recognizes its pinned v0.3.14 digest; verified custom builds can use the operator chart's `buildbarnCdcCompatible: true`. Version labels alone do not establish support. Set `upgradeChecks.operatorNamespace` when the operator runs elsewhere.
-- When bep-nats runs in this namespace, API and publisher Deployments declare the same capability. Deploy a verified dual-descriptor image and set the Hermetiq chart's `buildbarnCdcCompatible: true`. The currently bundled v0.9.8 image is not declared compatible; this flag does not add functionality to it. Do not proceed with a combined deployment until that prerequisite is actually available and verified.
-- Scheduler handover and `configurationReloadInterval` are off unless the selected fork implements CDC and those features. `scheduler.handover.cdcCompatibleFork: true` explicitly declares this. The chart emits CDC `contentAddressableStorage` in every mode.
+- The operator declares `hermetiq.com/cdc-compatible=true` for its selected image. Chart `0.3.13` automatically recognizes its pinned `v0.3.14` digest; verified custom builds can use the operator chart's `buildbarnCdcCompatible: true`. Version labels alone do not establish support. Set `upgradeChecks.operatorNamespace` when the operator runs in another namespace (required when live `RbeWorker` resources exist in the Buildbarn namespace).
+- When `bep-nats` runs in this namespace (or the namespace configured by `upgradeChecks.hermetiqNamespace`), API and publisher Deployments declare the same capability. Deploy a verified dual-descriptor image and set the Hermetiq chart's `buildbarnCdcCompatible: true`. The currently bundled `v0.9.8` image is not declared compatible; this flag does not add functionality to it. Do not proceed with a combined deployment until that prerequisite is actually available and verified.
+- Scheduler handover and `configurationReloadInterval` are off unless the selected fork implements CDC and those features (`scheduler.handover.cdcCompatibleFork: true`, with a non-upstream `images.scheduler.repository` and no pinned upstream `images.scheduler.digest`). The chart emits CDC `contentAddressableStorage` in every mode.
 
 These cluster checks use `lookup`, so offline `helm template` and GitOps renders skip them. Check those configurations against this table before upgrading.
 
 ### Storage format cutover and rollback
 
-The pre-CDC image (`db62041`) stores raw CAS bytes. The CDC image (`8d2acac`)
-stores compressed chunks. Reusing the old index can report a blob as present
-and then fail to decode it, invalidating its entire block. This chart does not
-perform an in-place conversion. The supported cutover is an explicit
-**cold-cache reset during a maintenance window**.
+The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for AC, ISCC, and FSAC. The CDC image (`8d2acac`) stores compressed CAS chunks and wraps AC, ISCC, and FSAC objects with `SHA256SuffixCoder` (a 32-byte SHA-256 suffix). Reopening old persistent indices causes decode/checksum failures that invalidate entire blocks (including newly written CDC data), and rolling back after CDC writes corrupts pre-CDC reads. This chart does not perform an in-place conversion. The supported cutover is an explicit **cold-cache reset during a maintenance window**.
 
-1. Verify the compatible operator and bep-nats prerequisites above. Update the
-   operator CRD separately as required by Helm's CRD lifecycle. Keep existing
-   worker image pins until the operator is ready. If using inherited images,
-   stage the exact current worker and runner-installer image references into
-   the existing `buildbarn-worker-config` before removing pins. This prevents
-   a `SpecInvalid` interval while the old chart lacks image keys.
-2. Stop new builds/cache clients, let active work finish, and pause worker and
-   frontend autoscaling. Record replicas and autoscaling settings. Stop the
-   workers, scheduler, frontend, browser/portal and remote-asset clients before
-   stopping storage. Do not mix old and CDC writers during this cutover.
-3. Stop **all** storage processes and snapshot the cache if rollback is needed.
-   For persistent raw block CAS, snapshot both the device and its metadata
-   volume together. Snapshot other durable stores and retain the old Helm
-   values, rendered configurations, worker manifests and image digests.
-4. Explicitly retire the legacy CAS entries listed below. Move them to a
-   separate backup volume or delete them only after the snapshot is verified.
-   Renaming them elsewhere on the same PVC does not free capacity; the new
-   blocks file must fit alongside CMS, indices and filesystem overhead.
+1. **Verify prerequisites and PVC headroom.**
+   - Verify the compatible operator and `bep-nats` prerequisites above, and update the operator CRD separately (`kubectl apply --server-side -f charts/bb-worker-operator/crds/`).
+   - Check CAS PVC headroom for shared CMS: default `sharedCas` CMS adds `1 GiB` blocks + `256 MiB` KLM (`1280 MiB`) inside `storage.persistence.cas.size` (or `cas.blockDevice.metadata.size` for raw CAS with file KLM). If existing PVCs are too tight for `validate.yaml`, expand the PVCs (and recreate the StatefulSet if updating claim templates), shrink `blocksSizeGi` / `keyLocationMapSizeMi`, or set `storage.persistence.cms.keyLocationMap.type: inMemory`.
+   - Keep existing worker image pins until the operator is ready. If migrating to inherited images, stage the current worker and runner-installer image references into the existing `buildbarn-worker-config` before removing pins to avoid a `SpecInvalid` window while the old chart lacks those keys.
+2. **Drain clients and pause autoscalers/operator before scaling down.**
+   - Stop new builds/cache clients and let active work finish. Record current replica counts and autoscaler settings.
+   - Pause KEDA `ScaledObject`s (annotate with `autoscaling.keda.sh/paused: "true"`) and scale `RbeWorker` CRs to `0` (or pause operator reconciliation) before scaling Deployments — scaling managed Deployments directly is reverted by KEDA and `bb-worker-operator`.
+   - Stop workers, `scheduler`, `frontend`, `browser`, `portal`, and `remote-asset` before stopping storage. Do not mix old and CDC writers during cutover.
+3. **Stop all storage pods and take consistent snapshots.**
+   - Scale `statefulset/storage` to `0` and wait until all `storage-0..N-1` pods terminate cleanly (so persistent stores flush checkpoints).
+   - If rollback is required, snapshot **all** durable PVCs/devices together (for persistent raw block stores, snapshot both the raw block device and its companion `-meta` PVC at the same stopped point). Retain the old Helm values, rendered configs, `RbeWorker` manifests, and image digests.
+4. **Explicitly retire legacy files on every shard.**
+   - For `mode: pvc`, scaling `statefulset/storage` to `0` unmounts every shard's RWO PVCs (`cas-storage-<i>`, `ac-storage-<i>`, and if enabled `iscc-storage-<i>`, `fsac-storage-<i>`, or their `-meta` counterparts). Mount each shard's PVCs (`i = 0..replicas-1`) in a short-lived maintenance Pod/Job running as the storage UID/GID (`65534:65534` by default) to move legacy files off-volume or delete them after snapshots are verified.
+   - **Ownership warning (`fsGroupChangePolicy: OnRootMismatch`):** Do **not** create directories as `root` inside a `65534`-owned PVC root; kubelet skips recursive `fsGroup` chown when the root already matches, which leaves `volume-init` unable to write. Let `volume-init` create `cdc-v1/` on startup.
+   - For `mode: hostPath`, clean the configured host directories on **every** storage node. For `mode: emptyDir`, pods start with empty volumes and no manual cleanup is needed.
+   - Renaming legacy files elsewhere on the same PVC does **not** free capacity; new `cdc-v1/` files must fit on the volume.
 
-   | Backend | Legacy entries to retire | New location |
+   | Store & backend | Legacy entries to retire | New CDC location |
    | --- | --- | --- |
-   | Filesystem CAS | `/storage-cas/cas-keys.db`, `cas-blocks.db`, `persistent_state/` | `/storage-cas/cdc-v1/{keys.db,blocks.db,persistent_state/}` |
-   | Raw CAS with persistent metadata | `/storage-cas-meta/cas-keys.db`, `persistent_state/` | `/storage-cas-meta/cdc-v1/{keys.db,persistent_state/}`; blocks remain on `/dev/bb/cas` |
-   | Raw CAS with an in-memory index | No persistent index to retire | Starts empty as before; the device is reused |
+   | Filesystem CAS | `/storage-cas/cas-keys.db`, `cas-blocks.db`, `persistent_state/` | `/storage-cas/cdc-v1/{keys.db,blocks.db,persistent_state/}` + shared CMS `cdc-v1/{cms-keys.db,cms-blocks.db,cms_persistent_state/}` |
+   | Raw CAS with file index | `/storage-cas-meta/cas-keys.db`, `persistent_state/` | `/storage-cas-meta/cdc-v1/{keys.db,persistent_state/}` + shared CMS under `cdc-v1/`; blocks remain on `/dev/bb/cas` |
+   | Raw CAS with in-memory index | No persistent index to retire | Starts empty as before; device reused; shared CMS uses `blocksInMemory` |
+   | Filesystem AC / ISCC / FSAC | `/storage-<store>/<store>-keys.db`, `<store>-blocks.db`, `persistent_state/` | `/storage-<store>/cdc-v1/{<store>-keys.db,<store>-blocks.db,persistent_state/}` |
+   | Raw AC / ISCC / FSAC with file index | `/storage-<store>-meta/<store>-keys.db`, `persistent_state/` | `/storage-<store>-meta/cdc-v1/{<store>-keys.db,persistent_state/}`; blocks remain on `/dev/bb/<store>` |
 
-   For raw CAS, resetting the metadata starts an empty logical store; a full
-   device wipe is unnecessary. CDC writes overwrite the old device contents,
-   so rollback requires the device snapshot, not just the old metadata. The
-   init container refuses any remaining legacy file/directory before creating
-   CDC storage. It never deletes, moves or converts user data, including on
-   repeated failed starts.
-5. Migrate custom Jsonnet and worker ConfigMaps while their consumers remain
-   stopped. Apply the CDC chart/configurations and inherited worker image keys.
-   Keep the original PVC names; the default shared CMS adds no claims. Start
-   storage first and verify its init completed, then start frontend, scheduler
-   and workers. Restart clients to discard old existence caches before resuming
-   traffic. Restore recorded replica and autoscaling settings after validation.
-6. Verify a small and a multi-megabyte CAS upload/read, then restart one shard
-   and read both again. Verify a real remote build and an Action Cache hit with
-   retained outputs. Expect old CAS entries to miss and rebuild/reupload; there
-   must be no ZSTD decoding or data-integrity errors. Check separate CS/CMS
-   retention and KLM panels as the cache warms.
+   For raw block stores, resetting the metadata starts an empty logical store; a full device wipe is unnecessary. CDC writes overwrite old device contents, so rollback requires the device snapshot, not just the old metadata. `volume-init` checks **all** enabled stores before creating any `cdc-v1/` directory and never deletes, moves, or converts user data, including on repeated failed starts. Missing even one shard leaves that shard stuck in `volume-init` and blocks `FindMissingBlobs` cluster-wide.
+5. **Migrate configs/worker pins and start storage before clients.**
+   - While workers remain stopped, migrate custom Jsonnet/worker ConfigMaps and update any `RbeWorker` CRs that keep explicit `spec.images.worker` / `spec.images.runnerInstaller` pins to CDC images (`>= 20261102T`) or remove the pins to inherit from `buildbarn-worker-config` (live pre-CDC pins fail `helm upgrade` in `validate.yaml`).
+   - Run `helm upgrade` with client replicas held at `0` (e.g., `--set frontend.replicas=0 --set scheduler.replicas=0 --set browser.replicas=0` plus `portal`/`remoteAsset` if enabled) so storage starts first, rather than letting `helm upgrade` immediately restart clients alongside storage.
+   - Verify every `storage-0..N-1` pod completes `volume-init` and becomes Ready. Then restore client replicas (`helm upgrade` with normal replica counts), unpause KEDA `ScaledObject`s, and restore `RbeWorker` replicas. Restart any external cache clients to discard stale existence caches.
+6. **Verify end-to-end.**
+   - Verify both a small blob and a multi-megabyte (> 2 MiB) composite CAS upload/read through the frontend, then restart one storage shard and read both again.
+   - Verify a real remote build and an Action Cache hit with retained outputs. Expect old entries to miss and rebuild/reupload; confirm zero ZSTD decoding or SHA-256 data-integrity errors in storage logs. Check separate CS/CMS retention and KLM panels as the cache warms.
 
-For rollback, stop all CDC clients and storage again. Restore a consistent
-pre-CDC snapshot and its matching old configurations/images before restarting.
-Without a snapshot, perform another explicit cold-cache reset; **never** point
-the old binary at CDC data or restore an old raw-device index over a device
-that CDC has modified. Independent `helm rollback` cannot restore the storage
-format or worker resources outside the release.
+For rollback, stop all CDC clients and storage again. Restore a consistent pre-CDC snapshot (both block devices and metadata volumes for raw block stores, across CAS and any persistent AC/ISCC/FSAC) and its matching old configurations/images before restarting. Without a snapshot, perform another explicit cold-cache reset — remove `/storage-<store>/cdc-v1/` (and `/storage-<store>-meta/cdc-v1/` for raw metadata volumes) across **all** stores before starting pre-CDC images so old `blocks.db` allocation does not hit `ENOSPC`. **Never** point the old binary at CDC data or restore an old raw-device index over a device that CDC has modified. Independent `helm rollback` cannot restore the storage format or `RbeWorker` resources outside the release.
 
-An explicit ephemeral CMS remains supported, but losing its mappings on restart
-is intentional and tested; it is not suitable when composite CAS blobs must
-survive restarts. Custom `storage.jsonnet` overrides must implement an equivalent
-format boundary and persistence policy.
+An explicit ephemeral CMS remains supported, but losing its mappings on restart is intentional and tested; it is not suitable when composite CAS blobs must survive restarts. Custom `storage.jsonnet` overrides must implement an equivalent format boundary and persistence policy.

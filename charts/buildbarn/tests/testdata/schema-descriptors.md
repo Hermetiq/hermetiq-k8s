@@ -26,9 +26,13 @@ pins these application revisions:
 | bb-portal | `a40873368f235611d83f33690e994ef7d7d9fd04` |
 | bb-remote-asset | `e72be5ead773d2e1b836ca818d769ff306b1598f` |
 
-The legacy snapshot is retained for bb-browser. When refreshing a base fixture,
-copy it from the configuration validator's reviewed release, update its source
-commit here and its SHA-256 in `config_schema_test.sh`, then run the full matrix.
+The legacy snapshot (`buildbarn_descriptors.pb`) is retained for `bb-browser`
+(built from `bb-browser` commit `ee35c54d5cecfc7a763870fe2187c93fa47aaf85` in
+`cloud-native/bep-nats/bbproto/upstream.txt`; the pinned `bb-browser` image
+`6d856c8` uses the same `ApplicationConfiguration` schema). When refreshing a
+base fixture, copy it from the configuration validator's reviewed release,
+update its source commit here and its SHA-256 in `config_schema_test.sh`, then
+run the full matrix.
 
 ## CDC fork scheduler descriptor
 

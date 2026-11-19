@@ -704,6 +704,12 @@ tests:
   - it: does not scan unrelated keys omitted from the worker projection
     set:
       _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -784,6 +790,12 @@ tests:
   - it: ignores legacy chart ConfigMap data that this upgrade replaces
     set:
       _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -824,6 +836,12 @@ tests:
   - it: ignores an inherited runner installer image when the installer is disabled
     set:
       _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -992,6 +1010,219 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
+
+  - it: rejects legacyContentAddressableStorage in scheduler configOverrides even when referencing common.blobstore
+    set:
+      configOverrides:
+        scheduler.jsonnet: |
+          {
+            legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "legacyContentAddressableStorage"'
+
+  - it: rejects removed pre-CDC fields in portal.jsonnet configOverrides
+    set:
+      configOverrides:
+        portal.jsonnet: |
+          {
+            instanceNameAuthorizer: { allow: {} },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["portal\.jsonnet"\] contains pre-CDC field "instanceNameAuthorizer"'
+
+  - it: rejects pre-CDC browser.jsonnet override splatting CDC common.blobstore
+    set:
+      configOverrides:
+        browser.jsonnet: |
+          local common = import 'common.libsonnet';
+          { blobstore: common.blobstore }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["browser\.jsonnet"\] passes CDC common\.blobstore directly to pre-CDC bb-browser'
+
+  - it: rejects storage.jsonnet contentAddressableStorageServer without chunkStorage
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorageServer: {
+              contentAddressableStorage: { 'local': {} },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'defines contentAddressableStorageServer with a single-store "contentAddressableStorage" missing "chunkStorage"'
+
+  - it: ignores removed pre-CDC field names inside Jsonnet comments
+    set:
+      configOverrides:
+        scheduler.jsonnet: |
+          // Migrated: replaced browserUrl with deprecatedPortalUrl
+          {
+            deprecatedPortalUrl: common.portalUrl,
+            contentAddressableStorage: common.blobstore.contentAddressableStorage,
+          }
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects pre-CDC fields inside scheduler.actionRouter.custom
+    set:
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ browserUrl: 'https://old.example.com' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'scheduler\.actionRouter\.custom contains pre-CDC field "browserUrl"'
+
+  - it: rejects fork scheduler features when images.scheduler.digest is still pinned to upstream
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      images.scheduler.digest: sha256:f8ff583267708354d2550e43c3b89c358d6e0c28fa5f4216521275b431db9fa8
+      scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'clear images\.scheduler\.digest if pinned to upstream'
+
+  - it: allows disabling frontend internalService when enforceAuth=true and browser.replicas=0
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: stytch-secret
+      frontend.internalService.enabled: false
+      browser.replicas: 0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects sharedCas CMS exceeding filesystem CAS PVC headroom
+    set:
+      storage.persistence.cas.size: 958Gi
+      storage.persistence.cas.blocksSizeGi: 950
+      storage.persistence.cas.keyLocationMapSizeMi: 7168
+      storage.persistence.cms.blocksSizeGi: 1
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
+    asserts:
+      - failedTemplate:
+          errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.size'
+
+  - it: rejects sharedCas CMS exceeding emptyDir CAS sizeLimit headroom
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 958Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.emptyDir\.sizeLimit'
+
+  - it: rejects sharedCas CMS exceeding raw CAS metadata PVC headroom
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+      storage.persistence.cas.blockDevice.metadata.size: 8Gi
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 7360
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cas\.blockDevice\.metadata\.size .* plus sharedCas CMS files'
+
+  - it: rejects CMS total blocks exceeding 100 on block-backed stores
+    set:
+      storage.persistence.cms.currentBlocks: 95
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cms: spareBlocks\+oldBlocks\+currentBlocks\+newBlocks is 107'
+
+  - it: checks CMS keyLocationMapSizing accurately for blocksInMemory (33 of 33 blocks)
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cms.keyLocationMap.entries: 100000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cms: key-location map is too small .* 264 MiB usable \(33 of 33 blocks\)'
+
+  - it: rejects live RbeWorkers when no bb-worker-operator is found in upgradeChecks.operatorNamespace
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-default
+              spec:
+                images:
+                  runner: example.com/runner:latest
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20261113T075319Z-f22e022
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker resources exist in namespace .*, but no bb-worker-operator Deployment was found'
+
+  - it: accepts live RbeWorker with CDC-era pinned images and compatible operator
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: custom-operator-name
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.13
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-cdc-pin
+              spec:
+                docker:
+                  mode: sysbox
+                images:
+                  runner: example.com/runner:latest
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+        configMaps:
+          items:
+            - metadata:
+                name: worker-cdc-pin-config
+                ownerReferences:
+                  - kind: RbeWorker
+                    name: worker-cdc-pin
+                labels:
+                  hermetiq.com/worker-pool: worker-cdc-pin
+              data:
+                worker.jsonnet: "{ browserUrl: 'operator-generated-will-be-reconciled' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks Hermetiq Deployments in upgradeChecks.hermetiqNamespace when set
+    set:
+      upgradeChecks.hermetiqNamespace: hermetiq-prod
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: custom-api-name
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment hermetiq-prod/custom-api-name has no hermetiq.com/cdc-compatible=true declaration'
+
+  - it: rejects _testLookup during helm upgrade
+    release:
+      upgrade: true
+    set:
+      _testLookup:
+        deployments:
+          items: []
+    asserts:
+      - failedTemplate:
+          errorPattern: '_testLookup is reserved for offline chart unit tests and cannot be set during helm upgrade'
 
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any

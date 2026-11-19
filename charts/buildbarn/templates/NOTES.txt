@@ -12,11 +12,12 @@
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
 
 CDC STORAGE: upgrading pre-CDC storage requires a maintenance cutover and
-explicit cache reset. volume-init refuses legacy CAS files without modifying
-them. Snapshot the old cache if rollback is required; follow:
+explicit cache reset across CAS, AC, ISCC, and FSAC. volume-init refuses legacy
+files without modifying them. Snapshot the old cache if rollback is required;
+follow:
 https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback
-Shared CMS mappings persist by default. Explicit inMemory mappings make
-composite blobs unavailable after a storage process restart.
+Shared CMS mappings persist under cdc-v1 by default. Explicit inMemory mappings
+make composite blobs unavailable after a storage process restart.
 
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}
@@ -51,11 +52,11 @@ longer derived from storage.replicas — keep the override's shard list in
 lockstep with storage.replicas, or added/removed storage pods silently
 receive no traffic.
 {{- end }}
-{{- if .Values.storage.dataIntegrityValidationCache.enabled }}
+{{- if or .Values.storage.dataIntegrityValidationCache.enabled .Values.frontend.readCache.dataIntegrityValidationCache }}
 
-DEPRECATION NOTE: storage.dataIntegrityValidationCache was removed from
+DEPRECATION NOTE: dataIntegrityValidationCache was removed from
 local.BlobAccessConfiguration in CDC bb-storage (integrity validation now runs
-per FastCDC chunk and via chunkMappingValidating) and is ignored by chart
+per RepMaxCDC chunk and via chunkMappingValidating) and is ignored by chart
 templates. Remove storage.dataIntegrityValidationCache (and
 frontend.readCache.dataIntegrityValidationCache) from your values file when
 convenient.

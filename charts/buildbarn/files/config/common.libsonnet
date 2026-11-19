@@ -96,38 +96,16 @@ local completenessCheckedActionCache = {
 {{- end }}
   },
 
-  # ISCC and FSAC are NOT part of blobstore.BlobstoreConfiguration (which only
-  # has CAS + AC). They are separate top-level stores consumed by bb-scheduler
-  # (ISCC) and bb-worker (FSAC), so they live as their own common keys rather
-  # than inside `blobstore` — otherwise configs that splat the whole
-  # `common.blobstore` (e.g. browser.jsonnet) fail with "unknown field".
+  // ISCC and FSAC are NOT part of blobstore.BlobstoreConfiguration (which only
+  // has CAS + AC). They are separate top-level stores consumed by bb-scheduler
+  // (ISCC) and bb-worker (FSAC), so they live as their own common keys rather
+  // than inside `blobstore` — otherwise configs that splat the whole
+  // `common.blobstore` (e.g. browser.jsonnet) fail with "unknown field".
 {{- if .Values.storage.persistence.iscc.enabled }}
-  initialSizeClassCache: {
-    sharding: {
-      shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-        "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-          weight: 1,
-        },
-{{- end }}
-      },
-    },
-  },
+  initialSizeClassCache: shardedStorage,
 {{- end }}
 {{- if .Values.storage.persistence.fsac.enabled }}
-  fileSystemAccessCache: {
-    sharding: {
-      shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-        "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-          weight: 1,
-        },
-{{- end }}
-      },
-    },
-  },
+  fileSystemAccessCache: shardedStorage,
 {{- end }}
 
   portalUrl: 'https://{{ include "buildbarn.browserHost" . }}',

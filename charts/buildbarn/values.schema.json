@@ -18,7 +18,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "operatorNamespace": { "type": "string" }
+        "operatorNamespace": { "type": "string" },
+        "hermetiqNamespace": { "type": "string" }
       }
     },
     "config": {
@@ -32,7 +33,13 @@
               "properties": {
                 "timeout": {
                   "type": "string",
-                  "pattern": "^([0-9]+(\\.[0-9]+)?s)?$"
+                  "anyOf": [
+                    { "const": "" },
+                    {
+                      "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                      "not": { "pattern": "^0+(\\.0+)?s$" }
+                    }
+                  ]
                 }
               }
             }
@@ -45,16 +52,23 @@
             "chunkingParameters": {
               "type": "object",
               "properties": {
-                "minChunkSizeBytes": { "type": "integer", "minimum": 64 },
-                "horizonSizeBytes": { "type": "integer", "minimum": 0 }
+                "minChunkSizeBytes": { "type": "integer", "minimum": 64, "maximum": 16777216 },
+                "horizonSizeBytes": { "type": "integer", "minimum": 0, "maximum": 134217728 }
               }
             },
             "cdcParameterCache": {
               "type": "object",
               "properties": {
                 "cacheSize": { "type": "integer", "minimum": 1 },
-                "cacheDuration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?s)$" },
-                "cacheReplacementPolicy": { "type": "string", "minLength": 1 }
+                "cacheDuration": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                  "not": { "pattern": "^0+(\\.0+)?s$" }
+                },
+                "cacheReplacementPolicy": {
+                  "type": "string",
+                  "enum": ["FIRST_IN_FIRST_OUT", "LEAST_RECENTLY_USED", "RANDOM_REPLACEMENT"]
+                }
               }
             }
           }
@@ -134,6 +148,18 @@
                 "backend": {
                   "type": "string",
                   "enum": ["sharedCas", "filesystem", "blockDevice"]
+                },
+                "blocksSizeGi": { "type": "integer", "minimum": 1 },
+                "blocksInMemoryBlockSizeBytes": { "type": "integer", "minimum": 1 },
+                "newBlocks": { "type": "integer", "const": 1 },
+                "keyLocationMap": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["inMemory", "blockDevice"]
+                    }
+                  }
                 }
               }
             }
