@@ -127,6 +127,36 @@ affinity:
 
 {{- define "buildbarn.configName" -}}buildbarn-config{{- end -}}
 {{- define "buildbarn.workerConfigName" -}}buildbarn-worker-config{{- end -}}
+{{- /* The common.libsonnet that RbeWorker pods read: configOverrides'
+       common.libsonnet if set, otherwise the chart's, plus the worker-only
+       chunk cache. The worker ConfigMap and any extra worker ConfigMap (for
+       example one that wraps it with longer deadlines) include this, so they
+       can't drift apart. */ -}}
+{{- define "buildbarn.workerCommon" -}}
+{{- $configOverrides := default dict .Values.configOverrides -}}
+{{- $commonOverride := index $configOverrides "common.libsonnet" | default "" -}}
+{{- $chunkCache := .Values.config.contentAddressableStorage.chunkCache -}}
+{{- if $commonOverride -}}
+{{ $commonOverride }}
+{{- else -}}
+{{ tpl (.Files.Get "files/config/common.libsonnet") . }}
+{{- if gt (int64 $chunkCache.cacheSize) 0 }}
++ {
+  // Workers only: keep decoded chunks in memory, so repeat FUSE reads
+  // skip ZSTD decoding and SHA-256 verification.
+  blobstore+: {
+    contentAddressableStorage+: {
+      chunkCache: {
+        cacheSize: {{ int64 $chunkCache.cacheSize }},
+        cacheDuration: {{ $chunkCache.cacheDuration | quote }},
+        cacheReplacementPolicy: {{ $chunkCache.cacheReplacementPolicy | quote }},
+      },
+    },
+  },
+}
+{{- end }}
+{{- end -}}
+{{- end -}}
 {{- define "buildbarn.configChecksum" -}}
 {{- $root := .root -}}
 {{- $overrides := default dict $root.Values.configOverrides -}}
