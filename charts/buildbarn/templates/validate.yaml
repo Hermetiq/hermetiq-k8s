@@ -271,63 +271,11 @@
 {{- fail "config.actionCache.actionResultExpiring.maximumValidityJitter must be a NONZERO duration when actionResultExpiring.enabled=true (bb-storage takes a modulo by it, so zero panics with an integer divide-by-zero on the first Action Cache hit)" -}}
 {{- end -}}
 {{- end -}}
-{{/* Key-location-map capacity guard. A store whose KLM cannot index every object
-     its blocks device can hold will silently drop location records once the
-     table saturates: the blob is on disk but FindMissingBlobs reports it absent,
-     which clients surface as "Lost inputs no longer available remotely" (Bazel
-     exit 39). Opt-in via storage.keyLocationMapSizing.validate. */}}
-{{- $klm := .Values.storage.keyLocationMapSizing -}}
-{{- if $klm.validate -}}
-{{- $ratio := $klm.minimumRatio | float64 -}}
-{{- range $store := list "cas" "cms" "ac" "iscc" "fsac" -}}
-{{- $s := index $.Values.storage.persistence $store -}}
-{{- if or (eq $store "cas") (eq $store "cms") (eq $store "ac") $s.enabled -}}
-{{- $isBlock := eq $s.backend "blockDevice" -}}
-{{- $casNoFs := and (eq $.Values.storage.persistence.cas.backend "blockDevice") (ne $.Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
-{{- $isCmsInMem := and (eq $store "cms") (eq $s.backend "sharedCas") $casNoFs -}}
-{{/* Bytes the blocks device/file offers, and how many of its blocks hold data. */}}
-{{- $data := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
-{{- $total := ternary $data (add $data (int $s.spareBlocks)) $isCmsInMem -}}
-{{- $deviceMi := 0.0 -}}
-{{- if $isBlock -}}
-{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) | float64 -}}
-{{- else if $isCmsInMem -}}
-{{- $deviceMi = divf (mulf ($data | float64) ($s.blocksInMemoryBlockSizeBytes | float64)) 1048576.0 -}}
-{{- else -}}
-{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 | float64 -}}
-{{- end -}}
-{{- $usableMi := divf (mulf $deviceMi ($data | float64)) ($total | float64) -}}
-{{- $avg := index $klm.averageObjectSizeBytes $store | float64 -}}
-{{- $maxObjects := divf (mulf $usableMi 1048576.0) $avg -}}
-{{/* Entries the configured KLM can actually index. An on-disk KLM stores one
-     66-byte LocationRecord per slot (bb-storage blockDeviceBackedLocationRecordSize). */}}
-{{- $entries := 0.0 -}}
-{{- $klmDesc := "" -}}
-{{/* Format sizes with %d/int64, never %v: Helm parses large YAML integers as
-     float64, so %v renders 20000000 as "2e+07" in the failure message. */}}
-{{- if $isBlock -}}
-{{- if eq $s.blockDevice.keyLocationMap "file" -}}
-{{- $entries = divf (mulf (int $s.blockDevice.metadata.keyLocationMapSizeMi | float64) 1048576.0) 66.0 -}}
-{{- $klmDesc = printf "blockDevice.metadata.keyLocationMapSizeMi=%d" (int64 $s.blockDevice.metadata.keyLocationMapSizeMi) -}}
-{{- else -}}
-{{- $entries = $s.blockDevice.keyLocationMapInMemoryEntries | float64 -}}
-{{- $klmDesc = printf "blockDevice.keyLocationMapInMemoryEntries=%d" (int64 $s.blockDevice.keyLocationMapInMemoryEntries) -}}
-{{- end -}}
-{{- else if eq $store "cas" -}}
-{{- $entries = divf (mulf (int $s.keyLocationMapSizeMi | float64) 1048576.0) 66.0 -}}
-{{- $klmDesc = printf "keyLocationMapSizeMi=%d" (int64 $s.keyLocationMapSizeMi) -}}
-{{- else if and (eq $s.keyLocationMap.type "blockDevice") (not $isCmsInMem) -}}
-{{- $entries = divf (mulf (int $s.keyLocationMap.sizeMi | float64) 1048576.0) 66.0 -}}
-{{- $klmDesc = printf "keyLocationMap.sizeMi=%d" (int64 $s.keyLocationMap.sizeMi) -}}
-{{- else -}}
-{{- $entries = $s.keyLocationMap.entries | float64 -}}
-{{- $klmDesc = printf "keyLocationMap.entries=%d" (int64 $s.keyLocationMap.entries) -}}
-{{- end -}}
-{{- $required := mulf $ratio $maxObjects -}}
-{{- if lt $entries $required -}}
-{{- fail (printf "storage.persistence.%s: key-location map is too small for its blocks device. %s indexes %.0f objects, but %.0f MiB usable (%d of %d blocks) at storage.keyLocationMapSizing.averageObjectSizeBytes.%s=%.0f can hold %.0f objects — that is %.2fx, below the required %vx. Once the table saturates, blobs are written but become unreachable and clients fail with \"Lost inputs no longer available remotely\". Fix by raising the key-location map to at least %.0f entries, shrinking the blocks device, or switching to a device-backed key-location map (which is also persistent across restarts)." $store $klmDesc $entries $usableMi $data $total $store $avg $maxObjects (divf $entries $maxObjects) $klm.minimumRatio $required) -}}
-{{- end -}}
-{{- end -}}
+{{/* Capacity arithmetic and remedies are shared with NOTES so a disabled guard
+     still exposes undersized indexes during install/upgrade. */}}
+{{- if .Values.storage.keyLocationMapSizing.validate -}}
+{{- range $diagnostic := (include "buildbarn.storage.indexSizingDiagnostics" . | fromJsonArray) -}}
+{{- fail $diagnostic -}}
 {{- end -}}
 {{- end -}}
 {{- if .Values.frontend.grpcCacheProxy.enabled -}}

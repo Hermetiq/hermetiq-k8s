@@ -19,7 +19,10 @@
 # profile. Avoid resizing or moving an already-persistent index unintentionally.
 #
 # Recovery requires retained blocks, index, and persistent_state together.
-# hostPath remains node-local; emptyDir cannot survive pod replacement.
+# Local blocks and metadata must share storage and reset lifecycle. Never keep
+# boot-disk/network metadata over wiped Local SSD blocks. The bundled raw-LV
+# local SSD overlay cannot safely use this profile without a validated metadata
+# filesystem/readiness/reset provisioner. emptyDir cannot survive pod replacement.
 storage:
   persistence:
     cas:

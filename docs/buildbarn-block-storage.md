@@ -35,7 +35,9 @@ storage:
 
 The chart creates a companion filesystem PVC named `<store>-meta` for the KLM
 file and `persistent_state` directory. Treat that metadata claim as part of the
-store. If either metadata or blocks are lost, the store starts empty. In
+store. Losing metadata requires a cold reset. Losing or replacing blocks while
+retaining metadata is worse: the index can report nonexistent blobs as present,
+so clients skip uploads and reads fail. Reset blocks and metadata as one unit. In
 `mode: hostPath`, instead supply each store's `blockDevice.metadata.hostPath.path`;
 Helm rejects a missing path rather than choosing a filesystem for you.
 
@@ -125,7 +127,7 @@ store on each process restart is intentional.
 
 ## GKE Example B: Local NVMe SSD with `partition_ephemeral_disks`
 
-Use this for a fast node-local tier that retains cache contents across same-node pod restarts. Buildbarn's `partition_ephemeral_disks` tool runs as a DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named `ephemeral`, and carves logical volumes for the stores.
+Use this for an explicitly volatile node-local tier. The supplied overlay uses in-memory indexes, so every storage-process restart starts cold. Buildbarn's `partition_ephemeral_disks` tool runs as a DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named `ephemeral`, and carves logical volumes for the stores.
 
 This repository includes a ready-to-edit version of that pattern:
 
@@ -188,63 +190,38 @@ Troubleshooting:
 - To change a logical volume size, recreate the node (or run `vgremove
   ephemeral` on it after draining). The store on that shard comes back empty.
 
-Storage pods then consume the logical volumes as hostPath block devices:
+Storage pods consume the logical volumes using the complete
+[local SSD overlay](../custom-values/buildbarn-values-local-ssd-block.yaml).
+It explicitly sets `blockDevice.keyLocationMap: inMemory` on CAS, AC, ISCC, and
+FSAC; shared CMS is also in memory. This overrides the chart's persistent
+defaults because the bundled provisioner creates raw LVs only. It does not
+create a metadata filesystem that is lost/reset with those LVs.
 
-```yaml
-storage:
-  # Use a raw-block Local SSD node pool, for example one created with
-  # gcloud --local-nvme-ssd-block. Do not target the
-  # cloud.google.com/gke-ephemeral-storage-local-ssd label; that mode formats
-  # and mounts the SSDs as a filesystem, leaving no raw device to partition.
-  # Storage shards should not be preemptible.
-  nodeSelector:
-    node-type: ssd-block
-    hermetiq/ephemeral-lvm: ready
-  persistence:
-    mode: hostPath
-    blockDevice:
-      allowHostPath: true
-      deviceAccess: chownInit
-    cas:
-      backend: blockDevice
-      blockDevice:
-        keyLocationMap: file
-        hostPath:
-          devicePath: /dev/ephemeral/cas
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/cas-meta
-    ac:
-      backend: blockDevice
-      blockDevice:
-        keyLocationMap: file
-        hostPath:
-          devicePath: /dev/ephemeral/ac
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/ac-meta
-```
+**Do not place persistent metadata on the boot disk or a network PVC while
+blocks live on Local SSD.** A host failure can return the same VM with blank
+SSDs while boot-disk metadata survives. The index can then report missing blobs
+as present. Google documents this [Local SSD recovery behavior](https://cloud.google.com/compute/docs/disks/local-ssd#data_persistence).
 
-> **Configure every enabled store.** If `mode: hostPath` is set and a store is left on `backend: filesystem`, the chart falls back to the default hostPath directory with `type: DirectoryOrCreate`. On a raw-block Local SSD node pool, nothing is mounted there, so Kubernetes creates the directory on the node boot disk. Configure `ac`, and `iscc`/`fsac` when enabled, on their own logical volumes.
+To make this layout persistent, first provision a metadata filesystem on the
+**same Local SSD storage** as the raw LVs and validate the mount/reset lifecycle
+on the actual node pool. Reserve space for all indexes, shared CMS blocks, and
+checkpoint state; the current sizes need about 10.75GiB before headroom (plan
+at least 16GiB). Gate storage scheduling on the verified mount. Use `Directory`
+for metadata hostPaths so a missing mount directory cannot silently be created
+on the boot disk. Reset all paired indexes/checkpoints when devices or the VG
+are recreated. The current DaemonSet neither provisions nor validates this
+layout; do not append the persistent profile to the supplied overlay without
+completing that work.
 
-This layout preserves cache contents across pod replacement on the same retained node. A node loss still drops that shard, and builds refill it. The storage container is privileged, and the partitioning DaemonSet is privileged too, so use a namespace that permits that model.
+> **Configure every enabled store.** On raw-block Local SSD nodes, filesystem
+> hostPaths can otherwise land on the boot disk. Keep enabled AC/ISCC/FSAC on
+> their configured LVs and explicitly select their intended index mode.
 
-For `keyLocationMap: file`, explicitly choose a retained filesystem directory with
-`blockDevice.metadata.hostPath.path`. A filesystem on Local SSD works; for the
-small ISCC map, the [ISCC-only example](iscc-size-classes.md#1-enable-iscc-storage)
-uses the node boot filesystem at `/mnt/stateful_partition/buildbarn-storage/iscc-meta`.
-Reserve at least 1 GiB there for the 512 MiB map and state-file headroom;
-`metadata.size` does not enforce
-a hostPath quota. This protects same-node pod restarts only. Losing either the
-blocks or metadata empties the store, and durable metadata alone cannot rescue
-blocks lost with a Local SSD node. Node replacement requires durable storage for
-both pieces; see the [ISCC guide](iscc-size-classes.md#1-enable-iscc-storage).
-
-With the persistent defaults, provide a metadata directory for each enabled raw
-device and include shared CMS capacity in the CAS directory. The chart does not
-resize the configured index files during migration; CAS's
-default `7360 MiB` index plus shared CMS's `1280 MiB` files already require
-`8640 MiB` before filesystem and checkpoint headroom.
+The volatile fallback is intentional until a same-SSD metadata layout is tested
+on GKE. It avoids stale persistent indexes but loses warmed contents and learned
+history on restart. Drain builds and restart frontends during planned resets to
+clear positive existence-cache entries. The storage and provisioner containers
+remain privileged, so use a namespace that permits that model.
 
 ## GKE Example C: TopoLVM CSI
 
@@ -278,32 +255,47 @@ storage:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 700Gi
         keyLocationMap: file
     ac:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 8Gi
     iscc:
       enabled: true
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 2Gi
     fsac:
       enabled: true
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 6Gi
 ```
 
-Set each raw store's `blockDevice.metadata.storageClassName` to a
-filesystem-capable class in your cluster (the chart defaults to `premium-rwo`).
-The companion metadata PVC is required with the persistent default. Network
-metadata does not protect blocks lost with a local storage node.
+Use the filesystem-capable `topolvm-ssd` class for every companion metadata
+PVC, as shown above, so it uses the same local device class as its blocks.
+The persistent default requires this companion volume; the network
+`premium-rwo` chart default is unsuitable for this local-storage example.
 
 Unlike hostPath mode, `blockDevice.size` matters here because it is the PVC request and therefore the logical volume size TopoLVM carves for each replica.
 
 Device ownership uses the same `deviceAccess` choices as the Persistent Disk example: try `group` only if your CSI driver presents group-accessible devices, otherwise use `chownInit`. The long-lived storage container remains non-privileged, which is the main operational advantage over the hostPath local SSD path.
+
+Keep each blocks PVC and metadata PVC on the same local StorageClass/device
+class. Never pair these local blocks with the default network `premium-rwo`
+metadata claim. Co-location does not make an independent PVC reset safe: after
+loss/recreation of either member, stop the shard and reset/delete the matching
+`<store>-blocks` and `<store>-meta` claims together. Restore rollback snapshots
+only as a consistent pair. Shared CMS is part of the CAS metadata claim.

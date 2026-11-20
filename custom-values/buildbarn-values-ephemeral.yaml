@@ -11,8 +11,10 @@
 # This preserves optional-store enablement, backends, sizes, paths and resources.
 # Review RAM entry counts and budgets. Switching from file to RAM discards access
 # to existing data; removing metadata PVC templates requires StatefulSet recreation.
-# Old metadata is not automatically deleted. Do not later reuse a stale checkpoint
-# with blocks written by a volatile store: returning to file requires a cold reset.
+# For a cold discard, stop storage and reset/delete the blocks and metadata
+# claims together. Rollback needs a consistent stopped snapshot/copy of both.
+# Do not reuse a stale checkpoint with blocks written by a volatile store:
+# returning to file requires a cold reset.
 # See docs/buildbarn-storage-operations.md for cutover and restart behavior.
 storage:
   persistence:

@@ -8,11 +8,14 @@
 # How it works, and why it is shaped this way, is documented in
 # docs/buildbarn-block-storage.md ("GKE Example B"). In short:
 #
+# - This provisioner creates raw LVs only. Use explicit in-memory indexes until
+#   a same-SSD metadata filesystem and paired-reset/mount lifecycle are validated.
+#   Retained boot-disk metadata over replaced Local SSD blocks is unsafe.
 # - Node-readiness gate: storage.nodeSelector in
 #   buildbarn-values-local-ssd-block.yaml requires hermetiq/ephemeral-lvm=ready,
 #   so a storage pod stays cleanly Pending until the devices exist instead of
 #   FailedMount-looping on a fresh node. The label is cleared at pod start and
-#   re-applied after provisioning, so a rebooted node with wiped SSDs re-gates.
+#   re-applied after provisioning, so a node returning with wiped SSDs re-gates.
 # - Why not ghcr.io/buildbarn/bb-partition-ephemeral-disks: that image is built
 #   on distroless_static and shells out to vgcreate/lvcreate, which are absent
 #   there. This runs the same LVM2 commands from an image that has them.
@@ -123,8 +126,8 @@ spec:
                   -d "{\"metadata\":{\"labels\":{\"$LABEL\":$1}}}" >/dev/null
               }
 
-              # Clear stale readiness before provisioning. A reboot can wipe
-              # local SSD state while leaving Kubernetes node labels behind.
+              # Clear stale readiness before provisioning. Host recovery can
+              # replace SSDs with blank disks while retaining node labels.
               label_node null || true
 
               set -- $(ls /dev/disk/by-id/google-local-nvme-ssd-* 2>/dev/null || true)

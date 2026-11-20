@@ -2,6 +2,7 @@ suite: persistent storage defaults
 templates:
   - templates/configmaps.yaml
   - templates/statefulset-storage.yaml
+  - templates/validate.yaml
 tests:
   - it: does not enable optional stores or create their claims
     template: templates/statefulset-storage.yaml
@@ -137,6 +138,77 @@ tests:
       - matchRegex:
           path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
           pattern: "mkdir -p /storage-cas-meta/cdc-v1/cms_persistent_state"
+
+  - it: bounded emptyDir volumes retain file indexes for container-only recovery
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 12Gi
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "inMemory:|blocksInMemory:"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/cdc-v1/cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-iscc/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-fsac/cdc-v1/persistent_state"
+
+  - it: bounded emptyDir defaults use pod volumes rather than PVCs
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 12Gi
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "cas")].emptyDir.sizeLimit
+          value: 1000Gi
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "ac")].emptyDir.sizeLimit
+          value: 12Gi
+
+  - it: rejects an emptyDir AC limit that fit the former RAM index but not its default file index
+    template: templates/validate.yaml
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 11Gi
+    asserts:
+      - failedTemplate:
+          errorMessage: "storage.persistence.ac: blocksSizeGi (10Gi) plus on-disk key-location map (1344Mi) leaves no room inside storage.persistence.ac.emptyDir.sizeLimit (11Gi) for persistent state and filesystem metadata"
+
+  - it: an explicit RAM AC opt-out still fits the former 11Gi emptyDir limit
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 11Gi
+      storage.persistence.ac.keyLocationMap.type: inMemory
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "ac")].emptyDir.sizeLimit
+          value: 11Gi
 
   - it: persists a dedicated CMS filesystem without changing its backend
     template: templates/configmaps.yaml

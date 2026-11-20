@@ -50,8 +50,10 @@ the coordinated [storage format cutover](buildbarn-storage-model.md#storage-form
 including a cold reset of any persistent ISCC history. The profile cannot
 convert that old history in place.
 
-For the raw Local SSD layout, this ISCC override preserves history across pod
-restarts on the same node:
+For a raw Local SSD layout with an **already validated same-SSD metadata
+filesystem**, this override preserves history across ordinary pod restarts.
+The bundled raw-LV provisioner does not create that filesystem, so its example
+remains explicitly volatile. Do not use a boot-disk directory as a substitute:
 
 ```yaml
 storage:
@@ -71,18 +73,20 @@ storage:
           size: 1Gi
           keyLocationMapSizeMi: 512
           hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/iscc-meta
+            path: /mnt/buildbarn-local-ssd/metadata/iscc
+            type: Directory
 ```
 
-The metadata path here deliberately uses the node's boot filesystem and must be
-writable and retain at least 512 MiB plus state-file headroom. In hostPath mode,
-`metadata.size` does not provision or limit that filesystem. Both the raw Local
-SSD device and this directory are tied to the node: rescheduling onto another
-node or replacing it can still lose history. To survive node replacement, use
-durable storage for both blocks and metadata. `storage.persistence.mode` is
-global, so this chart cannot put only ISCC on PVCs while other stores use
-hostPath. See [What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart)
-for the persistence limits and shutdown behavior.
+The metadata mount must live on the same Local SSD storage as the blocks,
+with a readiness gate verifying the actual mount and a paired reset when the
+LVs/VG are replaced. Pre-create the directory and reserve space for the 512MiB
+index and checkpoint state. `metadata.size` does not provision or limit hostPath
+space, and `Directory` does not verify the underlying filesystem identity.
+Retaining old metadata over wiped blocks can report nonexistent blobs as present;
+it is not a safe cold cache. To survive node replacement, use durable storage
+for both pieces. `storage.persistence.mode` is global, so the chart cannot put
+only ISCC on PVCs while other stores use hostPath. See
+[What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart).
 
 FSAC, the File System Access Cache, is the sibling store used for input prefetching. Enable it with:
 

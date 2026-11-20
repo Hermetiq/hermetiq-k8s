@@ -1101,3 +1101,104 @@ authenticationPolicy: {
     secretName: {{ required "security.grpcMtls.secretName is required when security.grpcMtls.enabled is true" .Values.security.grpcMtls.secretName | quote }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Return a JSON list of capacity diagnostics for enabled stores. This is shared by
+validate.yaml (fatal when requested) and NOTES (warnings otherwise). Disk records
+occupy 66 bytes; RAM records use the configured entry count. Device sizes for
+hostPath are documentary: Helm cannot discover the actual node device capacity.
+*/}}
+{{- define "buildbarn.storage.indexSizingDiagnostics" -}}
+{{- $messages := list -}}
+{{- $klm := .Values.storage.keyLocationMapSizing -}}
+{{- $ratio := $klm.minimumRatio | float64 -}}
+{{- range $store := list "cas" "cms" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $store -}}
+{{- if or (eq $store "cas") (eq $store "cms") (eq $store "ac") $s.enabled -}}
+{{- $isBlock := eq $s.backend "blockDevice" -}}
+{{- $casNoFs := and (eq $.Values.storage.persistence.cas.backend "blockDevice") (ne $.Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
+{{- $isCmsInMem := and (eq $store "cms") (eq $s.backend "sharedCas") $casNoFs -}}
+{{- $data := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
+{{- $total := ternary $data (add $data (int $s.spareBlocks)) $isCmsInMem -}}
+{{- $avg := index $klm.averageObjectSizeBytes $store | float64 -}}
+{{- if and $isBlock (not $s.blockDevice.size) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity cannot be checked without storage.persistence.%s.blockDevice.size; set it to the actual device capacity." $store $store) -}}
+{{- else if or (le $avg 0.0) (le $ratio 0.0) (le $data 0) (le $total 0) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity requires positive averageObjectSizeBytes.%s, minimumRatio, and data/total block counts." $store $store) -}}
+{{- else -}}
+{{- $deviceMi := 0.0 -}}
+{{- if $isBlock -}}
+{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) | float64 -}}
+{{- else if $isCmsInMem -}}
+{{- $deviceMi = divf (mulf ($data | float64) ($s.blocksInMemoryBlockSizeBytes | float64)) 1048576.0 -}}
+{{- else -}}
+{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 | float64 -}}
+{{- end -}}
+{{- $usableMi := divf (mulf $deviceMi ($data | float64)) ($total | float64) -}}
+{{- $maxObjects := divf (mulf $usableMi 1048576.0) $avg -}}
+{{- $entries := 0.0 -}}
+{{- $knob := "" -}}
+{{- $configured := 0.0 -}}
+{{- $disk := false -}}
+{{- if $isBlock -}}
+{{- if eq $s.blockDevice.keyLocationMap "file" -}}
+{{- $configured = $s.blockDevice.metadata.keyLocationMapSizeMi | float64 -}}
+{{- $knob = "blockDevice.metadata.keyLocationMapSizeMi" -}}
+{{- $disk = true -}}
+{{- else -}}
+{{- $configured = $s.blockDevice.keyLocationMapInMemoryEntries | float64 -}}
+{{- $knob = "blockDevice.keyLocationMapInMemoryEntries" -}}
+{{- end -}}
+{{- else if eq $store "cas" -}}
+{{- $configured = $s.keyLocationMapSizeMi | float64 -}}
+{{- $knob = "keyLocationMapSizeMi" -}}
+{{- $disk = true -}}
+{{- else if and (eq $s.keyLocationMap.type "blockDevice") (not $isCmsInMem) -}}
+{{- $configured = $s.keyLocationMap.sizeMi | float64 -}}
+{{- $knob = "keyLocationMap.sizeMi" -}}
+{{- $disk = true -}}
+{{- else -}}
+{{- $configured = $s.keyLocationMap.entries | float64 -}}
+{{- $knob = "keyLocationMap.entries" -}}
+{{- end -}}
+{{- $entries = $configured -}}
+{{- if $disk -}}
+{{- $entries = divf (mulf $configured 1048576.0) 66.0 -}}
+{{- end -}}
+{{- $required := mulf $ratio $maxObjects -}}
+{{- if lt $entries $required -}}
+{{- $remedy := printf "Set storage.persistence.%s.%s to at least %.0f entries, or reduce the blocks capacity." $store $knob (ceil $required) -}}
+{{- if $disk -}}
+{{- $requiredMi := ceil (divf (mulf $required 66.0) 1048576.0) -}}
+{{- $remedy = printf "Set storage.persistence.%s.%s to at least %.0f MiB (66 bytes per disk record), or reduce the blocks capacity. RAM entry settings do not size this file index." $store $knob $requiredMi -}}
+{{- end -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map is too small for its blocks device. %s=%.0f indexes %.0f objects, but %.0f MiB usable (%d of %d blocks) at storage.keyLocationMapSizing.averageObjectSizeBytes.%s=%.0f can hold %.0f objects — that is %.2fx, below the required %vx. Once the table saturates, blobs may become unreachable. %s" $store $knob $configured $entries $usableMi $data $total $store $avg $maxObjects (divf $entries $maxObjects) $klm.minimumRatio $remedy) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $messages -}}
+{{- end -}}
+
+{{/* Names of enabled chart-generated stores without a persistent index/state.
+     A raw CAS without a filesystem forces its shared CMS into memory too. */}}
+{{- define "buildbarn.storage.volatileStores" -}}
+{{- $stores := list -}}
+{{- $cas := .Values.storage.persistence.cas -}}
+{{- $casNoFs := and (eq $cas.backend "blockDevice") (ne $cas.blockDevice.keyLocationMap "file") -}}
+{{- range $name := list "cas" "cms" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $name -}}
+{{- if or (has $name (list "cas" "cms" "ac")) $s.enabled -}}
+{{- $volatile := false -}}
+{{- if eq $s.backend "blockDevice" -}}
+{{- $volatile = ne $s.blockDevice.keyLocationMap "file" -}}
+{{- else if ne $name "cas" -}}
+{{- $volatile = or (ne $s.keyLocationMap.type "blockDevice") (and (eq $name "cms") (eq $s.backend "sharedCas") $casNoFs) -}}
+{{- end -}}
+{{- if $volatile -}}
+{{- $stores = append $stores (upper $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $stores -}}
+{{- end -}}

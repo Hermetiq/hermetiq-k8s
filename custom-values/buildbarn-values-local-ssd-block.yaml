@@ -12,36 +12,35 @@
 #   hermetiq/ephemeral-lvm=ready.
 # - A namespace that permits privileged pods. HostPath raw block devices require
 #   privileged Buildbarn storage containers.
-# - At least 16 GiB free on the retained node boot filesystem for metadata below:
-#   default index files total 9.75 GiB, plus 1 GiB shared CMS blocks and headroom.
-#   Use a separately mounted metadata filesystem instead if appropriate; do not
-#   point metadata directories at an unmounted path unintentionally.
 #
-# File indexes retain the warmed cache and learned history across pod restarts
-# on the SAME retained node. Node replacement still loses the Local SSD blocks.
-# Apply buildbarn-values-ephemeral.yaml LAST to explicitly opt out; it removes
-# metadata mounts and makes all five storage-tier stores restart empty.
-# Upgrading from pre-CDC requires the coordinated cold cutover in the runbook.
+# This overlay explicitly uses volatile indexes. The bundled provisioner creates
+# raw LVs only; it does not mount a metadata filesystem on the same Local SSDs.
+# Putting metadata on the boot disk would leave stale indexes if the SSDs were
+# recreated empty on the same node. All five stores therefore start empty on
+# storage-process restart. Chart defaults remain persistent for other layouts.
+#
+# Do not simply append the persistent profile to this overlay: first provision
+# and validate a same-SSD metadata filesystem and gate storage readiness on its
+# mount. Data and metadata must be reset together on disk/VG replacement. This
+# provisioner has not been extended or validated for that layout on GKE.
+# See docs/buildbarn-block-storage.md (GKE Example B).
 
 storage:
   replicas: 1
   resources:
     requests:
       cpu: 500m
-      # File indexes total 9.75 GiB at the configured sizes, including shared
-      # CMS. Reserve page-cache working set plus heap and RPC buffers.
-      # Multi-NVMe nodes need truthful cas.blockDevice.size and index sizing;
-      # the partitioning DaemonSet gives CAS the remaining space after fixed
-      # AC/ISCC/FSAC LVs. These metadata directories are on the node boot disk,
-      # not the raw LVs. metadata.size does not impose a hostPath quota.
-      memory: 16Gi
+      # CAS 80M + AC 16M + ISCC 8M + FSAC 8M RAM entries use ~6.7 GiB;
+      # shared CMS also needs ~256 MiB for its index and 264 MiB for blocks.
+      # Include Go heap/GC and RPC buffers. Measure and tune for the workload.
+      memory: 12Gi
       # CAS/AC/ISCC/FSAC live on raw block devices; this only covers scratch.
       ephemeral-storage: 2Gi
     limits:
       cpu: 7100m
       memory: 24Gi
       ephemeral-storage: 2Gi
-  # Checks each file index (or RAM index in ephemeral mode) against the formula in
+  # Checks the RAM indexes against the capacity formula in
   # the chart's storage.keyLocationMapSizing. An undersized map drops location
   # records once it saturates, and clients see "Lost inputs no longer available
   # remotely" (Bazel exit 39) for blobs that are actually on disk.
@@ -58,30 +57,26 @@ storage:
     cas:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: file
-        # Used only with the ephemeral opt-out: ~634 GiB usable / 17408 B
-        # average chunk = ~39M chunks, so 80M RAM entries gives a 2.0x ratio.
-        # File mode uses metadata.keyLocationMapSizeMi instead (7360 MiB default).
+        keyLocationMap: inMemory
+        # ~634 GiB usable / 17408 B average chunk = ~39M chunks;
+        # 80M RAM entries gives a 2.0x ratio.
         keyLocationMapInMemoryEntries: 80000000
         # Documentation only in hostPath mode — but the sizing guard reads it, so
         # it must match the real LV or the check is meaningless.
         size: 680Gi
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/cas-meta
         hostPath:
           devicePath: /dev/ephemeral/cas
+    cms:
+      keyLocationMap:
+        type: inMemory
     ac:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: file
+        keyLocationMap: inMemory
         # Matches the 8G LV carved by partition-ephemeral-disks-daemonset.yaml.
         # ~7.3 GiB usable / 1152 B per ActionResult = ~6.8M -> 2.34x at 16M.
         keyLocationMapInMemoryEntries: 16000000
         size: 8Gi
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/ac-meta
         hostPath:
           devicePath: /dev/ephemeral/ac
     # ISCC/FSAC devices are deliberately SMALL: they hold one tiny object per
@@ -91,26 +86,20 @@ storage:
       enabled: true
       backend: blockDevice
       blockDevice:
-        keyLocationMap: file
+        keyLocationMap: inMemory
         # ~1.8 GiB usable / 512 B per PreviousExecutionStats = ~3.8M -> 2.1x.
         keyLocationMapInMemoryEntries: 8000000
         size: 2Gi
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/iscc-meta
         hostPath:
           devicePath: /dev/ephemeral/iscc
     fsac:
       enabled: true
       backend: blockDevice
       blockDevice:
-        keyLocationMap: file
+        keyLocationMap: inMemory
         # ~5.5 GiB usable / 2048 B per path bloom filter = ~2.9M -> 2.8x.
         keyLocationMapInMemoryEntries: 8000000
         size: 6Gi
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/fsac-meta
         hostPath:
           devicePath: /dev/ephemeral/fsac
   nodeSelector:
@@ -142,10 +131,9 @@ config:
 
 frontend:
   contentAddressableStorage:
-    # Persistence avoids a full cold cache on ordinary same-node restarts.
-    # Existence entries can still become stale after eviction, an abrupt crash,
-    # or node loss; 180s bounds that window. During the CDC cold cutover, restart
-    # frontends before resuming builds to clear cached positives.
+    # These volatile stores restart empty. Frontend positive existence entries
+    # can be stale for up to 180s afterwards, so drain builds and restart
+    # frontends with storage before resuming clients after a planned reset.
     existenceCaching:
       enabled: true
       cacheSize: 1000000

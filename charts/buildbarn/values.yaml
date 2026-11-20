@@ -554,6 +554,10 @@ storage:
         metadata:                # used only when keyLocationMap=file
           storageClassName: premium-rwo
           size: 10Gi
+          # Deliberately retains the established file-index capacity (~117M
+          # records): ~10.2x for the 200Gi raw default, with room for ~1TiB
+          # shards. Set a reviewed smaller size during a cold cutover to save
+          # space; do not resize an existing persistent index unintentionally.
           keyLocationMapSizeMi: 7360
           # Advanced (mode=hostPath): node-local dir for the KLM file + state.
           hostPath:
@@ -721,8 +725,8 @@ storage:
           keyLocationMapSizeMi: 512
           hostPath:
             # Required in mode=hostPath: choose a retained, writable node-local
-            # directory for the KLM and state. Local SSD blocks still disappear
-            # on node replacement even if this directory survives.
+            # directory on the SAME storage as the blocks, with a paired reset
+            # lifecycle. Never retain this checkpoint over replaced/wiped blocks.
             path: ""
             type: DirectoryOrCreate
         hostPath:

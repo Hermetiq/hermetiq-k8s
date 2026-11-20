@@ -12,6 +12,8 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Keep the unvalidated raw Local SSD example explicitly volatile, require paired blocks/metadata lifecycle, and report volatile stores and undersized file indexes in Helm notes"
     - kind: changed
       description: "Breaking: default CAS, CMS, AC, ISCC, and FSAC to persistent indexes for filesystem and raw-block storage; add an explicit ephemeral profile and coordinated CDC cutover guidance; keep optional stores disabled"
     - kind: fixed

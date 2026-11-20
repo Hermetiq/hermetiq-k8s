@@ -12,9 +12,20 @@ A store survives a restart only when these three pieces survive together:
 - the key-location map, which says where each digest lives
 - the `persistent_state` directory, which records valid blocks and the map hash seed
 
-Lose any one of them and the store comes back empty. The data bytes may still be on disk, but Buildbarn cannot safely find them.
+Treat these as one consistency unit. Losing the index/state makes old data
+unreachable. Losing or replacing the blocks while retaining index/state can
+instead produce **false presence**: `FindMissingBlobs` reports a blob present,
+but reading it fails. The pinned storage implementation reattaches blocks by
+location; it does not verify all contents on startup. Stop the shard and reset
+both sides before serving requests after disk replacement.
 
-> **The metadata volume is not optional bookkeeping.** For raw block stores, the key-location map file and `persistent_state` directory live on the companion metadata volume. Deleting that small metadata volume empties the store just as surely as deleting the blocks device.
+For Local SSD, put metadata on the same SSD storage and enforce a paired reset
+lifecycle. Never use boot-disk or network metadata over disposable local blocks.
+With raw PVCs, deleting/recreating `<store>-blocks` requires resetting/deleting
+`<store>-meta` too; shared CMS belongs to the CAS metadata volume. Retain rollback
+snapshots only as consistent blocks+metadata pairs taken while storage is stopped.
+
+> **The metadata volume is not optional bookkeeping.** For raw block stores, the key-location map file and `persistent_state` directory live on the companion metadata volume. Deleting metadata discards access to old data; deleting blocks alone can leave false index hits. Always reset or restore them as a matching pair.
 
 An in-memory key-location map means cache-only behavior. This is true even if the blocks sit on a durable Persistent Disk. After a pod restart, the bytes have no index and the store starts empty.
 
@@ -81,12 +92,12 @@ underlying disks need more time to flush.
 
 | Configuration | Pod restart on same node | Rescheduled to another node | Backing disk/PV lost |
 |---|---|---|---|
-| `mode: pvc`, durable attachable PV, disk-backed KLM | survives | survives, subject to disk zone | empty |
-| `mode: pvc`, node-local PV, disk-backed KLM | survives while the local disk remains | cannot reattach the local PV on another node | empty |
+| `mode: pvc`, durable attachable PV, disk-backed KLM | survives | survives, subject to disk zone | reset paired blocks and metadata before serving |
+| `mode: pvc`, node-local PV, disk-backed KLM | survives while the local disk remains | cannot reattach the local PV on another node | reset paired blocks and metadata before serving |
 | `mode: pvc`, in-memory KLM | empty | empty | empty |
 | `mode: emptyDir` | empty; container-only crashes may preserve disk-backed-KLM stores | empty | empty |
 | `mode: hostPath`, in-memory KLM | empty | empty | empty |
-| `mode: hostPath`, `blockDevice.keyLocationMap: file` on node-local metadata | survives | empty | empty |
+| `mode: hostPath`, file index on same local storage with verified paired lifecycle | survives while both remain | requires a new empty pair | reset both; stale metadata can report false hits |
 
 For durable network-backed PVCs, a node loss is normally a reschedule: the disk
 reattaches where Kubernetes can run the pod. A PVC backed by local storage, such
@@ -177,9 +188,14 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
 1. **Capture the current configuration.** Save the current release values and
    rendered manifest, and retain your deployment values file. Inspect
    `helm get values buildbarn --namespace hermetiq --all` for inherited settings.
-   Explicit `inMemory` values and `helm upgrade --reuse-values` can preserve old
-   behavior despite the changed defaults; render the complete desired values
-   rather than relying on an upgrade flag to migrate them. Check for
+   Prefer `helm upgrade --reset-then-reuse-values` when carrying forward the
+   release's overrides: it starts with new chart defaults, then applies stored
+   explicit values and the new command-line overrides. It still retains explicit
+   `inMemory` settings; remove or override them deliberately. Do not combine it
+   with `--reuse-values` or `--reset-values`, which take precedence. See the
+   [Helm upgrade reference](https://helm.sh/docs/helm/helm_upgrade/). Render the
+   complete desired values and review the conditional storage warnings in NOTES;
+   an upgrade flag alone cannot migrate volumes or repair stale checkpoints. Check for
    `configOverrides` that replace the generated storage config. If the deployment
    already uses CDC and existing persistent contents must be retained, keep its
    shard count, backend, block size, and index size unchanged. The pre-CDC cutover
@@ -212,7 +228,7 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
    | Filesystem + PVC | Ensure the existing claim has room for the index and state at the paths listed below; no new claim is needed for an already-enabled store. Keep its blocks file and geometry unchanged. |
    | Filesystem + hostPath | Ensure free space in the existing `hostPath.path`; recovery remains limited to that retained node and filesystem. |
    | Filesystem + emptyDir | Ensure `emptyDir.sizeLimit` fits the blocks and index. Container restarts may recover, but replacing the pod still loses the store. |
-   | Raw block + PVC | Set each store's `blockDevice.metadata.storageClassName` to a class that provisions Filesystem volumes and check `metadata.size`. New `<store>-meta` claim templates require the [StatefulSet recreate procedure](#recreate-the-storage-statefulset); retain the existing `<store>-blocks` claims. |
+   | Raw block + PVC | Set each store's metadata class/size. For local blocks use the same local StorageClass/device class, never network metadata. Adding `<store>-meta` requires [StatefulSet recreation](#recreate-the-storage-statefulset). Reuse blocks only with fresh metadata for the cold cutover; when discarding a store, reset/delete its blocks and metadata claims together. |
    | Raw block + hostPath | Supply a retained filesystem `blockDevice.metadata.hostPath.path` for every enabled raw store. This adds pod volumes, not PVC templates, so no StatefulSet recreation is needed. |
 
    CAS uses `cdc-v1/keys.db`; AC/ISCC/FSAC use
@@ -223,11 +239,13 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
    `persistent_state/` directly under `/storage-cms` or `/storage-cms-meta`, and
    requires the same capacity and metadata review as the other stores.
 
-   For example, these overrides add metadata directories to an existing raw
-   hostPath deployment. Choose mounted filesystems with sufficient capacity;
-   these example paths deliberately use the GKE node boot filesystem. They assume
-   the default `cms.backend: sharedCas`; a dedicated raw CMS needs its own
-   `cms.blockDevice.metadata.hostPath.path` too:
+   The following paths illustrate an **already provisioned and validated**
+   same-SSD metadata filesystem mounted at `/mnt/buildbarn-local-ssd/metadata`.
+   They do not work with the bundled raw-LV-only provisioner. Gate scheduling on
+   that verified mount, pre-create its store directories, and reset matching
+   metadata whenever a data LV is recreated. `Directory` avoids silently creating
+   absent paths on the boot disk; it does not itself verify mount identity.
+   Shared CMS uses CAS metadata; dedicated raw CMS needs its own directory too:
 
    ```yaml
    storage:
@@ -235,19 +253,19 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
        cas:
          blockDevice:
            metadata:
-             hostPath: { path: /mnt/stateful_partition/buildbarn-storage/cas-meta }
+             hostPath: { path: /mnt/buildbarn-local-ssd/metadata/cas, type: Directory }
        ac:
          blockDevice:
            metadata:
-             hostPath: { path: /mnt/stateful_partition/buildbarn-storage/ac-meta }
+             hostPath: { path: /mnt/buildbarn-local-ssd/metadata/ac, type: Directory }
        iscc:
          blockDevice:
            metadata:
-             hostPath: { path: /mnt/stateful_partition/buildbarn-storage/iscc-meta }
+             hostPath: { path: /mnt/buildbarn-local-ssd/metadata/iscc, type: Directory }
        fsac:
          blockDevice:
            metadata:
-             hostPath: { path: /mnt/stateful_partition/buildbarn-storage/fsac-meta }
+             hostPath: { path: /mnt/buildbarn-local-ssd/metadata/fsac, type: Directory }
    ```
 
    `metadata.size` provisions a PVC only in PVC mode; it does not reserve or
@@ -288,7 +306,7 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
    upgrade to succeed. Otherwise, use a normal upgrade with the same file order:
 
    ```bash
-   helm upgrade buildbarn ./charts/buildbarn --namespace hermetiq \
+   helm upgrade buildbarn ./charts/buildbarn --namespace hermetiq --reset-then-reuse-values \
      -f deployment-values.yaml \
      -f custom-values/buildbarn-values-persistent.yaml \
      -f persistence-overrides.yaml
@@ -318,9 +336,12 @@ CMS/AC/ISCC/FSAC. It leaves optional-store enablement, volume mode, backends,
 geometry, sizes, and resources unchanged. Shared CMS becomes wholly in-memory
 when raw CAS has no metadata filesystem. Raw stores no longer need metadata
 volumes; changing an existing PVC release to this layout also changes immutable
-claim templates, so use the reviewed StatefulSet recreation procedure and retain
-old claims until rollback is no longer needed. Returning to persistent indexes
-starts cold; do not reuse an old checkpoint over blocks modified in volatile mode.
+claim templates, so use the reviewed StatefulSet recreation procedure. For a
+cold discard, stop storage and reset/delete both the blocks and metadata claims
+before creating the volatile store. If rollback is needed, first take a consistent
+snapshot/copy of both while stopped; retained metadata alone is not a rollback
+point after its blocks have been modified. Returning to persistent indexes starts
+cold; never reattach a stale checkpoint over blocks written in volatile mode.
 
 Filesystem CAS always uses a file-backed index in this chart. To make that store
 pod-lifetime as well, explicitly select `storage.persistence.mode: emptyDir` and
@@ -401,7 +422,10 @@ CDC storage safe.
    and monitor it again. Confirm storage health and metadata mounts before
    resuming builds.
 
-4. If the change created new volumes for an existing store (a `backend` or `size` change without in-place expansion), the previous claims are now orphaned. Delete them deliberately once the cache is warming so they stop billing.
+4. If the change created replacement volumes, dispose of orphaned raw blocks
+   and their matching metadata claims together after the rollback retention
+   period. Keep consistent stopped snapshots if rollback is needed; never mix
+   an old metadata claim with a new or subsequently modified blocks claim.
 
 ### Invalidate Poisoned Action Results
 

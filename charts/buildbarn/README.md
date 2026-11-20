@@ -890,6 +890,8 @@ caches remain volatile.
 | Raw local NVMe (`hostPath`) | Explicit `blockDevice.metadata.hostPath.path` per raw store | Same retained node, blocks device, and metadata filesystem |
 | Filesystem `emptyDir` | Pod's ephemeral volume | Container-only restart; replacing the pod loses the store |
 
+Blocks and metadata must share a lifecycle: reset them together when either is
+replaced. Retained indexes over lost blocks can falsely report blobs as present.
 Shared CMS keeps its blocks, index, and state on the CAS filesystem or raw CAS
 metadata volume. Include its default 1Gi blocks and 256Mi index in that volume's
 capacity. Dedicated CMS backends also use persistent indexes by default.
@@ -1016,62 +1018,28 @@ full-zone loss. Use a regional disk for cross-zone HA.
 
 #### GKE example B — Local NVMe SSD via `partition_ephemeral_disks` (node-local)
 
-Buildbarn's `partition_ephemeral_disks` tool, packaged here as the
-[`custom-values/partition-ephemeral-disks-daemonset.yaml`](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
-DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named
-`ephemeral` and carves logical volumes, so pods can consume raw block devices
-with fine-grained sizes. The DaemonSet uses **fixed sizes** for the
-metadata-heavy stores (`8G` AC, `2G` ISCC, `6G` FSAC) and gives the remaining
-space (`100%FREE`) to CAS. Avoid percentage splits such as `1%VG`: on multi-SSD
-nodes they over-allocate AC/ISCC/FSAC, and an in-memory key-location map sized
-for the small store then covers only a fraction of the device, so the map
-saturates long before the blocks fill. The storage pods consume the LVs via
-`hostPath` block devices:
+The [partitioning DaemonSet](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
+creates raw CAS/AC/ISCC/FSAC LVs on Local SSD and sets a readiness label. The
+[local SSD overlay](../../custom-values/buildbarn-values-local-ssd-block.yaml)
+explicitly uses **in-memory indexes**, including shared CMS, because that
+provisioner does not mount a metadata filesystem on the same SSDs. These stores
+start cold on each storage-process restart even though the chart defaults to
+persistent indexes.
 
-```yaml
-storage:
-  # Dedicated non-spot raw-block Local SSD pool (gcloud --local-nvme-ssd-block).
-  # Do NOT target the cloud.google.com/gke-ephemeral-storage-local-ssd label:
-  # that mode formats + mounts the SSDs as a filesystem, leaving no raw device
-  # to partition.
-  nodeSelector:
-    node-type: ssd-block
-  persistence:
-    mode: hostPath
-    blockDevice:
-      allowHostPath: true         # required for backend=blockDevice with mode=hostPath
-      deviceAccess: chownInit     # chown the root-owned device node for uid 65534
-    cas:
-      backend: blockDevice
-      blockDevice:
-        keyLocationMap: file
-        hostPath:
-          devicePath: /dev/ephemeral/cas
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/cas-meta
-    ac:
-      backend: blockDevice
-      blockDevice:
-        keyLocationMap: file
-        hostPath:
-          devicePath: /dev/ephemeral/ac
-        metadata:
-          hostPath:
-            path: /mnt/stateful_partition/buildbarn-storage/ac-meta
-```
+Do not retain boot-disk or network metadata over disposable Local SSD blocks:
+recreated blocks can leave an old index falsely reporting blobs as present.
+Persistence requires a metadata filesystem on the same Local SSD storage, a
+verified mount/readiness gate, and paired reset of blocks and metadata on VG or
+device replacement. That provisioner change has not been validated on GKE, so
+this example keeps the explicit volatile fallback. See
+[GKE Example B](../../docs/buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+for prerequisites and the future persistent layout requirements. Do not merely
+append the persistent profile to the supplied overlay.
 
-This layout survives pod replacement on the same retained node; a node loss
-still drops the shard. The example deliberately uses the node boot filesystem
-for metadata. Reserve space for every enabled raw store, including shared CMS
-files in the CAS metadata directory; `metadata.size` does not enforce hostPath
-quotas. Provide ISCC/FSAC metadata directories when enabling those stores. A
-retained filesystem on Local SSD is another option. See the complete
-[local SSD values](../../custom-values/buildbarn-values-local-ssd-block.yaml).
-In hostPath block mode the chart runs the **storage container
-`privileged: true`** (device cgroup) alongside the `chownInit` device chown; that, plus
-the privileged DaemonSet and `hostPath` block devices, requires a baseline/privileged
-namespace or PSA exemption.
+In hostPath block mode the chart runs storage privileged and `chownInit` prepares
+the raw devices; the provisioner is also privileged. Use a namespace that permits
+that model. During planned storage restarts, drain builds and restart frontends
+before resuming them so stale positive existence-cache entries are cleared.
 
 #### GKE example C — TopoLVM CSI (dynamic LVM block, non-privileged)
 
@@ -1116,16 +1084,20 @@ storage:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 680Gi
         keyLocationMap: file # default; companion metadata PVC
-    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi } }
-    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 2Gi } }
-    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 6Gi } }
+    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 8Gi } }
+    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 2Gi } }
+    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 6Gi } }
 ```
 
-Each raw store also needs a filesystem-capable `blockDevice.metadata.storageClassName`
-(the chart defaults to `premium-rwo`); choose a class available in your cluster.
-Local blocks remain tied to their node even if metadata uses network disks.
+Each metadata PVC uses the same local `topolvm-ssd` StorageClass/device class as
+its blocks PVC. Do not use network `premium-rwo` metadata for local blocks.
+After device loss or independent PVC replacement, stop storage and reset/delete
+both `<store>-blocks` and `<store>-meta` together; retained metadata over empty
+blocks can falsely report blobs as present. Shared CMS lives in CAS metadata.
 
 Device-node *file* ownership is still handled by `deviceAccess` exactly as in Example A —
 try `group` (default; PSS restricted-compatible, works if TopoLVM presents the device
