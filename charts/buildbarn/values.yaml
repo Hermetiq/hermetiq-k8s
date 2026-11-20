@@ -148,8 +148,9 @@ config:
     # scheduler and browser use. bb_worker serves inputs over FUSE by reading
     # chunks at an offset, and without this cache every read decompresses
     # (ZSTD) and re-hashes (SHA-256) the whole chunk. Every worker pool shares
-    # it, and it is sized by entry count: cacheSize x horizonSizeBytes is the
-    # worst case per bb_worker, so fit it to the smallest worker container.
+    # it, and it is sized by entry count: cacheSize x (minChunkSizeBytes +
+    # horizonSizeBytes) is the worst case per bb_worker, so fit it to the
+    # smallest worker container. See docs/buildbarn-storage-model.md.
     # Set cacheSize to 0 to omit the cache.
     chunkCache:
       cacheSize: 2048

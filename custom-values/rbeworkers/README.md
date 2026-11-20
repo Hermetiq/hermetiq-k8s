@@ -315,8 +315,9 @@ memory budget. With the CDC chart, bb_worker also holds the chunk cache
 (`config.contentAddressableStorage.chunkCache` in the buildbarn chart), which
 every pool shares and which is sized by entry count: a full cache of 2,048
 entries measured about 0.9 GiB of heap on a Chromium worker, and the worst case
-is the entry count times the 2 MiB chunk horizon. Size it for the smallest
-worker container. When you resize a pool:
+is the entry count times about 2.25 MiB (`minChunkSizeBytes + horizonSizeBytes`).
+Size it for the smallest worker container; see
+[Worker Chunk Cache](../../docs/buildbarn-storage-model.md#worker-chunk-cache). When you resize a pool:
 
 - Lower the runner only after comparing its peak working set
   (`container_memory_working_set_bytes{container="runner"}`) with its limit.
