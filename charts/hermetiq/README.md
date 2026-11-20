@@ -2129,6 +2129,30 @@ fleet data, then that a disabled project or an insufficient role is denied.
 With `assistant.enabled` as well, Barn Owl is available from the page and
 from its worker-pool views.
 
+### Size-class training preview budgets
+
+`rbe.sizeClassTraining` bounds an explicitly requested
+`preview_size_class_training` call on API versions that provide it. The preview
+requires an installation administrator and the selected project's managed
+Buildbarn namespace. It reads completed-action history, current worker mappings
+and original CAS Actions to export candidate history; it does not write to the
+scheduler's initial size-class cache (ISCC). These settings do not enable the
+RBE page, grant access, or change ingestion.
+
+| Value under `rbe.sizeClassTraining` | Default | API environment variable |
+|---|---|---|
+| `maxLookbackHours` | `168` | `SIZE_CLASS_TRAINING_MAX_LOOKBACK_HOURS` |
+| `maxSamples` | `2000` | `SIZE_CLASS_TRAINING_MAX_SAMPLES` |
+| `maxRecords` | `100` | `SIZE_CLASS_TRAINING_MAX_RECORDS` |
+| `timeoutSeconds` | `30` | `SIZE_CLASS_TRAINING_TIMEOUT_SECONDS` |
+| `maxActionBytes` | `1048576` | `SIZE_CLASS_TRAINING_MAX_ACTION_BYTES` |
+
+All values must be positive integers. An explicit entry in `api.env` takes
+precedence over its matching value without emitting a duplicate environment
+variable. Changes roll the API Deployment. A preview's coverage and assumptions
+remain part of its result: current worker classes may differ from those used by
+historical actions, and missing CAS Actions leave those samples unmeasured.
+
 ## Barn Owl AI assistant
 
 **Values:** `assistant`. Commented out in the starter.

@@ -1,0 +1,55 @@
+suite: size-class training preview budgets
+templates:
+  - templates/deployment-api.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: supplies bounded preview defaults without enabling RBE
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_LOOKBACK_HOURS")].value
+          value: "168"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_SAMPLES")].value
+          value: "2000"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_RECORDS")].value
+          value: "100"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_TIMEOUT_SECONDS")].value
+          value: "30"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_ACTION_BYTES")].value
+          value: "1048576"
+
+  - it: renders installation-specific budgets
+    set:
+      rbe.sizeClassTraining.maxLookbackHours: 72
+      rbe.sizeClassTraining.maxSamples: 500
+      rbe.sizeClassTraining.maxRecords: 20
+      rbe.sizeClassTraining.timeoutSeconds: 15
+      rbe.sizeClassTraining.maxActionBytes: 65536
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_LOOKBACK_HOURS")].value
+          value: "72"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_SAMPLES")].value
+          value: "500"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_RECORDS")].value
+          value: "20"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_TIMEOUT_SECONDS")].value
+          value: "15"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_ACTION_BYTES")].value
+          value: "65536"
+
+  - it: honors an explicit API env override without a duplicate
+    set:
+      api.env.SIZE_CLASS_TRAINING_MAX_SAMPLES: "42"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SIZE_CLASS_TRAINING_MAX_SAMPLES")].value
+          value: "42"
