@@ -302,14 +302,29 @@ Do this arithmetic before the first install when you can. Changing block counts,
 
 ## Checked Automatically
 
-Two of the limits above fail at startup rather than degrade, so the BB Config Editor assistant reports them as advisories on an edit instead of waiting to be asked. The rule identifiers, for cross-referencing an advisory back to this document:
+Some of the limits in this document fail at startup or cost CPU silently, so the BB Config Editor assistant reports them as advisories on an edit instead of waiting to be asked. The rule identifiers, for cross-referencing an advisory back to this document:
 
 | Rule | What it catches | Section |
 | --- | --- | --- |
 | `mutable_store_new_blocks` | `newBlocks` other than 1 on the Action Cache, ISCC or FSAC | [Choosing Block Ratios](#choosing-block-ratios) |
 | `too_many_blocks` | `spareBlocks + oldBlocks + currentBlocks + newBlocks` above 100 in one local backend | [Blocks: Allocation, Eviction, and Maximum Blob Size](#blocks-allocation-eviction-and-maximum-blob-size) |
+| `worker_chunk_cache` | A virtual CDC worker with no `chunkCache`, or one bb_worker cannot start with | [Worker Chunk Cache](#worker-chunk-cache) |
 
 The division of labour is deliberate: the assistant owns the structural rules, which are checkable and verified against bb-storage source; this document owns the sizing arithmetic, worked examples and runbooks, which are what a generated rule list cannot give you. A test in the assistant's repository asserts that every rule identifier appears here, so a new rule cannot ship without a place to read about it.
+
+## Worker Chunk Cache
+
+With CDC, every chunk is stored ZSTD-compressed, and reading one back decodes it and checks its SHA-256 digest, including reads from a worker's own local cache. A worker with a virtual build directory serves action inputs over FUSE by reading chunks at an offset, so without a decoded-chunk cache it decodes and hashes the same chunks again and again. On a Chromium build that was most of bb_worker's CPU.
+
+`config.contentAddressableStorage.chunkCache` adds that cache to the workers' `common.libsonnet` only. It is an `ExistenceCacheConfiguration`, and bb-storage needs all three fields:
+
+| Field | Value | If missing or invalid |
+| --- | --- | --- |
+| `cacheSize` | Entries, not bytes; positive | With LEAST_RECENTLY_USED, a one-entry cache; with FIFO or random replacement, bb_worker panics on the first insert |
+| `cacheDuration` | Positive, for example `3600s` | bb_worker fails to start ("invalid nil Duration") |
+| `cacheReplacementPolicy` | `LEAST_RECENTLY_USED` | bb_worker fails to start ("Unknown cache replacement policy") |
+
+The worker operator copies one `chunkCache` to every RbeWorker pool, so the smallest worker container sets the safe size. The worst case per bb_worker is `cacheSize × (minChunkSizeBytes + horizonSizeBytes)`: about 2.25 MiB per entry with the defaults, so about 4.5 GiB at 2,048 entries and 9 GiB at 4,096. Typical use is much lower because most chunks are small files: a full 2,048-entry cache measured about 0.9 GiB of heap on a Chromium worker. The cache is in addition to bb_worker's heap and the page cache charged for its local CAS, described in the RbeWorker README.
 
 ## CMS Placement and Persistence
 

@@ -310,9 +310,14 @@ again: the node reports a high major page-fault rate (for example, the
 node-exporter `NodeMemoryMajorPagesFaults` alert), and the worker container
 reads several times more from disk than it writes.
 
-The examples give the worker container 9Gi, or 4Gi for Ubuntu 24.04 and the
-Testcontainers pools, alongside each runner's separate memory budget. When you
-resize a pool:
+The examples give every worker container 9Gi, alongside each runner's separate
+memory budget. With the CDC chart, bb_worker also holds the chunk cache
+(`config.contentAddressableStorage.chunkCache` in the buildbarn chart), which
+every pool shares and which is sized by entry count: a full cache of 2,048
+entries measured about 0.9 GiB of heap on a Chromium worker, and the worst case
+is the entry count times about 2.25 MiB (`minChunkSizeBytes + horizonSizeBytes`).
+Size it for the smallest worker container; see
+[Worker Chunk Cache](../../docs/buildbarn-storage-model.md#worker-chunk-cache). When you resize a pool:
 
 - Lower the runner only after comparing its peak working set
   (`container_memory_working_set_bytes{container="runner"}`) with its limit.
