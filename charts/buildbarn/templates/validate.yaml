@@ -467,6 +467,18 @@
 {{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
 {{- $_ := set $configMapsByName $cm.metadata.name $cm -}}
 {{- end -}}
+{{- /* A ConfigMap this release renders through extraObjects replaces its live
+       copy in this upgrade (or is created by it), so the worker checks below
+       read the rendered data: what workers will mount, not what they mount
+       now. A live pre-CDC copy then cannot block the upgrade that migrates it,
+       and a rendered pre-CDC copy is still refused. */ -}}
+{{- range $object := .Values.extraObjects -}}
+{{- $rendered := fromYaml (include "buildbarn.tplvalues.render" (dict "value" $object "context" $)) -}}
+{{- $renderedMeta := default (dict) $rendered.metadata -}}
+{{- if and (eq (default "" $rendered.kind) "ConfigMap") $renderedMeta.name (eq (default $ns $renderedMeta.namespace) $ns) -}}
+{{- $_ := set $configMapsByName $renderedMeta.name $rendered -}}
+{{- end -}}
+{{- end -}}
 {{- $chartConfigNames := list (include "buildbarn.configName" $) (include "buildbarn.workerConfigName" $) -}}
 {{- $referencedConfigMaps := dict -}}
 {{- $rbeWorkers := dict -}}
@@ -518,7 +530,8 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
+{{- /* Live ConfigMaps, with release-rendered replacements and additions. */ -}}
+{{- range $cmKey, $cm := $configMapsByName -}}
 {{- $cmMeta := default (dict) $cm.metadata -}}
 {{- $cmName := $cmMeta.name | default "" -}}
 {{- $cmLabels := default (dict) $cmMeta.labels -}}

@@ -763,6 +763,137 @@ tests:
       - failedTemplate:
           errorPattern: 'custom-libraries data\["worker-helper"\] contains pre-CDC field "browserUrl"'
 
+  # A worker ConfigMap the release renders through extraObjects replaces its
+  # live copy in this upgrade, so the guard reads the rendered data: the live
+  # pre-CDC copy alone must not block the upgrade (bbdev's Envoy common config),
+  # but a rendered pre-CDC copy still does.
+  - it: checks a release-rendered worker ConfigMap's new data, not its live copy
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+            namespace: {{ include "buildbarn.namespace" . }}
+          data:
+            workerImage: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } }, browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a release-rendered worker ConfigMap that is still pre-CDC
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, browserUrl: 'old' }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'worker ConfigMap .*/envoy-worker-config data\["common\.libsonnet"\] contains pre-CDC field "browserUrl"'
+
+  - it: rejects a pre-CDC worker image inherited from a release-rendered ConfigMap
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/worker-envoy pins pre-CDC image .* in spec\.images\.worker'
+
+  # A ConfigMap that exists only in the release's render is not missing.
+  - it: accepts a worker referencing a ConfigMap the release renders for the first time
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: new-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-new
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: new-worker-config
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - notFailedTemplate: {}
+
   - it: rejects pre-CDC worker images inherited from a referenced ConfigMap
     set:
       _testLookup:
