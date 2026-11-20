@@ -49,6 +49,10 @@
     "standardLabels": {
       "type": "object"
     },
+    "buildbarnCdcCompatible": {
+      "type": "boolean",
+      "description": "Annotate the api and publisher Deployments with hermetiq.com/cdc-compatible=true; set only when images.bepNats validates both pre-CDC and CDC Buildbarn configurations."
+    },
     "images": {
       "type": "object"
     },

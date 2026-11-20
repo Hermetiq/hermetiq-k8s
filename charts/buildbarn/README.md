@@ -14,12 +14,24 @@ and `RbeWorker` pools need the operator's CRD. The repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) gives the
 supported full-stack deployment order and external dependencies.
 
+Upgrading an existing cache to chart 0.10.0 requires the
+[CDC storage cutover](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
+The new storage encoding cannot read the old CAS files. Plan a maintenance
+window, snapshot for rollback, and an explicit cold-cache reset. The chart
+refuses legacy files rather than rewriting or deleting them automatically.
+CAS, CMS, AC, ISCC, and FSAC now use persistent indexes by default in both
+filesystem and raw-block backends. ISCC and FSAC are enabled by default; their
+scheduler analysis and worker prefetching consumers remain opt-in.
+Adopt these defaults during the CDC cutover so the cache warms once; see
+[persistent defaults and ephemeral opt-out](#persistent-defaults-and-ephemeral-opt-out).
+
 ![Hermetiq Buildbarn deployment architecture](https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/main/hermetiq-buildbarn-diagram.png)
 
 For Buildbarn upstream background, see https://github.com/buildbarn.
 
 ## Contents
 
+- [CDC upgrade behavior and regression coverage](#cdc-upgrade-behavior-and-regression-coverage)
 - [What The Chart Deploys](#what-the-chart-deploys)
 - [Install](#install)
   - [Prerequisites checklist](#prerequisites-checklist)
@@ -39,6 +51,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Operator-managed workers](#operator-managed-workers)
   - [Overrides](#overrides)
 - [Storage](#storage)
+  - [Persistent defaults and ephemeral opt-out](#persistent-defaults-and-ephemeral-opt-out)
   - [Raw block-device storage](#raw-block-device-storage)
   - [Initial Size Class Cache (ISCC) and File System Access Cache (FSAC)](#initial-size-class-cache-iscc-and-file-system-access-cache-fsac)
   - [Large-scale deployments (10 TiB cache / 5–10 shards)](#large-scale-deployments-10-tib-cache--510-shards)
@@ -78,6 +91,191 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
   - [Verify the sidecar](#verify-the-sidecar)
 - [License](#license)
 
+## CDC upgrade behavior and regression coverage
+
+Storage format and claims:
+
+- CAS, shared CMS, AC, ISCC, and FSAC on-disk data now live under `cdc-v1/` on
+  each store's existing filesystem or metadata volume. Existing data PVC names
+  are preserved; persistent raw-block defaults add metadata claim templates where
+  none existed before, and the default-enabled ISCC and FSAC add `iscc` and
+  `fsac` claim templates to a release that ran without them. `volume-init`
+  fails before modifying any volume
+  while legacy `*-keys.db`, `*-blocks.db`, or `persistent_state` exist; follow
+  the [cutover procedure](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
+- A changed claim-template list is refused before anything is applied. On a
+  real `helm install` or `helm upgrade` the chart reads the live StatefulSet
+  `storage` in the release namespace and fails when its `volumeClaimTemplates`
+  differ from the rendered ones: a claim name added, removed or reordered, or
+  `storageClassName`, `volumeMode` or the requested size changed for an
+  existing name. Access modes, labels and annotations are not compared. A
+  0.9.9 release on chart defaults always differs, because 0.10.0 adds the
+  `iscc` and `fsac` claims. The error lists the differences and the step to
+  run first, with storage stopped:
+  `kubectl delete statefulset storage --namespace <namespace> --cascade=orphan`.
+  Existing PersistentVolumeClaims are kept as they are; a changed class or
+  size only applies to claims that do not exist yet. The check has nothing to
+  compare under `helm template`, a client-side dry run, or a GitOps tool that
+  renders client-side, and `helm rollback` does not run it: a rollback across
+  a claim-template change needs the same StatefulSet deletion first.
+  `upgradeChecks.skipStorageClaimTemplateCheck: true` turns the check off.
+  Leave it `false`: without it Helm applies every other object of the release
+  and then fails on the StatefulSet.
+- Every store has its own `storageClassName`, and for raw-block PVCs a second
+  one for its metadata claim. Setting the CAS class does not change the
+  others; see [Deploying the chart](#deploying-the-chart). In `mode: pvc` the
+  install notes print `WARNING: STORAGE CLASS MISMATCH` when an enabled
+  filesystem store's class differs from the CAS class, or a raw store's
+  blocks class differs from its metadata class.
+- `storage.persistence.cms.keyLocationMap.type` defaults to `blockDevice`
+  (a file-backed index under `cdc-v1/`). On a durable filesystem, both chunks
+  and mappings survive process restarts. The index defaults to
+  `keyLocationMap.sizeMi: 1280`. It is sized for the smallest possible mapping
+  (two chunks, 104 bytes) and not for the 512 bytes that
+  `storage.keyLocationMapSizing.averageObjectSizeBytes.cms` assumes, because
+  resizing it later empties the CMS. With its 1 GiB blocks file, shared CMS
+  adds 2304 MiB to the CAS filesystem or the raw CAS metadata volume; a
+  dedicated filesystem CMS claim defaults to `4Gi`. Explicit `inMemory` CMS
+  and raw CAS devices without a metadata filesystem retain their documented
+  ephemeral behavior. An `emptyDir` still disappears when its Pod is replaced.
+- `storage.persistence.mode: emptyDir` needs an `emptyDir.sizeLimit` for every
+  enabled filesystem store. ISCC and FSAC are enabled by default, so values
+  that only set limits for CAS and AC no longer render: set both limits or
+  disable the stores.
+- `storage.persistence.mode: hostPath` has two new refusals. A raw store's
+  `blockDevice.metadata.hostPath.type` now defaults to `Directory` for all
+  five stores (it was `DirectoryOrCreate`): the node directory must already
+  exist, so a missing metadata mount fails the pod instead of being created on
+  the boot disk. And an enabled filesystem ISCC or FSAC whose `hostPath.path`
+  is still the chart default fails the render when CAS is a raw block device
+  or `cas.hostPath.path` is not the chart default: give the store a path next
+  to the other stores, or set its `enabled: false`.
+- `helm upgrade --reuse-values` cannot be used for the 0.9.9 to 0.10.0
+  upgrade. Helm then replaces the new chart's defaults with the values
+  computed for the old release, so every key 0.10.0 introduced is missing and
+  the render fails with errors that do not mention the flag. Pass your
+  complete values files instead.
+
+Images and configuration text:
+
+- The release's own images must be CDC builds. `images.storage`,
+  `images.scheduler`, `images.worker` and `images.runnerInstaller`, plus
+  `images.remoteAsset` and `images.portal` when those components are enabled,
+  fail the render when their tag carries an upstream date stamp before
+  `20261102`. `images.browser` is not checked: bb-browser is intentionally
+  still a pre-CDC binary. The check reads the tag only. A tag without an
+  upstream date stamp (a re-tagged mirror), a digest-only reference, and a
+  `digest` override left under the chart's default tag cannot be classified
+  and are accepted, so check any such pin yourself before the upgrade.
+- `scheduler.handover.enabled` and `scheduler.configurationReloadInterval`
+  fail the render unless `scheduler.handover.cdcCompatibleFork` is `true`.
+  Turning both off is not enough while `images.scheduler` still pins a fork
+  image built without CDC support: remove that repository, tag or digest
+  override too. See
+  [Optional configuration reload and scheduler handover](#optional-configuration-reload-and-scheduler-handover).
+- `configOverrides`, `scheduler.actionRouter.custom`, and worker ConfigMaps
+  are read as text for fields the CDC binaries reject; nothing is evaluated.
+  A field is recognised bare or quoted and followed by `:`, `::` or `+:`.
+  Block comments, `//` comments and whole-line `#` comments are removed
+  first. A file that tests for the CDC shape itself (it contains
+  `std.objectHas` and the word `chunkStorage`, as the operator's built-in
+  `worker-common.libsonnet` does) serves both schemas and is not refused for
+  the pre-CDC branch it carries.
+- Workers using custom ConfigMaps are checked through their actual CRD
+  references and projected keys. A ConfigMap in the release namespace that no
+  `RbeWorker` references is still read when its name ends in `-worker-config`
+  or it carries the `hermetiq.com/worker-pool` label, unless an `RbeWorker`
+  owns it; the error then says which of the two selected it. Rename such a
+  ConfigMap or keep it in another namespace if it is not a worker
+  configuration, for example a backup copy. ConfigMaps rendered by this
+  release through `extraObjects` are read in their rendered form, including
+  every document of a multi-document entry and the items of a `kind: List`.
+  Live `RbeWorker` image pins, and the `workerImage` and
+  `runnerInstallerImage` defaults of a referenced ConfigMap, fail under the
+  same date rule and with the same limits as the release images. Stage
+  existing image defaults before removing old CR image pins; see the
+  [worker upgrade notes](../../custom-values/rbeworkers/README.md).
+
+Other components:
+
+- Operator and co-located `bep-nats` Deployments must declare
+  `hermetiq.com/cdc-compatible: "true"` for the actual selected binaries.
+  These checks run on `helm install` as well as `helm upgrade`, on purpose: a
+  first install next to an operator or `bep-nats` without the declaration is
+  refused too. They read the cluster through Helm's `lookup`, so
+  `helm template` and other client-side renders skip them.
+  The operator chart recognizes its pinned CDC image digest; custom operator
+  images require its `buildbarnCdcCompatible` setting. Set
+  `upgradeChecks.operatorNamespace` and `upgradeChecks.hermetiqNamespace` when
+  those components run in another namespace. For `bep-nats` the declaration
+  needs a Hermetiq chart release newer than the published `0.9.8`, with a
+  `bep-nats` image that validates both configuration schemas. The published
+  `0.9.8` chart accepts `buildbarnCdcCompatible` but renders no annotation,
+  and its default `bep-nats v0.9.8` image is **not** compatible. The
+  [supported chart bundle](../../README.md#supported-chart-bundle) says what
+  that means for installing next to Hermetiq today.
+- `bb-browser` is still a pre-CDC binary and now reads CAS through the
+  frontend on port `8980`, which reassembles multi-chunk blobs for it. It
+  dials `frontend-internal:8980` by default and `frontend-grpc:8980` when
+  `frontend.internalService.enabled` is `false`; it still reads the Action
+  Cache from the storage shards on `:8981`. This is a new in-cluster hop: a
+  NetworkPolicy that selects the frontend pods must admit the browser pods,
+  or Browser pages that show commands, directories, files and logs time out.
+- When `bb-browser` is enabled (`browser.replicas > 0`) and the cache proxy
+  enforces authentication (`frontend.grpcCacheProxy.enforceAuth=true`),
+  `frontend.internalService.enabled=true` is required because `bb-browser`
+  has no proxy credentials. With the cache proxy enabled, `enforceAuth=false`
+  and the internal Service disabled, the render succeeds and Browser's CAS
+  reads pass through the proxy sidecar like any other client's.
+- `portal.bes.enableGraphqlPlayground: false` no longer disables anything.
+  The pinned bb-portal serves the GraphQL playground whenever the GraphQL API
+  is configured, and the chart always configures it; see
+  [bb-portal](#bb-portal).
+- Dashboards distinguish CDC chunk storage (`cs`) and chunk mappings (`cms`),
+  while continuing to display old `cas` metrics during a mixed rollout.
+  Removed invalid-put metrics are retired rather than renamed to nonexistent
+  series. Separate CMS retention/index views show mapping pressure even when
+  chunk capacity is healthy.
+
+The schema validation suite (`config_schema_test.sh`) uses the official protobuf
+JSON parser with pinned upstream and CDC fork descriptors plus negative controls.
+It needs Helm and the Python packages `PyYAML`, `jsonnet` and `protobuf`.
+
+The storage and metrics regressions cannot be run with Helm and a bare
+Python 3 alone:
+
+| Test | Needs |
+|---|---|
+| `storage_migration_test.sh` | Helm, `PyYAML` |
+| `storage_integration.py` | Helm, Docker, `PyYAML`, `jsonnet`, `protobuf`, `grpcio` |
+| `metrics_compatibility_test.sh` | `promtool`, `PyYAML` |
+
+```bash
+bash charts/buildbarn/tests/storage_migration_test.sh
+python3 charts/buildbarn/tests/storage_integration.py
+bash charts/buildbarn/tests/metrics_compatibility_test.sh
+```
+
+CI runs `helm unittest` and every `tests/*_test.sh` in the chart validation
+step, in a container that installs `PyYAML`, `jsonnet`, `protobuf` and
+`promtool`. `tests/storage_gke_probe.py` is a manual tool that CI does not
+run: it probes a disposable shard on a real cluster for the
+[GKE validation runbook](../../docs/buildbarn-gke-storage-validation.md).
+
+The container tests use isolated volumes and a private Docker network in CI
+(localhost-only ports when run directly). Raw-device cases require privileged
+Docker helper containers to create disposable loop devices. The tests verify
+that a rejected upgrade preserves old readable CAS and persistent AC data, an
+explicit reset yields clean misses and reuploads (including through `frontend`),
+and Action Cache completeness hides outputs lost by an explicitly ephemeral CMS.
+Filesystem, raw-PVC, and raw-hostPath configurations retain CAS/CMS/AC and enabled
+ISCC/FSAC entries through graceful container replacement and SIGKILL after a
+checkpoint. These are Docker simulations of the storage layouts, not Kubernetes
+PVC reattachment or physical NVMe/node-loss tests. A dedicated Buildkite step
+runs the suite.
+`metrics_compatibility_test.sh` evaluates the shipped recording rules, alerts,
+and dashboard queries with `promtool` against legacy, CDC, and mixed samples.
+
 ## What The Chart Deploys
 
 Core resources:
@@ -90,7 +288,7 @@ Core resources:
 - `scheduler-ubuntu22-04` Deployment and `scheduler` Service.
 - `storage` StatefulSet and headless `storage` Service.
 - Optional `bb-portal` Deployment and Service when `portal.enabled=true` (see [bb-portal](#bb-portal)).
-- Optional `frontend-internal` ClusterIP Service for trusted in-cluster clients when `frontend.internalService.enabled=true`.
+- Optional `frontend-internal` ClusterIP Service for trusted in-cluster clients when `frontend.internalService.enabled=true` (the default). `bb-browser` reads CAS through it.
 - Optional `NetworkPolicy` restricting the storage gRPC port to Buildbarn components and named peers when `storage.networkPolicy.enabled=true`.
 - Optional `NetworkPolicy` restricting the scheduler's client, worker, and BuildQueueState ports to the frontend, workers, bb-portal, and named peers when `scheduler.networkPolicy.enabled=true`.
 - Optional `remote-asset` Deployment plus `remote-asset` and `remote-asset-grpc` Services.
@@ -156,8 +354,12 @@ Confirm the following before running `helm upgrade --install`:
 - [ ] **Storage provisioning and immutable PVC decisions (before first install)**
   - **PVC storage (`mode: pvc`)**: run `kubectl get storageclass` and pick a
     fast SSD StorageClass (for example `premium-rwo` or `hyperdisk-balanced` on
-    GKE, `gp3` on EKS). Decide on `storage.persistence.iscc.enabled` and
-    `storage.persistence.fsac.enabled` **before** the initial install (see
+    GKE, `gp3` on EKS). Set it for every store that gets a claim: CAS, AC,
+    ISCC and FSAC each have their own `storageClassName` (see
+    [Deploying the chart](#deploying-the-chart)). Decide on
+    `storage.persistence.iscc.enabled` and
+    `storage.persistence.fsac.enabled` (both default to `true`) **before** the
+    initial install (see
     [Pre-install storage and scale decisions](#pre-install-storage-and-scale-decisions)).
   - **Local NVMe raw block storage (`mode: hostPath`, `backend: blockDevice`)**:
     provision the node pool with raw unformatted NVMe SSDs
@@ -187,11 +389,16 @@ Confirm the following before running `helm upgrade --install`:
 > `helm install` when using `mode: pvc`.**
 >
 > Kubernetes rejects changes to an existing StatefulSet's
-> `volumeClaimTemplates`. Enabling `storage.persistence.iscc.enabled: true` or
-> `storage.persistence.fsac.enabled: true`, switching between
+> `volumeClaimTemplates`. Changing either default-enabled
+> `storage.persistence.iscc.enabled` or `storage.persistence.fsac.enabled`,
+> switching between
 > `backend: filesystem` and `backend: blockDevice`, or changing a store's
-> `size` after the initial install makes `helm upgrade` fail until the
-> `storage` StatefulSet is recreated. Follow
+> `size` or `storageClassName` after the initial install makes `helm upgrade`
+> fail until the `storage` StatefulSet is recreated. The chart compares the
+> live StatefulSet with the render and fails before anything is applied,
+> listing the differences (see
+> [CDC upgrade behavior](#cdc-upgrade-behavior-and-regression-coverage)).
+> Follow
 > [Recreate the Storage StatefulSet](../../docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset);
 > to grow an existing volume in place first, see
 > [Resize a Store](../../docs/buildbarn-storage-operations.md#resize-a-store).
@@ -251,6 +458,14 @@ in `buildbarn-values.yaml` and `hermetiq-values.yaml`:
    `publisher.trustedCalCidrs` empty, which rejects every CAL stream, so set it
    in `hermetiq-values.yaml` to your cluster's Pod CIDR (and Node CIDR if any
    workers use `hostNetwork`).
+6. **CDC capability declaration.** This chart refuses to install or upgrade
+   while the Hermetiq API and publisher Deployments in its namespace (or in
+   `upgradeChecks.hermetiqNamespace`) lack
+   `hermetiq.com/cdc-compatible: "true"`. The published Hermetiq `0.9.8` chart
+   cannot render that annotation, so installing this chart into the same
+   namespace fails until a newer Hermetiq chart release with a dual-schema
+   `bep-nats` image is deployed. See the
+   [supported chart bundle](../../README.md#supported-chart-bundle).
 
 ### Deploying the chart
 
@@ -264,24 +479,46 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.9.9
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.9.9
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
-Check `kubectl get storageclass` and set
-`storage.persistence.cas.storageClassName` and
-`storage.persistence.ac.storageClassName` to a StorageClass available in your
-cluster. The chart defaults to the GKE-style name `premium-rwo`; on EKS, use
-`gp3` unless your cluster provides a `premium-rwo` alias backed by EBS gp3.
-Review the other `storage.persistence.*.storageClassName` values if you enable
-additional stores. After the Hermetiq chart and worker operator are installed,
-install Buildbarn:
+Check `kubectl get storageclass` and set the StorageClass of every store that
+gets a claim. Each store has its own value and none of them follows the CAS
+setting:
+
+- `storage.persistence.cas.storageClassName`
+- `storage.persistence.ac.storageClassName`
+- `storage.persistence.iscc.storageClassName`
+- `storage.persistence.fsac.storageClassName`
+
+ISCC and FSAC are enabled by default and each has its own claim. The chart
+defaults all four to the GKE-style name `premium-rwo`; on EKS, use `gp3` unless
+your cluster provides a `premium-rwo` alias backed by EBS gp3. A store with
+`backend: blockDevice` takes its classes from
+`storage.persistence.<store>.blockDevice.storageClassName` (empty by default,
+which is the cluster's default class) and
+`storage.persistence.<store>.blockDevice.metadata.storageClassName` (default
+`premium-rwo`) instead. Set both, to classes whose volumes are lost together.
+A dedicated CMS (`storage.persistence.cms.backend: filesystem` or
+`blockDevice`) has the same values under `storage.persistence.cms`.
+
+A claim that names a StorageClass the cluster does not have stays `Pending`,
+and so does its pod. Storage pods start in order, so while `storage-0` is
+Pending no shard comes up. A claim keeps the class it was created with:
+correcting the value afterwards means deleting the Pending claims and
+[recreating the StatefulSet](../../docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
+In `mode: pvc` the install notes print `WARNING: STORAGE CLASS MISMATCH` when a
+store's class differs from the CAS class or a raw store's blocks and metadata
+classes differ, but only after the release has been applied.
+
+After the Hermetiq chart and worker operator are installed, install Buildbarn:
 
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.9 \
+  --version 0.10.0 \
   --values buildbarn-values.yaml
 ```
 
@@ -318,7 +555,7 @@ The chart follows Buildbarn's standard split:
 - `scheduler` assigns queued operations to workers matching the requested platform properties.
 - `worker` containers fetch inputs from CAS, mount or materialize build inputs, call their local `runner` over a Unix socket, and upload outputs back to CAS.
 - `storage` shards hold CAS and Action Cache data on persistent disks.
-- `browser` provides the Buildbarn Browser UI.
+- `browser` provides the Buildbarn Browser UI. It reads CAS through the frontend on `:8980` and the Action Cache from the storage shards.
 - `remote-asset`, when enabled, serves the Bazel Remote Asset Fetch API and stores fetched blobs in CAS.
 - `bb-portal`, when enabled, serves the bb-portal build-event dashboard and BES endpoint (see [bb-portal](#bb-portal)).
 
@@ -375,7 +612,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.9 \
+  --version 0.10.0 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -611,9 +848,14 @@ The hops covered:
 | `:8983` | scheduler | workers |
 | `:8984` | scheduler | bb-portal |
 
-The frontend's own `:8980` is deliberately excluded: it faces Bazel, not
-another Buildbarn service, and it is normally terminated at the gateway with
-its callers authenticated by `frontend.jwks`. The scheduler's admin port
+The frontend's own `:8980` is deliberately excluded: it faces Bazel and is
+normally terminated at the gateway with its callers authenticated by
+`frontend.jwks`. One Buildbarn service does call it. `bb-browser` reads CAS
+through the frontend, at `frontend-internal:8980` by default and
+`frontend-grpc:8980` when `frontend.internalService.enabled` is `false`. That
+hop is plaintext and presents no client certificate, with or without this
+block; Browser's Action Cache reads still go to storage on `:8981` and are
+covered. The scheduler's admin port
 `:7982` is excluded because it is HTTP, and `http.server.AuthenticationPolicy`
 has no `tlsClientCertificate` arm at all — mutual TLS is not available there
 however this block is configured. The runner is reached over
@@ -744,15 +986,19 @@ storage:
 `blocksSizeGi` plus the on-disk key-location map (`keyLocationMapSizeMi` for
 the CAS, `keyLocationMap.sizeMi` for the other stores) must leave headroom
 inside `size` for `persistent_state` and filesystem metadata; the chart refuses
-to render when it does not. Enable `storage.keyLocationMapSizing.validate: true`
+to render when it does not. The CAS volume also holds the shared CMS: its 1 GiB
+blocks file and 1280 MiB index (2304 MiB by default) count against `cas.size`.
+ISCC and FSAC are enabled by default and get their own claims, each with its
+own `storageClassName`. Enable `storage.keyLocationMapSizing.validate: true`
 so Helm also verifies that every store's key-location map can index at least
 `2x` the objects its block capacity can hold. Changing shard count or storage
 layout after builds have run can invalidate or strand cache data, so size these
 values carefully before production use.
 
-For maximum local I/O, you can opt into ephemeral NVMe-backed storage without
-PVCs. This is cache storage: Pod recreation, node drain, node repair, node loss,
-or rescheduling can erase a shard. There is no automatic data migration between
+For maximum local I/O, use NVMe-backed storage without PVCs. File-backed
+indexes on retained hostPath storage survive pod replacement on the same node;
+node loss or rescheduling can still erase a shard. With `emptyDir`, pod
+replacement also erases the shard. There is no automatic data migration between
 PVC, `emptyDir`, and `hostPath`; changing an existing release requires manually
 recreating the StatefulSet because `volumeClaimTemplates` are effectively
 immutable.
@@ -781,7 +1027,19 @@ storage:
       blocksSizeGi: 10
       emptyDir:
         sizeLimit: 20Gi
+    iscc:
+      emptyDir:
+        sizeLimit: 2Gi
+    fsac:
+      emptyDir:
+        sizeLimit: 6Gi
 ```
+
+In this mode every enabled filesystem store needs an `emptyDir.sizeLimit`, and
+the render fails without one. That includes ISCC and FSAC, which are enabled by
+default; set a store's `enabled: false` instead if you do not use it. Each
+limit must hold the store's blocks file and index, and the CAS limit also the
+shared CMS (2304 MiB by default).
 
 If your nodes expose mounted NVMe storage through a stable path, use `hostPath`:
 
@@ -799,10 +1057,106 @@ storage:
       hostPath:
         path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/ac
         type: DirectoryOrCreate
+    iscc:
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/iscc
+        type: DirectoryOrCreate
+    fsac:
+      hostPath:
+        path: /mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/fsac
+        type: DirectoryOrCreate
 ```
+
+These are the chart defaults for a GKE Local SSD ephemeral-storage node. Set
+all four paths when your mount is elsewhere. `DirectoryOrCreate` lets the
+kubelet create a missing directory, and where the path is not a mounted SSD it
+creates it on the node boot disk. For that reason the render fails when CAS is
+moved off the default path, or is a raw block device, while an enabled
+filesystem-backed ISCC or FSAC is still on its default path: give that store a
+`hostPath.path` next to the other stores, or set its `enabled: false`. AC is
+not covered by that check.
 
 Storage pods are resource intensive in production. Make sure the target namespace
 has quota for the configured CPU, memory, disk, or ephemeral-storage requests.
+
+### Persistent defaults and ephemeral opt-out
+
+All five backing stores—CAS, CMS, AC, ISCC, and FSAC—use disk-backed indexes by
+default, and ISCC and FSAC are enabled. Set `storage.persistence.iscc.enabled`
+or `storage.persistence.fsac.enabled` to `false` to omit an unused store.
+Scheduler size-class analysis and worker prefetching remain separate opt-ins.
+Frontend read caches remain volatile.
+
+| Deployment | Index and checkpoint placement | Recovery boundary |
+|---|---|---|
+| Filesystem PVC | Existing data PVC | Pod replacement; node rescheduling when the PV is durable and attachable |
+| Raw-block PVC | Companion `<store>-meta` filesystem PVC | Both blocks and metadata PVCs must survive |
+| Raw local NVMe (`hostPath`) | Explicit `blockDevice.metadata.hostPath.path` per raw store; the directory must already exist | Same retained node, blocks device, and metadata filesystem |
+| Filesystem `emptyDir` | Pod's ephemeral volume | Container-only restart; replacing the pod loses the store |
+
+Blocks and metadata must share a lifecycle: reset them together when either is
+replaced. Retained indexes over lost blocks can falsely report blobs as present.
+Shared CMS keeps its blocks, index, and state on the CAS filesystem or raw CAS
+metadata volume. Include its default 1Gi blocks and 1280Mi index (2304 MiB) in
+that volume's capacity; the default CAS claim and the default 10Gi raw CAS
+metadata claim both hold it. Dedicated CMS backends also use persistent indexes
+by default, and a dedicated filesystem CMS claim defaults to 4Gi.
+
+With all five stores enabled, the default index files total 10304 MiB
+(10.06 GiB) on filesystem backends (CAS 7168, CMS 1280, AC 1344, ISCC 256,
+FSAC 256) and 11008 MiB (10.75 GiB) on raw-block backends with shared CMS (CAS
+7360, CMS 1280, AC 1344, ISCC 512, FSAC 512). The default
+`storage.resources.requests.memory` of `4Gi` does not keep that much index in
+the page cache; raise it for a warm index as described under
+[Large-scale deployments](#large-scale-deployments-10-tib-cache--510-shards).
+
+**Existing releases require a planned migration.** The CDC upgrade already
+invalidates the old storage format. Use one maintenance window to stop clients
+and storage, retire old data, prepare metadata storage, and start CDC with
+persistent indexes. Follow the [storage-format cutover](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback)
+and [capacity/migration checklist](../../docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes).
+Filesystem stores need index space; a PVC release that ran without ISCC or
+FSAC gains their claim templates; raw PVC stores gain immutable metadata
+claim templates; raw hostPath stores require explicit metadata directories
+that already exist on the node (their hostPath `type` defaults to
+`Directory`). A regular Helm upgrade cannot make those claim-template changes
+in place: the chart compares the live `storage` StatefulSet with the render
+and fails before anything is applied, naming the differences and the
+StatefulSet deletion to run first.
+
+Older deployment values with explicit `inMemory` overrides still win over the
+new defaults. Remove them, or apply
+[`custom-values/buildbarn-values-persistent.yaml`](../../custom-values/buildbarn-values-persistent.yaml)
+after deployment values. This optional convenience profile selects the default
+index modes without changing enablement, backends, sizes, paths, StorageClasses,
+or resource budgets. It is unnecessary for a fresh deployment using defaults.
+
+To deliberately discard indexes on restart, apply the
+[ephemeral profile](../../custom-values/buildbarn-values-ephemeral.yaml) last:
+
+```bash
+helm template buildbarn ./charts/buildbarn --namespace hermetiq \
+  -f deployment-values.yaml \
+  -f custom-values/buildbarn-values-ephemeral.yaml
+```
+
+That profile selects RAM indexes for all raw-block stores and filesystem
+CMS/AC/ISCC/FSAC, preserving volume modes and optional-store flags. It carries
+no RAM entry counts. The chart's default
+`blockDevice.keyLocationMapInMemoryEntries` of each raw store covers only that
+store's default device size (200Gi for CAS), so a larger raw store needs an
+explicit count. With `storage.keyLocationMapSizing.validate: true` the render
+fails and names the count to set; with validation off the undersized RAM index
+is deployed and only the install notes warn. The bundled
+[Local SSD overlay](../../custom-values/buildbarn-values-local-ssd-block.yaml)
+carries the count for its CAS device, so the profile renders when applied
+after it. Filesystem
+CAS always has a file-backed index; choose `mode: emptyDir` with bounded
+`emptyDir.sizeLimit` values when its data should also be pod-lifetime. Changing
+an existing release's volume mode or removing metadata claims is a separate
+migration; see [explicit ephemeral opt-out](../../docs/buildbarn-storage-operations.md#explicit-ephemeral-opt-out).
+The two companion profiles live outside the packaged OCI chart and must be
+fetched separately by OCI consumers.
 
 ### Raw block-device storage
 
@@ -813,12 +1167,23 @@ rather than a file on a filesystem, avoiding the filesystem layer. Set a store's
 becomes the block store — Buildbarn auto-infers the block size, so `blocksSizeGi` is
 ignored in this mode.
 
-The key-location map (KLM) defaults to **in memory** (`keyLocationMap: inMemory`),
-which is simplest but **not persistent** — the store is empty after a storage-pod
-restart. RAM use scales with `keyLocationMapInMemoryEntries` (~64 bytes/entry), so
-size it against the pod memory limit. To persist across restarts, set
-`keyLocationMap: file`: the KLM file and the `persistent_state` directory then live on
-a small companion `volumeMode: Filesystem` PVC (claim `<store>-meta`).
+The raw-block key-location map (KLM) defaults to **file-backed**
+(`keyLocationMap: file`) for all five dedicated raw-block stores. In PVC mode,
+the map and `persistent_state` directory live on a companion
+`volumeMode: Filesystem` claim named `<store>-meta`. That claim has its own
+`blockDevice.metadata.storageClassName`, which defaults to `premium-rwo` and
+does not follow the blocks class: set both, to classes whose volumes are lost
+together, or an index can outlive its blocks. The install notes print
+`WARNING: STORAGE CLASS MISMATCH` when the two differ. In hostPath mode there
+is no default: the render fails until `blockDevice.metadata.hostPath.path` is
+set, and the directory must already exist on the node. Its hostPath `type`
+defaults to `Directory`, so a missing metadata mount fails the volume mount
+and the pod does not start, where `DirectoryOrCreate` would have created the
+directory on the boot disk. Use a directory inside the mounted filesystem, not
+the mountpoint itself, which exists whether or not anything is mounted. Both
+blocks and metadata must survive for the store to recover.
+`keyLocationMap: inMemory` is an explicit opt-out that starts empty after each
+storage-process restart and consumes about 64 bytes of heap per index entry.
 
 ```yaml
 storage:
@@ -829,8 +1194,9 @@ storage:
       blockDevice:
         storageClassName: bb-block-hyperdisk   # must support volumeMode: Block
         size: 1000Gi
-        keyLocationMap: inMemory               # or "file" for persistence
-        keyLocationMapInMemoryEntries: 20000000
+        keyLocationMap: file                   # default; metadata PVC required
+        metadata:
+          storageClassName: bb-block-hyperdisk # default is premium-rwo, whatever the blocks class
 ```
 
 **Device access / Pod Security (differs by mode — validate on your cluster).** The
@@ -867,7 +1233,9 @@ discards its data on the next start; plan such changes as cache flushes.
 Enabling `storage.persistence.iscc.enabled` or `storage.persistence.fsac.enabled` on an
 existing PVC-backed release also changes the StatefulSet's `volumeClaimTemplates`.
 Plan a reviewed StatefulSet recreate/migration for that change; Helm cannot patch the
-existing StatefulSet in place.
+existing StatefulSet in place. For every such change the chart fails the install or
+upgrade before anything is applied and lists the differing claim templates; follow
+[Recreate the Storage StatefulSet](../../docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
 
 #### GKE example A — Persistent Disk / Hyperdisk (persistent, network-attached)
 
@@ -889,48 +1257,41 @@ allowVolumeExpansion: true
 its disk's zone, so a shard survives pod restart/reschedule within the zone, but not a
 full-zone loss. Use a regional disk for cross-zone HA.
 
-#### GKE example B — Local NVMe SSD via `partition_ephemeral_disks` (fastest, ephemeral)
+#### GKE example B — Local NVMe SSD via `partition_ephemeral_disks` (node-local)
 
-Buildbarn's `partition_ephemeral_disks` tool, packaged here as the
-[`custom-values/partition-ephemeral-disks-daemonset.yaml`](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
-DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named
-`ephemeral` and carves logical volumes, so pods can consume raw block devices
-with fine-grained sizes. The DaemonSet uses **fixed sizes** for the
-metadata-heavy stores (`8G` AC, `2G` ISCC, `6G` FSAC) and gives the remaining
-space (`100%FREE`) to CAS. Avoid percentage splits such as `1%VG`: on multi-SSD
-nodes they over-allocate AC/ISCC/FSAC, and an in-memory key-location map sized
-for the small store then covers only a fraction of the device, so the map
-saturates long before the blocks fill. The storage pods consume the LVs via
-`hostPath` block devices:
+The [partitioning DaemonSet](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
+creates raw CAS/AC/ISCC/FSAC LVs and a 16 GiB ext4 metadata LV on the **same Local
+SSDs**. The [local SSD overlay](../../custom-values/buildbarn-values-local-ssd-block.yaml)
+uses persistent indexes for all five stores; shared CMS lives on the CAS metadata
+filesystem. Clean storage pod restarts retain warmed contents and learned history
+while those SSDs remain available.
 
-```yaml
-storage:
-  # Dedicated non-spot raw-block Local SSD pool (gcloud --local-nvme-ssd-block).
-  # Do NOT target the cloud.google.com/gke-ephemeral-storage-local-ssd label:
-  # that mode formats + mounts the SSDs as a filesystem, leaving no raw device
-  # to partition.
-  nodeSelector:
-    node-type: ssd-block
-  persistence:
-    mode: hostPath
-    blockDevice:
-      allowHostPath: true         # required for backend=blockDevice with mode=hostPath
-      deviceAccess: chownInit     # chown the root-owned device node for uid 65534
-    cas:
-      backend: blockDevice
-      blockDevice:
-        keyLocationMap: inMemory  # ephemeral storage => cache-only; no persistence
-        hostPath:
-          devicePath: /dev/ephemeral/cas
-```
+The provisioner prepares a dedicated shared mount on COS, verifies the metadata
+filesystem and VG/LV identity marker privately, then publishes the metadata mount
+and sets `hermetiq/ephemeral-lvm=ready`. Metadata hostPaths use `type: Directory`.
+An old full VG without metadata requires a cold cut-over; no existing data LV is
+resized and no existing metadata LV is formatted. The ready label gates scheduling
+but does not evict already-running storage pods after a detected failure.
 
-This path is cache-only: a node loss drops that shard. If you set `keyLocationMap: file`
-here, co-locate the metadata on the **same** Local SSD
-(`blockDevice.metadata.hostPath.path`) so state and blocks are wiped together — never on
-a network PVC. In hostPath block mode the chart runs the **storage container
-`privileged: true`** (device cgroup) alongside the `chownInit` device chown; that, plus
-the privileged DaemonSet and `hostPath` block devices, requires a baseline/privileged
-namespace or PSA exemption.
+Never retain boot-disk or network metadata over disposable Local SSD blocks:
+recreated blocks can leave an old index falsely reporting blobs as present. Reset
+blocks and metadata together after loss or replacement, and restart frontends
+before resuming builds after a cold reset to clear positive existence-cache entries.
+Both storage and the provisioner are privileged in this hostPath configuration.
+
+See [GKE Example B](../../docs/buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+for the layout, the
+[cut-over procedure for an existing Local SSD pool](../../docs/buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool)
+and [resetting a Local SSD node](../../docs/buildbarn-block-storage.md#resetting-a-local-ssd-node),
+and the [GKE validation runbook and record](../../docs/buildbarn-gke-storage-validation.md)
+for physical mount and lifecycle checks. To intentionally discard cache and
+training state on each storage-process restart, apply
+[the ephemeral overlay](../../custom-values/buildbarn-values-ephemeral.yaml) last.
+That combination renders: the Local SSD overlay carries the RAM entry count
+for its CAS device, which is unused while the index is file-backed. A raw
+store larger than its chart default (200Gi for CAS) otherwise needs an
+explicit `blockDevice.keyLocationMapInMemoryEntries`; see
+[Persistent defaults and ephemeral opt-out](#persistent-defaults-and-ephemeral-opt-out).
 
 #### GKE example C — TopoLVM CSI (dynamic LVM block, non-privileged)
 
@@ -975,13 +1336,20 @@ storage:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
+        metadata:
+          storageClassName: topolvm-ssd
         size: 680Gi
-        keyLocationMap: inMemory
-        keyLocationMapInMemoryEntries: 80000000
-    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 8Gi, keyLocationMapInMemoryEntries: 16000000 } }
-    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 2Gi, keyLocationMapInMemoryEntries: 8000000 } }
-    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, size: 6Gi, keyLocationMapInMemoryEntries: 8000000 } }
+        keyLocationMap: file # default; companion metadata PVC
+    ac:   { backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 8Gi } }
+    iscc: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 2Gi } }
+    fsac: { enabled: true, backend: blockDevice, blockDevice: { storageClassName: topolvm-ssd, metadata: { storageClassName: topolvm-ssd }, size: 6Gi } }
 ```
+
+Each metadata PVC uses the same local `topolvm-ssd` StorageClass/device class as
+its blocks PVC. Do not use network `premium-rwo` metadata for local blocks.
+After device loss or independent PVC replacement, stop storage and reset/delete
+both `<store>-blocks` and `<store>-meta` together; retained metadata over empty
+blocks can falsely report blobs as present. Shared CMS lives in CAS metadata.
 
 Device-node *file* ownership is still handled by `deviceAccess` exactly as in Example A —
 try `group` (default; PSS restricted-compatible, works if TopoLVM presents the device
@@ -993,7 +1361,15 @@ main advantage over the hostPath path.
 
 Beyond CAS and Action Cache, bb-storage can host two optional stores, each served on the
 same gRPC port and configured exactly like the other stores (`backend`, `blockDevice`,
-sizes). Both are disabled by default.
+sizes). Both stores are enabled by default with persistent indexes. Disable an
+unused store explicitly with its `enabled: false` setting; doing so removes its
+storage endpoint and claim template. On an existing PVC-backed release, adding
+or removing either store changes the claim templates, and the chart refuses
+the upgrade until the
+[StatefulSet is recreated](../../docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
+Each store has its own `storageClassName` (default `premium-rwo`), and in
+`mode: emptyDir` its own required `emptyDir.sizeLimit`. Scheduler analysis and
+worker prefetching remain opt-in.
 
 - **ISCC** (`storage.persistence.iscc.enabled`) records prior action execution outcomes
   so bb-scheduler can pick the initial size class for future runs. Enable the scheduler
@@ -1008,6 +1384,15 @@ The chart validates these dependencies (e.g. `sizeClassAnalysis` requires
 `iscc.enabled`; a worker's `prefetching` requires `fsac.enabled` and its
 `virtualBuildDirectory`).
 
+Both stores use a persistent index by default:
+`keyLocationMap.type: blockDevice` for filesystem storage and
+`blockDevice.keyLocationMap: file` for raw blocks. Remove old `inMemory`
+overrides to retain learned history through storage-process restarts. See the
+[ISCC hostPath example](../../docs/iscc-size-classes.md#1-enable-iscc-storage)
+for the Local SSD metadata layout, and
+[What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart)
+for the volume-lifetime limits.
+
 ### Large-scale deployments (10 TiB cache / 5–10 shards)
 
 When scaling `bb-storage` to a **10 TiB CAS** across **5 to 10 shards**
@@ -1021,19 +1406,26 @@ with high IOPS (Hyperdisk, io2, multi-NVMe) and you want the device sized
 exactly; it also keeps the KLM file on a separate, cheaper disk. **Option B**
 (filesystem PVC) works with any `ReadWriteOnce` StorageClass and is what the
 starter values use; the chart's headroom guard (`blocksSizeGi` plus the on-disk
-KLM must fit inside `size`) applies only to this profile. Both survive restarts
-because their KLMs live on disk.
+KLM and the shared CMS must fit inside `size`) applies to this profile, and
+Option A has the equivalent guard on the CAS metadata claim. Both survive
+restarts because their KLMs live on disk.
 
 #### 1. Choosing `10 shards × 1 TiB` vs `5 shards × 2 TiB`
 
-| Dimension | `10 shards × 1 TiB` (~8.85 TiB usable CAS) | `5 shards × 2 TiB` (~8.85 TiB usable CAS) |
+A raw device is all blocks, while a filesystem volume also holds the index, so
+the two options differ in how much of each shard is blocks: 1024 or 2048 GiB
+for Option A, a 950 or 1900 GiB blocks file for Option B. 41 of the default
+`8+30+3+3 = 44` CAS blocks hold data.
+
+| Dimension | `10 shards × 1 TiB` | `5 shards × 2 TiB` |
 |---|---|---|
+| **Usable CAS** (blocks × 41 / 44) | Option A: ~954 GiB per shard, ~9.32 TiB in total. Option B: ~885 GiB per shard, ~8.64 TiB in total | Option A: ~1908 GiB per shard, ~9.32 TiB in total. Option B: ~1770 GiB per shard, ~8.64 TiB in total |
 | **Per-shard disk & network I/O** | Spread across 10 pods/volumes; lower per-pod CPU and network bandwidth ceiling | Higher per-pod I/O; provision high-IOPS disks (e.g. Hyperdisk Balanced or multi-NVMe RAID-0) |
-| **Max storable single blob** (`usable / 41` data blocks) | ~21.6 GiB (with default `8+30+3+3 = 44` blocks) | ~43.2 GiB (with default `44` blocks) |
+| **Max storable single blob** (one block: blocks / 44) | ~23.3 GiB (Option A), ~21.6 GiB (Option B) | ~46.5 GiB (Option A), ~43.2 GiB (Option B) |
 | **Single-shard loss impact** | Losing 1 shard evicts **10%** of cached blobs | Losing 1 shard evicts **20%** of cached blobs |
 | **Nodes whose loss stalls uploads** (see note below) | Any 1 of 10 | Any 1 of 5 |
-| **Per-shard CAS KLM size** (at 17.4 KiB avg blob, `2.3x` ratio) | ~54.6M objects/shard -> **`7680 MiB` (`7.5 GiB`, ~125.8M entries)** | ~109.2M objects/shard -> **`15360 MiB` (`15 GiB`, ~251.6M entries)** |
-| **Recommended pod memory (`requests` / `limits`)** | `16Gi` / `24Gi` per storage pod | `28Gi` / `40Gi` per storage pod |
+| **Per-shard CAS KLM size** (at 17,408 B avg object) | Option A: ~58.9M objects -> **`8192 MiB` (`8 GiB`, ~130.2M entries, `2.21x`)**. Option B: ~54.6M objects -> **`7680 MiB` (`7.5 GiB`, ~122.0M entries, `2.23x`)** | Option A: ~117.7M objects -> **`16384 MiB` (`16 GiB`, ~260.3M entries, `2.21x`)**. Option B: ~109.2M objects -> **`15360 MiB` (`15 GiB`, ~244.0M entries, `2.23x`)** |
+| **Recommended pod memory (`requests` / `limits`)** | `22Gi` / `28Gi` (Option A), `20Gi` / `28Gi` (Option B) per storage pod | `30Gi` / `40Gi` (Option A), `28Gi` / `40Gi` (Option B) per storage pod |
 
 > [!IMPORTANT]
 > **Dedicated non-spot node pool.** Without
@@ -1048,28 +1440,51 @@ because their KLMs live on disk.
 
 #### 2. Key-location map (KLM) strategy & RAM sizing at 1–2 TiB per shard
 
-At the measured `17,408`-byte average CAS blob size
-(`storage.keyLocationMapSizing.averageObjectSizeBytes.cas`), a `1 TiB` shard
-holds ~54.6M objects and a `2 TiB` shard holds ~109.2M objects. With
-`minimumRatio: 2` (and `2.2x–2.5x` recommended as hash-table displacement
-headroom), each shard's CAS KLM needs **`7.5 GiB` (1 TiB shard)** to
-**`15 GiB` (2 TiB shard)** of 64-byte slot records:
+The sizing guard works from
+`storage.keyLocationMapSizing.averageObjectSizeBytes.cas`, `17,408` bytes by
+default. That figure is a pre-CDC whole-blob average from one deployment;
+replace it with your own, measured as described under
+[The Key-Location Map](../../docs/buildbarn-storage-model.md#the-key-location-map).
+At that size a 950 GiB blocks file holds ~54.6M
+objects and a 1900 GiB one ~109.2M (Option B), and a raw 1 TiB device holds
+~58.9M and a raw 2 TiB device ~117.7M (Option A). The guard computes
+
+```text
+entries = keyLocationMapSizeMi x 1048576 / 66
+objects = blocks bytes x 41 / 44 / averageObjectSizeBytes.cas
+ratio   = entries / objects
+```
+
+and requires `ratio >= minimumRatio` (default `2`); `2.2x–2.5x` is recommended
+as hash-table displacement headroom. Each shard's CAS KLM therefore needs
+**`7.5 GiB` to `8 GiB` (1 TiB shard)** or **`15 GiB` to `16 GiB` (2 TiB
+shard)** of 66-byte disk records. The index that gives a 950 GiB blocks file
+`2.23x` gives a raw 1 TiB device only `2.07x`, which passes the guard but is
+below that headroom, so Option A uses 8192 and 16384 MiB (`2.21x`).
 
 - **Prefer a disk-backed KLM (`keyLocationMap: file` or `backend: filesystem`)
   for 1–2 TiB persistent shards.** A `15 GiB` KLM in `inMemory` mode sits on
   the Go heap, needs 32–48 GiB container limits, and **loses the whole shard
   index on every pod restart**. With a file-backed KLM (`backend: blockDevice`
   plus `blockDevice.keyLocationMap: file` on a companion `<store>-meta` PVC, or
-  `backend: filesystem`), `bb-storage` `mmap`s `cas-keys.db` and writes epoch
-  state to `persistent_state` every 300s, so cached blobs survive pod restarts
-  and upgrades.
+  `backend: filesystem`), `bb-storage` `mmap`s `cdc-v1/keys.db` and writes epoch
+  state to `cdc-v1/persistent_state` with a 300s minimum sync interval. Together
+  with persistent CMS, cached blobs survive ordinary restarts. Format-changing
+  upgrades require the explicit cutover described above.
 - **Size pod RAM so the mmap'd KLM stays resident in the page cache.** Every
-  `Get` and `FindMissingBlobs` lookup probes up to 16 random 64-byte slots in
-  the file. If the node cannot keep `cas-keys.db` in page cache, each lookup
+  `Get` and `FindMissingBlobs` lookup probes up to 16 random 66-byte slots in
+  the file. If the node cannot keep `cdc-v1/keys.db` in page cache, each lookup
   becomes a random disk read. Rule of thumb: set
   `storage.resources.requests.memory` to at least **the total KLM size across
-  CAS, AC, ISCC, and FSAC plus 6 GiB** (`16Gi` for `1 TiB` shards;
-  `28Gi–32Gi` for `2 TiB` shards).
+  CS, CMS, AC, ISCC, and FSAC plus 6 GiB**. The CMS index counts: 1280 MiB by
+  default. For the values below that is:
+
+  | Layout | CAS + CMS + AC + ISCC + FSAC index (MiB) | Plus 6 GiB | Request |
+  |---|---|---|---|
+  | Option A, 2 TiB | 16384 + 1280 + 4096 + 512 + 1536 = 23808 (23.3 GiB) | 29.3 GiB | `30Gi` |
+  | Option A, 1 TiB | 8192 + 1280 + 4096 + 512 + 1536 = 15616 (15.3 GiB) | 21.3 GiB | `22Gi` |
+  | Option B, 1 TiB | 7680 + 1280 + 2688 + 256 + 1024 = 12928 (12.6 GiB) | 18.6 GiB | `20Gi` |
+  | Option B, 2 TiB | 15360 + 1280 + 2688 + 256 + 1024 = 20608 (20.1 GiB) | 26.1 GiB | `28Gi` |
 
 #### 3. Proportionate AC, ISCC, and FSAC sizing for a 10 TiB CAS
 
@@ -1077,10 +1492,28 @@ A 10 TiB CAS retains build outputs across many repositories and branches for
 weeks. If the Action Cache stays at its ~10 GiB default (`ac.blocksSizeGi: 10`),
 `ActionResult` entries are evicted long before the CAS blobs they reference,
 turning warm CAS data into cache misses. Scale `ac`, `iscc`, and `fsac`
-alongside `cas`, and give all four stores a persistent KLM
-(`keyLocationMap.type: blockDevice` or `blockDevice.keyLocationMap: file`) so
-Action Cache hits also survive restarts. The ratios in the comments below are
-what `storage.keyLocationMapSizing.validate: true` computes for each store.
+alongside `cas`, and retain persistent indexes for all five stores, including
+CMS, so composite blobs and Action Cache hits survive restarts. The ratios in the comments below are
+what `storage.keyLocationMapSizing.validate: true` computes for each store:
+66 bytes per index record, the block layout of each store (41 of 44 blocks
+hold data for CAS, 33 of 36 for the others), and the default
+`averageObjectSizeBytes` (CAS 17408, CMS 512, AC 1152, ISCC 512, FSAC 2048).
+
+CMS stays at the chart defaults in both options: shared with CAS, a 1 GiB
+blocks file and a 1280 MiB index. That adds 2304 MiB to the CAS filesystem
+(Option B) or to the raw CAS metadata volume (Option A), and the sizes below
+include it. The blocks file keeps about 939 MiB of mappings (33 of 36 blocks):
+~1.92M at the 512 bytes the guard assumes, ~9.46M at the 104-byte minimum of a
+two-chunk mapping. The index holds ~20.3M records, which is `10.58x` the
+first figure and `2.15x` the second. Resizing that index later empties the
+CMS, and every blob of two or more chunks is then reported missing until it is
+uploaded again, so settle it before the first start. The CMS retention and
+key-location-map dashboard panels show whether mappings are evicted or dropped
+before the chunks they describe.
+
+ISCC is left at the chart default sizes in both options. Its index covers the
+blocks `2.12x`: above the `2x` the guard requires, below the `2.2x` headroom
+used for CAS and AC here.
 
 **Option A: durable raw-block PVCs (`5 shards × 2 TiB`, `backend: blockDevice`,
 `keyLocationMap: file`)**
@@ -1089,12 +1522,12 @@ what `storage.keyLocationMapSizing.validate: true` computes for each store.
 storage:
   replicas: 5
   # A clean shutdown syncs the blocks device twice and writes persistent
-  # state; on a 2 TiB network volume that can exceed the 30s default.
+  # state; on a 2 TiB network volume allow more than the chart's 120s default.
   terminationGracePeriodSeconds: 180
   resources:
     requests:
       cpu: "4"
-      memory: 28Gi
+      memory: 30Gi
     limits:
       cpu: "8"
       memory: 40Gi
@@ -1112,8 +1545,16 @@ storage:
         keyLocationMap: file
         metadata:
           storageClassName: premium-rwo
-          size: 20Gi
-          keyLocationMapSizeMi: 15360 # 15 GiB (~251.6M entries, 2.14x for 2 TiB)
+          # Holds the CAS index plus the shared CMS blocks and index:
+          # 16384 + 1024 + 1280 = 18688 MiB of files.
+          size: 24Gi
+          keyLocationMapSizeMi: 16384 # 16 GiB (~260.3M entries, 2.21x for 2 TiB)
+    cms:
+      backend: sharedCas              # default: on the CAS metadata volume
+      blocksSizeGi: 1                 # default
+      keyLocationMap:
+        type: blockDevice             # default
+        sizeMi: 1280                  # default (~20.3M entries, 10.58x for 1 GiB blocks)
     ac:
       backend: blockDevice
       blockDevice:
@@ -1123,7 +1564,7 @@ storage:
         metadata:
           storageClassName: premium-rwo
           size: 6Gi
-          keyLocationMapSizeMi: 4096  # 4 GiB (~67.1M entries, 2.45x for 32 GiB)
+          keyLocationMapSizeMi: 4096  # 4 GiB (~65.1M entries, 2.38x for 32 GiB)
     iscc:
       enabled: true
       backend: blockDevice
@@ -1134,7 +1575,7 @@ storage:
         metadata:
           storageClassName: premium-rwo
           size: 1Gi
-          keyLocationMapSizeMi: 512   # 512 MiB (~8.39M entries, 2.18x for 2 GiB)
+          keyLocationMapSizeMi: 512   # default: 512 MiB (~8.13M entries, 2.12x for 2 GiB)
     fsac:
       enabled: true
       backend: blockDevice
@@ -1145,13 +1586,21 @@ storage:
         metadata:
           storageClassName: premium-rwo
           size: 2Gi
-          keyLocationMapSizeMi: 1536  # 1.5 GiB (~25.2M entries, 4.4x for 12 GiB)
+          keyLocationMapSizeMi: 1536  # 1.5 GiB (~24.4M entries, 4.23x for 12 GiB)
 ```
 
 For `10 shards × 1 TiB`, set `storage.replicas: 10`, `cas.blockDevice.size: 1Ti`,
 `cas.blockDevice.metadata.size: 12Gi`,
-`cas.blockDevice.metadata.keyLocationMapSizeMi: 7680` (2.14x), and
-`storage.resources.requests.memory: 16Gi` / `limits.memory: 24Gi`.
+`cas.blockDevice.metadata.keyLocationMapSizeMi: 8192` (~130.2M entries, 2.21x;
+8192 + 1024 + 1280 = 10496 MiB of files on the metadata volume), and
+`storage.resources.requests.memory: 22Gi` / `limits.memory: 28Gi`.
+
+Blocks and metadata use two StorageClasses in this option, so the install
+notes print `WARNING: STORAGE CLASS MISMATCH` for each of the four raw stores.
+Both classes here are network disks that outlive the pod and the node. Keep
+it that way: do not pair node-local blocks with network metadata, give both
+classes the same reclaim policy, and delete or reset a store's `-blocks` and
+`-meta` claims together.
 
 **Option B: durable filesystem PVCs (`10 shards × 1 TiB`, `backend: filesystem`)**
 
@@ -1162,10 +1611,10 @@ storage:
   resources:
     requests:
       cpu: "4"
-      memory: 16Gi
+      memory: 20Gi
     limits:
       cpu: "8"
-      memory: 24Gi
+      memory: 28Gi
   keyLocationMapSizing:
     validate: true
   persistence:
@@ -1173,15 +1622,23 @@ storage:
     cas:
       storageClassName: premium-rwo
       size: 1Ti
-      blocksSizeGi: 950          # leaves ~66.5 GiB for 7.5 GiB KLM + persistent_state + fs overhead
-      keyLocationMapSizeMi: 7680 # 7.5 GiB (~125.8M entries, 2.30x for 950 GiB blocks)
+      # Leaves 74 GiB for the 7.5 GiB KLM, the shared CMS (2304 MiB),
+      # persistent_state and filesystem overhead.
+      blocksSizeGi: 950
+      keyLocationMapSizeMi: 7680 # 7.5 GiB (~122.0M entries, 2.23x for 950 GiB blocks)
+    cms:
+      backend: sharedCas         # default: on the CAS filesystem
+      blocksSizeGi: 1            # default
+      keyLocationMap:
+        type: blockDevice        # default
+        sizeMi: 1280             # default (~20.3M entries, 10.58x for 1 GiB blocks)
     ac:
       storageClassName: premium-rwo
       size: 25Gi
       blocksSizeGi: 20
       keyLocationMap:
         type: blockDevice
-        sizeMi: 2688             # 2.625 GiB (~44M entries, 2.57x for 20 GiB blocks)
+        sizeMi: 2688             # 2.625 GiB (~42.7M entries, 2.50x for 20 GiB blocks)
     iscc:
       enabled: true
       storageClassName: premium-rwo
@@ -1189,7 +1646,7 @@ storage:
       blocksSizeGi: 1
       keyLocationMap:
         type: blockDevice
-        sizeMi: 256              # 256 MiB (~4.19M entries, 2.18x for 1 GiB blocks)
+        sizeMi: 256              # default: 256 MiB (~4.07M entries, 2.12x for 1 GiB blocks)
     fsac:
       enabled: true
       storageClassName: premium-rwo
@@ -1197,20 +1654,22 @@ storage:
       blocksSizeGi: 8
       keyLocationMap:
         type: blockDevice
-        sizeMi: 1024             # 1 GiB (~16.8M entries, 4.4x for 8 GiB blocks)
+        sizeMi: 1024             # 1 GiB (~16.3M entries, 4.23x for 8 GiB blocks)
 ```
 
 For `5 shards × 2 TiB` on `backend: filesystem`, set `storage.replicas: 5`,
-`cas.size: 2Ti`, `cas.blocksSizeGi: 1900`, `cas.keyLocationMapSizeMi: 15360`,
-and `storage.resources.requests.memory: 28Gi` / `limits.memory: 40Gi`.
+`cas.size: 2Ti`, `cas.blocksSizeGi: 1900`, `cas.keyLocationMapSizeMi: 15360`
+(~244.0M entries, 2.23x), and `storage.resources.requests.memory: 28Gi` /
+`limits.memory: 40Gi`.
 
 #### 4. Scaling Frontend, Scheduler, and Gateway alongside a 10 TiB cache
 
 - **Graceful storage shutdown (`storage.terminationGracePeriodSeconds: 120`–`180`)**:
-  a clean `bb-storage` shutdown syncs the blocks device twice and writes
-  `persistent_state`. On a 1–2 TiB network volume under load that can exceed
-  the 30s Kubernetes default, in which case the shard falls back to crash
-  recovery and loses up to the last 300s of writes as ordinary cache misses.
+  the chart defaults to 120 seconds. A clean `bb-storage` shutdown syncs the
+  blocks device twice and writes `persistent_state`. Tune the interval for
+  measured flush times; if shutdown exhausts it, the shard falls back to crash
+  recovery and may lose recent unsynchronized writes as ordinary cache misses.
+  The 300s minimum sync interval is not a maximum loss window.
   See [What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart).
 - **Frontend memory & read cache**: when `config.maximumMessageSizeBytes` is
   raised (for example to `838860800` / 800 MiB), size
@@ -1254,25 +1713,34 @@ The recipe, using chart values only:
    ring B points at the StatefulSet you add in step 2:
 
    ```jsonnet
-   contentAddressableStorage: {
+   local mirroredShards = {
      mirrored: {
        backendA: { sharding: { shards: { /* storage-{i}.storage.<ns>:8981 */ } } },
        backendB: { sharding: { shards: { /* storage-b-{i}.storage-b.<ns>:8981 */ } } },
        replicatorAToB: { 'local': {} },
        replicatorBToA: { 'local': {} },
      },
+   };
+   contentAddressableStorage: {
+     chunkStorage: mirroredShards,
+     chunkMappingStorage: { chunkMappingValidating: { backend: mirroredShards } },
+     cdcParameterCache: {
+       cacheSize: 1000,
+       cacheDuration: '3600s',
+       cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+     },
    },
    ```
 
-   Apply the same wrapper to the Action Cache *inside* `completenessChecking`
-   (keeping `actionResultExpiring` outermost when enabled) and to
-   `initialSizeClassCache`/`fileSystemAccessCache` when enabled. The Action
-   Cache, ISCC, and FSAC accept only `local`-family replicators
-   (`local`/`queued`/`concurrencyLimiting`/`noop`); `remote` and
-   `deduplicating` are CAS-only, and bb-storage rejects anything else at
-   startup. The override must keep exporting every key consumers splat:
+   Apply the same `mirroredShards` wrapper to the Action Cache *inside*
+   `completenessChecking` (keeping `actionResultExpiring` outermost when
+   enabled) and to `initialSizeClassCache`/`fileSystemAccessCache` when
+   enabled. The Action Cache, CMS, ISCC, and FSAC accept only `local`-family
+   replicators (`local`/`queued`/`concurrencyLimiting`/`noop`); `remote` and
+   `deduplicating` are chunk-storage-only, and bb-storage rejects anything else
+   at startup. The override must keep exporting every key consumers splat:
    `blobstore`, `initialSizeClassCache`/`fileSystemAccessCache` (only when
-   enabled), `browserUrl`, `maximumMessageSizeBytes`, and `global`. The
+   enabled), `portalUrl`, `maximumMessageSizeBytes`, and `global`. The
    override propagates to both ConfigMaps, so every client (frontend,
    scheduler, workers, browser, remote asset, portal) inherits the mirror,
    and the checksum annotations roll them all when it changes. Overrides are
@@ -1487,8 +1955,10 @@ what most deployments want.
 
 If you want reads closed too, remove the fallback by requiring the JWT arm
 alone — that is a `configOverrides["frontend.jsonnet"]` today, and it forks the
-file. Before doing it, check every caller: the browser, bb-portal and any
-CI that reads without a token all lose access at the same moment.
+file. Before doing it, check every caller. `bb-browser` reads CAS through the
+frontend and presents no token, so it and any CI that reads without a token
+lose access at the same moment. bb-portal reads the storage shards directly
+and is not affected.
 
 ### CAS read efficiency
 
@@ -1596,14 +2066,21 @@ mean that is ~1.4M objects, so `4194304` entries (256 MiB) sits at about 3x.
 After the first real build, three things confirm the sizing:
 
 ```text
-buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total
-buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total
+buildbarn_lossymap_hash_map_put_too_many_iterations_total{kubernetes_service="frontend",name="KeyLocationMap:cs"}
+buildbarn_lossymap_hash_map_get_too_many_attempts_total{kubernetes_service="frontend",name="KeyLocationMap:cs"}
 ```
+
+Keep the `kubernetes_service="frontend"` matcher: storage pods and worker read
+caches report a map under the same name. The chart's key-location-map
+recording rules and the `BuildbarnKeyLocationMapPutsDropped` and
+`BuildbarnKeyLocationMapGetsExhausted` alerts select
+`kubernetes_service="storage"` only, so they never fire for this cache; these
+raw counters are the only signal for it.
 
 Any sustained nonzero rate means the map is too small for the live object count —
 go up a power of two. The probe budgets that produce it are rendered into the
-config as `keyLocationMapMaximumGetAttempts: 16` and
-`keyLocationMapMaximumPutAttempts: 64`.
+config inside `keyLocationMap` as `maximumGetAttempts: 16` and
+`maximumPutAttempts: 64`.
 
 Then confirm the block clears your largest blob, scoping the histogram by **both**
 `pod` and `backend_type`. Every worker runs its own `readCaching` local CAS, so an
@@ -1743,6 +2220,14 @@ vmPodScrapes:
 vmRules:
   enabled: false
 ```
+
+If you keep the rules but scrape with your own configuration, copy the
+`kubernetes_service` pod label onto the scraped series, as the chart's
+`VMPodScrape` resources do. The key-location-map and retention recording rules
+select `kubernetes_service="storage"`. Without that label they produce
+nothing: the dashboard panels built on them are blank, and
+`BuildbarnKeyLocationMapPutsDropped`, `BuildbarnKeyLocationMapGetsExhausted`
+and `BuildbarnCacheRetentionLow` stay silent.
 
 ## Frontend Autoscaling
 
@@ -1892,14 +2377,21 @@ The UI is embedded in the Go binary
 separate Next.js workload and nothing to proxy to.
 
 > **bb-portal is unauthenticated.** Both routes are served with
-> `authenticationPolicy: { allow: {} }` and an `allow` instance-name authorizer,
-> so anyone who can reach `portal.<domainBase>` can read every build's events,
-> and anyone who can reach `bes.<domainBase>` can publish their own. The chart
-> does not front the portal with oauth2-proxy the way `browser.oauth2Proxy`
-> fronts Buildbarn Browser. Before enabling it, put it behind an external auth
-> layer, restrict the routes to an internal-only Gateway or Ingress, or limit
-> reachability with a NetworkPolicy. Also consider
-> `portal.bes.enableGraphqlPlayground: false`.
+> `authenticationPolicy: { allow: {} }` and `allow` read and publish
+> authorizers, so anyone who can reach `portal.<domainBase>` can read every
+> build's events, and anyone who can reach `bes.<domainBase>` can publish
+> their own. The HTTP server also serves the GraphQL API and its interactive
+> playground (`/graphql` and `/graphiql`), and no chart value turns either
+> off: the pinned bb-portal serves the playground whenever the GraphQL API is
+> configured, and the chart always configures it.
+> `portal.bes.enableGraphqlPlayground` is ignored. It is kept only so existing
+> values files pass schema validation, and a release that set it to `false`
+> on 0.9.9 serves `/graphiql` again after the upgrade; the install notes print
+> a warning in that case. The chart does not front the portal with
+> oauth2-proxy the way `browser.oauth2Proxy` fronts Buildbarn Browser. Before
+> enabling it, put it behind an external auth layer, restrict the routes to an
+> internal-only Gateway or Ingress, or limit reachability with a
+> NetworkPolicy.
 
 ```yaml
 portal:
@@ -2009,9 +2501,9 @@ for matching worker examples, KEDA settings, and verification.
 
 ### Optional configuration reload and scheduler handover
 
-Both features are disabled by default. A chart upgrade keeps the existing
-scheduler image, inline configuration, pod permissions, and restart behavior
-unless you explicitly opt in:
+Both features are disabled by default. They retain inline routing, the normal
+pod permissions and restart strategy unless you explicitly opt in. The CDC
+upgrade itself changes the default scheduler image and configuration:
 
 ```yaml
 scheduler:
@@ -2028,18 +2520,22 @@ Hermetiq's `bb-remote-execution` fork. Handover also needs a matching
 separate environment override; publishing or upgrading the chart alone does
 not activate them.
 
-The opt-in configuration requires a fork image with
-`legacyContentAddressableStorage` support. It uses that field to read Actions
-from the existing, non-CDC storage deployment without changing storage,
-frontend, or worker configuration. Legacy Action reads use uncompressed
-`BatchReadBlobs` requests, even when the shared backend enables compression,
-to avoid the newer client's CDC capability negotiation. Digest validation,
-message-size bounds, and configured storage decorators still apply.
-It also uses the fork's renamed
-`deprecatedAdminHttpServers` field and omits the removed `browserUrl` field.
-With both features disabled the chart retains the configuration schema for its
-pinned upstream scheduler image. If you run a newer image without either
-feature, supply a matching `configOverrides."scheduler.jsonnet"`.
+The opt-in image must implement CDC `contentAddressableStorage` as well as
+the selected fork features. Set `scheduler.handover.cdcCompatibleFork=true`
+only for such an image. Without it the render fails while
+`scheduler.handover.enabled` is `true` or
+`scheduler.configurationReloadInterval` is set. Turning both off for the
+upgrade is not enough when `images.scheduler` still pins a fork image built
+without CDC support: that scheduler rejects the CDC configuration whether or
+not the features are enabled, so remove the `images.scheduler` repository, tag
+and digest overrides too. The chart cannot detect such a pin itself unless its
+tag carries an upstream date stamp before `20261102`. The chart uses the CDC
+field for all scheduler modes;
+the old single-store `legacyContentAddressableStorage` shape is incompatible.
+Schema regressions cover reload only, handover only, and both using the pinned
+[fork descriptor](tests/testdata/schema-descriptors.md). This verifies the
+configuration contract; it does not substitute for testing the particular
+scheduler/coordinator binaries selected in your environment.
 
 ```yaml
 # Environment-specific opt-in; replace the repositories and digests with your
@@ -2052,6 +2548,7 @@ scheduler:
   configurationReloadInterval: 30s
   handover:
     enabled: true
+    cdcCompatibleFork: true
     coordinator:
       image:
         repository: REGISTRY/bb-scheduler-coordinator
@@ -2373,6 +2870,18 @@ either in the release through `extraObjects` or alongside it.
 - Select RbeWorker pods by `app.kubernetes.io/name: bb-worker`.
 - The frontend, Browser, portal, and remote asset service receive traffic from
   your ingress controller or Gateway.
+- The frontend also receives in-cluster traffic from the Browser pods
+  (`app: browser`). `bb-browser` reads CAS through the frontend:
+  `frontend-internal:8980` by default, `frontend-grpc:8980` when
+  `frontend.internalService.enabled` is `false`. A frontend policy that
+  admits only the ingress controller or Gateway leaves Browser unable to show
+  commands, directories, files and logs, while its Action Cache pages still
+  load from storage. Admit any other in-cluster client of `frontend-internal`
+  as well.
+- NetworkPolicy ports are pod ports. Through `frontend-internal` callers
+  reach the frontend container on `8980`. Through `frontend-grpc` with
+  `frontend.grpcCacheProxy.enabled` they reach the proxy sidecar on
+  `frontend.grpcCacheProxy.port` (default `50081`).
 
 Once any ingress policy selects a pod, traffic that no policy allows is
 dropped, so list every caller before you enable one.
@@ -2413,7 +2922,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.9.9 \
+  --version 0.10.0 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
@@ -2512,6 +3021,13 @@ helm upgrade <buildbarn-release> oci://ghcr.io/hermetiq/buildbarn \
   --reuse-values --values buildbarn-image-values.yaml
 ```
 
+`--reuse-values` is only valid here because the chart version does not change.
+It cannot be used for the 0.9.9 to 0.10.0 upgrade, or to change chart version
+in general: Helm then replaces the new chart's defaults with the values
+computed for the old release, every key the new chart introduced is missing,
+and the render fails. Upgrade the chart with your complete values files, then
+apply the image override with this command against the new version.
+
 This changes the cache-proxy image pin and rolls the frontend pods when the
 sidecar is enabled. It does not enable the sidecar or require publishing another
 Buildbarn chart version. Chart source defaults are updated for the next chart
@@ -2604,7 +3120,12 @@ Buildbarn frontend container on port `8980`, while `frontend-grpc` continues to
 target the proxy sidecar. The internal Service bypasses proxy authentication and
 cache-event capture, so never attach an Ingress, Gateway route, or other external
 load balancer to it. Use a NetworkPolicy if only selected namespaces should be
-able to reach the direct frontend port.
+able to reach the direct frontend port, and admit the Browser pods
+(`app: browser`) in it: `bb-browser` reads CAS through this Service. The
+Service is enabled by default. With it disabled, `bb-browser` dials
+`frontend-grpc:8980` instead, its reads pass through the proxy sidecar, and
+`enforceAuth: true` then fails the render while `browser.replicas` is above 0,
+because `bb-browser` has no proxy credentials.
 
 Leave `natsUrl` empty to switch cache-event capture off entirely and run the
 sidecar as a plain pass-through proxy. Only unauthenticated NATS endpoints are

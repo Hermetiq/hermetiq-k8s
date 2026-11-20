@@ -6,18 +6,38 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.9
-appVersion: "20260908T142448Z"
+version: 0.10.0
+appVersion: "20261118T120531Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "Refuse an install or upgrade before anything is applied when the live storage StatefulSet's volumeClaimTemplates differ from the rendered ones (upgradeChecks.skipStorageClaimTemplateCheck opts out), when the release pins a pre-CDC date-stamped storage, scheduler, worker, runner-installer, remote-asset or portal image, or when a hostPath ISCC or FSAC store would land on the chart's default path beside a relocated or raw CAS"
     - kind: changed
-      description: "Update the Hermetiq grpc-cache-proxy default to v0.9.8, pinned to its signed digest; application release image values can update the sidecar independently of the Buildbarn chart version"
+      description: "Breaking: raw-block metadata hostPath type defaults to Directory, so the node directory must already exist instead of being created on the boot disk when the metadata filesystem is not mounted"
     - kind: changed
-      description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
+      description: "Default the shared CMS file index to 1280 MiB (was 256 MiB) to cover the smallest 104-byte chunk mappings, and the dedicated filesystem CMS claim to 4Gi; resizing the index later empties the CMS"
     - kind: fixed
-      description: "Preserve custom router common imports and scheduler root references during reload, format IPv6 scheduler handover endpoints, and reject handover configurations with disabled API credentials or conflicting listener ports"
+      description: "Scope the key-location-map recording rules and alerts to the storage Service so worker and frontend read caches no longer trigger them; the configuration text guard now recognises quoted keys, jsonnet merge syntax, dual-schema worker libraries and multi-document extraObjects"
+    - kind: fixed
+      description: "Keep raw Local SSD blocks and persistent metadata on the same SSDs with verified mount/generation checks; require paired resets and report volatile stores and undersized file indexes in Helm notes"
+    - kind: changed
+      description: "Breaking: default CAS, CMS, AC, ISCC, and FSAC to persistent indexes for filesystem and raw-block storage; add an explicit ephemeral profile and coordinated CDC cutover guidance; enable ISCC and FSAC stores by default while retaining consumer opt-ins"
+    - kind: fixed
+      description: "Isolate CDC CAS files in cdc-v1 and refuse legacy data until an explicit maintenance reset; persist shared CMS mappings by default so composite blobs survive restarts"
+    - kind: fixed
+      description: "Use the CDC scheduler field for fork features, validate actual worker ConfigMap references and binary capability declarations, and require the internal browser route when the cache proxy enforces auth"
+    - kind: fixed
+      description: "Preserve legacy CAS and CDC CS/CMS observability; validate protobuf semantics and add real storage upgrade/restart and PromQL regressions"
+    - kind: changed
+      description: "Update Buildbarn images and Jsonnet configurations to the RepMaxCDC chunked CAS storage model (chunkStorage, chunkMappingStorage, nested keyLocationMap, bb-portal top-level database and authorizers, and workerImage/runnerInstallerImage defaults in buildbarn-worker-config)"
+    - kind: changed
+      description: "Breaking: raw Jsonnet supplied through configOverrides, a custom common.libsonnet or RbeWorker spec.config.files must use the CDC schema; upgrades fail with the field to change and a link to the manual steps"
+    - kind: added
+      description: "helm upgrade requires verified CDC capability declarations on the operator and co-located bep-nats Deployments; upgradeChecks.operatorNamespace locates an operator in another namespace"
+    - kind: changed
+      description: "Scheduler handover and configurationReloadInterval require a compatible fork image and scheduler.handover.cdcCompatibleFork; their accepted configuration uses the CDC schema"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

@@ -71,8 +71,14 @@ image:
   # silently ignores — no error, the feature just never appears in the generated
   # worker Jsonnet.
   tag: ""
-  digest: "sha256:07ecf648a59a9c7d233a1740c2936e373822148182e695ea6c5aa24e8a176c6c"
+  digest: "sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819"
   pullPolicy: IfNotPresent
+
+# The pinned default image is known to support both pre-CDC and CDC worker
+# configurations, so the chart declares its capability automatically by digest.
+# Set this only after verifying a different image (including tag-only images)
+# supports both schemas. Chart/appVersion labels alone are not proof of support.
+buildbarnCdcCompatible: false
 
 imagePullSecrets: []
 nameOverride: ""

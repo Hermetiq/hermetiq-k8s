@@ -7,6 +7,10 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "api") | nindent 4 }}
     app: {{ include "hermetiq-core.apiName" . }}
+  {{- if .Values.buildbarnCdcCompatible }}
+  annotations:
+    hermetiq.com/cdc-compatible: "true"
+  {{- end }}
 spec:
   replicas: {{ .Values.api.replicas }}
   progressDeadlineSeconds: 600

@@ -11,6 +11,53 @@ tests:
           path: spec.groups[0].rules[6].expr
           pattern: 'last_removed_old_block_insertion_time_seconds\{kubernetes_service="storage"\}'
 
+  # Worker local read caches and the frontend read cache report their own
+  # key-location map under the same name as storage (KeyLocationMap:cs on the
+  # CDC image). Both sides of each rule, the CDC lossymap series and the legacy
+  # series, must select storage pods only, or the key-location-map alerts fire
+  # for a worker cache.
+  - it: excludes worker-local and frontend caches from storage key-location map metrics
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-recording-rules
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[10].expr
+          pattern: 'buildbarn_lossymap_hash_map_get_attempts_count\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[10].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_get_attempts_count\{kubernetes_service="storage"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[11].expr
+          pattern: 'buildbarn_lossymap_hash_map_get_too_many_attempts_total\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[11].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts_total\{kubernetes_service="storage"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[12].expr
+          pattern: 'buildbarn_lossymap_hash_map_get_attempts_bucket\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[12].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket\{kubernetes_service="storage"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[13].expr
+          pattern: 'buildbarn_lossymap_hash_map_put_iterations_count\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[13].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_put_iterations_count\{kubernetes_service="storage"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[14].expr
+          pattern: 'buildbarn_lossymap_hash_map_put_too_many_iterations_total\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[14].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations_total\{kubernetes_service="storage"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[15].expr
+          pattern: 'buildbarn_lossymap_hash_map_put_iterations_bucket\{kubernetes_service="storage",name=~"KeyLocationMap:\.\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[15].expr
+          pattern: 'buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket\{kubernetes_service="storage"\}'
+
   - it: gates the low-retention alert on storage process age
     documentSelector:
       path: metadata.name

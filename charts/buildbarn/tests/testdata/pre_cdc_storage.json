@@ -1,0 +1,108 @@
+{
+  "actionCache": {
+    "backend": {
+      "local": {
+        "blocksOnBlockDevice": {
+          "dataIntegrityValidationCache": {
+            "cacheDuration": "14400s",
+            "cacheReplacementPolicy": "LEAST_RECENTLY_USED",
+            "cacheSize": 100000
+          },
+          "source": {
+            "file": {
+              "path": "/storage-ac/ac-blocks.db",
+              "sizeBytes": 1073741824
+            }
+          },
+          "spareBlocks": 3
+        },
+        "currentBlocks": 24,
+        "keyLocationMapInMemory": {
+          "entries": 10000
+        },
+        "keyLocationMapMaximumGetAttempts": 16,
+        "keyLocationMapMaximumPutAttempts": 64,
+        "newBlocks": 1,
+        "oldBlocks": 8
+      }
+    },
+    "getAuthorizer": {
+      "allow": {}
+    },
+    "putAuthorizer": {
+      "allow": {}
+    }
+  },
+  "contentAddressableStorage": {
+    "backend": {
+      "local": {
+        "blocksOnBlockDevice": {
+          "dataIntegrityValidationCache": {
+            "cacheDuration": "14400s",
+            "cacheReplacementPolicy": "LEAST_RECENTLY_USED",
+            "cacheSize": 100000
+          },
+          "source": {
+            "file": {
+              "path": "/storage-cas/cas-blocks.db",
+              "sizeBytes": 1073741824
+            }
+          },
+          "spareBlocks": 3
+        },
+        "currentBlocks": 30,
+        "keyLocationMapMaximumGetAttempts": 16,
+        "keyLocationMapMaximumPutAttempts": 64,
+        "keyLocationMapOnBlockDevice": {
+          "file": {
+            "path": "/storage-cas/cas-keys.db",
+            "sizeBytes": 1048576
+          }
+        },
+        "newBlocks": 3,
+        "oldBlocks": 8,
+        "persistent": {
+          "minimumEpochInterval": "300s",
+          "stateDirectoryPath": "/storage-cas/persistent_state"
+        }
+      }
+    },
+    "findMissingAuthorizer": {
+      "allow": {}
+    },
+    "getAuthorizer": {
+      "allow": {}
+    },
+    "putAuthorizer": {
+      "allow": {}
+    }
+  },
+  "global": {
+    "diagnosticsHttpServer": {
+      "enableActiveSpans": true,
+      "enablePprof": true,
+      "enablePrometheus": true,
+      "httpServers": [
+        {
+          "authenticationPolicy": {
+            "allow": {}
+          },
+          "listenAddresses": [
+            ":9980"
+          ]
+        }
+      ]
+    }
+  },
+  "grpcServers": [
+    {
+      "authenticationPolicy": {
+        "allow": {}
+      },
+      "listenAddresses": [
+        ":8981"
+      ]
+    }
+  ],
+  "maximumMessageSizeBytes": 10485760
+}

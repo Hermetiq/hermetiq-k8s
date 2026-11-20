@@ -5,6 +5,13 @@ metadata:
   namespace: {{ include "bb-worker-operator.namespace" . }}
   labels:
     {{- include "bb-worker-operator.labels" . | nindent 4 }}
+  {{- /* Digest identity survives registry mirrors and takes precedence over
+       image.tag. Custom images need an explicit compatibility declaration;
+       Chart.appVersion does not tell us which binary will actually run. */}}
+  {{- if or .Values.buildbarnCdcCompatible (eq (trimPrefix "@" (default "" .Values.image.digest)) "sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819") }}
+  annotations:
+    hermetiq.com/cdc-compatible: "true"
+  {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}

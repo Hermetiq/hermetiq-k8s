@@ -27,6 +27,14 @@ spec:
         bloomFilterBitsPerPath: 14
         bloomFilterMaximumSizeBytes: 65536
       virtualBuildDirectory:
+        fuse:
+          # 128 x 24 concurrent actions; resize with the pool.
+          maximumBackgroundTasks: 3072
+          # Writeback tuning needs Linux >= 6.2 and writable /sys; otherwise omit
+          # this map. Failed writes stop bb_worker. See the RBE worker README.
+          linuxBackingDevInfoTunables:
+            max_ratio: "10"
+            strict_limit: "0"
         filePoolPath: /storage-worker-cas/file_pool
         filePoolSizeBytes: 34359738368 # 32 GiB
         maximumFilePoolFileCount: 200000
@@ -34,9 +42,7 @@ spec:
     rolloutOnChange: true
   images:
     runner: gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a
-    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
     volumeInit: busybox:1.31.1-uclibc
-    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
   pod:
     # Put these pools on 16-vCPU nodes with local SSD. Add your node pool's
     # label here, and a toleration if the nodes are tainted (spot nodes often are).

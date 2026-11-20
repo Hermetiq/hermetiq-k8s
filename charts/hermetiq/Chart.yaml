@@ -15,8 +15,14 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   # Keep track 0.9.9 changes here (we'll bump the chart version in the release PR when we're ready to release 0.9.9)
   artifacthub.io/changes: |
+    - kind: added
+      description: "Add an explicit buildbarnCdcCompatible declaration for verified dual-schema bep-nats images; existing default images are not automatically declared compatible"
+    - kind: fixed
+      description: "Keep Buildbarn dashboards usable with legacy CAS and CDC chunk storage, add separate chunk-mapping views, and test shipped queries against old/new/mixed metrics"
     - kind: fixed
       description: "Bound worker-pool CPU and memory queries during pod churn"
+    - kind: fixed
+      description: "Correct the Buildbarn object-size panel descriptions: on CDC storage the panels show the size named in the request digest (the whole blob for CMS, the action message for AC, ISCC, and FSAC, the uncompressed chunk for CS), not the stored entry"
 keywords:
   - hermetiq
   - MCP

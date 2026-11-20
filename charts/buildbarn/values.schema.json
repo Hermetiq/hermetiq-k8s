@@ -14,7 +14,83 @@
     "standardLabels": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "configOverrides": { "type": "object" },
-    "config": { "type": "object" },
+    "upgradeChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operatorNamespace": { "type": "string" },
+        "hermetiqNamespace": { "type": "string" },
+        "skipStorageClaimTemplateCheck": { "type": "boolean" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "blobstore": {
+          "type": "object",
+          "properties": {
+            "deadlineEnforcing": {
+              "type": "object",
+              "properties": {
+                "timeout": {
+                  "type": "string",
+                  "anyOf": [
+                    { "const": "" },
+                    {
+                      "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                      "not": { "pattern": "^0+(\\.0+)?s$" }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "contentAddressableStorage": {
+          "type": "object",
+          "properties": {
+            "maximumChunkCount": { "type": "integer", "minimum": 1 },
+            "chunkingParameters": {
+              "type": "object",
+              "properties": {
+                "minChunkSizeBytes": { "type": "integer", "minimum": 64, "maximum": 16777216 },
+                "horizonSizeBytes": { "type": "integer", "minimum": 0, "maximum": 134217728 }
+              }
+            },
+            "cdcParameterCache": {
+              "type": "object",
+              "properties": {
+                "cacheSize": { "type": "integer", "minimum": 1 },
+                "cacheDuration": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                  "not": { "pattern": "^0+(\\.0+)?s$" }
+                },
+                "cacheReplacementPolicy": {
+                  "type": "string",
+                  "enum": ["FIRST_IN_FIRST_OUT", "LEAST_RECENTLY_USED", "RANDOM_REPLACEMENT"]
+                }
+              }
+            },
+            "chunkCache": {
+              "type": "object",
+              "properties": {
+                "cacheSize": { "type": "integer", "minimum": 0 },
+                "cacheDuration": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                  "not": { "pattern": "^0+(\\.0+)?s$" }
+                },
+                "cacheReplacementPolicy": {
+                  "type": "string",
+                  "enum": ["FIRST_IN_FIRST_OUT", "LEAST_RECENTLY_USED", "RANDOM_REPLACEMENT"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "images": { "type": "object" },
     "secrets": { "type": "object" },
     "hosts": { "type": "object" },
@@ -77,6 +153,41 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "cms": {
+              "type": "object",
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "enum": ["sharedCas", "filesystem", "blockDevice"]
+                },
+                "blocksSizeGi": { "type": "integer", "minimum": 1 },
+                "blocksInMemoryBlockSizeBytes": { "type": "integer", "minimum": 1 },
+                "newBlocks": { "type": "integer", "const": 1 },
+                "keyLocationMap": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["inMemory", "blockDevice"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "dataIntegrityValidationCache": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "cacheSize": { "type": "integer", "minimum": 0 },
+            "cacheDuration": { "type": "string" },
+            "cacheReplacementPolicy": { "type": "string" }
           }
         },
         "grpcServers": {
@@ -182,6 +293,7 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "cdcCompatibleFork": { "type": "boolean" },
             "peerServerName": { "type": "string", "minLength": 1 },
             "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },

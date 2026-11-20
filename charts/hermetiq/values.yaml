@@ -18,6 +18,14 @@ extraObjects: []
 standardLabels:
   appVersion: false
 
+# Set true only when images.bepNats runs a bep-nats that validates both the
+# pre-CDC and the CDC Buildbarn configuration schemas (dual descriptor sets).
+# It annotates the api and publisher Deployments with
+# hermetiq.com/cdc-compatible=true, which the buildbarn chart's CDC upgrade
+# guard accepts in place of a hermetiq release version. Leave false for the
+# images this chart ships until a release includes that bep-nats.
+buildbarnCdcCompatible: false
+
 images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats

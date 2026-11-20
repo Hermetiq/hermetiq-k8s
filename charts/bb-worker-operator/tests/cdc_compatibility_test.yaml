@@ -1,0 +1,73 @@
+suite: operator CDC compatibility follows the effective image
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: declares compatibility for the pinned default image
+    asserts:
+      - equal:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+          value: "true"
+
+  - it: preserves compatibility when mirroring the known digest
+    set:
+      global.imageRegistry: mirror.example.com
+    asserts:
+      - equal:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+          value: "true"
+
+  - it: uses the effective digest even when a stale tag is present
+    set:
+      image.tag: v0.3.13
+    asserts:
+      - equal:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+          value: "true"
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '@sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819$'
+
+  - it: does not claim support for an older tag-only operator
+    set:
+      image.tag: v0.3.13
+      image.digest: ""
+    asserts:
+      - notExists:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+
+  - it: does not claim support for an older digest carrying the new tag
+    set:
+      image.digest: sha256:07ecf648a59a9c7d233a1740c2936e373822148182e695ea6c5aa24e8a176c6c
+    asserts:
+      - notExists:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+
+  - it: supports removing the digest with null without claiming compatibility
+    set:
+      image.digest: null
+    asserts:
+      - notExists:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-worker-operator:v0.3.14
+
+  - it: requires attestation for an unverified tag-only custom build
+    set:
+      image.repository: example.com/operator
+      image.tag: cdc-build
+      image.digest: ""
+    asserts:
+      - notExists:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+
+  - it: permits an explicitly verified custom CDC image
+    set:
+      image.repository: example.com/operator
+      image.tag: cdc-build
+      image.digest: ""
+      buildbarnCdcCompatible: true
+    asserts:
+      - equal:
+          path: metadata.annotations["hermetiq.com/cdc-compatible"]
+          value: "true"

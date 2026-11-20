@@ -1,5 +1,7 @@
 {{- $namespace := include "buildbarn.namespace" . }}
 {{- $are := .Values.config.actionCache.actionResultExpiring }}
+{{- $deadlineTimeout := .Values.config.blobstore.deadlineEnforcing.timeout }}
+{{- $cdc := .Values.config.contentAddressableStorage.cdcParameterCache }}
 {{- if .Values.security.grpcMtls.enabled }}
 // Dialling half of the in-cluster mTLS hop to storage, shared by every shard
 // client below. The listening half is storage.jsonnet's grpcServers `tls` plus
@@ -11,23 +13,25 @@ local storageClientTls = {
 };
 
 {{- end }}
+local shardedStorage = {
+  sharding: {
+    shards: {
+{{- range $i, $_ := until (int .Values.storage.replicas) }}
+      "{{ $i }}": {
+        backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
+        weight: 1,
+      },
+{{- end }}
+    },
+  },
+};
+
 // Only return ActionResult messages for which all output files are still present
 // in the Content Addressable Storage (CAS). Bazel requires this decorator, and it
 // is what keeps an Action Cache hit from ever pointing at evicted CAS blobs.
 local completenessCheckedActionCache = {
   completenessChecking: {
-    backend: {
-      sharding: {
-        shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-          "{{ $i }}": {
-            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-            weight: 1,
-          },
-{{- end }}
-        },
-      },
-    },
+    backend: shardedStorage,
     maximumTotalTreeSizeBytes: 256 * 1024 * 1024,
   },
 };
@@ -35,15 +39,35 @@ local completenessCheckedActionCache = {
 {
   blobstore: {
     contentAddressableStorage: {
-      sharding: {
-        shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-          "{{ $i }}": {
-            backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-            weight: 1,
-          },
-{{- end }}
+{{- if $deadlineTimeout }}
+      chunkStorage: {
+        deadlineEnforcing: {
+          timeout: {{ $deadlineTimeout | quote }},
+          backend: shardedStorage,
         },
+      },
+      chunkMappingStorage: {
+        chunkMappingValidating: {
+          backend: {
+            deadlineEnforcing: {
+              timeout: {{ $deadlineTimeout | quote }},
+              backend: shardedStorage,
+            },
+          },
+        },
+      },
+{{- else }}
+      chunkStorage: shardedStorage,
+      chunkMappingStorage: {
+        chunkMappingValidating: {
+          backend: shardedStorage,
+        },
+      },
+{{- end }}
+      cdcParameterCache: {
+        cacheSize: {{ int64 $cdc.cacheSize }},
+        cacheDuration: {{ $cdc.cacheDuration | quote }},
+        cacheReplacementPolicy: {{ $cdc.cacheReplacementPolicy | quote }},
       },
     },
 {{- if $are.enabled }}
@@ -72,41 +96,19 @@ local completenessCheckedActionCache = {
 {{- end }}
   },
 
-  # ISCC and FSAC are NOT part of blobstore.BlobstoreConfiguration (which only
-  # has CAS + AC). They are separate top-level stores consumed by bb-scheduler
-  # (ISCC) and bb-worker (FSAC), so they live as their own common keys rather
-  # than inside `blobstore` — otherwise configs that splat the whole
-  # `common.blobstore` (e.g. browser.jsonnet) fail with "unknown field".
+  // ISCC and FSAC are NOT part of blobstore.BlobstoreConfiguration (which only
+  // has CAS + AC). They are separate top-level stores consumed by bb-scheduler
+  // (ISCC) and bb-worker (FSAC), so they live as their own common keys rather
+  // than inside `blobstore` — otherwise configs that splat the whole
+  // `common.blobstore` (e.g. browser.jsonnet) fail with "unknown field".
 {{- if .Values.storage.persistence.iscc.enabled }}
-  initialSizeClassCache: {
-    sharding: {
-      shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-        "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-          weight: 1,
-        },
-{{- end }}
-      },
-    },
-  },
+  initialSizeClassCache: shardedStorage,
 {{- end }}
 {{- if .Values.storage.persistence.fsac.enabled }}
-  fileSystemAccessCache: {
-    sharding: {
-      shards: {
-{{- range $i, $_ := until (int .Values.storage.replicas) }}
-        "{{ $i }}": {
-          backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ include "buildbarn.namespace" $ }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
-          weight: 1,
-        },
-{{- end }}
-      },
-    },
-  },
+  fileSystemAccessCache: shardedStorage,
 {{- end }}
 
-  browserUrl: 'https://{{ include "buildbarn.browserHost" . }}',
+  portalUrl: 'https://{{ include "buildbarn.browserHost" . }}',
   maximumMessageSizeBytes: {{ int64 .Values.config.maximumMessageSizeBytes }},
   global: {
     {{- if .Values.tracing.enabled }}

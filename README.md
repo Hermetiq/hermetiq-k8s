@@ -196,13 +196,49 @@ change-control policies to every example.
 
 ## Supported chart bundle
 
-The following versions form the first tested bundle in this repository:
+The following versions form the first tested bundle in this repository. As
+published, they do not all install into one namespace in the order this guide
+gives; read the note below the table before installing Buildbarn.
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.8` |             `0.9.8` |
-| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
-| BB Worker Operator |      `0.3.12` |           `v0.3.13` |
+| Buildbarn |      `0.10.0` |  `20261118T120531Z` |
+| BB Worker Operator |      `0.3.13` |           `v0.3.14` |
+
+> **Buildbarn `0.10.0` does not install next to the published Hermetiq `0.9.8`
+> chart in the same namespace.** Buildbarn `0.10.0` stores data in the new CDC
+> format and refuses to install or upgrade while the Hermetiq API (`grpc-api`)
+> and publisher (`bep-nats-pub`) Deployments it finds lack the annotation
+> `hermetiq.com/cdc-compatible: "true"`. The check runs on the first
+> `helm install` as well as on every upgrade, so step 4 of the
+> [installation order](#installation) fails with an error such as
+> `live Deployment hermetiq/grpc-api has no hermetiq.com/cdc-compatible=true declaration`.
+> The error says to set `buildbarnCdcCompatible: true` in the Hermetiq chart.
+> The published `0.9.8` chart accepts that value and renders no annotation,
+> and its `bep-nats` image validates only the pre-CDC Buildbarn configuration
+> schema. Installing Buildbarn first does not help: nothing is found then, and
+> the next Buildbarn upgrade fails instead.
+>
+> What is required: a Hermetiq chart release newer than the published `0.9.8`
+> that implements `buildbarnCdcCompatible`, deployed with a `bep-nats` image
+> that validates both the pre-CDC and the CDC configuration schema, and
+> `buildbarnCdcCompatible: true` set for that image.
+>
+> Until that release is available, Buildbarn `0.10.0` can only be installed
+> beside Hermetiq by running the two in different namespaces and leaving
+> Buildbarn's `upgradeChecks.hermetiqNamespace` empty. Buildbarn then finds no
+> Hermetiq Deployments and skips the check. That makes nothing compatible:
+> configuration validation in the Hermetiq UI stays on the pre-CDC schema and
+> does not match the configuration Buildbarn `0.10.0` runs. The rest of this
+> guide assumes one namespace. With two, review every cross-chart setting in
+> [Co-installing with Buildbarn](charts/hermetiq/README.md#co-installing-with-buildbarn)
+> and
+> [Co-installing with the Hermetiq chart](charts/buildbarn/README.md#co-installing-with-the-hermetiq-chart):
+> resources the charts share by name, such as the Browser sign-in ConfigMap
+> and Secret, are namespaced.
+> An existing Buildbarn `0.9.9` cache also needs the
+> [storage format cutover](docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -220,7 +256,9 @@ Install in this order:
 2. Install Hermetiq. It creates the shared dashboard OAuth configuration used
    by the optional Grafana and Buildbarn Browser proxies.
 3. Install the BB Worker Operator.
-4. Install Buildbarn.
+4. Install Buildbarn. With the published Hermetiq `0.9.8` chart in the same
+   namespace this step fails; see
+   [Supported chart bundle](#supported-chart-bundle).
 5. Apply the `RbeWorker` pools appropriate for the cluster, starting from the
    [sample worker pools](custom-values/rbeworkers/README.md).
 
@@ -529,13 +567,19 @@ When a new chart version is released:
 1. Read the `Chart.yaml` release metadata and GitHub release notes.
 2. Compare the new defaults with the version currently deployed.
 3. Back up PostgreSQL and assess whether Buildbarn storage changes imply a cold
-   cache. Enabling a new PVC-backed store (`iscc`, `fsac`) or changing a
-   store's `size` or `backend` also requires recreating the storage
-   StatefulSet; see the
+   cache. Buildbarn `0.9.9` to `0.10.0` does: it is a cold cut-over of the
+   storage format with its own
+   [runbook](docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+   not a rolling upgrade. Enabling a new PVC-backed store (`iscc`, `fsac`) or
+   changing a store's `size`, `storageClassName` or `backend` also requires
+   recreating the storage StatefulSet; see the
    [storage operations runbook](docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
-5. Reuse the same custom values files and verify every rollout before continuing.
+5. Reuse the same custom values files, passed with `--values`, and verify
+   every rollout before continuing. Do not use `--reuse-values` to change
+   chart version: Helm then drops the new chart's defaults, and Buildbarn
+   `0.10.0` does not render that way.
 
 Example defaults comparison:
 

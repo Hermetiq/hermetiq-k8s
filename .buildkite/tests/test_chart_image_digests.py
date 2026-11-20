@@ -22,7 +22,7 @@ class ChartImageDigestsTest(unittest.TestCase):
     def test_real_chart_defaults_cover_image_shapes(self):
         expected = {
             "hermetiq": {"images.bepNats.apiTag", "images.bepNats.pubTag", "images.bepNats.subTag", "images.bepNats.bootstrapTag", "images.authProxy.tag", "images.dashboard.tag", "images.promptRuntime.tag", "images.oauth2Proxy.tag"},
-            "buildbarn": {"images.storage.tag", "images.scheduler.tag", "images.browser.tag", "images.remoteAsset.tag", "images.busybox.image", "images.oauth2Proxy.tag", "images.grpcCacheProxy.tag", "images.portal.tag", "frontend.jwks.sync.image.tag"},
+            "buildbarn": {"images.storage.tag", "images.scheduler.tag", "images.worker.tag", "images.runnerInstaller.tag", "images.browser.tag", "images.remoteAsset.tag", "images.busybox.image", "images.oauth2Proxy.tag", "images.grpcCacheProxy.tag", "images.portal.tag", "frontend.jwks.sync.image.tag"},
             "bb-worker-operator": {"image.tag"},
         }
         for name, paths in expected.items():

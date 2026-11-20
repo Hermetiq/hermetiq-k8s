@@ -63,6 +63,35 @@ tests:
       - failedTemplate:
           errorPattern: "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled"
 
+  - it: rejects browser fallback through a proxy that requires credentials
+    set:
+      frontend.internalService.enabled: false
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: https://api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: proxy-auth
+    asserts:
+      - failedTemplate:
+          errorPattern: "bb-browser reads CAS through the frontend without proxy credentials"
+
+  - it: permits browser fallback through an unauthenticated proxy
+    set:
+      frontend.internalService.enabled: false
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: false
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: permits an authenticated proxy when the browser has its internal Service
+    set:
+      frontend.internalService.enabled: true
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: https://api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: proxy-auth
+    asserts:
+      - notFailedTemplate: {}
+
   - it: rejects frontend autoscaling to zero because its metric is pull-based
     set:
       keda.frontend.enabled: true
@@ -110,6 +139,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - hasDocuments:
           count: 0
@@ -123,13 +154,18 @@ tests:
       - failedTemplate:
           errorPattern: "blockDevice.size is required when backend=blockDevice and mode=pvc"
 
+  # ISCC and FSAC are enabled by default; with CAS on a raw device they need
+  # their own paths (see guard_hostpath_test.yaml).
   - it: accepts a hostPath-mode block device without a size
     set:
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
       storage.persistence.mode: hostPath
       storage.persistence.blockDevice.allowHostPath: true
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.size: ""
       storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.iscc.hostPath.path: /mnt/buildbarn/iscc
+      storage.persistence.fsac.hostPath.path: /mnt/buildbarn/fsac
     asserts:
       - hasDocuments:
           count: 0
@@ -152,6 +188,8 @@ tests:
       storage.persistence.cas.emptyDir.sizeLimit: 400Gi
       storage.persistence.cas.blocksSizeGi: 500
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - failedTemplate:
@@ -164,6 +202,8 @@ tests:
       storage.persistence.cas.blocksSizeGi: 300
       storage.persistence.cas.size: 10Gi
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - notFailedTemplate: {}
@@ -254,6 +294,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - notFailedTemplate: {}
@@ -262,6 +303,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - failedTemplate:
@@ -383,12 +425,31 @@ tests:
       - failedTemplate:
           errorPattern: "scheduler.configurationReloadInterval requires a bb-scheduler image built from Hermetiq's fork"
 
-  - it: accepts configurationReloadInterval with a fork scheduler image
+  - it: accepts configurationReloadInterval with a CDC-compatible fork scheduler image
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects configurationReloadInterval with the CDC blobstore unless the fork supports CDC
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
     asserts:
-      - notFailedTemplate: {}
+      - failedTemplate:
+          errorPattern: "scheduler.configurationReloadInterval is not supported with the CDC blobstore unless the fork supports CDC"
+
+  - it: rejects scheduler.handover with the CDC blobstore unless the fork supports CDC
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+    asserts:
+      - failedTemplate:
+          errorPattern: "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC"
 
   - it: rejects scheduler.handover with the upstream scheduler image
     set:
@@ -504,8 +565,813 @@ tests:
       scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.automountServiceAccountToken: true
       scheduler.handover.port: 9999
+      scheduler.handover.cdcCompatibleFork: true
     asserts:
       - notFailedTemplate: {}
+
+  - it: rejects configOverrides containing removed pre-CDC fields
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorageServer: {
+              contentAddressableStorage: {
+                chunkStorage: {
+                  'local': {
+                    blocksOnBlockDevice: {
+                      dataIntegrityValidationCache: { cacheSize: 1000 },
+                    },
+                  },
+                },
+              },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "dataIntegrityValidationCache"'
+
+  - it: rejects configOverrides with pre-CDC top-level contentAddressableStorage in storage.jsonnet
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorage: {
+              backend: {},
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] uses pre-CDC top-level field "contentAddressableStorage"'
+
+  - it: permits zstdPool in CDC storage frontend and portal configurations
+    set:
+      configOverrides:
+        storage.jsonnet: "{ zstdPool: {} }"
+        frontend.jsonnet: "{ zstdPool: {} }"
+        portal.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects zstdPool in a CDC scheduler configuration
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  - it: rejects zstdPool in a CDC remote asset configuration
+    set:
+      configOverrides:
+        asset.jsonnet: "{ zstdPool: {} }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["asset\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  - it: rejects configOverrides with pre-CDC single-store contentAddressableStorage in common.libsonnet
+    set:
+      configOverrides:
+        common.libsonnet: |
+          {
+            blobstore: {
+              contentAddressableStorage: {
+                sharding: {},
+              },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["common\.libsonnet"\] defines a pre-CDC single-store "contentAddressableStorage" without "chunkStorage"'
+
+  # files is a ConfigMap reference, not inline Jsonnet. Use the shipped CRD's
+  # real shape so this guard exercises the data a live worker actually mounts.
+  - it: rejects a files-mode worker referencing legacy config under an arbitrary ConfigMap name
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-legacy
+              spec:
+                config:
+                  files:
+                    configMapName: arbitrary-config
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: arbitrary-config
+              data:
+                worker.jsonnet: "{ browserUrl: 'https://browser.example.com' }"
+                runner.jsonnet: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap .*/arbitrary-config data\["worker\.jsonnet"\] contains pre-CDC field "browserUrl"'
+
+  - it: rejects live RbeWorker CR pinning a pre-CDC bb-worker image
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-old-img
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/worker-old-img pins pre-CDC image .* in spec\.images\.worker'
+
+  - it: checks source keys projected under a different worker filename
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: mapped-worker
+              spec:
+                config:
+                  files:
+                    configMapName: mapped-input
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                    items:
+                      - {key: worker-source, path: worker.jsonnet}
+                      - {key: runner-source, path: runner.jsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: mapped-input
+              data:
+                worker-source: "{ contentAddressableStorage: { grpc: {} } }"
+                runner-source: "{}"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'mapped-input data\["worker-source"\] defines a pre-CDC single-store contentAddressableStorage'
+
+  - it: does not scan unrelated keys omitted from the worker projection
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: mapped-worker
+              spec:
+                config:
+                  files:
+                    configMapName: mapped-input
+                    workerConfigPath: /config/worker.jsonnet
+                    runnerConfigPath: /config/runner.jsonnet
+                    items:
+                      - {key: worker-source, path: worker.jsonnet}
+                      - {key: runner-source, path: runner.jsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: mapped-input
+              data:
+                worker-source: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+                runner-source: "{}"
+                unused-legacy: "{ browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks a generated worker custom common library from an arbitrary ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                    commonItems:
+                      - {key: custom-common, path: common.libsonnet}
+                      - {key: worker-helper, path: worker-common.libsonnet}
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                custom-common: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+                worker-helper: "{ workerConfig(config):: { browserUrl: 'old' } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'custom-libraries data\["worker-helper"\] contains pre-CDC field "browserUrl"'
+
+  # A worker ConfigMap the release renders through extraObjects replaces its
+  # live copy in this upgrade, so the guard reads the rendered data: the live
+  # pre-CDC copy alone must not block the upgrade (bbdev's Envoy common config),
+  # but a rendered pre-CDC copy still does.
+  - it: checks a release-rendered worker ConfigMap's new data, not its live copy
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+            namespace: {{ include "buildbarn.namespace" . }}
+          data:
+            workerImage: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } }, browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a release-rendered worker ConfigMap that is still pre-CDC
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, browserUrl: 'old' }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'worker ConfigMap .*/envoy-worker-config data\["common\.libsonnet"\] contains pre-CDC field "browserUrl"'
+
+  - it: rejects a pre-CDC worker image inherited from a release-rendered ConfigMap
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/worker-envoy pins pre-CDC image .* in spec\.images\.worker'
+
+  # A ConfigMap that exists only in the release's render is not missing.
+  - it: accepts a worker referencing a ConfigMap the release renders for the first time
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: new-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-new
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: new-worker-config
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects pre-CDC worker images inherited from a referenced ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{}"
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'generated-worker pins pre-CDC image .*ConfigMap image defaults'
+
+  - it: ignores legacy chart ConfigMap data that this upgrade replaces
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: buildbarn-worker-config
+                images:
+                  runner: example.com/runner:latest
+        configMaps:
+          items:
+            - metadata:
+                name: buildbarn-worker-config
+              data:
+                common.libsonnet: "{ browserUrl: 'old' }"
+                workerImage: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a missing referenced worker ConfigMap
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: missing-input
+                images:
+                  runner: example.com/runner:latest
+    asserts:
+      - failedTemplate:
+          errorPattern: 'generated-worker references missing ConfigMap "missing-input"'
+
+  - it: ignores an inherited runner installer image when the installer is disabled
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: generated-worker
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                images:
+                  runner: example.com/runner:latest
+                runner:
+                  installerEnabled: false
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{}"
+                runnerInstallerImage: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  # Operator: one per cluster. upgradeChecks.operatorNamespace points at it;
+  # the mock lookup stands in for that namespace's Deployments.
+  - it: rejects the bb-worker-operator release that runs today (v0.3.13)
+    set:
+      upgradeChecks.operatorNamespace: hermetiq
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.12
+                  app.kubernetes.io/version: v0.3.13
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment hermetiq/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
+
+  - it: rejects operator chart version labels without image compatibility evidence
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.13
+                  app.kubernetes.io/version: v0.3.14
+            - metadata:
+                name: bb-worker-operator-controller-manager
+                labels:
+                  app.kubernetes.io/version: v0.4.0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'has no hermetiq.com/cdc-compatible=true declaration for its operator image'
+
+  - it: accepts an operator annotated as CDC-compatible regardless of version
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+                labels:
+                  app.kubernetes.io/version: bb-upgrade-22b7d82
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: fails closed when the operator version cannot be read
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.12
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
+
+  - it: ignores unrelated Deployments in the operator namespace
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: keda-operator
+                labels:
+                  app.kubernetes.io/version: 2.19.0
+    asserts:
+      - notFailedTemplate: {}
+
+  # bep-nats: only grpc-api and bep-nats-pub validate ConfigSets.
+  - it: rejects bep-nats from hermetiq 0.9.8, the latest release without dual-descriptor validation
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: grpc-api
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/grpc-api has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
+
+  - it: rejects newer hermetiq chart labels without evidence for the selected bep-nats image
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-pub
+                labels:
+                  helm.sh/chart: hermetiq-0.9.9
+                  app.kubernetes.io/component: publisher
+            - metadata:
+                name: bep-nats-sub-0
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: subscriber
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
+
+  - it: accepts hermetiq 0.9.8 bep-nats annotated as CDC-compatible (buildbarnCdcCompatible)
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: grpc-api
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: ignores subscribers because they do not validate configurations
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-sub-0
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: subscriber
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: fails closed when a bep-nats Deployment has no readable hermetiq chart version
+    set:
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: bep-nats-pub
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
+
+  - it: rejects legacyContentAddressableStorage in scheduler configOverrides even when referencing common.blobstore
+    set:
+      configOverrides:
+        scheduler.jsonnet: |
+          {
+            legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "legacyContentAddressableStorage"'
+
+  - it: rejects removed pre-CDC fields in portal.jsonnet configOverrides
+    set:
+      configOverrides:
+        portal.jsonnet: |
+          {
+            instanceNameAuthorizer: { allow: {} },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["portal\.jsonnet"\] contains pre-CDC field "instanceNameAuthorizer"'
+
+  - it: rejects pre-CDC browser.jsonnet override splatting CDC common.blobstore
+    set:
+      configOverrides:
+        browser.jsonnet: |
+          local common = import 'common.libsonnet';
+          { blobstore: common.blobstore }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["browser\.jsonnet"\] passes CDC common\.blobstore directly to pre-CDC bb-browser'
+
+  - it: rejects storage.jsonnet contentAddressableStorageServer without chunkStorage
+    set:
+      configOverrides:
+        storage.jsonnet: |
+          {
+            contentAddressableStorageServer: {
+              contentAddressableStorage: { 'local': {} },
+            },
+          }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'defines contentAddressableStorageServer with a single-store "contentAddressableStorage" missing "chunkStorage"'
+
+  - it: ignores removed pre-CDC field names inside Jsonnet comments
+    set:
+      configOverrides:
+        scheduler.jsonnet: |
+          // Migrated: replaced browserUrl with deprecatedPortalUrl
+          {
+            deprecatedPortalUrl: common.portalUrl,
+            contentAddressableStorage: common.blobstore.contentAddressableStorage,
+          }
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects pre-CDC fields inside scheduler.actionRouter.custom
+    set:
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ browserUrl: 'https://old.example.com' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'scheduler\.actionRouter\.custom contains pre-CDC field "browserUrl"'
+
+  - it: rejects fork scheduler features when images.scheduler.digest is still pinned to upstream
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      images.scheduler.digest: sha256:f8ff583267708354d2550e43c3b89c358d6e0c28fa5f4216521275b431db9fa8
+      scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'clear images\.scheduler\.digest if pinned to upstream'
+
+  - it: allows disabling frontend internalService when enforceAuth=true and browser.replicas=0
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.enforceAuth: true
+      frontend.grpcCacheProxy.stytch.apiHost: api.stytch.com
+      frontend.grpcCacheProxy.stytch.existingSecret: stytch-secret
+      frontend.internalService.enabled: false
+      browser.replicas: 0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects sharedCas CMS exceeding filesystem CAS PVC headroom
+    set:
+      storage.persistence.cas.size: 958Gi
+      storage.persistence.cas.blocksSizeGi: 950
+      storage.persistence.cas.keyLocationMapSizeMi: 7168
+      storage.persistence.cms.blocksSizeGi: 1
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
+    asserts:
+      - failedTemplate:
+          errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.size'
+
+  - it: rejects sharedCas CMS exceeding emptyDir CAS sizeLimit headroom
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 958Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.emptyDir\.sizeLimit'
+
+  - it: rejects sharedCas CMS exceeding raw CAS metadata PVC headroom
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+      storage.persistence.cas.blockDevice.metadata.size: 8Gi
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 7360
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cas\.blockDevice\.metadata\.size .* plus sharedCas CMS files'
+
+  - it: rejects CMS total blocks exceeding 100 on block-backed stores
+    set:
+      storage.persistence.cms.currentBlocks: 95
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cms: spareBlocks\+oldBlocks\+currentBlocks\+newBlocks is 107'
+
+  - it: checks CMS keyLocationMapSizing accurately for blocksInMemory (33 of 33 blocks)
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cms.keyLocationMap.entries: 100000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.cms: key-location map is too small .* 264 MiB usable \(33 of 33 blocks\)'
+
+  # upgradeChecks.operatorNamespace is left empty here, so the operator is
+  # looked for in the release namespace; upgrade_lookup_test.yaml covers a
+  # configured operator namespace through the real lookup path.
+  - it: rejects live RbeWorkers when no bb-worker-operator is found in the release namespace
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-default
+              spec:
+                images:
+                  runner: example.com/runner:latest
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20261113T075319Z-f22e022
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker resources exist in namespace .*, but no bb-worker-operator Deployment was found'
+
+  - it: accepts live RbeWorker with CDC-era pinned images and compatible operator
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: custom-operator-name
+                labels:
+                  helm.sh/chart: bb-worker-operator-0.3.13
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-cdc-pin
+              spec:
+                docker:
+                  mode: sysbox
+                images:
+                  runner: example.com/runner:latest
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+        configMaps:
+          items:
+            - metadata:
+                name: worker-cdc-pin-config
+                ownerReferences:
+                  - kind: RbeWorker
+                    name: worker-cdc-pin
+                labels:
+                  hermetiq.com/worker-pool: worker-cdc-pin
+              data:
+                worker.jsonnet: "{ browserUrl: 'operator-generated-will-be-reconciled' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks Hermetiq Deployments in upgradeChecks.hermetiqNamespace when set
+    set:
+      upgradeChecks.hermetiqNamespace: hermetiq-prod
+      _testLookup:
+        deployments:
+          items:
+            - metadata:
+                name: custom-api-name
+                labels:
+                  helm.sh/chart: hermetiq-0.9.8
+                  app.kubernetes.io/component: api
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment hermetiq-prod/custom-api-name has no hermetiq.com/cdc-compatible=true declaration'
+
+  - it: rejects _testLookup during helm upgrade
+    release:
+      upgrade: true
+    set:
+      _testLookup:
+        deployments:
+          items: []
+    asserts:
+      - failedTemplate:
+          errorPattern: '_testLookup is reserved for offline chart unit tests and cannot be set during helm upgrade'
 
   # The authenticationPolicy `mode` enums (and scheduler.actionRouter.mode) are
   # enforced by values.schema.json, which rejects the release before any
@@ -513,3 +1379,141 @@ tests:
   # a chart-level error rather than a template one. validate.yaml keeps the same
   # checks as a backstop for `--skip-schema-validation`; the enum lists
   # themselves live in values.schema.json.
+
+  - it: reports the filesystem AC file knob after an entries-only scale-up
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.entries: 42000000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage.persistence.ac: key-location map is too small.*that is 1.25x.*Set storage.persistence.ac.keyLocationMap.sizeMi to at least 2152 MiB.*RAM entry settings do not size this file index'
+
+  - it: rejects an AC file index one MiB below the rounded minimum
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.sizeMi: 2151
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.ac.keyLocationMap.sizeMi to at least 2152 MiB'
+
+  - it: accepts the rounded minimum AC file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.sizeMi: 2152
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks enabled filesystem ISCC file-index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.size: 4Gi
+      storage.persistence.iscc.blocksSizeGi: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.iscc.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks enabled filesystem FSAC file-index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.size: 12Gi
+      storage.persistence.fsac.blocksSizeGi: 8
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.fsac.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: skips disabled filesystem FSAC even with an undersized file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.sizeMi: 1
+    asserts:
+      - notFailedTemplate: {}
+
+  # The CMS index size is set in these three cases so they test the arithmetic
+  # and not the chart default.
+  - it: checks shared CMS file-index capacity on the CAS filesystem
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks shared CMS file-index capacity on raw CAS metadata
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks a dedicated filesystem CMS file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.backend: filesystem
+      storage.persistence.cms.size: 4Gi
+      storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: reports raw CAS metadata index size rather than ignored RAM entries
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: 340Gi
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 1024
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 40000000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi to at least 2460 MiB'
+
+  - it: reports raw AC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.size: 16Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.ac.blockDevice.metadata.keyLocationMapSizeMi to at least 1721 MiB'
+
+  - it: reports raw ISCC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.size: 4Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.iscc.blockDevice.metadata.keyLocationMapSizeMi to at least 968 MiB'
+
+  - it: reports raw FSAC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+      storage.persistence.fsac.blockDevice.size: 12Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.fsac.blockDevice.metadata.keyLocationMapSizeMi to at least 726 MiB'
+
+  - it: reports dedicated raw CMS metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.cms.blockDevice.size: 4Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.blockDevice.metadata.keyLocationMapSizeMi to at least 968 MiB'

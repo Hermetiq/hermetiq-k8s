@@ -1,0 +1,64 @@
+# Explicit opt-out from restart persistence. Apply AFTER deployment values:
+#   helm template buildbarn charts/buildbarn -f my-values.yaml \
+#     -f custom-values/buildbarn-values-ephemeral.yaml
+#
+# Raw-block stores use RAM indexes, omit metadata volumes, and start empty on
+# every storage-process restart. With raw CAS, shared CMS blocks are in RAM too.
+# CMS/AC/ISCC/FSAC filesystem indexes also use RAM. Filesystem CAS always uses a
+# file index; select mode: emptyDir with sized emptyDir limits for pod-lifetime
+# filesystem storage (this overlay deliberately does not change volume topology).
+#
+# This preserves optional-store enablement, backends, sizes, paths and resources.
+# It sets no RAM entry counts. A raw store then uses its
+# blockDevice.keyLocationMapInMemoryEntries, and the chart defaults are sized
+# for the default devices (CAS: 24000000 entries for 200Gi). A raw store larger
+# than its default needs an explicit count in your deployment values:
+#   entries >= storage.keyLocationMapSizing.minimumRatio (2)
+#              x device bytes x (old + current + new blocks) / (all blocks)
+#              / storage.keyLocationMapSizing.averageObjectSizeBytes.<store>
+# For raw CAS with the default 8/30/3/3 geometry and 17408-byte average that is
+# about 115000 entries per GiB of device: 82534707 for 718Gi, 114950845 for
+# 1000Gi. Budget about 64 bytes of Go heap per entry. With
+# storage.keyLocationMapSizing.validate=true an undersized count fails the
+# render and the error states the minimum; with the chart default (false) it
+# renders, the index silently drops entries once it fills, and the only warning
+# is in the install/upgrade NOTES. The Local SSD overlay
+# (buildbarn-values-local-ssd-block.yaml) carries a CAS count for its 718Gi
+# LV, so this file renders after it.
+#
+# Switching from file to RAM discards access to existing data. Removing
+# metadata PVC templates requires StatefulSet recreation. A release whose raw
+# PVC stores already ran in-memory indexes (the 0.9.9 raw default) had no
+# metadata claims, and with this profile it still renders none. ISCC and FSAC
+# are now enabled by default and add their own claims unless the release
+# already had them or sets enabled: false.
+# For a cold discard, stop storage and reset/delete the blocks and metadata
+# claims together. Rollback needs a consistent stopped snapshot/copy of both.
+# Do not reuse a stale checkpoint with blocks written by a volatile store:
+# returning to file requires a cold reset.
+# See docs/buildbarn-storage-operations.md for cutover and restart behavior.
+storage:
+  persistence:
+    cas:
+      blockDevice:
+        keyLocationMap: inMemory
+    cms:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    ac:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    iscc:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    fsac:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory

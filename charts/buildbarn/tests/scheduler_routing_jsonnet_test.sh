@@ -77,6 +77,7 @@ for router in routers:
         inline = evaluate(values)
         reloading_values = copy.deepcopy(values)
         reloading_values["scheduler"]["configurationReloadInterval"] = "30s"
+        reloading_values["scheduler"]["handover"] = {"cdcCompatibleFork": True}
         reloading = evaluate(reloading_values)
         assert inline["actionRouter"] == reloading["actionRouter"], router["mode"]
         assert inline.get("predeclaredPlatformQueues", []) == reloading["predeclaredPlatformQueues"], router["mode"]
@@ -92,6 +93,7 @@ for pod_ip, endpoint_host in [("10.0.0.7", "10.0.0.7"), ("fd00::7", "[fd00::7]")
             "images": {"scheduler": {"repository": "example.com/bb-scheduler"}},
             "scheduler": {"handover": {
                 "enabled": True,
+                "cdcCompatibleFork": True,
                 "port": handover_port,
                 "coordinator": {"image": {
                     "repository": "example.com/bb-scheduler-coordinator", "tag": "test",

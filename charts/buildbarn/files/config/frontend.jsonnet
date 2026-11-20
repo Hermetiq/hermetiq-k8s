@@ -70,7 +70,7 @@ local common = import 'common.libsonnet';
 
   global: common.global,
 
-  contentAddressableStorage: {
+  contentAddressableStorageServer: {
     {{- /* The read cache nests INSIDE the existence cache when both are on.
          ReadCachingBlobAccess overrides only Get and GetFromComposite and
          embeds the slow backend for everything else, so FindMissingBlobs —
@@ -88,33 +88,63 @@ local common = import 'common.libsonnet';
     {{- $readCache := .Values.frontend.readCache.enabled }}
     {{- $existenceCache := .Values.frontend.contentAddressableStorage.existenceCaching.enabled }}
     {{- if and $readCache $existenceCache }}
-    backend: {
-      existenceCaching: {
-        existenceCache: {
-          cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
-          cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
-          cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+    contentAddressableStorage: {
+      chunkStorage: {
+        existenceCaching: {
+          existenceCache: {
+            cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
+            cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
+            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+          },
+          backend: {{ include "buildbarn.frontendReadCachingBackend" . | indent 10 | trim }},
         },
-        backend: {{ include "buildbarn.frontendReadCachingBackend" . | indent 8 | trim }},
       },
+      chunkMappingStorage: {
+        existenceCaching: {
+          backend: common.blobstore.contentAddressableStorage.chunkMappingStorage,
+          existenceCache: {
+            cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
+            cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
+            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+          },
+        },
+      },
+      cdcParameterCache: common.blobstore.contentAddressableStorage.cdcParameterCache,
     },
     {{- else if $readCache }}
-    backend: {{ include "buildbarn.frontendReadCachingBackend" . | indent 4 | trim }},
+    contentAddressableStorage: {
+      chunkStorage: {{ include "buildbarn.frontendReadCachingBackend" . | indent 6 | trim }},
+      chunkMappingStorage: common.blobstore.contentAddressableStorage.chunkMappingStorage,
+      cdcParameterCache: common.blobstore.contentAddressableStorage.cdcParameterCache,
+    },
     {{- else if $existenceCache }}
-    backend: {
-      existenceCaching: {
-        backend: common.blobstore.contentAddressableStorage,
-        existenceCache: {
-          cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
-          cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
-          cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+    contentAddressableStorage: {
+      chunkStorage: {
+        existenceCaching: {
+          backend: common.blobstore.contentAddressableStorage.chunkStorage,
+          existenceCache: {
+            cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
+            cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
+            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+          },
         },
       },
+      chunkMappingStorage: {
+        existenceCaching: {
+          backend: common.blobstore.contentAddressableStorage.chunkMappingStorage,
+          existenceCache: {
+            cacheSize: {{ int64 .Values.frontend.contentAddressableStorage.existenceCaching.cacheSize }},
+            cacheDuration: {{ .Values.frontend.contentAddressableStorage.existenceCaching.cacheDuration | quote }},
+            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+          },
+        },
+      },
+      cdcParameterCache: common.blobstore.contentAddressableStorage.cdcParameterCache,
     },
     {{- else }}
     {{- /* No FindMissingBlobs caching: every lookup goes straight to the shards.
          Correct (never stale) but higher storage read load. */}}
-    backend: common.blobstore.contentAddressableStorage,
+    contentAddressableStorage: common.blobstore.contentAddressableStorage,
     {{- end }}
     getAuthorizer: { allow: {} },
     putAuthorizer: {
@@ -133,6 +163,7 @@ local common = import 'common.libsonnet';
       {{- end }}
     },
     findMissingAuthorizer: { allow: {} },
+    maximumChunkCount: {{ int64 .Values.config.contentAddressableStorage.maximumChunkCount }},
   },
   actionCache: {
     backend: common.blobstore.actionCache,

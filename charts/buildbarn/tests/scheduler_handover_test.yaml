@@ -1,4 +1,7 @@
 suite: scheduler zero-downtime handover (Phase 1)
+# The CDC chart rejects handover unless the fork image supports CDC; each
+# handover-enabled test opts in explicitly so the default tests below exercise
+# unmodified chart defaults.
 templates:
   - templates/deployment-scheduler.yaml
   - templates/rbac-scheduler.yaml
@@ -17,7 +20,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/buildbarn/bb-scheduler:20260908T142432Z-77f7642
+          value: ghcr.io/buildbarn/bb-scheduler:20261113T075319Z-f22e022
       - lengthEqual:
           path: spec.template.spec.containers
           count: 1
@@ -56,6 +59,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
@@ -125,6 +129,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:
@@ -154,6 +159,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
@@ -168,13 +174,16 @@ tests:
           pattern: "deprecatedAdminHttpServers:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "legacyContentAddressableStorage: common.blobstore.contentAddressableStorage,"
+          pattern: "deprecatedPortalUrl: common\\.portalUrl,"
+      - matchRegex:
+          path: data["scheduler.jsonnet"]
+          pattern: "(?m)^  contentAddressableStorage: common.blobstore.contentAddressableStorage,"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "(?m)^  contentAddressableStorage:"
+          pattern: "legacyContentAddressableStorage:"
       - notMatchRegex:
           path: data["scheduler.jsonnet"]
-          pattern: "adminHttpServers:|browserUrl:|deprecatedPortalUrl:"
+          pattern: "adminHttpServers:|browserUrl:"
       - matchRegex:
           path: data["scheduler.jsonnet"]
           pattern: "address: 'unix:///run/bb-coordinator/coordinator\\.sock'"
@@ -191,6 +200,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.handover.peerServerName: scheduler.bbdev.svc
@@ -206,6 +216,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
       scheduler.handover.peerServerName: scheduler.bbdev.svc
@@ -238,6 +249,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
@@ -252,6 +264,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
       security.grpcMtls.enabled: true
@@ -278,6 +291,7 @@ tests:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.networkPolicy.enabled: true
       scheduler.handover.enabled: true
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
       scheduler.handover.coordinator.image.tag: v0.1.0
     asserts:

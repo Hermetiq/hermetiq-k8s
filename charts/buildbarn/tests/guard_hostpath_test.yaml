@@ -1,0 +1,91 @@
+suite: buildbarn hostPath default-path guard
+templates:
+  - templates/validate.yaml
+tests:
+  # ISCC and FSAC are enabled by default with backend=filesystem. In
+  # mode=hostPath they mount the chart-default directory unless told otherwise,
+  # whatever path or device the operator chose for CAS. Once CAS is off the
+  # chart default, an ISCC or FSAC store still on it fails the render.
+  #
+  # These tests also pin buildbarn.storage.defaultHostPath to the hostPath.path
+  # defaults in values.yaml: if the two drift apart, the first test starts
+  # failing or the rejections stop firing.
+
+  - it: accepts hostPath mode with every store on the chart default paths
+    set:
+      storage.persistence.mode: hostPath
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a default ISCC path when the CAS filesystem path was moved
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.hostPath.path: /mnt/disks/nvme0/buildbarn/cas
+      storage.persistence.ac.hostPath.path: /mnt/disks/nvme0/buildbarn/ac
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.iscc\.hostPath\.path is still the chart default \(/mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/iscc\) in storage\.persistence\.mode=hostPath, but CAS does not use the chart default path \(storage\.persistence\.cas\.hostPath\.path=/mnt/disks/nvme0/buildbarn/cas\)'
+      - failedTemplate:
+          errorPattern: 'Set storage\.persistence\.iscc\.hostPath\.path to a directory next to the other stores, or set storage\.persistence\.iscc\.enabled=false\.'
+
+  - it: rejects a default FSAC path once ISCC has its own path
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.hostPath.path: /mnt/disks/nvme0/buildbarn/cas
+      storage.persistence.iscc.hostPath.path: /mnt/disks/nvme0/buildbarn/iscc
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.fsac\.hostPath\.path is still the chart default \(/mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/fsac\)'
+      - failedTemplate:
+          errorPattern: 'Set storage\.persistence\.fsac\.hostPath\.path to a directory next to the other stores, or set storage\.persistence\.fsac\.enabled=false\.'
+
+  # The 0.9.9 raw-block hostPath layout: CAS on a device, nothing said about
+  # ISCC or FSAC.
+  - it: rejects default ISCC and FSAC paths when CAS is a raw block device
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/buildbarn/metadata/cas
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage\.persistence\.iscc\.hostPath\.path is still the chart default .* but CAS does not use the chart default path \(storage\.persistence\.cas\.backend=blockDevice\)'
+
+  - it: accepts moved CAS when ISCC and FSAC have their own paths
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.hostPath.path: /mnt/disks/nvme0/buildbarn/cas
+      storage.persistence.ac.hostPath.path: /mnt/disks/nvme0/buildbarn/ac
+      storage.persistence.iscc.hostPath.path: /mnt/disks/nvme0/buildbarn/iscc
+      storage.persistence.fsac.hostPath.path: /mnt/disks/nvme0/buildbarn/fsac
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts moved CAS when ISCC and FSAC are disabled
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.hostPath.path: /mnt/disks/nvme0/buildbarn/cas
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+    asserts:
+      - notFailedTemplate: {}
+
+  # A raw ISCC or FSAC store has no filesystem hostPath; its device and
+  # metadata paths are required elsewhere.
+  - it: does not apply to raw block ISCC and FSAC stores
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.backend: blockDevice
+    asserts:
+      - notFailedTemplate: {}
+
+  # hostPath.path is inert outside hostPath mode.
+  - it: does not apply in pvc mode
+    set:
+      storage.persistence.cas.hostPath.path: /mnt/disks/nvme0/buildbarn/cas
+    asserts:
+      - notFailedTemplate: {}
