@@ -472,6 +472,20 @@ tests:
           path: data["worker-common.libsonnet"]
       - notExists:
           path: data["worker-ubuntu22-04.jsonnet"]
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: "(?s)\\}\\s*\\+ \\{.*blobstore\\+: \\{.*contentAddressableStorage\\+: \\{.*chunkCache: \\{\\n *cacheSize: 2048,"
+
+  - it: omits the worker chunk cache when its size is 0
+    set:
+      config.contentAddressableStorage.chunkCache.cacheSize: 0
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-worker-config
+    asserts:
+      - notMatchRegex:
+          path: data["common.libsonnet"]
+          pattern: "chunkCache"
 
   - it: renders RepMaxCDC chunkStorage, chunkMappingStorage, and nested keyLocationMap across configs
     documentSelector:
@@ -487,9 +501,9 @@ tests:
       - matchRegex:
           path: data["common.libsonnet"]
           pattern: "cdcParameterCache:"
-      - matchRegex:
+      - notMatchRegex:
           path: data["common.libsonnet"]
-          pattern: "chunkCache: \\{\\n        cacheSize: 2048,"
+          pattern: "chunkCache"
       - matchRegex:
           path: data["common.libsonnet"]
           pattern: "portalUrl: 'https://browser.helm.hermetiq.dev',"
