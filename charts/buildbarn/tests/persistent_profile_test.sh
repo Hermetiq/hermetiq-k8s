@@ -39,11 +39,18 @@ def check_layout(output, expected_claims, expected_stores):
 
 with tempfile.TemporaryDirectory(prefix='buildbarn-profile-test-') as tmp:
     directory = pathlib.Path(tmp)
-    # Defaults must not enable optional stores merely because the profile is added.
+    # The profile preserves default enablement and explicit disabled overrides.
     output = render(directory, {})
     assert output == render(directory, {}, include_profile=True)
+    check_layout(output, expected_claims=4, expected_stores=5)
+    print('PASS default/profile equality with all five stores enabled')
+    disabled = {'storage': {'persistence': {
+        'iscc': {'enabled': False}, 'fsac': {'enabled': False},
+    }}}
+    output = render(directory, disabled)
+    assert output == render(directory, disabled, include_profile=True)
     check_layout(output, expected_claims=2, expected_stores=3)
-    print('PASS default/profile equality with optional stores disabled')
+    print('PASS default/profile equality with explicitly disabled ISCC and FSAC')
 
     for mode in ('pvc', 'hostPath'):
         for backend in ('filesystem', 'blockDevice'):
@@ -85,10 +92,8 @@ with tempfile.TemporaryDirectory(prefix='buildbarn-profile-test-') as tmp:
                              expected_stores=5)
                 print(f'PASS {label}: default/profile equality, old RAM overrides, five persistent stores')
 
-    # The shipped raw Local SSD provisioner has no metadata filesystem whose
-    # loss is coupled to its data LVs. Until that topology is validated on GKE,
-    # the real example must explicitly opt out rather than retain boot-disk
-    # checkpoints over SSD blocks that can disappear independently.
+    # The shipped Local SSD overlay must keep every raw index and checkpoint
+    # on the provisioner's metadata LV, alongside the four disposable data LVs.
     local_overlay = chart.parent.parent / 'custom-values/buildbarn-values-local-ssd-block.yaml'
     output = subprocess.check_output(
         ['helm', 'template', 'profile-test', str(chart), '--namespace', 'hermetiq',
@@ -99,15 +104,26 @@ with tempfile.TemporaryDirectory(prefix='buildbarn-profile-test-') as tmp:
                    and doc['metadata']['name'] == 'storage')
     assert not storage['spec'].get('volumeClaimTemplates'), storage['spec']
     pod = storage['spec']['template']['spec']
-    assert not any(volume['name'].endswith('-meta') for volume in pod['volumes']), pod['volumes']
-    for container in pod['containers'] + pod.get('initContainers', []):
-        assert not any(mount['name'].endswith('-meta')
-                       for mount in container.get('volumeMounts', [])), container
+    assert pod['nodeSelector']['hermetiq/ephemeral-lvm'] == 'ready', pod['nodeSelector']
+    volumes = {volume['name']: volume for volume in pod['volumes']}
+    expected_meta = {f'{store}-meta' for store in ('cas', 'ac', 'iscc', 'fsac')}
+    assert {name for name in volumes if name.endswith('-meta')} == expected_meta, volumes
+    for store in ('cas', 'ac', 'iscc', 'fsac'):
+        assert volumes[store + '-meta']['hostPath'] == {
+            'path': '/mnt/stateful_partition/buildbarn-local-ssd/metadata/' + store,
+            'type': 'Directory',
+        }, volumes[store + '-meta']
+    for container_name, containers in (('storage', pod['containers']),
+                                       ('volume-init', pod.get('initContainers', []))):
+        container = next(item for item in containers if item['name'] == container_name)
+        mounts = {item['name']: item for item in container.get('volumeMounts', [])}
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            assert mounts[store + '-meta']['mountPath'] == '/storage-' + store + '-meta', mounts
     config = next(doc['data']['storage.jsonnet'] for doc in documents
                   if doc['kind'] == 'ConfigMap' and doc['metadata']['name'] == 'buildbarn-config')
-    assert 'stateDirectoryPath:' not in config and 'onBlockDevice:' not in config, config
-    assert config.count('inMemory:') == 5 and 'blocksInMemory:' in config, config
-    print('PASS bundled Local SSD example explicitly keeps all five stores volatile without metadata mounts')
+    check_layout(output, expected_claims=0, expected_stores=5)
+    assert "path: '/storage-cas-meta/cdc-v1/cms-blocks.db'" in config, config
+    print('PASS bundled Local SSD example persists all five stores on the provisioned metadata LV')
 
 print('Persistent profile matches defaults and overrides old RAM settings across all storage layouts.')
 PY

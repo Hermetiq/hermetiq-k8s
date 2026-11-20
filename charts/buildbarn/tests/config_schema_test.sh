@@ -225,7 +225,18 @@ def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_
 ci_values = chart / "ci-values" / "ci.yaml"
 
 # 1. Default values (with ci-values image repository fixtures)
-render_and_validate("defaults", value_files=[ci_values])
+defaults = render_and_validate("defaults", value_files=[ci_values])
+for name in ("initialSizeClassCache", "fileSystemAccessCache"):
+    assert "persistent" in defaults["storage.jsonnet"][name]["backend"]["local"], name
+assert "initialSizeClassCache" not in defaults["scheduler.jsonnet"], "scheduler analysis remains opt-in"
+disabled = render_and_validate(
+    "explicitly-disabled-history-stores", value_files=[ci_values],
+    inline_overrides={"storage": {"persistence": {
+        "iscc": {"enabled": False}, "fsac": {"enabled": False},
+    }}},
+)
+for name in ("initialSizeClassCache", "fileSystemAccessCache"):
+    assert name not in disabled["storage.jsonnet"], name
 
 # 2. All optional components and storage backends enabled
 render_and_validate(

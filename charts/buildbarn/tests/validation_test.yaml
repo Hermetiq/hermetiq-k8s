@@ -139,6 +139,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - hasDocuments:
           count: 0
@@ -182,6 +184,8 @@ tests:
       storage.persistence.cas.emptyDir.sizeLimit: 400Gi
       storage.persistence.cas.blocksSizeGi: 500
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - failedTemplate:
@@ -194,6 +198,8 @@ tests:
       storage.persistence.cas.blocksSizeGi: 300
       storage.persistence.cas.size: 10Gi
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - notFailedTemplate: {}
@@ -1247,6 +1253,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 958Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - failedTemplate:
           errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.emptyDir\.sizeLimit'

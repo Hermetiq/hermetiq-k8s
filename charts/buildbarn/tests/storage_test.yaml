@@ -118,11 +118,11 @@ tests:
           path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
           value: /storage-cas-meta
 
-  - it: prepares separate CDC CAS, AC, and durable shared CMS state without adding PVCs
+  - it: prepares separate CDC and shared CMS state on the four default data PVCs
     asserts:
       - lengthEqual:
           path: spec.volumeClaimTemplates
-          count: 2
+          count: 4
       - matchRegex:
           path: spec.template.spec.initContainers[0].command[2]
           pattern: 'mkdir -p /storage-cas/cdc-v1/persistent_state'

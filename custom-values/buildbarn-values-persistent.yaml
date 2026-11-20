@@ -20,9 +20,10 @@
 #
 # Recovery requires retained blocks, index, and persistent_state together.
 # Local blocks and metadata must share storage and reset lifecycle. Never keep
-# boot-disk/network metadata over wiped Local SSD blocks. The bundled raw-LV
-# local SSD overlay cannot safely use this profile without a validated metadata
-# filesystem/readiness/reset provisioner. emptyDir cannot survive pod replacement.
+# boot-disk/network metadata over wiped Local SSD blocks. The bundled Local SSD
+# overlay already selects persistent indexes and supplies same-SSD metadata
+# paths for its mount/generation-checking provisioner. See the GKE validation
+# runbook before adopting another layout. emptyDir cannot survive pod replacement.
 storage:
   persistence:
     cas:

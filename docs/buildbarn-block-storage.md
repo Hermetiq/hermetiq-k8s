@@ -1,6 +1,6 @@
 # Buildbarn Raw Block-Device Storage on GKE
 
-By default, each Buildbarn storage shard keeps CAS and Action Cache blocks in files on a filesystem volume. That is the simplest mode, and it is the right default for many deployments.
+By default, each Buildbarn storage shard keeps CAS and Action Cache blocks in files on a filesystem volume. CAS remains the logical content-addressable store: CDC changes its physical chunk layout, and CMS records how chunks compose a blob. Filesystem-backed storage is the simplest mode and suits many deployments.
 
 Raw block-device storage is the lower-overhead option. Instead of writing a large blocks file on a mounted filesystem, a store writes directly to a Kubernetes `volumeMode: Block` device. In chart values, set the store's `backend: blockDevice`.
 
@@ -127,101 +127,124 @@ store on each process restart is intentional.
 
 ## GKE Example B: Local NVMe SSD with `partition_ephemeral_disks`
 
-Use this for an explicitly volatile node-local tier. The supplied overlay uses in-memory indexes, so every storage-process restart starts cold. Buildbarn's `partition_ephemeral_disks` tool runs as a DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named `ephemeral`, and carves logical volumes for the stores.
+Use this for a node-local tier that retains warmed contents and learned history
+across storage pod restarts. The supplied LVM DaemonSet places raw data LVs and
+a metadata filesystem on the **same Local SSDs**. This makes process persistence
+useful without treating ephemeral SSDs as durable storage: replacement or loss of
+those SSDs still requires a cold store.
 
-This repository includes a ready-to-edit version of that pattern:
+Use the two files together:
 
-- `custom-values/partition-ephemeral-disks-daemonset.yaml` prepares the node devices and labels nodes `hermetiq/ephemeral-lvm=ready`.
-- `custom-values/buildbarn-values-local-ssd-block.yaml` consumes those devices as a Helm values overlay.
+- [partition-ephemeral-disks-daemonset.yaml](../custom-values/partition-ephemeral-disks-daemonset.yaml) prepares and verifies the node storage before labelling it `hermetiq/ephemeral-lvm=ready`.
+- [buildbarn-values-local-ssd-block.yaml](../custom-values/buildbarn-values-local-ssd-block.yaml) selects persistent indexes for all five stores and points metadata hostPaths at the verified SSD mount.
 
-Apply the DaemonSet first, then layer the overlay after your base
-`buildbarn-values.yaml`.
+Apply the DaemonSet first, then layer the overlay after your base values. Both
+the provisioner and hostPath storage containers require a namespace that permits
+privileged pods. Follow the [GKE validation runbook](buildbarn-gke-storage-validation.md)
+when changing the node image, provisioning script, or disk layout.
 
-### How the DaemonSet works
+### Layout and readiness
 
-`partition-ephemeral-disks-daemonset.yaml` runs one privileged pod per
-`node-type=ssd-block` node. On start it:
+The DaemonSet targets `node-type=ssd-block` nodes created with
+`--local-nvme-ssd-block`. It discovers and stripes every raw Local SSD into the
+`ephemeral` VG. Fresh nodes receive these LVs, in order:
 
-1. Clears the node label `hermetiq/ephemeral-lvm`, so a node whose SSDs were
-   wiped by a reboot is not advertised as ready with stale state.
-2. Finds the raw Local SSDs at `/dev/disk/by-id/google-local-nvme-ssd-*` and
-   refuses to run if there are none, which means the node pool was not created
-   with `--local-nvme-ssd-block`.
-3. Creates the LVM2 volume group `ephemeral` across all of them, once.
-4. Creates the logical volumes if they do not exist, striped across every SSD:
-   `ac` 8 GiB, `iscc` 2 GiB, `fsac` 6 GiB, then `cas` with all remaining
-   extents. The small stores use fixed sizes rather than percentages because
-   they hold tiny objects (about 1.1 KiB ActionResults, 0.5 KiB ISCC records,
-   2 KiB FSAC bloom filters). A percentage of a multi-SSD node would hand them
-   tens of GiB and millions of extra key-location-map slots that the values
-   file would then have to cover in RAM. Fixed sizes keep the sizing arithmetic
-   in `buildbarn-values-local-ssd-block.yaml` valid on any node shape.
-5. Verifies that all four block devices exist, labels the node
-   `hermetiq/ephemeral-lvm=ready`, and sleeps. The storage overlay's
-   `nodeSelector` requires that label, so storage pods stay Pending until the
-   devices exist instead of failing to mount.
+| LV | Size | Purpose |
+|---|---|---|
+| `meta` | 16 GiB | ext4 filesystem for indexes, checkpoints, and shared CMS |
+| `ac` | 8 GiB | AC raw blocks |
+| `iscc` | 2 GiB | ISCC raw blocks |
+| `fsac` | 6 GiB | FSAC raw blocks |
+| `cas` | all remaining extents | CAS raw blocks; about 718 GiB with two GKE "375GB" SSDs exposing 375 GiB each |
 
-Every step is idempotent, so a restarted DaemonSet pod is harmless. `lvcreate`
-is guarded by `lvs`, so editing a size never resizes an existing volume; only
-fresh or wiped nodes pick the change up.
+`/dev/ephemeral/meta` is mounted at
+`/mnt/stateful_partition/buildbarn-local-ssd/metadata`. The parent directory is
+on COS's writable stateful partition, but **the mounted metadata filesystem is
+on Local SSD**, not the boot disk. A privileged init container uses the host PID
+and mount namespaces to make only this dedicated parent a shared mount; COS
+does not provide that property by default. Bidirectional propagation then makes
+the metadata submount visible to hostPath volumes in storage pods. The per-store directories
+`cas`, `ac`, `iscc`, and `fsac` use ownership `65534:65534` and mode `0770`.
+Shared CMS lives below the CAS metadata directory; it has no separate raw LV.
+The configured index files total about 9.75 GiB, plus 1 GiB of shared CMS blocks,
+leaving filesystem and checkpoint headroom within the 16 GiB LV.
 
-Implementation notes:
+On startup the provisioner clears `hermetiq/ephemeral-lvm`, verifies the layout,
+and activates existing LVs because COS has no host LVM activation service. It
+privately mounts metadata at `/tmp/buildbarn-metadata-staging` if needed and
+verifies the exact ext4
+mountpoint, its filesystem UUID, writable mount options, directory permissions,
+and `.buildbarn-layout-v1`. That marker records the VG, LV, and filesystem UUIDs
+so checkpoints cannot silently attach to a recreated data LV. Only after these
+checks does it publish the verified filesystem at the host metadata path and
+label the node ready. The same checks run periodically and in its readiness probe;
+a detected mismatch removes the scheduling label and fails the provisioner.
 
-- It does not use `ghcr.io/buildbarn/bb-partition-ephemeral-disks`. That image
-  is built on `distroless_static` and shells out to `vgcreate` and `lvcreate`,
-  which are not present there. The DaemonSet runs the same LVM2 commands from
-  `alpine:3.20` after `apk add lvm2 curl`. For air-gapped clusters, bake an
-  image with those packages and set `image:`.
-- Volumes are striped with classic LVM striping (the device-mapper `striped`
-  target in the already loaded `dm-mod`) rather than `--type raid0`, which
-  needs the `dm-raid` module that GKE Container-Optimized OS cannot load.
-- `terminationMessagePath` is moved off `/dev` because the container
-  bind-mounts the host `/dev`. The kubelet's default termination-log mount
-  otherwise races the hostPath mount and `runc` fails before the process starts.
-- Node labels are cluster-scoped, so the pod's ServiceAccount has a ClusterRole
-  limited to `get` and `patch` on Nodes.
+The storage overlay requires the ready label and uses `type: Directory` for
+metadata hostPaths. A missing per-store directory therefore fails mounting
+instead of being silently created on the boot disk. Staging before publication
+also keeps those directories unavailable to an already-bound pod restarting
+during node boot until the metadata generation has been checked.
+**The label gates scheduling; it does not evict an already running storage pod.** Stop affected storage before
+repairing a missing mount or a generation mismatch, and verify it again before
+allowing requests. UUID checks detect recreation, not arbitrary in-place zeroing
+or corruption of an LV.
 
-Troubleshooting:
+The script formats metadata only when creating a completely new VG. Restarting
+the provisioner remounts existing metadata and verifies its marker; it never
+formats an existing metadata LV or changes data-LV sizes. A partially created
+layout, missing marker, or old full VG without `meta` fails closed and needs an
+operator-reviewed cold cut-over. Changing size values does not resize existing
+LVs.
 
-- A storage pod stays Pending and no node carries `hermetiq/ephemeral-lvm=ready`:
-  read `kubectl -n hermetiq logs ds/partition-ephemeral-disks` for that node.
-- `ERROR: no /dev/disk/by-id/google-local-nvme-ssd-* devices`: the node pool
-  was created with `--ephemeral-storage-local-ssd` or without local SSDs.
-- To change a logical volume size, recreate the node (or run `vgremove
-  ephemeral` on it after draining). The store on that shard comes back empty.
+Implementation details:
 
-Storage pods consume the logical volumes using the complete
-[local SSD overlay](../custom-values/buildbarn-values-local-ssd-block.yaml).
-It explicitly sets `blockDevice.keyLocationMap: inMemory` on CAS, AC, ISCC, and
-FSAC; shared CMS is also in memory. This overrides the chart's persistent
-defaults because the bundled provisioner creates raw LVs only. It does not
-create a metadata filesystem that is lost/reset with those LVs.
+- The manifest uses `alpine:3.20` with `lvm2`, `curl`, `e2fsprogs`, and `util-linux`. For restricted-egress clusters, bake those packages into an image first.
+- It uses classic LVM striping through `dm-mod`. LVM `--type raid0` requires `dm-raid`, which the target GKE COS image cannot load.
+- Its `terminationMessagePath` is outside `/dev` because it bind-mounts the host's `/dev`.
+- Its ServiceAccount can `get` and `patch` Nodes to manage the scheduling label.
 
-**Do not place persistent metadata on the boot disk or a network PVC while
-blocks live on Local SSD.** A host failure can return the same VM with blank
-SSDs while boot-disk metadata survives. The index can then report missing blobs
-as present. Google documents this [Local SSD recovery behavior](https://cloud.google.com/compute/docs/disks/local-ssd#data_persistence).
+### Cold cut-over and failure recovery
 
-To make this layout persistent, first provision a metadata filesystem on the
-**same Local SSD storage** as the raw LVs and validate the mount/reset lifecycle
-on the actual node pool. Reserve space for all indexes, shared CMS blocks, and
-checkpoint state; the current sizes need about 10.75GiB before headroom (plan
-at least 16GiB). Gate storage scheduling on the verified mount. Use `Directory`
-for metadata hostPaths so a missing mount directory cannot silently be created
-on the boot disk. Reset all paired indexes/checkpoints when devices or the VG
-are recreated. The current DaemonSet neither provisions nor validates this
-layout; do not append the persistent profile to the supplied overlay without
-completing that work.
+Existing layouts that allocated the entire VG to four data LVs cannot gain the
+16 GiB metadata LV in place. Use a fresh storage node pool or explicitly reset a
+drained shard's **whole** VG. Do not shrink CAS or recreate one data LV while
+retaining its old metadata. The CDC upgrade already requires a cold format
+cut-over; combine the two planned outages when upgrading from pre-CDC storage.
 
-> **Configure every enabled store.** On raw-block Local SSD nodes, filesystem
-> hostPaths can otherwise land on the boot disk. Keep enabled AC/ISCC/FSAC on
-> their configured LVs and explicitly select their intended index mode.
+Drain builds and stop the affected storage processes before replacing devices or
+resetting a VG. Recreate blocks and metadata together, wait for the verified
+ready label, and start storage with the persistent overlay. Check that old keys
+are missing and clean uploads/readback succeed. Restart frontends before resuming
+clients so positive existence-cache entries do not refer to the discarded data.
+Restore rollback state only as a consistent blocks-and-metadata pair taken with
+storage stopped; retained metadata alone is not a rollback copy.
 
-The volatile fallback is intentional until a same-SSD metadata layout is tested
-on GKE. It avoids stale persistent indexes but loses warmed contents and learned
-history on restart. Drain builds and restart frontends during planned resets to
-clear positive existence-cache entries. The storage and provisioner containers
-remain privileged, so use a namespace that permits that model.
+**Never put persistent metadata on the boot disk or a network PVC while blocks
+live on Local SSD.** A normal guest-OS reboot preserves Local SSD contents, but a
+host-recovery failure can return the same VM with blank SSDs and an intact boot
+disk. Surviving metadata can then advertise nonexistent blobs as present. See
+Google's [Local SSD persistence and recovery behavior](https://cloud.google.com/compute/docs/disks/local-ssd#data_persistence).
+
+If a storage pod stays Pending, inspect the provisioner on its intended node:
+
+```bash
+kubectl -n hermetiq logs ds/partition-ephemeral-disks
+kubectl get nodes -l node-type=ssd-block -L hermetiq/ephemeral-lvm
+```
+
+No raw SSDs usually means the node pool was created without
+`--local-nvme-ssd-block`, or used `--ephemeral-storage-local-ssd` instead. A legacy
+VG, missing metadata mount, wrong filesystem, or generation mismatch is an
+intentional refusal to serve; resolve the paired storage lifecycle rather than
+manually adding the ready label.
+
+For intentionally volatile indexes, apply
+[buildbarn-values-ephemeral.yaml](../custom-values/buildbarn-values-ephemeral.yaml)
+**after** this overlay. That discards cache/training state on each storage-process
+restart and does not remove the need to handle frontend existence-cache entries
+after a cold reset. Keep every enabled store on its intended Local SSD layout;
+a filesystem hostPath outside the metadata mount can otherwise use the boot disk.
 
 ## GKE Example C: TopoLVM CSI
 

@@ -35,7 +35,7 @@ storage:
   keyLocationMapSizing:
     validate: true
   persistence:
-    # Enable ISCC and FSAC before first install when using mode=pvc: StatefulSet
+    # Keep the default-enabled ISCC and FSAC when using mode=pvc: StatefulSet
     # volumeClaimTemplates are immutable after creation, and the starter
     # RbeWorker manifests in custom-values/rbeworkers/ require FSAC for
     # FUSE input prefetching. If you first installed with an older copy of this

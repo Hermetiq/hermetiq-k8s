@@ -30,7 +30,9 @@ snapshots only as consistent blocks+metadata pairs taken while storage is stoppe
 An in-memory key-location map means cache-only behavior. This is true even if the blocks sit on a durable Persistent Disk. After a pod restart, the bytes have no index and the store starts empty.
 
 The chart defaults to `backend: filesystem`, `mode: pvc`, and persistent indexes
-for every enabled store. ISCC and FSAC remain disabled until explicitly enabled.
+for all five stores, with ISCC and FSAC enabled. Scheduler size-class analysis
+and worker prefetching remain separate opt-ins. Set an unused ISCC or FSAC store's
+`enabled` flag to `false` to omit it.
 These defaults apply to both PVC storage and raw blocks on local NVMe:
 
 | Store | Enabled by default | Filesystem backend | Raw-block backend |
@@ -38,8 +40,8 @@ These defaults apply to both PVC storage and raw blocks on local NVMe:
 | CAS | yes | Disk-backed map; recovers | Disk-backed map; recovers |
 | CMS | yes, sharing CAS | Disk-backed map; recovers | Shared CAS metadata or dedicated raw CMS; recovers |
 | AC | yes | Disk-backed map; recovers | Disk-backed map; recovers |
-| ISCC | no | Disk-backed map; recovers | Disk-backed map; recovers |
-| FSAC | no | Disk-backed map; recovers | Disk-backed map; recovers |
+| ISCC | yes | Disk-backed map; recovers | Disk-backed map; recovers |
+| FSAC | yes | Disk-backed map; recovers | Disk-backed map; recovers |
 
 “Recovers” requires the same blocks, KLM, and state directory to remain available;
 it does not make an ephemeral volume durable. Volume lifetime is a separate
@@ -65,7 +67,10 @@ explicitly selects these same defaults. It is useful after older deployment
 values that still set `inMemory`; new deployments do not need it. This is a
 breaking default change: existing releases must review the migration below
 before upgrading. Raw hostPath stores must supply metadata directories, and raw
-PVC stores can gain immutable metadata claim templates.
+PVC stores can gain immutable metadata claim templates. Upgrades from defaults
+that disabled ISCC and FSAC also add their data claims; explicitly set their
+`enabled` flags to `false` if they are unused. At default filesystem sizes, these
+claims add 2Gi for ISCC and 6Gi for FSAC per storage replica.
 
 Explicit values take precedence over chart defaults; among values files, the
 last file wins. The first conversion from an in-memory index starts empty and
@@ -179,8 +184,8 @@ same-format rollout in step 5 instead of the complete cutover runbook.
 Remove old explicit `inMemory` overrides, or apply
 [`custom-values/buildbarn-values-persistent.yaml`](../custom-values/buildbarn-values-persistent.yaml)
 after deployment values to override them. The profile only changes index types;
-it does not enable ISCC/FSAC or change backends, volume mode, block geometry,
-index sizes, paths, StorageClasses, or resources. CMS retains its configured
+it preserves ISCC/FSAC enable flags and does not change backends, volume mode,
+block geometry, index sizes, paths, StorageClasses, or resources. CMS retains its configured
 backend, including the default `sharedCas`. Within CDC, already-persistent
 stores keep their paths and sizes. To deliberately retain volatile indexes, use
 the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
@@ -270,9 +275,10 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
 
    `metadata.size` provisions a PVC only in PVC mode; it does not reserve or
    enforce hostPath space. Node-local metadata cannot protect lost Local SSD
-   blocks. Surviving node replacement requires durable storage for both. Enabling
-   previously disabled ISCC/FSAC, or switching shared CMS to a dedicated volume,
-   is a separate change and can add PVC templates.
+   blocks. Surviving node replacement requires durable storage for both. The new
+   enabled defaults add ISCC/FSAC data claims unless existing values explicitly
+   disable them. Plan these claims in the same cutover; switching shared CMS
+   to a dedicated volume also adds claim templates.
 
 4. **Render and inspect before upgrading.** From the repository root, apply the
    profile after deployment values, and any reviewed sizing/path overrides last:

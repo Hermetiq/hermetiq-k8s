@@ -4,8 +4,11 @@ templates:
   - templates/statefulset-storage.yaml
   - templates/validate.yaml
 tests:
-  - it: does not enable optional stores or create their claims
+  - it: explicitly disabled stores do not create claims
     template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
     asserts:
       - lengthEqual:
           path: spec.volumeClaimTemplates
@@ -15,14 +18,11 @@ tests:
       - notExists:
           path: spec.volumeClaimTemplates[?(@.metadata.name == "fsac")]
 
-  - it: persists all five enabled stores on the existing filesystem volumes
+  - it: persists all five stores by default on filesystem volumes
     template: templates/configmaps.yaml
     documentSelector:
       path: metadata.name
       value: buildbarn-config
-    set:
-      storage.persistence.iscc.enabled: true
-      storage.persistence.fsac.enabled: true
     asserts:
       - matchRegex:
           path: data["storage.jsonnet"]
@@ -43,11 +43,8 @@ tests:
           path: data["storage.jsonnet"]
           pattern: "inMemory:|blocksInMemory:|devicePath:|storage-.*-meta"
 
-  - it: filesystem persistence keeps the four existing claim names
+  - it: default filesystem persistence creates four data claims
     template: templates/statefulset-storage.yaml
-    set:
-      storage.persistence.iscc.enabled: true
-      storage.persistence.fsac.enabled: true
     asserts:
       - lengthEqual:
           path: spec.volumeClaimTemplates
@@ -178,6 +175,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 12Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - notExists:
           path: spec.volumeClaimTemplates
@@ -194,6 +193,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 11Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - failedTemplate:
           errorMessage: "storage.persistence.ac: blocksSizeGi (10Gi) plus on-disk key-location map (1344Mi) leaves no room inside storage.persistence.ac.emptyDir.sizeLimit (11Gi) for persistent state and filesystem metadata"
@@ -204,6 +205,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 11Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.keyLocationMap.type: inMemory
     asserts:
       - equal:
@@ -247,7 +250,7 @@ tests:
     asserts:
       - lengthEqual:
           path: spec.volumeClaimTemplates
-          count: 4
+          count: 6
       - isNotNull:
           path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-blocks")]
       - isNotNull:

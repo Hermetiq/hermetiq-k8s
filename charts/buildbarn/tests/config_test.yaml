@@ -2,7 +2,10 @@ suite: buildbarn config generation
 templates:
   - templates/configmaps.yaml
 tests:
-  - it: default config has no ISCC/FSAC stores and no raw block devices
+  - it: explicitly disabled ISCC/FSAC stores have no stores or raw block devices
+    set:
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
     documentSelector:
       path: metadata.name
       value: buildbarn-config
@@ -17,10 +20,7 @@ tests:
           path: data["storage.jsonnet"]
           pattern: "devicePath"
 
-  - it: enabling ISCC/FSAC adds storage stores and sharded backends
-    set:
-      storage.persistence.iscc.enabled: true
-      storage.persistence.fsac.enabled: true
+  - it: default config enables ISCC/FSAC stores and sharded backends
     documentSelector:
       path: metadata.name
       value: buildbarn-config

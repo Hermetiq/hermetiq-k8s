@@ -457,8 +457,8 @@ storage:
     # Volume retention alone does not make a store recoverable. The KLM and
     # persistent_state must survive with its blocks. All five stores default to
     # disk-backed indexes, on both filesystem and raw-block backends. ISCC/FSAC
-    # remain disabled until explicitly enabled. Raw hostPath requires retained
-    # metadata directories; raw PVCs need companion metadata claims.
+    # are enabled by default; explicitly disable either unused store. Raw hostPath
+    # requires retained metadata directories; raw PVCs need companion metadata claims.
     # BREAKING: combine the CDC cold cutover with this change; see
     # docs/buildbarn-storage-operations.md. Old explicit inMemory overrides still
     # win: remove them or apply custom-values/buildbarn-values-persistent.yaml.
@@ -676,14 +676,15 @@ storage:
           devicePath: ""
     # Initial Size Class Cache (ISCC): consumed by bb-scheduler for size-class
     # analysis. Only useful when worker platforms declare multiple size classes.
-    # Enable together with scheduler.sizeClassAnalysis.enabled.
+    # The store is enabled by default; its scheduler consumer still requires
+    # scheduler.sizeClassAnalysis.enabled and suitable multi-class worker queues.
     # When enabled, its disk-backed KLM and persistent_state retain learned
     # history through storage-process restarts. Blocks, KLM, and state must
     # survive together. Explicit inMemory opts out and loses history on restart.
     # Durable PVCs can survive node replacement; hostPath requires the same
     # retained node and disks; emptyDir loses history when the pod is replaced.
     iscc:
-      enabled: false
+      enabled: true
       backend: filesystem
       storageClassName: premium-rwo
       # ISCC objects are small PreviousExecutionStats protos and there is at most
@@ -732,10 +733,10 @@ storage:
         hostPath:
           devicePath: ""
     # File System Access Cache (FSAC): consumed by workers for prefetching. Only
-    # useful with the virtual (FUSE/NFS) build directory. Enable together with a
-    # worker's prefetching.enabled.
+    # useful with the virtual (FUSE/NFS) build directory. The store is enabled by
+    # default; workers use it only when their prefetching is configured.
     fsac:
-      enabled: false
+      enabled: true
       backend: filesystem
       storageClassName: premium-rwo
       # One path-bloom-filter per distinct action, each capped by the worker's

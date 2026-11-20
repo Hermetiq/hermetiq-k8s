@@ -10,12 +10,13 @@ The ISCC key is a reduced action digest: command digest plus platform. It intent
 
 ## 1. Enable ISCC Storage
 
-ISCC is an extra bb-storage store served by the storage pod. It remains disabled
-by default. When enabled, it uses a persistent index for both filesystem storage
+ISCC is a bb-storage store served by the storage pod. It is enabled by default
+and uses a persistent index for both filesystem storage
 (`keyLocationMap.type: blockDevice`) and raw blocks (`blockDevice.keyLocationMap: file`).
 Remove any old explicit `inMemory` override, or apply the
 [persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
-after deployment values. Neither profile enables ISCC or FSAC. The
+after deployment values. Both profiles preserve explicit ISCC and FSAC enable
+flags. Set `storage.persistence.iscc.enabled: false` if unused. The
 [ephemeral opt-out](buildbarn-storage-operations.md#explicit-ephemeral-opt-out)
 deliberately discards learned history on storage-process restart.
 
@@ -31,8 +32,8 @@ storage:
       # Raw devices: buildbarn-block-storage.md
 ```
 
-On a PVC-backed release, enabling ISCC or FSAC adds a claim to the storage
-StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place.
+On a PVC-backed release, enabling a previously disabled ISCC or FSAC adds a
+claim to the storage StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place.
 Render and inspect the change, then follow the
 [StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset)
 before upgrading; existing PVCs are retained and reattached.
@@ -50,10 +51,12 @@ the coordinated [storage format cutover](buildbarn-storage-model.md#storage-form
 including a cold reset of any persistent ISCC history. The profile cannot
 convert that old history in place.
 
-For a raw Local SSD layout with an **already validated same-SSD metadata
-filesystem**, this override preserves history across ordinary pod restarts.
-The bundled raw-LV provisioner does not create that filesystem, so its example
-remains explicitly volatile. Do not use a boot-disk directory as a substitute:
+The bundled [raw Local SSD overlay](../custom-values/buildbarn-values-local-ssd-block.yaml)
+persists all five stores on its provisioner's same-SSD metadata LV. These are the
+ISCC settings from that layout; apply the complete overlay so its readiness
+selector and the other stores' metadata paths are included. Follow the
+[GKE validation runbook](buildbarn-gke-storage-validation.md) when changing the
+node layout. Do not substitute a boot-disk directory for the metadata mount:
 
 ```yaml
 storage:
@@ -73,7 +76,7 @@ storage:
           size: 1Gi
           keyLocationMapSizeMi: 512
           hostPath:
-            path: /mnt/buildbarn-local-ssd/metadata/iscc
+            path: /mnt/stateful_partition/buildbarn-local-ssd/metadata/iscc
             type: Directory
 ```
 
@@ -88,7 +91,8 @@ for both pieces. `storage.persistence.mode` is global, so the chart cannot put
 only ISCC on PVCs while other stores use hostPath. See
 [What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart).
 
-FSAC, the File System Access Cache, is the sibling store used for input prefetching. Enable it with:
+FSAC, the File System Access Cache, is the sibling store used for input prefetching.
+It is also enabled by default; the explicit setting is:
 
 ```yaml
 storage:

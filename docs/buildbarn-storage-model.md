@@ -1,6 +1,6 @@
 # Buildbarn Storage Model and Sizing
 
-Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both RepMaxCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
+Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both RepMaxCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, and ISCC and FSAC volumes by default - but each enabled store is the same kind of local backend:
 
 - a fixed-size key-location map, which is the index from digest to location
 - a ring of fixed-size blocks, which holds the bytes
@@ -97,8 +97,9 @@ There are two placements:
 Disk-backed maps are required for restart persistence and are the chart default
 for all five stores. Filesystem CAS uses `keyLocationMapSizeMi`; filesystem
 CMS/AC/ISCC/FSAC use `keyLocationMap.type: blockDevice`; all dedicated raw block
-stores use `blockDevice.keyLocationMap: file`. ISCC and FSAC remain disabled by
-default. Shared CMS uses the CAS filesystem or raw CAS metadata volume for its
+stores use `blockDevice.keyLocationMap: file`. ISCC and FSAC are enabled by
+default; scheduler analysis and worker prefetching remain separate opt-ins.
+Shared CMS uses the CAS filesystem or raw CAS metadata volume for its
 blocks, index, and state, so budget for those files too.
 
 Older explicit `inMemory` overrides still take precedence. Remove them or apply
@@ -242,41 +243,44 @@ Two more settings that are easy to copy wrongly from the storage tier:
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 
-## Worked Example 1: One Local-NVMe Shard (680 GiB)
+## Worked Example 1: One Local-NVMe Shard (718 GiB)
 
-The supplied `custom-values/buildbarn-values-local-ssd-block.yaml` intentionally
-uses in-memory indexes. Its provisioner creates raw LVs without a same-SSD
-metadata filesystem. Boot-disk metadata is unsafe: after SSD replacement the
-old index can report missing blobs as present. See the
-[local SSD requirements](buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
-before enabling persistence on this layout.
+The supplied `custom-values/buildbarn-values-local-ssd-block.yaml` uses persistent
+file indexes for all five stores. Its provisioner reserves a 16Gi metadata LV on
+the same Local SSD VG as the raw data LVs, mounts it at
+`/mnt/stateful_partition/buildbarn-local-ssd/metadata`, and publishes readiness
+only after checking the layout and mount. Never substitute boot-disk or network
+metadata: retained indexes over lost blocks can report nonexistent blobs present.
+See the [local SSD requirements](buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+and [GKE validation runbook](buildbarn-gke-storage-validation.md).
 
-**1. Block geometry.** A 680GiB CAS device with `3 + 8 + 30 + 3 = 44` total
-blocks gives about 15.5GiB per block and `41/44`, about 634GiB, usable capacity.
+**1. Block geometry.** On the two-SSD example, the observed CAS LV is 717.992Gi;
+`size: 718Gi` rounds up for the sizing guard. With `3 + 8 + 30 + 3 = 44` total
+blocks, that gives about 16.3GiB per block and `41/44`, about 669GiB, usable
+capacity. Measure the actual LV when changing the node pool or device count.
 
 **2. Expected objects.** At the illustrative 17,408-byte average chunk size,
-that is roughly 39.1 million live chunks. Measure your CDC chunk distribution;
+that is roughly 41.3 million live chunks. Measure your CDC chunk distribution;
 assuming larger objects undersizes the index.
 
-**3. Volatile index capacity.** The overlay uses 80M CAS entries, about `2x`
-capacity, plus AC 16M, ISCC 8M, and FSAC 8M. Shared CMS also uses RAM. Enable
-`storage.keyLocationMapSizing.validate` to catch undersizing before deployment.
-The 112M entries occupy about 6.7GiB of heap, plus roughly 256MiB CMS index and
-264MiB CMS blocks, before GC and RPC buffers. The example requests 12Gi and
-limits memory to 24Gi; measure the workload.
+**3. Persistent index capacity.** The 7360Mi CAS index holds about 116.9M
+records at 66 bytes each, about `2.83x` this shard's estimated live chunks.
+AC uses 1344Mi, ISCC and FSAC use 512Mi each, and shared CMS uses 256Mi. The
+overlay enables `storage.keyLocationMapSizing.validate` to catch undersizing
+before deployment. The raw-CAS chart default retains this generous file size
+for deployments near 1TiB; on its default 200Gi device it provides about `10.2x`.
+Choose a smaller reviewed size during a cold cutover if desired; resizing an
+already-persistent index discards its contents.
 
-**4. Persistent alternative.** First provision and validate a metadata
-filesystem on the same Local SSD storage and a paired device/metadata reset
-lifecycle. The chart's raw-CAS file default of 7360Mi holds about 116.9M records:
-it is intentionally generous for the default 200Gi device (~10.2x), retaining
-the existing file-index size for deployments sized near 1TiB. It gives about
-`3x` for this 680Gi shard. A cold cutover is the opportunity to choose a smaller
-reviewed size; resizing an already-persistent index discards its contents.
-Shared CMS adds 1Gi blocks and 256Mi index. All default raw indexes plus shared
-CMS blocks require about 10.75GiB, so plan at least 16GiB of same-SSD metadata
-space and memory for the page-cache working set. `metadata.size` does not impose
-a hostPath quota. This persistent provisioner is not supplied or GKE-validated
-by this PR; the bundled overlay remains volatile.
+**4. Metadata and memory.** All five indexes total 9984Mi (9.75GiB); shared CMS
+adds a 1Gi blocks file. The 16Gi metadata LV leaves room for checkpoint state and
+filesystem overhead. `metadata.size` does not impose a hostPath quota. File
+indexes still consume memory for their resident pages, alongside Go heap, GC,
+CMS blocks and RPC buffers. The example requests 12Gi and limits memory to
+24Gi; measure page-cache pressure and the workload before reducing these limits.
+Storage pod restarts reuse retained blocks and metadata. SSD loss or replacement
+requires resetting both together and starts cold; an old full VG without the
+metadata LV needs the documented cutover to a fresh layout.
 
 ## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
 
@@ -375,15 +379,18 @@ These cluster checks use `lookup`, so offline `helm template` and GitOps renders
 
 The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for AC, ISCC, and FSAC. The CDC image (`8d2acac`) stores compressed CAS chunks and wraps AC, ISCC, and FSAC objects with `SHA256SuffixCoder` (a 32-byte SHA-256 suffix). Reopening old persistent indices causes decode/checksum failures that invalidate entire blocks (including newly written CDC data), and rolling back after CDC writes corrupts pre-CDC reads. This chart does not perform an in-place conversion. The supported cutover is an explicit **cold-cache reset during a maintenance window**.
 Adopt the persistent defaults in that same window, so CDC conversion and index
-placement cause one cold start rather than two. Optional ISCC and FSAC stay
-disabled unless the deployment already enables them.
+placement cause one cold start rather than two. ISCC and FSAC are now enabled
+by default and add data claims when upgrading from the old defaults. Keep an
+explicit `enabled: false` for either store if unused, or create its claims during
+the same StatefulSet recreation. The persistent and ephemeral profiles preserve
+these enable flags.
 
 1. **Verify prerequisites and prepare persistent storage.**
    - Verify the compatible operator and `bep-nats` prerequisites above, and update the operator CRD separately (`kubectl apply --server-side -f charts/bb-worker-operator/crds/`).
    - Remove explicit `inMemory` overrides or apply the persistent profile after deployment values where the storage layout supports safe persistence. When carrying forward release overrides, use `--reset-then-reuse-values` to adopt new chart defaults, but remove/override explicit old `inMemory` values too. Render and lint the complete target configuration; `--reuse-values` can retain old implicit defaults as well.
    - Check filesystem PVC space for every enabled store's blocks, index, and state. Shared CMS adds `1 GiB` blocks + `256 MiB` index (`1280 MiB`) on the CAS filesystem or raw CAS metadata volume. Review index capacity and page-cache resources using the [migration checklist](buildbarn-storage-operations.md#migrate-to-persistent-indexes); prepare PVC expansion where needed.
    - For raw PVC stores, prepare filesystem metadata StorageClasses and sizes. Switching former RAM indexes to the new defaults adds `<store>-meta` claim templates, so plan to recreate the stopped StatefulSet while retaining existing blocks claims.
-   - For raw local NVMe persistence, metadata must be on the same Local SSD storage with verified mount readiness and paired reset when devices/VGs are replaced. Never keep boot-disk/network metadata over lost local blocks. The bundled local SSD overlay remains explicitly volatile until that provisioner is validated. Shared CMS is part of CAS metadata. For local PVCs, use the same local StorageClass/device class for blocks and metadata and reset/delete both claims together after loss.
+   - For raw local NVMe persistence, metadata must be on the same Local SSD storage with verified mount readiness and paired reset when devices/VGs are replaced. Never keep boot-disk/network metadata over lost local blocks. The bundled local SSD overlay uses the provisioner's same-SSD metadata LV; follow its [migration and validation runbook](buildbarn-gke-storage-validation.md) before switching an existing node pool. Shared CMS is part of CAS metadata. For local PVCs, use the same local StorageClass/device class for blocks and metadata and reset/delete both claims together after loss.
    - Keep existing worker image pins until the operator is ready. If migrating to inherited images, stage the current worker and runner-installer image references into the existing `buildbarn-worker-config` before removing pins to avoid a `SpecInvalid` window while the old chart lacks those keys.
 2. **Drain clients and pause autoscalers/operator before scaling down.**
    - Stop new builds/cache clients and let active work finish. Record current replica counts and autoscaler settings.

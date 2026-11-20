@@ -67,6 +67,9 @@ def render_config(directory, ephemeral=False, optional_stores=False, raw=False, 
         'ac': {'size': '2Gi', 'blocksSizeGi': 1,
                'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
         'cms': {'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
+        # CMS-only cases do not allocate the default-enabled history stores.
+        'iscc': {'enabled': False},
+        'fsac': {'enabled': False},
     }}}
     if optional_stores:
         for store in ('iscc', 'fsac'):

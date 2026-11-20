@@ -20,7 +20,8 @@ The new storage encoding cannot read the old CAS files. Plan a maintenance
 window, snapshot for rollback, and an explicit cold-cache reset. The chart
 refuses legacy files rather than rewriting or deleting them automatically.
 CAS, CMS, AC, ISCC, and FSAC now use persistent indexes by default in both
-filesystem and raw-block backends. ISCC and FSAC remain disabled by default.
+filesystem and raw-block backends. ISCC and FSAC are enabled by default; their
+scheduler analysis and worker prefetching consumers remain opt-in.
 Adopt these defaults during the CDC cutover so the cache warms once; see
 [persistent defaults and ephemeral opt-out](#persistent-defaults-and-ephemeral-opt-out).
 
@@ -229,7 +230,8 @@ Confirm the following before running `helm upgrade --install`:
   - **PVC storage (`mode: pvc`)**: run `kubectl get storageclass` and pick a
     fast SSD StorageClass (for example `premium-rwo` or `hyperdisk-balanced` on
     GKE, `gp3` on EKS). Decide on `storage.persistence.iscc.enabled` and
-    `storage.persistence.fsac.enabled` **before** the initial install (see
+    `storage.persistence.fsac.enabled` (both default to `true`) **before** the
+    initial install (see
     [Pre-install storage and scale decisions](#pre-install-storage-and-scale-decisions)).
   - **Local NVMe raw block storage (`mode: hostPath`, `backend: blockDevice`)**:
     provision the node pool with raw unformatted NVMe SSDs
@@ -259,8 +261,9 @@ Confirm the following before running `helm upgrade --install`:
 > `helm install` when using `mode: pvc`.**
 >
 > Kubernetes rejects changes to an existing StatefulSet's
-> `volumeClaimTemplates`. Enabling `storage.persistence.iscc.enabled: true` or
-> `storage.persistence.fsac.enabled: true`, switching between
+> `volumeClaimTemplates`. Changing either default-enabled
+> `storage.persistence.iscc.enabled` or `storage.persistence.fsac.enabled`,
+> switching between
 > `backend: filesystem` and `backend: blockDevice`, or changing a store's
 > `size` after the initial install makes `helm upgrade` fail until the
 > `storage` StatefulSet is recreated. Follow
@@ -880,8 +883,10 @@ has quota for the configured CPU, memory, disk, or ephemeral-storage requests.
 ### Persistent defaults and ephemeral opt-out
 
 All five backing stores—CAS, CMS, AC, ISCC, and FSAC—use disk-backed indexes by
-default. ISCC and FSAC remain disabled until explicitly enabled. Frontend read
-caches remain volatile.
+default, and ISCC and FSAC are enabled. Set `storage.persistence.iscc.enabled`
+or `storage.persistence.fsac.enabled` to `false` to omit an unused store.
+Scheduler size-class analysis and worker prefetching remain separate opt-ins.
+Frontend read caches remain volatile.
 
 | Deployment | Index and checkpoint placement | Recovery boundary |
 |---|---|---|
@@ -1019,27 +1024,30 @@ full-zone loss. Use a regional disk for cross-zone HA.
 #### GKE example B — Local NVMe SSD via `partition_ephemeral_disks` (node-local)
 
 The [partitioning DaemonSet](../../custom-values/partition-ephemeral-disks-daemonset.yaml)
-creates raw CAS/AC/ISCC/FSAC LVs on Local SSD and sets a readiness label. The
-[local SSD overlay](../../custom-values/buildbarn-values-local-ssd-block.yaml)
-explicitly uses **in-memory indexes**, including shared CMS, because that
-provisioner does not mount a metadata filesystem on the same SSDs. These stores
-start cold on each storage-process restart even though the chart defaults to
-persistent indexes.
+creates raw CAS/AC/ISCC/FSAC LVs and a 16 GiB ext4 metadata LV on the **same Local
+SSDs**. The [local SSD overlay](../../custom-values/buildbarn-values-local-ssd-block.yaml)
+uses persistent indexes for all five stores; shared CMS lives on the CAS metadata
+filesystem. Clean storage pod restarts retain warmed contents and learned history
+while those SSDs remain available.
 
-Do not retain boot-disk or network metadata over disposable Local SSD blocks:
-recreated blocks can leave an old index falsely reporting blobs as present.
-Persistence requires a metadata filesystem on the same Local SSD storage, a
-verified mount/readiness gate, and paired reset of blocks and metadata on VG or
-device replacement. That provisioner change has not been validated on GKE, so
-this example keeps the explicit volatile fallback. See
-[GKE Example B](../../docs/buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
-for prerequisites and the future persistent layout requirements. Do not merely
-append the persistent profile to the supplied overlay.
+The provisioner prepares a dedicated shared mount on COS, verifies the metadata
+filesystem and VG/LV identity marker privately, then publishes the metadata mount
+and sets `hermetiq/ephemeral-lvm=ready`. Metadata hostPaths use `type: Directory`.
+An old full VG without metadata requires a cold cut-over; no existing data LV is
+resized and no existing metadata LV is formatted. The ready label gates scheduling
+but does not evict already-running storage pods after a detected failure.
 
-In hostPath block mode the chart runs storage privileged and `chownInit` prepares
-the raw devices; the provisioner is also privileged. Use a namespace that permits
-that model. During planned storage restarts, drain builds and restart frontends
-before resuming them so stale positive existence-cache entries are cleared.
+Never retain boot-disk or network metadata over disposable Local SSD blocks:
+recreated blocks can leave an old index falsely reporting blobs as present. Reset
+blocks and metadata together after loss or replacement, and restart frontends
+before resuming builds after a cold reset to clear positive existence-cache entries.
+Both storage and the provisioner are privileged in this hostPath configuration.
+
+See [GKE Example B](../../docs/buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+for the layout and cut-over, and the [GKE validation runbook and record](../../docs/buildbarn-gke-storage-validation.md)
+for physical mount and lifecycle checks. To intentionally discard cache and
+training state on each storage-process restart, apply
+[the ephemeral overlay](../../custom-values/buildbarn-values-ephemeral.yaml) last.
 
 #### GKE example C — TopoLVM CSI (dynamic LVM block, non-privileged)
 
@@ -1109,7 +1117,10 @@ main advantage over the hostPath path.
 
 Beyond CAS and Action Cache, bb-storage can host two optional stores, each served on the
 same gRPC port and configured exactly like the other stores (`backend`, `blockDevice`,
-sizes). Both are disabled by default.
+sizes). Both stores are enabled by default with persistent indexes. Disable an
+unused store explicitly with its `enabled: false` setting; doing so removes its
+storage endpoint and claim template. Scheduler analysis and worker prefetching
+remain opt-in.
 
 - **ISCC** (`storage.persistence.iscc.enabled`) records prior action execution outcomes
   so bb-scheduler can pick the initial size class for future runs. Enable the scheduler
@@ -1124,12 +1135,12 @@ The chart validates these dependencies (e.g. `sizeClassAnalysis` requires
 `iscc.enabled`; a worker's `prefetching` requires `fsac.enabled` and its
 `virtualBuildDirectory`).
 
-Enabling either store uses a persistent index by default:
+Both stores use a persistent index by default:
 `keyLocationMap.type: blockDevice` for filesystem storage and
 `blockDevice.keyLocationMap: file` for raw blocks. Remove old `inMemory`
 overrides to retain learned history through storage-process restarts. See the
-[ISCC-only hostPath example](../../docs/iscc-size-classes.md#1-enable-iscc-storage)
-when only scheduling history should persist, and
+[ISCC hostPath example](../../docs/iscc-size-classes.md#1-enable-iscc-storage)
+for the Local SSD metadata layout, and
 [What Survives a Restart](../../docs/buildbarn-storage-operations.md#what-survives-a-restart)
 for the volume-lifetime limits.
 

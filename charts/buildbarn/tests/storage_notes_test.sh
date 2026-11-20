@@ -104,6 +104,8 @@ assert 'Set storage.persistence.iscc.blockDevice.metadata.keyLocationMapSizeMi t
 bounded = notes({'storage': {'persistence': {
     'mode': 'emptyDir', 'cas': {'emptyDir': {'sizeLimit': '1000Gi'}},
     'ac': {'emptyDir': {'sizeLimit': '12Gi'}},
+    'iscc': {'emptyDir': {'sizeLimit': '2Gi'}},
+    'fsac': {'emptyDir': {'sizeLimit': '6Gi'}},
 }}})
 assert 'storage.persistence.mode=emptyDir loses all stores on pod replacement' in bounded, bounded
 assert 'VOLATILE STORAGE STORES:' not in bounded, bounded
