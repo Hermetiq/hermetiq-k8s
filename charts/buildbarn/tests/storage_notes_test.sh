@@ -54,6 +54,7 @@ baseline = notes()
 assert 'All enabled storage stores use persistent indexes' in baseline, baseline
 assert 'VOLATILE STORAGE STORES:' not in baseline, baseline
 assert 'STORAGE INDEX CAPACITY:' not in baseline, baseline
+assert 'STORAGE CLASS MISMATCH:' not in baseline, baseline
 
 one = notes({'storage': {'persistence': {
     'iscc': {'enabled': True, 'keyLocationMap': {'type': 'inMemory'}},
@@ -90,9 +91,11 @@ assert 'switching to a device-backed' not in warning, warning
 assert 'VOLATILE STORAGE STORES:' not in warning, warning
 
 # Both dedicated and shared CMS use the same warning arithmetic as validation.
+# The index size is set here so the case does not depend on the chart default.
 for backend in ('sharedCas', 'filesystem'):
     warning = notes({'storage': {'persistence': {'cms': {
         'backend': backend, 'size': '4Gi', 'blocksSizeGi': 2,
+        'keyLocationMap': {'sizeMi': 256},
     }}}})
     assert 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB' in warning, warning
 
@@ -110,6 +113,37 @@ bounded = notes({'storage': {'persistence': {
 assert 'storage.persistence.mode=emptyDir loses all stores on pod replacement' in bounded, bounded
 assert 'VOLATILE STORAGE STORES:' not in bounded, bounded
 
+# In pvc mode every store has its own StorageClass. Setting it for CAS and AC
+# leaves the default-enabled ISCC and FSAC claims on the chart default.
+classes = notes({'storage': {'persistence': {
+    'cas': {'storageClassName': 'gp3'}, 'ac': {'storageClassName': 'gp3'},
+}}})
+for store in ('iscc', 'fsac'):
+    assert ('WARNING: STORAGE CLASS MISMATCH: storage.persistence.%s.storageClassName is "premium-rwo" '
+            'but storage.persistence.cas.storageClassName is "gp3".' % store) in classes, classes
+assert 'STORAGE CLASS MISMATCH: storage.persistence.ac.' not in classes, classes
+aligned = notes({'storage': {'persistence': {
+    name: {'storageClassName': 'gp3'} for name in ('cas', 'ac', 'iscc', 'fsac')
+}}})
+assert 'STORAGE CLASS MISMATCH:' not in aligned, aligned
+
+# A raw store's metadata claim holds its index and checkpoint state. A blocks
+# class next to a different metadata class must be reported; one class for
+# both must not.
+split = notes({'storage': {'persistence': {'ac': {
+    'backend': 'blockDevice', 'blockDevice': {'storageClassName': 'topolvm-ssd'},
+}}}})
+assert ('WARNING: STORAGE CLASS MISMATCH: storage.persistence.ac.blockDevice.storageClassName is "topolvm-ssd" '
+        'but storage.persistence.ac.blockDevice.metadata.storageClassName is "premium-rwo".') in split, split
+paired = notes({'storage': {'persistence': {'ac': {
+    'backend': 'blockDevice', 'blockDevice': {
+        'storageClassName': 'topolvm-ssd', 'metadata': {'storageClassName': 'topolvm-ssd'},
+    },
+}}}})
+assert 'STORAGE CLASS MISMATCH: storage.persistence.ac.blockDevice' not in paired, paired
+# No claims are rendered outside pvc mode.
+assert 'STORAGE CLASS MISMATCH:' not in bounded, bounded
+
 custom = notes({'configOverrides': {'storage.jsonnet': '{}'}, **undersized})
 assert 'STORAGE CONFIG OVERRIDE:' in custom, custom
 assert 'VOLATILE STORAGE STORES:' not in custom, custom
@@ -124,5 +158,5 @@ empty_volatile = notes({'configOverrides': {'storage.jsonnet': ''}, 'storage': {
 }})
 assert 'VOLATILE STORAGE STORES: AC.' in empty_volatile, empty_volatile
 
-print('Storage NOTES report actual volatile selections and actionable file-index capacity warnings.')
+print('Storage NOTES report actual volatile selections, actionable file-index capacity warnings, and StorageClass mismatches.')
 PY

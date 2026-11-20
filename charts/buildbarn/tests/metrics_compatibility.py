@@ -20,6 +20,22 @@ def selector(metric, labels):
     return metric + "{" + ",".join(f"{k}={json.dumps(str(v))}" for k, v in sorted(labels.items())) + "}"
 
 
+def check_fixture_rates():
+    # Distinct powers of four make every sum that counts each series at most
+    # twice unique, which is what lets an expected value detect a dropped,
+    # swapped, merged, double-counted, or leaked series. Rates such as cas 2,
+    # cs 3, cms 5 do not: cas plus cs equals cms, so a CS/CMS swap passes.
+    # Starting at 4 keeps every rate clear of the 1 and 2 that the
+    # series-count checks expect.
+    excluded = [series["rate"] for series in FIXTURE["excluded_series"]]
+    for scenario in FIXTURE["scenarios"]:
+        rates = [store["rate"] for store in scenario["stores"]] + excluded
+        assert len(rates) == len(set(rates)), f"duplicate fixture rates in {scenario['name']}: {sorted(rates)}"
+        for rate in rates:
+            power_of_four = isinstance(rate, int) and rate >= 4 and (rate & (rate - 1)) == 0 and rate.bit_length() % 2 == 1
+            assert power_of_four, f"fixture rate {rate} in {scenario['name']} is not a power of four of at least 4"
+
+
 def panels(items):
     for item in items:
         yield item
@@ -35,7 +51,8 @@ def fixture_series(scenario):
     for store in scenario["stores"]:
         labels = {"namespace": scenario["name"], "instance": store["version"] + store["type"]}
         for metric in FIXTURE["key_location_metrics"]:
-            klm_labels = dict(labels, **metric["labels"])
+            # The key-location map records select storage pods only.
+            klm_labels = dict(labels, kubernetes_service="storage", **metric["labels"])
             if store["version"] == "cdc":
                 klm_labels["name"] = "KeyLocationMap:" + store["type"]
             else:
@@ -67,10 +84,18 @@ def fixture_series(scenario):
             # the storage-tier records, including the new CMS panels.
             result.append({"series": selector("buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds", retention_labels), "values": "0x20" if service == "storage" else "290x20"})
 
-    # Generic lossy-map metrics also exist outside storage. They must not
-    # appear as unlabelled storage data in the compatibility recording rules.
-    for metric in FIXTURE["key_location_metrics"]:
-        counter(metric["cdc"], dict(metric["labels"], namespace=scenario["name"], name="UnrelatedCache"), 1000)
+    # Series the storage records must not include: the key-location maps of
+    # worker and frontend read caches, which carry the storage names but not
+    # kubernetes_service="storage", and a lossy map in a storage pod that is
+    # not a key-location map. Read caches emit the CDC and the legacy form so
+    # that an unscoped side of any recording rule changes a recorded value.
+    for excluded in FIXTURE["excluded_series"]:
+        service = excluded["kubernetes_service"]
+        labels = {"namespace": scenario["name"], "kubernetes_service": service}
+        for metric in FIXTURE["key_location_metrics"]:
+            counter(metric["cdc"], dict(labels, instance=service + "-cdc", name=excluded["cdc_name"], **metric["labels"]), excluded["rate"])
+            if "legacy_storage_type" in excluded:
+                counter(metric["legacy"], dict(labels, instance=service + "-legacy", storage_type=excluded["legacy_storage_type"], **metric["labels"]), excluded["rate"])
     return result
 
 
@@ -141,22 +166,23 @@ def dashboard_tests(scenario):
 
 
 def alert_tests():
-    # Prove all three shipped Buildbarn storage alerts fire for CDC cs and cms series.
+    # Prove all three shipped Buildbarn storage alerts fire for CDC cs and cms
+    # series reported by storage pods.
     input_series = [
         {
-            "series": selector("buildbarn_lossymap_hash_map_put_too_many_iterations_total", {"namespace": "alerts", "instance": "s0", "name": "KeyLocationMap:cs"}),
+            "series": selector("buildbarn_lossymap_hash_map_put_too_many_iterations_total", {"namespace": "alerts", "instance": "s0", "kubernetes_service": "storage", "name": "KeyLocationMap:cs"}),
             "values": "0+15x140",
         },
         {
-            "series": selector("buildbarn_lossymap_hash_map_put_too_many_iterations_total", {"namespace": "alerts", "instance": "s0", "name": "KeyLocationMap:cms"}),
+            "series": selector("buildbarn_lossymap_hash_map_put_too_many_iterations_total", {"namespace": "alerts", "instance": "s0", "kubernetes_service": "storage", "name": "KeyLocationMap:cms"}),
             "values": "0+15x140",
         },
         {
-            "series": selector("buildbarn_lossymap_hash_map_get_too_many_attempts_total", {"namespace": "alerts", "instance": "s0", "name": "KeyLocationMap:cs"}),
+            "series": selector("buildbarn_lossymap_hash_map_get_too_many_attempts_total", {"namespace": "alerts", "instance": "s0", "kubernetes_service": "storage", "name": "KeyLocationMap:cs"}),
             "values": "0+15x140",
         },
         {
-            "series": selector("buildbarn_lossymap_hash_map_get_too_many_attempts_total", {"namespace": "alerts", "instance": "s0", "name": "KeyLocationMap:cms"}),
+            "series": selector("buildbarn_lossymap_hash_map_get_too_many_attempts_total", {"namespace": "alerts", "instance": "s0", "kubernetes_service": "storage", "name": "KeyLocationMap:cms"}),
             "values": "0+15x140",
         },
         {
@@ -228,7 +254,36 @@ def alert_tests():
     }
 
 
+def non_storage_alert_tests():
+    # A worker or frontend read cache that exhausts its own key-location map
+    # must not fire the storage alerts: they tell the operator to grow the
+    # storage map. Both the CDC and the legacy form are saturated here, and no
+    # storage pod reports anything, so any alert comes from an unscoped rule.
+    input_series = []
+    for service in ("worker-ubuntu22-04", "frontend"):
+        labels = {"namespace": "alerts-read-caches", "instance": service + "-0", "kubernetes_service": service}
+        for metric in ("put_too_many_iterations_total", "get_too_many_attempts_total"):
+            input_series.append({
+                "series": selector("buildbarn_lossymap_hash_map_" + metric, dict(labels, name="KeyLocationMap:cs")),
+                "values": "0+15x140",
+            })
+            input_series.append({
+                "series": selector("buildbarn_blobstore_hashing_key_location_map_" + metric, dict(labels, storage_type="cas")),
+                "values": "0+15x140",
+            })
+    return {
+        "name": "read-cache-alerts",
+        "interval": "15s",
+        "input_series": input_series,
+        "alert_rule_test": [
+            {"eval_time": "20m", "alertname": alertname, "exp_alerts": []}
+            for alertname in ("BuildbarnKeyLocationMapPutsDropped", "BuildbarnKeyLocationMapGetsExhausted")
+        ],
+    }
+
+
 def main():
+    check_fixture_rates()
     tests = []
     for scenario in FIXTURE["scenarios"]:
         query_tests = []
@@ -245,6 +300,7 @@ def main():
         query_tests.extend(dashboard_tests(scenario))
         tests.append({"name": scenario["name"], "interval": "15s", "input_series": fixture_series(scenario), "promql_expr_test": query_tests})
     tests.append(alert_tests())
+    tests.append(non_storage_alert_tests())
     with tempfile.TemporaryDirectory(prefix="buildbarn-metrics-") as directory:
         directory = pathlib.Path(directory)
         (directory / "rules.yaml").write_text(yaml.safe_dump({"groups": RULES["spec"]["groups"]}, sort_keys=False))
@@ -252,7 +308,7 @@ def main():
         subprocess.run(["promtool", "test", "rules", "tests.yaml"], cwd=directory, check=True)
     expr_count = sum(len(t.get("promql_expr_test", [])) for t in tests)
     alert_count = sum(len(t.get("alert_rule_test", [])) for t in tests)
-    print(f"Validated {expr_count} recording-rule/dashboard queries and {alert_count} alert rules across legacy, CDC, and mixed fixtures")
+    print(f"Validated {expr_count} recording-rule/dashboard queries and {alert_count} alert checks across legacy, CDC, and mixed fixtures")
 
 
 if __name__ == "__main__":

@@ -451,7 +451,7 @@ class StorageMigrationTest(unittest.TestCase):
         result = self.initialize(check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Pre-CDC CAS files detected', result.stderr)
-        self.shell('test ! -e /storage-cas/cdc-v1 && test ! -e /storage-ac/cdc-v1 && test ! -e /storage-cas/cms_persistent_state')
+        self.shell('test ! -e /storage-cas/cdc-v1 && test ! -e /storage-ac/cdc-v1 && test ! -e /storage-cas/cdc-v1/cms_persistent_state')
         docker('start', name)
         channel = self.channel(name)
         for blob in blobs:

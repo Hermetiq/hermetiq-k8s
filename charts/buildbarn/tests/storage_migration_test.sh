@@ -3,6 +3,7 @@
 # starts. No Docker/Kubernetes dependency; container RPC tests run separately.
 set -euo pipefail
 python3 - "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" <<'PY'
+import os
 import pathlib
 import subprocess
 import sys
@@ -34,31 +35,56 @@ def rewrite_paths(script, root, mounts):
     return script
 
 
-# 1. Exercise legacy CAS, AC, ISCC, and FSAC guards in both filesystem and raw+file-KLM modes.
-for raw in (False, True):
+# 1. Exercise legacy CAS, AC, ISCC, and FSAC guards in every layout that gives
+# those stores a filesystem: filesystem stores, raw CAS/AC with file KLMs, all
+# four stores raw with file KLMs, and filesystem stores in hostPath mode.
+#
+# The hostPath script chowns each directory to the storage identity, as root
+# in a pod. Render it with the identity running this test, so the chown is one
+# this process may perform whether or not it runs as root.
+identity = f'{os.getuid()}:{os.getgid()}'
+raw_cas_ac = [
+    'storage.persistence.cas.backend=blockDevice',
+    'storage.persistence.cas.blockDevice.keyLocationMap=file',
+    'storage.persistence.ac.backend=blockDevice',
+    'storage.persistence.ac.blockDevice.keyLocationMap=file',
+]
+raw_iscc_fsac = [
+    'storage.persistence.iscc.backend=blockDevice',
+    'storage.persistence.iscc.blockDevice.keyLocationMap=file',
+    'storage.persistence.fsac.backend=blockDevice',
+    'storage.persistence.fsac.blockDevice.keyLocationMap=file',
+]
+host_path = [
+    'storage.persistence.mode=hostPath',
+    f'security.pod.runAsUser={os.getuid()}',
+    f'security.pod.runAsGroup={os.getgid()}',
+]
+layouts = [
+    ('filesystem', [],
+     ['/storage-cas', '/storage-ac', '/storage-iscc', '/storage-fsac']),
+    ('raw CAS/AC', raw_cas_ac,
+     ['/storage-cas-meta', '/storage-ac-meta', '/storage-iscc', '/storage-fsac']),
+    ('raw CAS/AC/ISCC/FSAC', raw_cas_ac + raw_iscc_fsac,
+     ['/storage-cas-meta', '/storage-ac-meta', '/storage-iscc-meta', '/storage-fsac-meta']),
+    ('hostPath', host_path,
+     ['/storage-cas', '/storage-ac', '/storage-iscc', '/storage-fsac']),
+]
+for layout, layout_sets, mounts in layouts:
     extra = [
         'storage.persistence.iscc.enabled=true',
         'storage.persistence.fsac.enabled=true',
     ]
-    if raw:
-        extra += [
-            'storage.persistence.cas.backend=blockDevice',
-            'storage.persistence.cas.blockDevice.keyLocationMap=file',
-            'storage.persistence.ac.backend=blockDevice',
-            'storage.persistence.ac.blockDevice.keyLocationMap=file',
-        ]
+    extra += layout_sets
     script = render(extra)
-    mounts = [
-        '/storage-cas-meta' if raw else '/storage-cas',
-        '/storage-ac-meta' if raw else '/storage-ac',
-        '/storage-iscc',
-        '/storage-fsac',
-    ]
+    # Only the hostPath script changes ownership.
+    assert (f'chown {identity} {mounts[0]}\n' in script) == (layout == 'hostPath'), (layout, script)
+    assert ('chown' in script) == (layout == 'hostPath'), (layout, script)
     store_cases = [
         ('cas', mounts[0], ('cas-keys.db', 'cas-blocks.db', 'persistent_state')),
         ('ac', mounts[1], ('ac-keys.db', 'ac-blocks.db', 'persistent_state')),
-        ('iscc', '/storage-iscc', ('iscc-keys.db', 'iscc-blocks.db', 'persistent_state')),
-        ('fsac', '/storage-fsac', ('fsac-keys.db', 'fsac-blocks.db', 'persistent_state')),
+        ('iscc', mounts[2], ('iscc-keys.db', 'iscc-blocks.db', 'persistent_state')),
+        ('fsac', mounts[3], ('fsac-keys.db', 'fsac-blocks.db', 'persistent_state')),
     ]
     for store, mount, legacy_names in store_cases:
         for legacy in legacy_names:
@@ -77,10 +103,10 @@ for raw in (False, True):
                 local_script = rewrite_paths(script, root, mounts)
                 for attempt in range(2):
                     result = subprocess.run(['sh', '-c', local_script], capture_output=True, text=True)
-                    assert result.returncode != 0, (raw, store, legacy, 'legacy store accepted')
+                    assert result.returncode != 0, (layout, store, legacy, 'legacy store accepted')
                     assert f'Pre-CDC {store.upper()} files detected' in result.stderr, result.stderr
                     # Snapshot verifies neither files NOR stray directories were created on any mount.
-                    assert before == snapshot(root), (raw, store, legacy, 'filesystem mutated on rejected upgrade')
+                    assert before == snapshot(root), (layout, store, legacy, 'filesystem mutated on rejected upgrade')
                 # Model an operator explicitly retiring the legacy files after a
                 # snapshot. The chart itself must never perform this removal.
                 if target.is_dir():
@@ -90,13 +116,15 @@ for raw in (False, True):
                     target.unlink()
                 cas_dir = root / mounts[0].lstrip('/')
                 ac_dir = root / mounts[1].lstrip('/')
+                iscc_dir = root / mounts[2].lstrip('/')
+                fsac_dir = root / mounts[3].lstrip('/')
                 for attempt in range(2):
                     subprocess.run(['sh', '-c', local_script], check=True)
                     assert (cas_dir / 'cdc-v1/persistent_state').is_dir()
                     assert (cas_dir / 'cdc-v1/cms_persistent_state').is_dir()
                     assert (ac_dir / 'cdc-v1/persistent_state').is_dir()
-                    assert (root / 'storage-iscc/cdc-v1/persistent_state').is_dir()
-                    assert (root / 'storage-fsac/cdc-v1/persistent_state').is_dir()
+                    assert (iscc_dir / 'cdc-v1/persistent_state').is_dir()
+                    assert (fsac_dir / 'cdc-v1/persistent_state').is_dir()
                     sentinel = cas_dir / 'cdc-v1/persistent_state/sentinel'
                     if attempt:
                         assert sentinel.read_bytes() == b'CDC state survives init'
@@ -117,5 +145,5 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (root / 'storage-iscc/cdc-v1/persistent_state').is_dir()
     assert (root / 'storage-fsac/cdc-v1/persistent_state').is_dir()
 
-print('Storage format guard rejects legacy CAS/AC/ISCC/FSAC files without mutating files or dirs; CDC init is repeatable.')
+print('Storage format guard rejects legacy CAS/AC/ISCC/FSAC files in filesystem, raw and hostPath layouts without mutating files or dirs; CDC init is repeatable.')
 PY

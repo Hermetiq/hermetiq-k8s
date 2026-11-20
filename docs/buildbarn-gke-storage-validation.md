@@ -1,10 +1,16 @@
 # Validate Buildbarn's same-SSD metadata layout on GKE
 
-This runbook verifies the [Local SSD example](buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+This procedure verifies the [Local SSD example](buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
 on real GKE nodes. Helm rendering and stubbed LVM tests cannot prove mount
 propagation, COS device access, or reboot recovery. Use a disposable node pool
 and a separate namespace in the target cluster; never run loss/reset tests on
 an occupied storage node.
+
+It validates a node image, provisioning script or disk layout. It does not
+migrate anything. To move an existing storage pool to this layout, follow the
+[cut-over procedure for an existing Local SSD pool](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool).
+To get a node out of a state the provisioner refuses, follow
+[Resetting a Local SSD node](buildbarn-block-storage.md#resetting-a-local-ssd-node).
 
 The required outcome is that blocks, indexes, and checkpoints survive ordinary
 restarts together, or become a clean empty store together after SSD loss. A
@@ -122,7 +128,9 @@ Run this matrix, restarting port-forward whenever the storage pod changes:
 
 A normal reboot is not a disk-loss test. Google documents that [guest-OS reboot
 preserves Local SSD data, while some host-recovery failures lose it](https://cloud.google.com/compute/docs/disks/local-ssd#data_persistence).
-Exercise a deliberate whole-layout reset separately on the disposable node.
+Exercise a deliberate whole-layout reset separately on the disposable node,
+using the sequence in [Resetting a Local SSD node](buildbarn-block-storage.md#resetting-a-local-ssd-node)
+with the validation namespace and resource names.
 Do not use a forced Kubernetes object deletion as evidence of SIGKILL: record
 the actual process/container termination and subsequent recovery.
 
@@ -170,9 +178,11 @@ uv run --no-project --with protobuf --with grpcio python3 "$PROBE" \
 ```
 
 Collect logs **before** removing each storage container/pod. Check every lifetime
-for integrity, checksum, and decompression failures. For a deployed release's
-cold cut-over, drain build traffic and restart frontends before resuming clients
-to clear positive existence-cache entries; this isolated RPC probe bypasses them.
+for integrity, checksum, and decompression failures. This isolated RPC probe
+bypasses the frontends and their existence caches; a deployed release's cold
+cut-over has to deal with them, as its
+[own procedure](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool)
+describes.
 
 ## Limits and cleanup
 
@@ -220,12 +230,33 @@ command array joined with newlines:
 - `partition`: `da4f9113f087735c89a59101ab5c2da40f5bfb3a795582ab065a9c901b8315ea`
 - `prepare-metadata-parent`: `bf6e777c834e18eb51fa38a247774e12c2685a0e265949c5c6e0d7601870fb68`
 
+Both hashes still describe
+[the manifest in this repository](../custom-values/partition-ephemeral-disks-daemonset.yaml).
+The comments in its YAML header have changed since the run; they are not part
+of either command array. Any edit to the script text, including a comment
+inside it, changes the hash and makes it a script this record does not cover.
+To recompute (use `initContainers[0]` for `prepare-metadata-parent`):
+
+```bash
+yq -o=json 'select(.kind == "DaemonSet") | .spec.template.spec.containers[0].command' \
+  custom-values/partition-ephemeral-disks-daemonset.yaml |
+  python3 -c 'import hashlib, json, sys; print(hashlib.sha256("\n".join(json.load(sys.stdin)).encode()).hexdigest())'
+```
+
 Storage ran `ghcr.io/buildbarn/bb-storage:20261118T120531Z-06739f2`, resolved to
 `sha256:53f9b3834b6bc565bb1160e28f82d7750e00278413f89e9ebcee8519657a03ee`.
-The final Local SSD overlay rendered the same storage ConfigMap, StatefulSet,
-and Service used in the test. Isolation overrides changed the namespace, node
-selector and toleration, disabled unrelated routing, and disabled AC expiry
-while testing exact metadata equality.
+The Local SSD overlay as it was at the time of the run rendered the same
+storage ConfigMap, StatefulSet, and Service used in the test. Isolation
+overrides changed the namespace, node selector and toleration, disabled
+unrelated routing, and disabled AC expiry while testing exact metadata
+equality.
+
+Two sizes have changed since the run, neither in the provisioner nor in the
+layout: the chart default for the shared CMS index rose from 256 MiB to
+1280 MiB, and the overlay's storage memory request from `12Gi` to `16Gi`. The
+tested render therefore put 9984 MiB of index files and 1024 MiB of CMS blocks
+on the 16 GiB metadata LV; the current overlay puts 11008 MiB and 1024 MiB
+there.
 
 | Live test | Observed result |
 |---|---|
@@ -244,10 +275,12 @@ The SIGKILL result deliberately allows uncheckpointed writes to disappear;
 persistent storage does not promise that every acknowledged write survives an
 abrupt process death.
 
-Evidence was retained locally in `/tmp/pr79-gke-validation-20261120`, including
-`results.json`, rendered manifests, probe manifests, mount/identity snapshots,
-failure-injection evidence and logs. Cleanup is complete: the namespace,
+The evidence (`results.json`, rendered manifests, probe manifests,
+mount/identity snapshots, failure-injection evidence and logs) was kept by the
+engineer who ran the validation. It is not in this repository, and this record
+is the only part of it published here. Cleanup is complete: the namespace,
 cluster-scoped RBAC, both temporary node pools (including the alternate-zone
 capacity retry), their nodes, and their VMs were removed. The existing deployment
 and its three Ready storage shards were left unchanged; adopting this layout
-there still requires the documented cold cut-over.
+there still requires the
+[cut-over procedure for an existing Local SSD pool](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool).

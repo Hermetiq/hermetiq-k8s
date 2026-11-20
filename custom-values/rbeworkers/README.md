@@ -41,11 +41,18 @@ See the [operator upgrade procedure](../../charts/bb-worker-operator/README.md#u
 Custom pools using `spec.config.files` reference a ConfigMap through
 `configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.
 The Buildbarn upgrade checks the referenced ConfigMap's selected source keys,
-regardless of its name or labels. Generated pools using a custom
+regardless of its name or labels. A ConfigMap that no `RbeWorker` references
+is scanned too, with all of its keys, when its name ends in `-worker-config`
+or it carries the `hermetiq.com/worker-pool` label and the operator does not
+own it. Rename a backup copy of an old worker configuration, or keep it in
+another namespace. Generated pools using a custom
 `commonConfigMapName`/`commonItems` must also migrate those selected libraries.
 Only the Buildbarn chart's own ConfigMaps are exempt because the upgrade
 replaces their contents. ConfigMap image defaults must also be CDC-capable;
-removing a CR image pin does not update a separate custom ConfigMap.
+removing a CR image pin does not update a separate custom ConfigMap. The image
+check reads the upstream date stamp in the tag. It cannot classify a
+digest-only or re-tagged image, so such a pin passes whatever it runs: check
+those yourself.
 
 ## Pools
 

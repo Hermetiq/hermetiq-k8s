@@ -6,9 +6,31 @@
 # SSDs. The node is labelled hermetiq/ephemeral-lvm=ready only after the mount,
 # generation marker and directory permissions have been verified.
 #
+# This manifest is not part of the Buildbarn Helm release: apply it by hand
+# before installing or upgrading the chart. On a pool that already runs the
+# 0.9.9 layout, apply it only after storage has been stopped, and follow
+# "Cut-over procedure for an existing Local SSD pool" in
+# docs/buildbarn-block-storage.md.
+#
 # How it works, and why it is shaped this way, is documented in
 # docs/buildbarn-block-storage.md ("GKE Example B"). In short:
 #
+# - Layout on a fresh volume group, in this order: meta 16G, ac 8G, iscc 2G,
+#   fsac 6G, then cas with every remaining extent (--extents 100%FREE). The
+#   volume group is therefore full: the metadata LV cannot be extended later,
+#   and a different size for any LV means a new layout and a cold reset of the
+#   node. The first deployment of this layout changed the cas line to a fixed
+#   size (--size 700G on two 375 GiB SSDs, about 18 GiB left free) to keep
+#   slack; make that edit before the first provisioning if you want it, and
+#   keep cas.blockDevice.size in the storage values equal to the real LV.
+# - The 16G metadata LV is fixed whatever the number of SSDs. It must hold
+#   every store's index file plus the shared CMS blocks file. With
+#   buildbarn-values-local-ssd-block.yaml that is 11008 MiB of indexes plus
+#   1024 MiB of CMS blocks, 12032 MiB of 16384 MiB. A 2 TiB CAS LV with a
+#   15360 MiB index needs 20032 MiB and does not fit: change the meta size
+#   below before provisioning such nodes. Nothing checks this sum; the
+#   per-store metadata.size values in the chart are not enforced in hostPath
+#   mode.
 # - Metadata is mounted at /mnt/stateful_partition/buildbarn-local-ssd/metadata.
 #   Its parent is on the writable COS stateful partition; metadata itself lives
 #   on /dev/ephemeral/meta, never on the boot disk. Bidirectional propagation
@@ -22,6 +44,11 @@
 #   before that prerequisite exists; the main container then publishes safely.
 # - Existing legacy VGs without meta require a deliberate cold cut-over. This
 #   provisioner never shrinks data LVs or formats an existing metadata LV.
+#   It also never completes a partial layout: a first provisioning that is
+#   interrupted between vgcreate and the marker write leaves a node that fails
+#   on every restart. The only exit from that, a missing marker, a legacy VG
+#   or a generation mismatch is "Resetting a Local SSD node" in
+#   docs/buildbarn-block-storage.md.
 # - A metadata generation marker binds checkpoints to the VG/data-LV UUIDs.
 #   Recreating one data LV fails closed; reset blocks and metadata together.
 #   UUIDs cannot detect in-place corruption/zeroing of an otherwise intact LV.
@@ -30,8 +57,13 @@
 # - Node-readiness gate: storage.nodeSelector in
 #   buildbarn-values-local-ssd-block.yaml requires hermetiq/ephemeral-lvm=ready,
 #   so a storage pod stays Pending until data and metadata are ready. The label
-#   is cleared at pod start, on graceful shutdown, and on detected mount or
-#   generation failure. Readiness also checks the real mount every five seconds.
+#   is cleared on graceful shutdown, on detected mount or generation failure,
+#   and at container start once the tools are installed: `apk add` runs before
+#   the first label change, so when the package mirror cannot be reached the
+#   container exits with the label left as it was, and a stale "ready" stays
+#   with nothing verifying it. The Directory and BlockDevice hostPath types
+#   still stop a storage pod from starting on a node whose LVs or metadata
+#   mount are absent. Readiness also checks the real mount every five seconds.
 # - Why not ghcr.io/buildbarn/bb-partition-ephemeral-disks: that image is built
 #   on distroless_static and shells out to vgcreate/lvcreate, which are absent
 #   there. This runs the same LVM2 commands from an image that has them.
@@ -46,8 +78,13 @@
 # - A non-preemptible node pool created with `--local-nvme-ssd-block count=N`
 #   (raw block SSDs), NOT `--ephemeral-storage-local-ssd`, labeled
 #   node-type=ssd-block and tainted hermetiq/ssd-block:NoSchedule.
-# - Node egress for `apk add lvm2 curl e2fsprogs util-linux`, or bake these
-#   packages into an image for air-gapped clusters and set `image:` below.
+# - Node egress to the Alpine package mirror for `apk add lvm2 curl e2fsprogs
+#   util-linux` (main container) and `apk add util-linux` (init container).
+#   Both run on every container start, not only on first provisioning, and the
+#   main container exits on any failed check, so every restart and every node
+#   reboot depends on the mirror. For air-gapped or restricted-egress clusters
+#   bake the packages into an image, set both `image:` fields below and remove
+#   the two `apk add` lines, which otherwise still run.
 # - Storage containers use UID/GID 65534; metadata store directories use 0770.
 # - A namespace that permits privileged pods.
 #

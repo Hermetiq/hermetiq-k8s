@@ -21,6 +21,8 @@ annotations:
       description: "Keep Buildbarn dashboards usable with legacy CAS and CDC chunk storage, add separate chunk-mapping views, and test shipped queries against old/new/mixed metrics"
     - kind: fixed
       description: "Bound worker-pool CPU and memory queries during pod churn"
+    - kind: fixed
+      description: "Correct the Buildbarn object-size panel descriptions: on CDC storage the panels show the size named in the request digest (the whole blob for CMS, the action message for AC, ISCC, and FSAC, the uncompressed chunk for CS), not the stored entry"
 keywords:
   - hermetiq
   - MCP

@@ -389,13 +389,27 @@ When the Buildbarn chart runs in the same cluster:
 - If FUSE-based workers share the Hermetiq namespace, that namespace needs the
   `privileged` Pod Security level; see
   [Pod and container security context](#pod-and-container-security-context).
-- When running Buildbarn `0.10.0` (RepMaxCDC), `buildbarn`'s upgrade check
-  requires `hermetiq.com/cdc-compatible: "true"` on the Hermetiq API (`grpc-api`)
-  and publisher (`bep-nats-pub`) Deployments. The default `bep-nats v0.9.8`
-  image is not dual-schema compatible; only set `buildbarnCdcCompatible: true`
-  after selecting a verified dual-schema `bep-nats` image. When Buildbarn runs
-  in a different namespace from Hermetiq, pass Buildbarn's
-  `upgradeChecks.hermetiqNamespace` so its upgrade guard checks that namespace.
+- Buildbarn `0.10.0` (RepMaxCDC) refuses to install or upgrade unless the
+  Hermetiq API (`grpc-api`) and publisher (`bep-nats-pub`) Deployments it
+  finds carry `hermetiq.com/cdc-compatible: "true"`. The check runs on
+  `helm install` as well as `helm upgrade`. Two things are needed to pass it:
+  - A `bep-nats` image that validates both the pre-CDC and the CDC Buildbarn
+    configuration schema. The default `bep-nats v0.9.8` image validates only
+    the pre-CDC schema.
+  - `buildbarnCdcCompatible: true`, which renders the annotation on both
+    Deployments. Set it only for such an image; the chart cannot verify the
+    image for you. The value is implemented in a Hermetiq chart release newer
+    than the published `0.9.8`. The published `0.9.8` chart accepts the value
+    and renders no annotation, so setting it there changes nothing and
+    Buildbarn's check still fails.
+
+  Buildbarn looks for these Deployments in its own namespace, or in the one
+  named by its `upgradeChecks.hermetiqNamespace`. When Hermetiq runs in a
+  different namespace and that value is left empty, Buildbarn finds nothing
+  and skips the check, and configuration validation in the Hermetiq UI stays
+  on the pre-CDC schema. The repository's
+  [supported chart bundle](https://github.com/Hermetiq/hermetiq-k8s#supported-chart-bundle)
+  note says which combinations install today.
 
 ### Inspect the packaged defaults
 

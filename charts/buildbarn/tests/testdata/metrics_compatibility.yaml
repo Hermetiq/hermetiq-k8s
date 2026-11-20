@@ -1,6 +1,13 @@
 # Metric names/labels emitted by bb-storage db62041 (legacy) and 8d2acac
-# (CDC). Counter increments below are synthetic and intentionally distinct,
-# so the PromQL tests detect dropped stores, merged CS/CMS, and double counts.
+# (CDC). Counter increments below are synthetic. Every rate in a scenario,
+# including the excluded series, is a distinct power of four, so any sum that
+# counts each series zero, one, or two times is unique. A dropped store, a
+# CS/CMS swap or merge, a double count, and a leaked worker, frontend, or
+# unrelated series therefore each change the expected value. Four rather than
+# three because the test multiplies operation-rate expectations by three: with
+# powers of three, three times one store's rate is the next store's rate.
+# Rates start at 4 so that none equals the 1 or 2 the series-count checks
+# expect. metrics_compatibility.py refuses a fixture that breaks these rules.
 key_location_metrics:
   - legacy: buildbarn_blobstore_hashing_key_location_map_get_attempts_count
     cdc: buildbarn_lossymap_hash_map_get_attempts_count
@@ -26,36 +33,50 @@ key_location_metrics:
     cdc: buildbarn_lossymap_hash_map_put_iterations_bucket
     labels: {le: '+Inf', outcome: Inserted}
     record: le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m
+# Lossy-map series, added to every scenario, that must not reach the storage
+# records or fire the key-location-map alerts. Worker local read caches and
+# the frontend read cache keep their own key-location map and report it under
+# the storage names: KeyLocationMap:cs on the CDC image, storage_type="cas"
+# before it. Each is emitted in both forms, so both sides of every recording
+# rule are checked for the kubernetes_service="storage" scope. The last entry
+# is a lossy map inside a storage pod that is not a key-location map; only the
+# name matcher keeps it out.
+excluded_series:
+  - {kubernetes_service: worker-ubuntu22-04, cdc_name: 'KeyLocationMap:cs', legacy_storage_type: cas, rate: 65536}
+  - {kubernetes_service: frontend, cdc_name: 'KeyLocationMap:cs', legacy_storage_type: cas, rate: 262144}
+  - {kubernetes_service: storage, cdc_name: UnrelatedCache, rate: 1048576}
 scenarios:
   - name: legacy
     stores:
-      - {version: legacy, type: cas, rate: 2}
-      - {version: legacy, type: ac, rate: 7}
-      - {version: legacy, type: iscc, rate: 11}
-      - {version: legacy, type: fsac, rate: 13}
+      - {version: legacy, type: cas, rate: 4}
+      - {version: legacy, type: ac, rate: 256}
+      - {version: legacy, type: iscc, rate: 4096}
+      - {version: legacy, type: fsac, rate: 16384}
     # The dashboard must retain legacy data, including its backend dropdown.
-    expected_data_rate: 2
+    expected_data_rate: 4
     expected_data_stores: 1
     expected_mapping_rate: 0
   - name: cdc
     stores:
-      - {version: cdc, type: cs, rate: 3}
-      - {version: cdc, type: cms, rate: 5}
-      - {version: cdc, type: ac, rate: 7}
-      - {version: cdc, type: iscc, rate: 11}
-      - {version: cdc, type: fsac, rate: 13}
-    expected_data_rate: 3
+      - {version: cdc, type: cs, rate: 16}
+      - {version: cdc, type: cms, rate: 64}
+      - {version: cdc, type: ac, rate: 256}
+      - {version: cdc, type: iscc, rate: 4096}
+      - {version: cdc, type: fsac, rate: 16384}
+    expected_data_rate: 16
     expected_data_stores: 1
-    expected_mapping_rate: 5
+    expected_mapping_rate: 64
   - name: mixed
     stores:
-      - {version: legacy, type: cas, rate: 2}
-      - {version: cdc, type: cs, rate: 3}
-      - {version: cdc, type: cms, rate: 5}
-      - {version: legacy, type: ac, rate: 7}
-      - {version: cdc, type: ac, rate: 17}
-      - {version: legacy, type: iscc, rate: 11}
-      - {version: cdc, type: fsac, rate: 13}
-    expected_data_rate: 5
+      - {version: legacy, type: cas, rate: 4}
+      - {version: cdc, type: cs, rate: 16}
+      - {version: cdc, type: cms, rate: 64}
+      - {version: legacy, type: ac, rate: 256}
+      - {version: cdc, type: ac, rate: 1024}
+      - {version: legacy, type: iscc, rate: 4096}
+      - {version: cdc, type: fsac, rate: 16384}
+    # cas 4 plus cs 16. It must not equal the cms rate, or a CS/CMS swap in a
+    # dashboard query would pass.
+    expected_data_rate: 20
     expected_data_stores: 2
-    expected_mapping_rate: 5
+    expected_mapping_rate: 64

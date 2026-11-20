@@ -248,6 +248,25 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{/* hostPath mode with CAS moved off the chart default path. ISCC and FSAC are
+     enabled by default, so values that never mention them still gain two
+     hostPath volumes at the chart-default directory. Where that directory is
+     not a mounted SSD, the kubelet creates it on the node boot disk. Raw block
+     stores already refuse to guess a path; do the same here. */}}
+{{- if eq .Values.storage.persistence.mode "hostPath" -}}
+{{- $hpCas := .Values.storage.persistence.cas -}}
+{{- $hpCasRaw := eq $hpCas.backend "blockDevice" -}}
+{{- $hpCasPath := toString (default "" $hpCas.hostPath.path) -}}
+{{- if or $hpCasRaw (ne $hpCasPath (include "buildbarn.storage.defaultHostPath" "cas")) -}}
+{{- range $store := list "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $store -}}
+{{- $defaultPath := include "buildbarn.storage.defaultHostPath" $store -}}
+{{- if and $s.enabled (ne $s.backend "blockDevice") (eq (toString (default "" $s.hostPath.path)) $defaultPath) -}}
+{{- fail (printf "storage.persistence.%s.hostPath.path is still the chart default (%s) in storage.persistence.mode=hostPath, but CAS does not use the chart default path (%s). %s is enabled by default; where that directory is not a mounted SSD, a DirectoryOrCreate hostPath is created on the node boot disk. Set storage.persistence.%s.hostPath.path to a directory next to the other stores, or set storage.persistence.%s.enabled=false." $store $defaultPath (ternary "storage.persistence.cas.backend=blockDevice" (printf "storage.persistence.cas.hostPath.path=%s" $hpCasPath) $hpCasRaw) (upper $store) $store $store) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if and .Values.scheduler.sizeClassAnalysis.enabled (not .Values.storage.persistence.iscc.enabled) -}}
 {{- fail "scheduler.sizeClassAnalysis.enabled=true requires storage.persistence.iscc.enabled=true" -}}
 {{- end -}}
@@ -351,57 +370,102 @@
 {{- end -}}
 {{/* --- CDC schema upgrade guardrails (render-time values & cluster lookup) --- */}}
 {{- $cdcGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#upgrading-configurations-to-cdc" -}}
+{{- $cutoverGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback" -}}
 {{- /* Handover and reload require a fork built with the CDC CAS schema.
-       Older fork images only support the pre-CDC configuration. */ -}}
+       Older fork images only support the pre-CDC configuration, with or
+       without these features: turning them off is not enough while
+       images.scheduler still points at such a fork. */ -}}
 {{- if not $.Values.scheduler.handover.cdcCompatibleFork -}}
 {{- if $.Values.scheduler.handover.enabled -}}
-{{- fail "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC: disable scheduler.handover for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
+{{- fail "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC: disable scheduler.handover for this upgrade and remove any images.scheduler repository, tag or digest override that pins a fork image built without CDC support (that scheduler rejects the CDC configuration whether or not handover is enabled), or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
 {{- end -}}
 {{- if $.Values.scheduler.configurationReloadInterval -}}
-{{- fail "scheduler.configurationReloadInterval is not supported with the CDC blobstore unless the fork supports CDC: leave it empty for this upgrade, or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
+{{- fail "scheduler.configurationReloadInterval is not supported with the CDC blobstore unless the fork supports CDC: leave it empty for this upgrade and remove any images.scheduler repository, tag or digest override that pins a fork image built without CDC support (that scheduler rejects the CDC configuration whether or not reload is enabled), or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
 {{- end -}}
 {{- end -}}
+{{- /* The release's own Buildbarn images must be CDC builds: the chart renders
+       CDC configuration for all of them. images.browser is not checked
+       because bb-browser is still a pre-CDC binary and reads through
+       frontend-internal. Only upstream date stamps can be classified. */ -}}
+{{- $releaseImages := list "storage" "scheduler" "worker" "runnerInstaller" -}}
+{{- if $.Values.remoteAsset.enabled -}}
+{{- $releaseImages = append $releaseImages "remoteAsset" -}}
+{{- end -}}
+{{- if $.Values.portal.enabled -}}
+{{- $releaseImages = append $releaseImages "portal" -}}
+{{- end -}}
+{{- range $imageName := $releaseImages -}}
+{{- $image := default (dict) (index $.Values.images $imageName) -}}
+{{- $imageRef := printf "%s:%s" (toString (default "" $image.repository)) (toString (default "" $image.tag)) -}}
+{{- with $image.digest -}}
+{{- $imageRef = printf "%s@%s" $imageRef (trimPrefix "@" (toString .)) -}}
+{{- end -}}
+{{- if include "buildbarn.cdc.preCdcImage" $imageRef -}}
+{{- fail (printf "images.%s pins pre-CDC image %q: its tag carries an upstream date stamp before 20261102, and a pre-CDC binary rejects the CDC configuration this chart renders. Remove the images.%s tag and digest overrides to use the chart's CDC image, or pin a build stamped 20261102 or later. Tags without an upstream date stamp and digest-only references cannot be classified and are not checked; see %s" $imageName $imageRef $imageName $cdcGuide) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The checks below read configuration as text; nothing is evaluated. A
+       field is recognised bare or quoted and with any jsonnet separator
+       (name:, name::, name+:). Comments are removed first. A file that tests
+       for the CDC shape itself (std.objectHas plus chunkStorage) serves both
+       schemas and is not refused for the pre-CDC branch it carries. A rule
+       without its own pattern matches its field name as an object key. */ -}}
 {{- $removedCdcFields := list
-      (dict "field" "dataIntegrityValidationCache" "pattern" "dataIntegrityValidationCache[[:space:]]*:" "hint" "remove dataIntegrityValidationCache (integrity validation is now performed per RepMaxCDC chunk and via chunkMappingValidating)")
-      (dict "field" "keyLocationMapInMemory" "pattern" "keyLocationMapInMemory[[:space:]]*:" "hint" "replace keyLocationMapInMemory with keyLocationMap: { inMemory: ... }")
-      (dict "field" "keyLocationMapOnBlockDevice" "pattern" "keyLocationMapOnBlockDevice[[:space:]]*:" "hint" "replace keyLocationMapOnBlockDevice with keyLocationMap: { onBlockDevice: ... }")
-      (dict "field" "keyLocationMapMaximumGetAttempts" "pattern" "keyLocationMapMaximumGetAttempts[[:space:]]*:" "hint" "move maximumGetAttempts inside keyLocationMap: { ..., maximumGetAttempts: 16 }")
-      (dict "field" "keyLocationMapMaximumPutAttempts" "pattern" "keyLocationMapMaximumPutAttempts[[:space:]]*:" "hint" "move maximumPutAttempts inside keyLocationMap: { ..., maximumPutAttempts: 64 }")
+      (dict "field" "dataIntegrityValidationCache" "hint" "remove dataIntegrityValidationCache (integrity validation is now performed per RepMaxCDC chunk and via chunkMappingValidating)")
+      (dict "field" "keyLocationMapInMemory" "hint" "replace keyLocationMapInMemory with keyLocationMap: { inMemory: ... }")
+      (dict "field" "keyLocationMapOnBlockDevice" "hint" "replace keyLocationMapOnBlockDevice with keyLocationMap: { onBlockDevice: ... }")
+      (dict "field" "keyLocationMapMaximumGetAttempts" "hint" "move maximumGetAttempts inside keyLocationMap: { ..., maximumGetAttempts: 16 }")
+      (dict "field" "keyLocationMapMaximumPutAttempts" "hint" "move maximumPutAttempts inside keyLocationMap: { ..., maximumPutAttempts: 64 }")
       (dict "field" "browserUrl" "pattern" "(^|[^a-zA-Z0-9_])browserUrl([[:space:]]*:|[^a-zA-Z0-9_]|$)" "hint" "replace browserUrl with portalUrl (or deprecatedPortalUrl in scheduler.jsonnet)")
-      (dict "field" "adminHttpServers" "pattern" "(^|[^a-zA-Z0-9_])adminHttpServers[[:space:]]*:" "hint" "replace adminHttpServers with deprecatedAdminHttpServers")
-      (dict "field" "adminRoutePrefix" "pattern" "adminRoutePrefix[[:space:]]*:" "hint" "replace adminRoutePrefix with deprecatedAdminRoutePrefix (or remove it)")
-      (dict "field" "legacyContentAddressableStorage" "pattern" "legacyContentAddressableStorage[[:space:]]*:" "hint" "replace legacyContentAddressableStorage with contentAddressableStorage (using the CDC { chunkStorage, chunkMappingStorage, cdcParameterCache } shape)")
-      (dict "field" "zstdPool" "pattern" "zstdPool[[:space:]]*:" "excludedFiles" (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet") "hint" "remove zstdPool (removed from scheduler, worker, and remote-asset configurations; still supported by bb-storage and bb-portal)")
-      (dict "field" "instanceNameAuthorizer" "pattern" "instanceNameAuthorizer[[:space:]]*:" "configFiles" (list "portal.jsonnet") "hint" "remove instanceNameAuthorizer and configure per-service authorizers (readAuthorizer / publishAuthorizer)")
-      (dict "field" "enableGraphqlPlayground" "pattern" "enableGraphqlPlayground[[:space:]]*:" "configFiles" (list "portal.jsonnet") "hint" "remove enableGraphqlPlayground (replaced by graphqlApiServiceConfiguration)")
-      (dict "field" "databaseCleanupConfiguration" "pattern" "databaseCleanupConfiguration[[:space:]]*:" "configFiles" (list "portal.jsonnet") "hint" "move database cleanup settings under top-level database.cleanupConfiguration") -}}
+      (dict "field" "adminHttpServers" "hint" "replace adminHttpServers with deprecatedAdminHttpServers")
+      (dict "field" "adminRoutePrefix" "hint" "replace adminRoutePrefix with deprecatedAdminRoutePrefix (or remove it)")
+      (dict "field" "legacyContentAddressableStorage" "hint" "replace legacyContentAddressableStorage with contentAddressableStorage (using the CDC { chunkStorage, chunkMappingStorage, cdcParameterCache } shape)")
+      (dict "field" "zstdPool" "excludedFiles" (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet") "hint" "remove zstdPool (removed from scheduler, worker, and remote-asset configurations; still supported by bb-storage and bb-portal)")
+      (dict "field" "instanceNameAuthorizer" "configFiles" (list "portal.jsonnet") "hint" "remove instanceNameAuthorizer and configure per-service authorizers (readAuthorizer / publishAuthorizer)")
+      (dict "field" "enableGraphqlPlayground" "configFiles" (list "portal.jsonnet") "hint" "remove enableGraphqlPlayground (replaced by graphqlApiServiceConfiguration)")
+      (dict "field" "databaseCleanupConfiguration" "configFiles" (list "portal.jsonnet") "hint" "move database cleanup settings under top-level database.cleanupConfiguration") -}}
+{{- range $rule := $removedCdcFields -}}
+{{- if not (hasKey $rule "pattern") -}}
+{{- $_ := set $rule "pattern" (include "buildbarn.cdc.keyPattern" $rule.field) -}}
+{{- end -}}
+{{- end -}}
+{{- $casKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorage" -}}
+{{- $casServerKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorageServer" -}}
+{{- /* Evidence that a contentAddressableStorage definition is the CDC message:
+       it sets one of the fields only that message has, or it delegates to the
+       chart's common.blobstore.contentAddressableStorage. */ -}}
+{{- $cdcShape := printf "(%s|common\\.blobstore\\.contentAddressableStorage)" (include "buildbarn.cdc.keyPattern" "(chunkStorage|chunkMappingStorage|chunkMappingCache|cdcParameterCache|chunkCache)") -}}
 {{- range $name, $content := default (dict) $.Values.configOverrides -}}
-{{- $text := regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" ($content | toString) "") "" -}}
+{{- $text := include "buildbarn.cdc.stripComments" $content -}}
+{{- if not (include "buildbarn.cdc.dualSchema" $text) -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has $name $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has $name $rule.excludedFiles))) -}}
 {{- if and $inScope (regexMatch $rule.pattern $text) -}}
 {{- fail (printf "configOverrides[%q] contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s; see %s" $name $rule.field $rule.hint $cdcGuide) -}}
 {{- end -}}
 {{- end -}}
-{{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch "(^|[^a-zA-Z0-9_])contentAddressableStorage[[:space:]]*:" $text) (not (regexMatch "contentAddressableStorageServer[[:space:]]*:" $text)) -}}
+{{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch $casKey $text) (not (regexMatch $casServerKey $text)) -}}
 {{- fail (printf "configOverrides[%q] uses pre-CDC top-level field \"contentAddressableStorage\"; rename it to \"contentAddressableStorageServer\" with chunkStorage and chunkMappingStorage; see %s" $name $cdcGuide) -}}
 {{- end -}}
-{{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch "contentAddressableStorageServer[[:space:]]*:" $text) (regexMatch "(^|[^a-zA-Z0-9_])contentAddressableStorage[[:space:]]*:" $text) (not (regexMatch "(chunkStorage[[:space:]]*:|common\\.blobstore\\.contentAddressableStorage)" $text)) -}}
+{{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch $casServerKey $text) (regexMatch $casKey $text) (not (regexMatch $cdcShape $text)) -}}
 {{- fail (printf "configOverrides[%q] defines contentAddressableStorageServer with a single-store \"contentAddressableStorage\" missing \"chunkStorage\"; update it to the CDC { chunkStorage, chunkMappingStorage } shape; see %s" $name $cdcGuide) -}}
 {{- end -}}
-{{- if and (has $name (list "common.libsonnet" "scheduler.jsonnet" "asset.jsonnet")) (regexMatch "(^|[^a-zA-Z0-9_])contentAddressableStorage[[:space:]]*:" $text) (not (regexMatch "(chunkStorage[[:space:]]*:|common\\.blobstore\\.contentAddressableStorage)" $text)) -}}
+{{- if and (has $name (list "common.libsonnet" "scheduler.jsonnet" "asset.jsonnet")) (regexMatch $casKey $text) (not (regexMatch $cdcShape $text)) -}}
 {{- fail (printf "configOverrides[%q] defines a pre-CDC single-store \"contentAddressableStorage\" without \"chunkStorage\"; update it to the CDC { chunkStorage, chunkMappingStorage, cdcParameterCache } shape; see %s" $name $cdcGuide) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq $name "browser.jsonnet") (regexMatch "blobstore[[:space:]]*:[[:space:]]*common\\.blobstore([^a-zA-Z0-9_.]|$)" $text) -}}
 {{- fail (printf "configOverrides[\"browser.jsonnet\"] passes CDC common.blobstore directly to pre-CDC bb-browser; point contentAddressableStorage at frontend-internal:8980 and actionCache at common.blobstore.actionCache; see %s" $cdcGuide) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq $router.mode "custom") $router.custom -}}
-{{- $routerText := regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" ($router.custom | toString) "") "" -}}
+{{- $routerText := include "buildbarn.cdc.stripComments" $router.custom -}}
+{{- if not (include "buildbarn.cdc.dualSchema" $routerText) -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has "scheduler.jsonnet" $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has "scheduler.jsonnet" $rule.excludedFiles))) -}}
 {{- if and $inScope (regexMatch $rule.pattern $routerText) -}}
 {{- fail (printf "scheduler.actionRouter.custom contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s" $rule.field $rule.hint) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -410,6 +474,37 @@
 {{- fail "_testLookup is reserved for offline chart unit tests and cannot be set during helm upgrade" -}}
 {{- end -}}
 {{- $mockLookup := default (dict) $.Values._testLookup -}}
+{{- /* Claim-template preflight. Kubernetes forbids changing a StatefulSet's
+       volumeClaimTemplates, and Helm patches every other object of the release
+       before that one patch is refused. Compare the live StatefulSet with the
+       render and stop here, before anything is applied. Nothing is checked
+       when there is no live StatefulSet (first install, offline render, or
+       after the StatefulSet was deleted for recreation). */ -}}
+{{- if not (index (default (dict) $.Values.upgradeChecks) "skipStorageClaimTemplateCheck") -}}
+{{- $liveStorage := dict -}}
+{{- if hasKey $mockLookup "statefulSets" -}}
+{{- range $sts := default (list) (index (default (dict) (index $mockLookup "statefulSets")) "items") -}}
+{{- if eq (toString (index (default (dict) (index $sts "metadata")) "name")) "storage" -}}
+{{- $liveStorage = $sts -}}
+{{- end -}}
+{{- end -}}
+{{- else -}}
+{{- $liveStorage = default (dict) (lookup "apps/v1" "StatefulSet" $ns "storage") -}}
+{{- end -}}
+{{- if $liveStorage -}}
+{{- $renderedClaims := dict "claims" (list) -}}
+{{- if eq $.Values.storage.persistence.mode "pvc" -}}
+{{- $renderedClaims = fromYaml (printf "claims:\n%s" (include "buildbarn.storage.volumeClaimTemplates" $)) -}}
+{{- end -}}
+{{- /* An unparsable render is reported by the StatefulSet template itself. */ -}}
+{{- if not (hasKey $renderedClaims "Error") -}}
+{{- $claimDifferences := include "buildbarn.storage.claimTemplateDifferences" (dict "live" (index (default (dict) (index $liveStorage "spec")) "volumeClaimTemplates") "rendered" (index $renderedClaims "claims")) | fromJsonArray -}}
+{{- if $claimDifferences -}}
+{{- fail (printf "live StatefulSet %s/storage has different volumeClaimTemplates than this release renders: %s. Kubernetes forbids changing volumeClaimTemplates in place, and Helm applies every other object of the release before that patch is refused, which leaves the release half-applied on the old StatefulSet. Stop storage first (scale statefulset/storage to 0 and wait for its pods to terminate), run `kubectl delete statefulset storage --namespace %s --cascade=orphan`, then run this upgrade again so the StatefulSet is recreated with the rendered templates. Existing PersistentVolumeClaims are kept as they are: a changed class or size only applies to claims that do not exist yet. The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check. Set upgradeChecks.skipStorageClaimTemplateCheck=true to skip it. See %s" $ns (join "; " $claimDifferences) $ns $cutoverGuide) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $configMaps := default (lookup "v1" "ConfigMap" $ns "") (index $mockLookup "configMaps") -}}
 {{- $configMapsByName := dict -}}
 {{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
@@ -419,12 +514,26 @@
        copy in this upgrade (or is created by it), so the worker checks below
        read the rendered data: what workers will mount, not what they mount
        now. A live pre-CDC copy then cannot block the upgrade that migrates it,
-       and a rendered pre-CDC copy is still refused. */ -}}
+       and a rendered pre-CDC copy is still refused. One entry may hold several
+       YAML documents or a List; Helm applies all of them, so read all of them. */ -}}
+{{- $releaseConfigMaps := dict -}}
 {{- range $object := .Values.extraObjects -}}
-{{- $rendered := fromYaml (include "buildbarn.tplvalues.render" (dict "value" $object "context" $)) -}}
-{{- $renderedMeta := default (dict) $rendered.metadata -}}
-{{- if and (eq (default "" $rendered.kind) "ConfigMap") $renderedMeta.name (eq (default $ns $renderedMeta.namespace) $ns) -}}
-{{- $_ := set $configMapsByName $renderedMeta.name $rendered -}}
+{{- range $document := regexSplit "(?m)^---[ \\t\\r]*(#.*)?$" (include "buildbarn.tplvalues.render" (dict "value" $object "context" $)) -1 -}}
+{{- $parsed := fromYaml $document -}}
+{{- $candidates := list $parsed -}}
+{{- if and (hasSuffix "List" (toString (default "" (index $parsed "kind")))) (kindIs "slice" (index $parsed "items")) -}}
+{{- $candidates = index $parsed "items" -}}
+{{- end -}}
+{{- range $rendered := $candidates -}}
+{{- if kindIs "map" $rendered -}}
+{{- $renderedMeta := default (dict) (index $rendered "metadata") -}}
+{{- $renderedName := toString (default "" (index $renderedMeta "name")) -}}
+{{- if and (eq (toString (default "" (index $rendered "kind"))) "ConfigMap") $renderedName (eq (toString (default $ns (index $renderedMeta "namespace"))) $ns) -}}
+{{- $_ := set $configMapsByName $renderedName $rendered -}}
+{{- $_ := set $releaseConfigMaps $renderedName true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $chartConfigNames := list (include "buildbarn.configName" $) (include "buildbarn.workerConfigName" $) -}}
@@ -473,12 +582,16 @@
 {{- range $imgField, $imgVal := dict
       "spec.images.worker" (default (default "" (index $refData "workerImage")) (index $wImages "worker"))
       "spec.images.runnerInstaller" (default (default "" (index $refData "runnerInstallerImage")) (index $wImages "runnerInstaller")) -}}
-{{- if and (or $installerEnabled (not (contains "runnerInstaller" $imgField))) $imgVal (regexMatch ":(202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" ($imgVal | toString)) -}}
+{{- if and (or $installerEnabled (not (contains "runnerInstaller" $imgField))) $imgVal (include "buildbarn.cdc.preCdcImage" $imgVal) -}}
 {{- fail (printf "live RbeWorker %s/%s pins pre-CDC image %q in %s (including ConfigMap image defaults); remove the pin so the worker inherits buildbarn-worker-config's CDC image or update it to >= 20261102T before upgrading the buildbarn chart" $ns $wName ($imgVal | toString) $imgField) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- /* Live ConfigMaps, with release-rendered replacements and additions. */ -}}
+{{- /* Live ConfigMaps, with release-rendered replacements and additions.
+       A ConfigMap is read when an RbeWorker references it. One that nothing
+       references is still read when it looks like a worker configuration (the
+       hermetiq.com/worker-pool label or a name ending in -worker-config) and
+       the operator does not own it; the message then says why it was picked. */ -}}
 {{- range $cmKey, $cm := $configMapsByName -}}
 {{- $cmMeta := default (dict) $cm.metadata -}}
 {{- $cmName := $cmMeta.name | default "" -}}
@@ -490,18 +603,33 @@
 {{- range $owner := default (list) $cmMeta.ownerReferences -}}
 {{- if eq (default "" $owner.kind) "RbeWorker" -}}{{- $isOperatorOwned = true -}}{{- end -}}
 {{- end -}}
-{{- if and (not $isChartCm) (or $isReferenced (and (not $isOperatorOwned) (or (hasKey $cmLabels "hermetiq.com/worker-pool") (hasSuffix "-worker-config" $cmName)))) -}}
+{{- $selectedBy := "" -}}
+{{- if and (not $isReferenced) (not $isOperatorOwned) -}}
+{{- if hasKey $cmLabels "hermetiq.com/worker-pool" -}}
+{{- $selectedBy = "its hermetiq.com/worker-pool label" -}}
+{{- else if hasSuffix "-worker-config" $cmName -}}
+{{- $selectedBy = "its name ending in -worker-config" -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not $isChartCm) (or $isReferenced $selectedBy) -}}
+{{- $cmOrigin := ternary "release-rendered" "live" (hasKey $releaseConfigMaps $cmName) -}}
+{{- $cmRemedy := ternary "migrate it in the release values (extraObjects) before upgrading the buildbarn chart" "migrate the ConfigMap before upgrading the buildbarn chart" (hasKey $releaseConfigMaps $cmName) -}}
+{{- if $selectedBy -}}
+{{- $cmRemedy = printf "%s. No RbeWorker references this ConfigMap; it was selected by %s. If it is not a worker configuration (for example a backup copy), rename it or keep it outside this namespace" $cmRemedy $selectedBy -}}
+{{- end -}}
 {{- range $fName, $fContent := default (dict) $cm.data -}}
 {{- if or $selected.all (hasKey $selected.keys $fName) -}}
-{{- $fText := regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" ($fContent | toString) "") "" -}}
+{{- $fText := include "buildbarn.cdc.stripComments" $fContent -}}
+{{- if not (include "buildbarn.cdc.dualSchema" $fText) -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has $fName $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has $fName $rule.excludedFiles))) -}}
 {{- if and $inScope (regexMatch $rule.pattern $fText) -}}
-{{- fail (printf "live worker ConfigMap %s/%s data[%q] contains pre-CDC field %q (%s); migrate the ConfigMap before upgrading the buildbarn chart" $ns $cmName $fName $rule.field $rule.hint) -}}
+{{- fail (printf "%s worker ConfigMap %s/%s data[%q] contains pre-CDC field %q (%s); %s" $cmOrigin $ns $cmName $fName $rule.field $rule.hint $cmRemedy) -}}
 {{- end -}}
 {{- end -}}
-{{- if and (regexMatch "(^|[^a-zA-Z0-9_])contentAddressableStorage[[:space:]]*:" $fText) (not (regexMatch "(chunkStorage[[:space:]]*:|common\\.blobstore\\.contentAddressableStorage)" $fText)) -}}
-{{- fail (printf "live worker ConfigMap %s/%s data[%q] defines a pre-CDC single-store contentAddressableStorage without chunkStorage; migrate the referenced configuration before upgrading the buildbarn chart" $ns $cmName $fName) -}}
+{{- if and (regexMatch $casKey $fText) (not (regexMatch $cdcShape $fText)) -}}
+{{- fail (printf "%s worker ConfigMap %s/%s data[%q] defines a pre-CDC single-store contentAddressableStorage without chunkStorage; %s" $cmOrigin $ns $cmName $fName $cmRemedy) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -511,7 +639,9 @@
        Chart/app-version labels describe packaging, not the selected image.
        Require a capability declaration verified against the effective image.
        Absent components are not required when no RbeWorkers exist in this
-       namespace: Buildbarn-only installs have no bep-nats, and SaaS runs it elsewhere. */ -}}
+       namespace: Buildbarn-only installs have no bep-nats, and SaaS runs it elsewhere.
+       These checks run on install as well as upgrade, on purpose: a first
+       install next to an undeclared operator or bep-nats is refused too. */ -}}
 {{- $operatorNs := default $ns $.Values.upgradeChecks.operatorNamespace -}}
 {{- $operatorDeployments := default (lookup "apps/v1" "Deployment" $operatorNs "") (index $mockLookup "operatorDeployments") -}}
 {{- $foundOperator := false -}}
@@ -541,7 +671,7 @@
        subscribers only ingest builds. */ -}}
 {{- if or (has $dName (list "grpc-api" "bep-nats-pub" "bep-nats")) (and (hasPrefix "hermetiq-" $chartLabel) (has (default "" (index $dLabels "app.kubernetes.io/component")) (list "api" "publisher"))) -}}
 {{- if ne (default "" (index (default (dict) $dMeta.annotations) "hermetiq.com/cdc-compatible")) "true" -}}
-{{- fail (printf "live Deployment %s/%s has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image; deploy an image that validates both pre-CDC and CDC configurations and set buildbarnCdcCompatible=true in the hermetiq chart (chart version alone does not establish compatibility)" $hermetiqNs $dName) -}}
+{{- fail (printf "live Deployment %s/%s has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image; deploy an image that validates both pre-CDC and CDC configurations and set buildbarnCdcCompatible=true in the hermetiq chart (chart version alone does not establish compatibility). This needs a Hermetiq chart release newer than the published 0.9.8: that chart accepts the value but renders no annotation" $hermetiqNs $dName) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -6,9 +6,24 @@
 #     -f custom-values/buildbarn-values-persistent.yaml
 #
 # Review docs/buildbarn-storage-operations.md before applying to an existing
-# release. Filesystem stores need free space for their index; raw PVC stores
-# add immutable metadata claim templates and need a StatefulSet recreate;
-# raw hostPath stores require each blockDevice.metadata.hostPath.path.
+# release. Filesystem stores need free space for their index.
+#
+# Raw PVC stores add immutable <store>-meta claim templates and need a
+# StatefulSet recreate. This profile does not set the class of those claims:
+# each store's blockDevice.metadata.storageClassName defaults to premium-rwo,
+# whatever class its blocks use. Set it in your deployment values for every
+# raw store, to a class whose volumes are lost together with the blocks. For
+# node-local blocks (TopoLVM, local PVs) that means the same local class:
+# metadata left on a network class survives a node replacement that blanks
+# the blocks, and the surviving index then reports blobs that are gone. NOTES
+# prints "STORAGE CLASS MISMATCH" on install or upgrade when the two differ.
+#
+# Raw hostPath stores require each blockDevice.metadata.hostPath.path. The
+# directory must already exist on the node, on the same storage as the blocks:
+# blockDevice.metadata.hostPath.type defaults to Directory, so a missing
+# directory fails the volume mount instead of being created on the boot disk.
+# Do not override it with DirectoryOrCreate.
+#
 # Pre-CDC upgrades also require the explicit storage-format cutover; this
 # profile cannot preserve data encoded by an older Buildbarn version.
 #

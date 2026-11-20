@@ -39,6 +39,10 @@ Set storage.keyLocationMapSizing.validate=true to make this a render error.
 WARNING: storage.persistence.mode=emptyDir loses all stores on pod replacement,
 even when their indexes and checkpoint state are file-backed.
 {{- end }}
+{{- range $diagnostic := (include "buildbarn.storage.storageClassDiagnostics" . | fromJsonArray) }}
+
+WARNING: STORAGE CLASS MISMATCH: {{ $diagnostic }}
+{{- end }}
 Storage recovery requires matching blocks, indexes, and state to survive together.
 For the CDC cutover and volume-lifetime limits:
 https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes
@@ -84,4 +88,11 @@ per RepMaxCDC chunk and via chunkMappingValidating) and is ignored by chart
 templates. Remove storage.dataIntegrityValidationCache (and
 frontend.readCache.dataIntegrityValidationCache) from your values file when
 convenient.
+{{- end }}
+{{- if and .Values.portal.enabled (eq (toString .Values.portal.bes.enableGraphqlPlayground) "false") }}
+
+WARNING: portal.bes.enableGraphqlPlayground=false is ignored. The pinned
+bb-portal serves the GraphQL playground (/graphiql) whenever the GraphQL API is
+configured, and this chart always configures it. Control who can reach the
+portal host at the route or network layer.
 {{- end }}

@@ -32,18 +32,40 @@ storage:
       # Raw devices: buildbarn-block-storage.md
 ```
 
+Because the store is on by default, each persistence mode asks something of it:
+
+- `mode: pvc` gives it its own claim. Its class is
+  `storage.persistence.iscc.storageClassName` (default `premium-rwo`), which
+  does not follow the CAS class; a class the cluster does not have leaves the
+  claim and its storage pod Pending.
+- `mode: emptyDir` requires `storage.persistence.iscc.emptyDir.sizeLimit`.
+- `mode: hostPath` with a filesystem-backed ISCC requires
+  `storage.persistence.iscc.hostPath.path` to be set whenever CAS is a raw
+  block device or `cas.hostPath.path` is not the chart default. Left on its
+  default path next to a moved CAS, the render fails.
+
 On a PVC-backed release, enabling a previously disabled ISCC or FSAC adds a
-claim to the storage StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place.
-Render and inspect the change, then follow the
-[StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset)
-before upgrading; existing PVCs are retained and reattached.
+claim to the storage StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place,
+and the chart refuses the upgrade before anything is applied, naming the added
+claim template. Upgrading a chart 0.9.9 release that never set
+`iscc.enabled` or `fsac.enabled` is the same change, because both were
+disabled by default there. An added claim name is not a rolling change. Follow
+[Recreate the Storage StatefulSet](buildbarn-storage-operations.md#recreate-the-storage-statefulset):
+its stopped recreation scales storage to zero, so every cache request fails
+until storage is back, and it describes what to do when storage cannot be
+stopped. Existing PVCs are retained and reattached, and the new claim starts
+empty.
 
 Persistence requires the **blocks, key-location map, and `persistent_state`** to
 survive together. Changing an `inMemory` setting cannot recover an index already
 lost on restart. The first switch starts empty, then future restarts can reuse
 the history. Filesystem ISCC needs
 no new claim for this switch. Raw-block ISCC on `mode: pvc` adds an `iscc-meta`
-claim; follow the [StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset).
+claim, which is again an added claim name; follow the same
+[StatefulSet recreate runbook](buildbarn-storage-operations.md#recreate-the-storage-statefulset).
+That claim's class is `storage.persistence.iscc.blockDevice.metadata.storageClassName`
+(default `premium-rwo`). Set it to a class whose volumes are lost together
+with the blocks class, or the index can outlive its blocks.
 
 This persistence-only change assumes the existing release already uses CDC.
 Upgrading a pre-CDC release also changes the ISCC object encoding and requires
@@ -82,7 +104,13 @@ storage:
 
 The metadata mount must live on the same Local SSD storage as the blocks,
 with a readiness gate verifying the actual mount and a paired reset when the
-LVs/VG are replaced. Pre-create the directory and reserve space for the 512MiB
+LVs/VG are replaced. `blockDevice.metadata.hostPath.path` has no default: the
+render fails without it. `type: Directory` is the chart default for every raw
+store's metadata directory (it was `DirectoryOrCreate` before chart 0.10.0).
+The kubelet does not create the directory, so a missing metadata mount fails
+the volume mount and the storage pod does not start, instead of an empty index
+being created on the boot disk. Pre-create the directory inside the mounted
+filesystem, not at the mountpoint itself, and reserve space for the 512MiB
 index and checkpoint state. `metadata.size` does not provision or limit hostPath
 space, and `Directory` does not verify the underlying filesystem identity.
 Retaining old metadata over wiped blocks can report nonexistent blobs as present;

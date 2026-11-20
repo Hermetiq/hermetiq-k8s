@@ -1071,7 +1071,7 @@
           ],
           "title": "Chunk Storage / legacy CAS (Get Size)",
           "type": "heatmap",
-          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
         },
         {
           "datasource": {
@@ -1155,7 +1155,7 @@
           ],
           "title": "Chunk Mapping Storage (CMS) (Get Size)",
           "type": "heatmap",
-          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
         },
         {
           "datasource": {
@@ -1239,7 +1239,7 @@
           ],
           "title": "Chunk Storage / legacy CAS (Put Size)",
           "type": "heatmap",
-          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
         },
         {
           "datasource": {
@@ -1323,7 +1323,7 @@
           ],
           "title": "Chunk Mapping Storage (CMS) (Put Size)",
           "type": "heatmap",
-          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
         },
         {
           "datasource": {

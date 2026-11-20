@@ -21,11 +21,15 @@ routing:
 
 storage:
   # Per storage shard; tune these requests for your shard count and cache load.
+  # Memory rule (docs/buildbarn-storage-model.md): the total size of the index
+  # files plus about 6 GiB, so the mmap'd key-location maps stay resident in
+  # the OS page cache. With the chart defaults used here the five index files
+  # total 10304 MiB (10.06 GiB: CAS 7168, CMS 1280, AC 1344, ISCC 256, FSAC
+  # 256), hence 16Gi.
   # For 10 TiB deployments (e.g. 10 x 1 TiB or 5 x 2 TiB shards), also set
   # terminationGracePeriodSeconds above the 120s default if flushes need longer,
-  # and scale memory so the mmap'd
-  # key-location map stays resident in the OS page cache (16Gi for 1 TiB shards,
-  # 28Gi-32Gi for 2 TiB shards). See charts/buildbarn/README.md for 10 TiB profiles.
+  # and scale memory with the larger indexes (20Gi-22Gi for 1 TiB shards,
+  # 28Gi-30Gi for 2 TiB shards). See charts/buildbarn/README.md for 10 TiB profiles.
   resources:
     requests:
       cpu: 7100m
@@ -39,13 +43,21 @@ storage:
     # volumeClaimTemplates are immutable after creation, and the starter
     # RbeWorker manifests in custom-values/rbeworkers/ require FSAC for
     # FUSE input prefetching. If you first installed with an older copy of this
-    # file that left them disabled, `helm upgrade` is rejected until you follow
-    # "Recreate the Storage StatefulSet" in docs/buildbarn-storage-operations.md
-    # (or keep both disabled).
+    # file that left them disabled, the live StatefulSet has no iscc and fsac
+    # claim templates. The chart then refuses `helm upgrade` before anything is
+    # applied and lists the differing templates, until you follow "Recreate
+    # the Storage StatefulSet" in docs/buildbarn-storage-operations.md (or keep
+    # both disabled).
+    # Each store has its own storageClassName, default premium-rwo. Setting
+    # it for CAS does not change AC, ISCC or FSAC.
     iscc:
       enabled: true
     fsac:
       enabled: true
+    # Shared CMS (the default) keeps its 1 GiB blocks file and 1280 MiB index
+    # on the CAS volume: 2304 MiB that cas.size must hold beside the CAS
+    # blocks and index. The default 1000Gi claim and the 1Ti example below
+    # both do.
     # Example: scale to a 10 TiB persistent cache across 10 x 1 TiB shards
     # (also set storage.replicas: 10; shutdown grace already defaults to 120s):
     # cas:

@@ -1,0 +1,101 @@
+suite: buildbarn storage class notes
+templates:
+  - templates/NOTES.txt
+values:
+  - ../ci-values/ci.yaml
+tests:
+  # In mode=pvc every store has its own storageClassName, and a raw block
+  # store has a second one for its metadata claim. NOTES warns when they do
+  # not agree; storage_notes_test.sh checks the same text through helm itself.
+
+  - it: prints no storage class warning for the chart defaults
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "STORAGE CLASS MISMATCH"
+
+  # The README told operators to set the class for CAS and AC; ISCC and FSAC
+  # are now enabled by default and keep their own.
+  - it: warns when ISCC and FSAC keep a class that CAS no longer uses
+    set:
+      storage.persistence.cas.storageClassName: gp3
+      storage.persistence.ac.storageClassName: gp3
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.iscc\.storageClassName is "premium-rwo" but storage\.persistence\.cas\.storageClassName is "gp3"\.'
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.fsac\.storageClassName is "premium-rwo" but storage\.persistence\.cas\.storageClassName is "gp3"\.'
+      - notMatchRegexRaw:
+          pattern: 'STORAGE CLASS MISMATCH: storage\.persistence\.ac\.'
+
+  - it: does not warn about a disabled store
+    set:
+      storage.persistence.cas.storageClassName: gp3
+      storage.persistence.ac.storageClassName: gp3
+      storage.persistence.iscc.storageClassName: gp3
+      storage.persistence.fsac.enabled: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "STORAGE CLASS MISMATCH"
+
+  - it: warns when a dedicated filesystem CMS uses another class than CAS
+    set:
+      storage.persistence.cms.backend: filesystem
+      storage.persistence.cms.storageClassName: standard-rwo
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.cms\.storageClassName is "standard-rwo" but storage\.persistence\.cas\.storageClassName is "premium-rwo"\.'
+
+  # A node-local blocks class with the network default for metadata: the index
+  # outlives the blocks when the node is replaced.
+  - it: warns when a raw store's metadata class differs from its blocks class
+    set:
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.storageClassName: topolvm-ssd
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.ac\.blockDevice\.storageClassName is "topolvm-ssd" but storage\.persistence\.ac\.blockDevice\.metadata\.storageClassName is "premium-rwo"\.'
+
+  - it: names the cluster default when a raw store's blocks class is empty
+    set:
+      storage.persistence.ac.backend: blockDevice
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.ac\.blockDevice\.storageClassName is empty \(the cluster default\) but storage\.persistence\.ac\.blockDevice\.metadata\.storageClassName is "premium-rwo"\.'
+
+  - it: does not warn when a raw store's blocks and metadata share a class
+    set:
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.storageClassName: topolvm-ssd
+      storage.persistence.ac.blockDevice.metadata.storageClassName: topolvm-ssd
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'STORAGE CLASS MISMATCH: storage\.persistence\.ac\.'
+
+  # A raw store with a RAM index renders no metadata claim.
+  - it: does not warn about the metadata class of a raw store without a metadata claim
+    set:
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.storageClassName: topolvm-ssd
+      storage.persistence.ac.blockDevice.keyLocationMap: inMemory
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'STORAGE CLASS MISMATCH: storage\.persistence\.ac\.'
+
+  # With raw CAS, filesystem stores are compared with the CAS blocks class.
+  - it: compares filesystem stores with the blocks class of a raw CAS
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: topolvm-ssd
+      storage.persistence.cas.blockDevice.metadata.storageClassName: topolvm-ssd
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: STORAGE CLASS MISMATCH: storage\.persistence\.ac\.storageClassName is "premium-rwo" but storage\.persistence\.cas\.blockDevice\.storageClassName is "topolvm-ssd"\.'
+
+  # Claims are only rendered in pvc mode.
+  - it: prints no storage class warning outside pvc mode
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.cas.storageClassName: gp3
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "STORAGE CLASS MISMATCH"

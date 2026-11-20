@@ -487,6 +487,31 @@ tests:
           path: data["common.libsonnet"]
           pattern: "chunkCache"
 
+  - it: uses customized worker chunk cache settings
+    set:
+      config.contentAddressableStorage.chunkCache.cacheSize: 4096
+      config.contentAddressableStorage.chunkCache.cacheDuration: 1800s
+      config.contentAddressableStorage.chunkCache.cacheReplacementPolicy: FIRST_IN_FIRST_OUT
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-worker-config
+    asserts:
+      - matchRegex:
+          path: data["common.libsonnet"]
+          pattern: 'chunkCache: \{\n *cacheSize: 4096,\n *cacheDuration: "1800s",\n *cacheReplacementPolicy: "FIRST_IN_FIRST_OUT",'
+
+  - it: preserves a complete worker common override without appending the default cache
+    set:
+      configOverrides:
+        common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'custom' }"
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-worker-config
+    asserts:
+      - equal:
+          path: data["common.libsonnet"]
+          value: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'custom' }"
+
   - it: renders RepMaxCDC chunkStorage, chunkMappingStorage, and nested keyLocationMap across configs
     documentSelector:
       path: metadata.name
@@ -627,7 +652,7 @@ tests:
           path: data["storage.jsonnet"]
           pattern: "/storage-cas/cdc-v1/cms-blocks.db"
 
-  - it: renders dedicated CMS filesystem and blockDevice file-KLM configurations
+  - it: renders a dedicated raw CMS with a file index beside filesystem ISCC and FSAC file indexes
     set:
       storage.persistence.cms.backend: blockDevice
       storage.persistence.cms.blockDevice.storageClassName: bb-block

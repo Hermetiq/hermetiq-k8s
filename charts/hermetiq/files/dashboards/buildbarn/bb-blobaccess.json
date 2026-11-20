@@ -1535,7 +1535,8 @@
         }
       ],
       "title": "Action Cache",
-      "type": "heatmap"
+      "type": "heatmap",
+      "description": "On CDC deployments the size is the one named in the request digest: the Action message, not the stored ActionResult. On legacy deployments it is the stored ActionResult."
     },
     {
       "datasource": {
@@ -1619,7 +1620,7 @@
       ],
       "title": "Chunk Storage / legacy CAS",
       "type": "heatmap",
-      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
     },
     {
       "datasource": {
@@ -1703,7 +1704,7 @@
       ],
       "title": "Chunk Mapping Storage (CMS)",
       "type": "heatmap",
-      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
     },
     {
       "collapsed": false,
@@ -1799,7 +1800,8 @@
         }
       ],
       "title": "Action Cache",
-      "type": "heatmap"
+      "type": "heatmap",
+      "description": "On CDC deployments the size is the one named in the request digest: the Action message, not the stored ActionResult. On legacy deployments it is the stored ActionResult."
     },
     {
       "datasource": {
@@ -1883,7 +1885,7 @@
       ],
       "title": "Chunk Storage / legacy CAS",
       "type": "heatmap",
-      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
     },
     {
       "datasource": {
@@ -1967,7 +1969,7 @@
       ],
       "title": "Chunk Mapping Storage (CMS)",
       "type": "heatmap",
-      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
     },
     {
       "collapsed": false,
@@ -2727,7 +2729,7 @@
         "type": "prometheus",
         "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
       },
-      "description": "Sizes of stored entries read by a found Get() and written by Put().",
+      "description": "On CDC deployments, the size named in the request digest for every Get() and Put(): the reduced Action message (command digest and platform) that keys the entry, not the stored entry. On legacy deployments, the stored entries read by a found Get() and written by Put().",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3315,7 +3317,7 @@
         "type": "prometheus",
         "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
       },
-      "description": "Sizes of stored entries read by a found Get() and written by Put().",
+      "description": "On CDC deployments, the size named in the request digest for every Get() and Put(): the reduced Action message (command digest and platform) that keys the entry, not the stored entry. On legacy deployments, the stored entries read by a found Get() and written by Put().",
       "fieldConfig": {
         "defaults": {
           "color": {

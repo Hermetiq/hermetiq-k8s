@@ -1,0 +1,311 @@
+suite: buildbarn pre-CDC image guard
+templates:
+  - templates/validate.yaml
+tests:
+  # Upstream Buildbarn tags are <YYYYMMDD>T<hhmmss>Z-<commit>. A stamp before
+  # 20261102 is a pre-CDC build. The same rule covers the release's own images
+  # and RbeWorker pins (buildbarn.cdc.preCdcImage).
+
+  # --- The release's own images -------------------------------------------
+  - it: accepts the chart's default images, including the pre-CDC bb-browser
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a pre-CDC images.storage tag and names the value and the image
+    set:
+      images.storage.tag: 20260908T142448Z-db62041
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.storage pins pre-CDC image "ghcr\.io/buildbarn/bb-storage:20260908T142448Z-db62041": its tag carries an upstream date stamp before 20261102'
+      - failedTemplate:
+          errorPattern: 'Remove the images\.storage tag and digest overrides .* Tags without an upstream date stamp and digest-only references cannot be classified and are not checked'
+
+  - it: rejects a pre-CDC images.scheduler tag
+    set:
+      images.scheduler.tag: 20260908T142448Z-db62041
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.scheduler pins pre-CDC image "ghcr\.io/buildbarn/bb-scheduler:20260908T142448Z-db62041"'
+
+  - it: rejects a pre-CDC images.worker tag
+    set:
+      images.worker.tag: 20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.worker pins pre-CDC image "ghcr\.io/buildbarn/bb-worker:20260908T142432Z-77f7642"'
+
+  - it: rejects a pre-CDC images.runnerInstaller tag
+    set:
+      images.runnerInstaller.tag: 20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.runnerInstaller pins pre-CDC image "ghcr\.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642"'
+
+  - it: rejects a pre-CDC images.remoteAsset tag when remote asset is enabled
+    set:
+      remoteAsset.enabled: true
+      images.remoteAsset.tag: 20260523T151603Z-2f8cde4
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.remoteAsset pins pre-CDC image "ghcr\.io/buildbarn/bb-remote-asset:20260523T151603Z-2f8cde4"'
+
+  - it: does not check images.remoteAsset while remote asset is disabled
+    set:
+      remoteAsset.enabled: false
+      images.remoteAsset.tag: 20260523T151603Z-2f8cde4
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a pre-CDC images.portal tag when the portal is enabled
+    set:
+      portal.enabled: true
+      images.portal.tag: 20260417T082210Z-1a2b3c4
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.portal pins pre-CDC image "ghcr\.io/buildbarn/bb-portal:20260417T082210Z-1a2b3c4"'
+
+  - it: does not check images.portal while the portal is disabled
+    set:
+      portal.enabled: false
+      images.portal.tag: 20260417T082210Z-1a2b3c4
+    asserts:
+      - notFailedTemplate: {}
+
+  # bb-browser is intentionally still a pre-CDC binary.
+  - it: never checks images.browser
+    set:
+      images.browser.tag: 20250101T000000Z-0000000
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a release image stamped 20261101, the last pre-CDC day
+    set:
+      images.storage.tag: 20261101T235959Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.storage pins pre-CDC image'
+
+  - it: accepts a release image stamped 20261102, the first CDC day
+    set:
+      images.storage.tag: 20261102T000000Z-abcdef0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a release image stamped in October 2026
+    set:
+      images.scheduler.tag: 20261015T101010Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.scheduler pins pre-CDC image'
+
+  - it: rejects a release image stamped in 2025
+    set:
+      images.worker.tag: 20250704T120000Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.worker pins pre-CDC image'
+
+  - it: rejects a pre-CDC release tag that also carries a digest
+    set:
+      images.storage.tag: 20260908T142448Z-db62041
+      images.storage.digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    asserts:
+      - failedTemplate:
+          errorPattern: 'images\.storage pins pre-CDC image "ghcr\.io/buildbarn/bb-storage:20260908T142448Z-db62041@sha256:1{64}"'
+
+  # A tag without an upstream date stamp cannot be classified, so it is
+  # accepted. This is the limit of the guard, not evidence of CDC support: a
+  # fork or mirror tag has to be verified by hand.
+  - it: accepts a release image whose tag has no upstream date stamp
+    set:
+      images.scheduler.repository: registry.example.com/cloud/bb-scheduler
+      images.scheduler.tag: bbdev-handover-20261113-9f75e92-r3
+      images.storage.repository: registry.example.com/mirror/bb-storage
+      images.storage.tag: pre-cdc-db62041
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Scheduler fork messages (handover / reload) --------------------------
+  # Turning the fork features off is not enough while images.scheduler still
+  # pins a fork built without CDC support; both messages have to say so.
+  - it: tells operators to remove a non-CDC fork scheduler pin when refusing handover
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.handover.enabled: true
+      scheduler.handover.coordinator.image.repository: us-docker.pkg.dev/example/bb-scheduler-coordinator
+      scheduler.handover.coordinator.image.tag: v0.1.0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'disable scheduler\.handover for this upgrade and remove any images\.scheduler repository, tag or digest override that pins a fork image built without CDC support'
+
+  - it: tells operators to remove a non-CDC fork scheduler pin when refusing configuration reload
+    set:
+      images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
+      scheduler.configurationReloadInterval: 30s
+    asserts:
+      - failedTemplate:
+          errorPattern: 'leave it empty for this upgrade and remove any images\.scheduler repository, tag or digest override that pins a fork image built without CDC support'
+
+  # --- RbeWorker pins: the same date rule -----------------------------------
+  - it: rejects an RbeWorker worker pin stamped 20261101
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20261101T235959Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/pool pins pre-CDC image "ghcr\.io/buildbarn/bb-worker:20261101T235959Z-abcdef0" in spec\.images\.worker'
+
+  - it: accepts an RbeWorker worker pin stamped 20261102
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20261102T000000Z-abcdef0
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20261102T000000Z-abcdef0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects an RbeWorker worker pin stamped in October 2026
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20261031T120000Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'pool pins pre-CDC image .* in spec\.images\.worker'
+
+  - it: rejects an RbeWorker worker pin stamped in 2025
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20251224T080000Z-abcdef0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'pool pins pre-CDC image .* in spec\.images\.worker'
+
+  - it: rejects an RbeWorker date tag that also carries a digest
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642@sha256:1111111111111111111111111111111111111111111111111111111111111111
+    asserts:
+      - failedTemplate:
+          errorPattern: 'pool pins pre-CDC image "ghcr\.io/buildbarn/bb-worker:20260908T142432Z-77f7642@sha256:1{64}" in spec\.images\.worker'
+
+  # A digest-only reference, and a tag without an upstream date stamp, cannot
+  # be classified: nothing in the reference says which build it is. The guard
+  # accepts both; they have to be verified by hand.
+  - it: accepts digest-only and undated RbeWorker pins because they cannot be classified
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker@sha256:1111111111111111111111111111111111111111111111111111111111111111
+                  runnerInstaller: registry.example.com/mirror/bb-runner-installer:pre-cdc-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  # The runner installer runs unless the pool uses sysbox or turns it off, so
+  # by default its image is checked like the worker's.
+  - it: rejects a pre-CDC spec.images.runnerInstaller when the installer is enabled
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/pool pins pre-CDC image "ghcr\.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642" in spec\.images\.runnerInstaller'
+
+  - it: rejects a pre-CDC runnerInstallerImage ConfigMap default when the installer is enabled
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                runner:
+                  installerEnabled: true
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{}"
+                workerImage: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                runnerInstallerImage: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker .*/pool pins pre-CDC image "ghcr\.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642" in spec\.images\.runnerInstaller \(including ConfigMap image defaults\)'
+
+  - it: ignores a pre-CDC spec.images.runnerInstaller when the pool turns the installer off
+    set:
+      _testLookup:
+        operatorDeployments:
+          items:
+            - metadata:
+                name: bb-worker-operator
+                annotations:
+                  hermetiq.com/cdc-compatible: "true"
+        rbeWorkers:
+          items:
+            - metadata:
+                name: pool
+              spec:
+                images:
+                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
+                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
+                runner:
+                  installerEnabled: false
+    asserts:
+      - notFailedTemplate: {}

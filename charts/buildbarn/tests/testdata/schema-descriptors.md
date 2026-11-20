@@ -26,6 +26,10 @@ pins these application revisions:
 | bb-portal | `a40873368f235611d83f33690e994ef7d7d9fd04` |
 | bb-remote-asset | `e72be5ead773d2e1b836ca818d769ff306b1598f` |
 
+The chart ships bb-storage image `20261118T120531Z-06739f2`, two commits after the
+fixture's `8d2acac` (`f76066c` and `06739f2`). Neither commit changes a
+configuration proto, so the fixture still describes the shipped binary's schema.
+
 The legacy snapshot (`buildbarn_descriptors.pb`) is retained for `bb-browser`
 (built from `bb-browser` commit `ee35c54d5cecfc7a763870fe2187c93fa47aaf85` in
 `cloud-native/bep-nats/bbproto/upstream.txt`; the pinned `bb-browser` image

@@ -65,6 +65,10 @@ with tempfile.TemporaryDirectory(prefix='buildbarn-profile-test-') as tmp:
                     store = {'backend': backend}
                     if name in ('iscc', 'fsac'):
                         store['enabled'] = True
+                    if name == 'cms' and backend == 'filesystem':
+                        # The default 2Gi claim does not hold the 1Gi blocks
+                        # file plus the default 1280Mi index.
+                        store['size'] = '3Gi'
                     if mode == 'hostPath' and backend == 'blockDevice':
                         store['blockDevice'] = {
                             'hostPath': {'devicePath': f'/dev/local/{name}'},

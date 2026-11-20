@@ -12,6 +12,14 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "Refuse an install or upgrade before anything is applied when the live storage StatefulSet's volumeClaimTemplates differ from the rendered ones (upgradeChecks.skipStorageClaimTemplateCheck opts out), when the release pins a pre-CDC date-stamped storage, scheduler, worker, runner-installer, remote-asset or portal image, or when a hostPath ISCC or FSAC store would land on the chart's default path beside a relocated or raw CAS"
+    - kind: changed
+      description: "Breaking: raw-block metadata hostPath type defaults to Directory, so the node directory must already exist instead of being created on the boot disk when the metadata filesystem is not mounted"
+    - kind: changed
+      description: "Default the shared CMS file index to 1280 MiB (was 256 MiB) to cover the smallest 104-byte chunk mappings, and the dedicated filesystem CMS claim to 4Gi; resizing the index later empties the CMS"
+    - kind: fixed
+      description: "Scope the key-location-map recording rules and alerts to the storage Service so worker and frontend read caches no longer trigger them; the configuration text guard now recognises quoted keys, jsonnet merge syntax, dual-schema worker libraries and multi-document extraObjects"
     - kind: fixed
       description: "Keep raw Local SSD blocks and persistent metadata on the same SSDs with verified mount/generation checks; require paired resets and report volatile stores and undersized file indexes in Helm notes"
     - kind: changed

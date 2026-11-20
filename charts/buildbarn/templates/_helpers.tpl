@@ -127,6 +127,35 @@ affinity:
 
 {{- define "buildbarn.configName" -}}buildbarn-config{{- end -}}
 {{- define "buildbarn.workerConfigName" -}}buildbarn-worker-config{{- end -}}
+
+{{/* Shared source for the standard worker ConfigMap and custom worker wrappers.
+     Keep worker-only CAS settings here so custom pools inherit the same defaults.
+     A complete common.libsonnet override remains authoritative. */}}
+{{- define "buildbarn.workerCommon" -}}
+{{- $configOverrides := default dict .Values.configOverrides -}}
+{{- $commonOverride := index $configOverrides "common.libsonnet" | default "" -}}
+{{- $chunkCache := .Values.config.contentAddressableStorage.chunkCache -}}
+{{- if $commonOverride -}}
+{{ $commonOverride }}
+{{- else -}}
+{{ tpl (.Files.Get "files/config/common.libsonnet") . }}
+{{- if gt (int64 $chunkCache.cacheSize) 0 }}
++ {
+  // Workers only: keep decoded chunks in memory, so repeat FUSE reads
+  // skip ZSTD decoding and SHA-256 verification.
+  blobstore+: {
+    contentAddressableStorage+: {
+      chunkCache: {
+        cacheSize: {{ int64 $chunkCache.cacheSize }},
+        cacheDuration: {{ $chunkCache.cacheDuration | quote }},
+        cacheReplacementPolicy: {{ $chunkCache.cacheReplacementPolicy | quote }},
+      },
+    },
+  },
+}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- define "buildbarn.configChecksum" -}}
 {{- $root := .root -}}
 {{- $overrides := default dict $root.Values.configOverrides -}}
@@ -1201,4 +1230,201 @@ hostPath are documentary: Helm cannot discover the actual node device capacity.
 {{- end -}}
 {{- end -}}
 {{- toJson $stores -}}
+{{- end -}}
+
+{{/*
+Chart-default hostPath directory of a filesystem store. It must stay equal to
+storage.persistence.<store>.hostPath.path in values.yaml: the hostPath guard in
+validate.yaml uses it to tell an untouched default from a chosen path.
+*/}}
+{{- define "buildbarn.storage.defaultHostPath" -}}
+/mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/{{ . }}
+{{- end -}}
+
+{{/*
+JSON list of StorageClass mismatches between the claim templates rendered in
+mode=pvc. NOTES prints them as warnings. A raw block store's blocks and its
+companion metadata claim must share a lifecycle, and every filesystem store has
+its own storageClassName that does not follow the CAS setting.
+*/}}
+{{- define "buildbarn.storage.storageClassDiagnostics" -}}
+{{- $messages := list -}}
+{{- $p := .Values.storage.persistence -}}
+{{- if eq $p.mode "pvc" -}}
+{{- $casRaw := eq $p.cas.backend "blockDevice" -}}
+{{- $casClass := toString (default "" (ternary $p.cas.blockDevice.storageClassName $p.cas.storageClassName $casRaw)) -}}
+{{- $casKnob := ternary "storage.persistence.cas.blockDevice.storageClassName" "storage.persistence.cas.storageClassName" $casRaw -}}
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) -}}
+{{- $s := index $p $store -}}
+{{- if eq $s.backend "blockDevice" -}}
+{{- $blocksClass := toString (default "" $s.blockDevice.storageClassName) -}}
+{{- $metaClass := toString (default "" $s.blockDevice.metadata.storageClassName) -}}
+{{- if and (eq $s.blockDevice.keyLocationMap "file") (ne $blocksClass $metaClass) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s.blockDevice.storageClassName is %s but storage.persistence.%s.blockDevice.metadata.storageClassName is %s. The metadata claim holds this store's index and checkpoint state. If the two classes do not lose their volumes together, an index that outlives its blocks reports blobs that no longer exist. Set both to one class unless their volumes share one lifecycle." $store (ternary "empty (the cluster default)" (quote $blocksClass) (eq $blocksClass "")) $store (ternary "empty (the cluster default)" (quote $metaClass) (eq $metaClass ""))) -}}
+{{- end -}}
+{{- else if ne $store "cas" -}}
+{{- $class := toString (default "" $s.storageClassName) -}}
+{{- if ne $class $casClass -}}
+{{- $messages = append $messages (printf "storage.persistence.%s.storageClassName is %s but %s is %s. Each store has its own storageClassName; setting it for CAS does not change AC, ISCC, FSAC or a dedicated CMS. A claim keeps the class it was created with, and a class that does not exist in the cluster leaves the claim and its storage pod Pending." $store (ternary "empty (the cluster default)" (quote $class) (eq $class "")) $casKnob (ternary "empty (the cluster default)" (quote $casClass) (eq $casClass ""))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $messages -}}
+{{- end -}}
+
+{{/*
+Normalise a Kubernetes quantity to whole bytes so that two spellings of one
+size compare equal (the API server stores 1024Mi as 1Gi and 1.5Gi as 1536Mi).
+Accepts an integer or decimal mantissa followed by a binary suffix (Ki..Ei), a
+decimal suffix (k..E), a non-negative decimal exponent (e9), or nothing.
+Returns "" for anything else (milli-units, negative exponents, a fraction of a
+byte, a value beyond int64); callers then fall back to comparing the strings.
+*/}}
+{{- define "buildbarn.storage.quantityBytes" -}}
+{{- $q := toString . -}}
+{{- $suffixPattern := "(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E|[eE][0-9]{1,2})" -}}
+{{- if regexMatch (printf "^(0|[1-9][0-9]*)(\\.[0-9]+)?%s?$" $suffixPattern) $q -}}
+{{- $suffix := regexFind (printf "%s$" $suffixPattern) $q -}}
+{{- $parts := splitList "." (trimSuffix $suffix $q) -}}
+{{- $fraction := "" -}}
+{{- if gt (len $parts) 1 -}}
+{{- $fraction = index $parts 1 -}}
+{{- end -}}
+{{- /* value = digits x binary x 10^shift */ -}}
+{{- $digits := regexReplaceAll "^0+" (printf "%s%s" (first $parts) $fraction) "" -}}
+{{- $binary := index (dict "Ki" 1024 "Mi" 1048576 "Gi" 1073741824 "Ti" 1099511627776 "Pi" 1125899906842624 "Ei" 1152921504606846976) $suffix | default 1 | int64 -}}
+{{- $exponent := index (dict "k" 3 "M" 6 "G" 9 "T" 12 "P" 15 "E" 18) $suffix | default 0 | int64 -}}
+{{- if regexMatch "^[eE][0-9]+$" $suffix -}}
+{{- $exponent = int64 (default "0" (regexReplaceAll "^[eE]0*" $suffix "")) -}}
+{{- end -}}
+{{- $shift := sub $exponent (len $fraction) -}}
+{{- $max := 9223372036854775807 -}}
+{{- $pow10 := list 1 10 100 1000 10000 100000 1000000 10000000 100000000 1000000000 10000000000 100000000000 1000000000000 10000000000000 100000000000000 1000000000000000 10000000000000000 100000000000000000 1000000000000000000 -}}
+{{- if le (len $digits) 18 -}}
+{{- $n := int64 (default "0" $digits) -}}
+{{- if le $n (div $max $binary) -}}
+{{- $value := mul $n $binary -}}
+{{- if and (ge $shift 0) (le $shift 18) -}}
+{{- if le $value (div $max (index $pow10 $shift)) -}}
+{{- mul $value (index $pow10 $shift) -}}
+{{- end -}}
+{{- else if and (lt $shift 0) (ge $shift -18) -}}
+{{- if eq (mod $value (index $pow10 (sub 0 $shift))) 0 -}}
+{{- div $value (index $pow10 (sub 0 $shift)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+JSON list of the differences between a live StatefulSet's volumeClaimTemplates
+(.live) and the rendered ones (.rendered) that Kubernetes refuses to patch in
+place: a claim name added or removed, the order changed, or storageClassName,
+volumeMode or requested size changed for an existing name. Values are
+normalised the way the API server stores them: an absent storageClassName is
+empty, an absent volumeMode is Filesystem, and sizes compare as quantities.
+*/}}
+{{- define "buildbarn.storage.claimTemplateDifferences" -}}
+{{- $sides := dict -}}
+{{- $order := dict -}}
+{{- range $side := list "live" "rendered" -}}
+{{- $byName := dict -}}
+{{- $names := list -}}
+{{- range $claim := default (list) (index $ $side) -}}
+{{- $meta := default (dict) (index $claim "metadata") -}}
+{{- $spec := default (dict) (index $claim "spec") -}}
+{{- $requests := default (dict) (index (default (dict) (index $spec "resources")) "requests") -}}
+{{- $name := toString (default "" (index $meta "name")) -}}
+{{- $names = append $names $name -}}
+{{- /* The API server returns a quantity as a string. A rendered byte count
+       written as a bare number parses as a float; print it without exponent. */ -}}
+{{- $size := default "" (index $requests "storage") -}}
+{{- if kindIs "float64" $size -}}
+{{- if eq (floor $size) $size -}}
+{{- $size = printf "%.0f" $size -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $byName $name (dict
+      "storageClassName" (toString (default "" (index $spec "storageClassName")))
+      "volumeMode" (toString (default "Filesystem" (index $spec "volumeMode")))
+      "size" (toString $size)) -}}
+{{- end -}}
+{{- $_ := set $sides $side $byName -}}
+{{- $_ := set $order $side (join "," $names) -}}
+{{- end -}}
+{{- $live := index $sides "live" -}}
+{{- $rendered := index $sides "rendered" -}}
+{{- $differences := list -}}
+{{- range $name := sortAlpha (keys $rendered) -}}
+{{- if not (hasKey $live $name) -}}
+{{- $differences = append $differences (printf "claim template %q is added" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- range $name := sortAlpha (keys $live) -}}
+{{- if not (hasKey $rendered $name) -}}
+{{- $differences = append $differences (printf "claim template %q is removed" $name) -}}
+{{- else -}}
+{{- $l := index $live $name -}}
+{{- $r := index $rendered $name -}}
+{{- if ne $l.storageClassName $r.storageClassName -}}
+{{- $differences = append $differences (printf "claim template %q storageClassName changes from %q to %q" $name $l.storageClassName $r.storageClassName) -}}
+{{- end -}}
+{{- if ne $l.volumeMode $r.volumeMode -}}
+{{- $differences = append $differences (printf "claim template %q volumeMode changes from %q to %q" $name $l.volumeMode $r.volumeMode) -}}
+{{- end -}}
+{{- if ne $l.size $r.size -}}
+{{- $liveBytes := include "buildbarn.storage.quantityBytes" $l.size -}}
+{{- $renderedBytes := include "buildbarn.storage.quantityBytes" $r.size -}}
+{{- if or (not $liveBytes) (not $renderedBytes) (ne $liveBytes $renderedBytes) -}}
+{{- $differences = append $differences (printf "claim template %q requested size changes from %q to %q" $name $l.size $r.size) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not $differences) (ne (index $order "live") (index $order "rendered")) -}}
+{{- $differences = append $differences (printf "claim templates are reordered from %q to %q" (index $order "live") (index $order "rendered")) -}}
+{{- end -}}
+{{- toJson $differences -}}
+{{- end -}}
+
+{{/*
+"true" when an image reference carries an upstream Buildbarn date stamp from
+before the CDC storage format. Upstream tags are <YYYYMMDD>T<hhmmss>Z-<commit>
+and the first CDC builds are stamped 20261102. A tag without that stamp and a
+digest-only reference cannot be classified and return "". This is the only
+place the date rule lives; validate.yaml applies it to the release's own
+images and to RbeWorker pins.
+*/}}
+{{- define "buildbarn.cdc.preCdcImage" -}}
+{{- if regexMatch ":(20[01][0-9]{5}|202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" (toString .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Regular expression matching a jsonnet or JSON object field named `.`: bare or
+quoted, followed by `:`, `::`, `:::` or the merge forms `+:`, `+::`, `+:::`.
+*/}}
+{{- define "buildbarn.cdc.keyPattern" -}}
+(^|[^a-zA-Z0-9_])["']?{{ . }}["']?[[:space:]]*\+?:
+{{- end -}}
+
+{{/*
+Configuration text with comments removed, so a field name in a comment is not
+read as configuration: block comments, // to end of line, and lines whose first
+non-blank character is #.
+*/}}
+{{- define "buildbarn.cdc.stripComments" -}}
+{{- regexReplaceAll "(?m)^[ \\t]*#.*$" (regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" (toString .) "") "") "" -}}
+{{- end -}}
+
+{{/*
+"true" when configuration text tests for the CDC shape itself: it calls
+std.objectHas and names chunkStorage. Such a file serves both schemas (the
+operator's built-in worker-common.libsonnet does), so the pre-CDC branch it
+carries is not a reason to refuse it. Pass text with comments already removed.
+*/}}
+{{- define "buildbarn.cdc.dualSchema" -}}
+{{- if and (regexMatch "std\\.objectHas" .) (regexMatch "(^|[^a-zA-Z0-9_])chunkStorage([^a-zA-Z0-9_]|$)" .) -}}true{{- end -}}
 {{- end -}}

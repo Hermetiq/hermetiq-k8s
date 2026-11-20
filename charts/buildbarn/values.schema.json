@@ -19,7 +19,8 @@
       "additionalProperties": false,
       "properties": {
         "operatorNamespace": { "type": "string" },
-        "hermetiqNamespace": { "type": "string" }
+        "hermetiqNamespace": { "type": "string" },
+        "skipStorageClaimTemplateCheck": { "type": "boolean" }
       }
     },
     "config": {

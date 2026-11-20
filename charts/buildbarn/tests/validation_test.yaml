@@ -154,6 +154,8 @@ tests:
       - failedTemplate:
           errorPattern: "blockDevice.size is required when backend=blockDevice and mode=pvc"
 
+  # ISCC and FSAC are enabled by default; with CAS on a raw device they need
+  # their own paths (see guard_hostpath_test.yaml).
   - it: accepts a hostPath-mode block device without a size
     set:
       storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
@@ -162,6 +164,8 @@ tests:
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.size: ""
       storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.iscc.hostPath.path: /mnt/buildbarn/iscc
+      storage.persistence.fsac.hostPath.path: /mnt/buildbarn/fsac
     asserts:
       - hasDocuments:
           count: 0
@@ -1288,7 +1292,10 @@ tests:
       - failedTemplate:
           errorPattern: 'storage\.persistence\.cms: key-location map is too small .* 264 MiB usable \(33 of 33 blocks\)'
 
-  - it: rejects live RbeWorkers when no bb-worker-operator is found in upgradeChecks.operatorNamespace
+  # upgradeChecks.operatorNamespace is left empty here, so the operator is
+  # looked for in the release namespace; upgrade_lookup_test.yaml covers a
+  # configured operator namespace through the real lookup path.
+  - it: rejects live RbeWorkers when no bb-worker-operator is found in the release namespace
     set:
       _testLookup:
         rbeWorkers:
@@ -1430,10 +1437,13 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  # The CMS index size is set in these three cases so they test the arithmetic
+  # and not the chart default.
   - it: checks shared CMS file-index capacity on the CAS filesystem
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
     asserts:
       - failedTemplate:
           errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
@@ -1443,6 +1453,7 @@ tests:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
     asserts:
       - failedTemplate:
           errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
@@ -1453,6 +1464,7 @@ tests:
       storage.persistence.cms.backend: filesystem
       storage.persistence.cms.size: 4Gi
       storage.persistence.cms.blocksSizeGi: 2
+      storage.persistence.cms.keyLocationMap.sizeMi: 256
     asserts:
       - failedTemplate:
           errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'

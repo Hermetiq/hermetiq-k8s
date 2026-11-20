@@ -43,32 +43,10 @@ metadata:
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
 data:
-{{- /* RbeWorker pods use the shared common.libsonnet; the operator generates
-       their worker and runner configs. Honor configOverrides so an override
-       propagates to both ConfigMaps consistently. */ -}}
-{{- $commonOverride := index $configOverrides "common.libsonnet" | default "" }}
-{{- $chunkCache := .Values.config.contentAddressableStorage.chunkCache }}
+{{- /* The operator generates worker and runner configs from this common source.
+       Custom worker ConfigMaps can include the same helper. */}}
   common.libsonnet: |-
-{{- if $commonOverride }}
-{{ $commonOverride | nindent 4 }}
-{{- else }}
-{{ tpl (.Files.Get "files/config/common.libsonnet") . | nindent 4 }}
-{{- if gt (int64 $chunkCache.cacheSize) 0 }}
-    + {
-      // Workers only: keep decoded chunks in memory, so repeat FUSE reads
-      // skip ZSTD decoding and SHA-256 verification.
-      blobstore+: {
-        contentAddressableStorage+: {
-          chunkCache: {
-            cacheSize: {{ int64 $chunkCache.cacheSize }},
-            cacheDuration: {{ $chunkCache.cacheDuration | quote }},
-            cacheReplacementPolicy: {{ $chunkCache.cacheReplacementPolicy | quote }},
-          },
-        },
-      },
-    }
-{{- end }}
-{{- end }}
+{{ include "buildbarn.workerCommon" . | nindent 4 }}
   workerImage: {{ include "buildbarn.image" (dict "root" . "name" "images.worker" "repository" .Values.images.worker.repository "tag" .Values.images.worker.tag "digest" .Values.images.worker.digest) | quote }}
   runnerInstallerImage: {{ include "buildbarn.image" (dict "root" . "name" "images.runnerInstaller" "repository" .Values.images.runnerInstaller.repository "tag" .Values.images.runnerInstaller.tag "digest" .Values.images.runnerInstaller.digest) | quote }}
 {{- if and .Values.browser.oauth2Proxy.enabled (not .Values.browser.oauth2Proxy.existingConfigMap) }}
