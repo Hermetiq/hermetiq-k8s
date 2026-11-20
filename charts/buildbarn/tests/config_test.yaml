@@ -489,6 +489,9 @@ tests:
           pattern: "cdcParameterCache:"
       - matchRegex:
           path: data["common.libsonnet"]
+          pattern: "chunkCache: \\{\\n        cacheSize: 2048,"
+      - matchRegex:
+          path: data["common.libsonnet"]
           pattern: "portalUrl: 'https://browser.helm.hermetiq.dev',"
       - matchRegex:
           path: data["storage.jsonnet"]

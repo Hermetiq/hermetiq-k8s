@@ -143,6 +143,17 @@ config:
       cacheSize: 1000
       cacheDuration: 3600s
       cacheReplacementPolicy: LEAST_RECENTLY_USED
+    # Client-side in-memory cache of decoded CAS chunks in common.libsonnet,
+    # used by bb_worker (and the other components that read the CAS through
+    # common.libsonnet; the frontend builds its own CAS config). bb_worker
+    # serves inputs over FUSE by reading chunks at an offset, and without this
+    # cache every read decompresses (ZSTD) and re-hashes (SHA-256) the whole
+    # chunk. Sized by entry count: cacheSize x horizonSizeBytes is the worst
+    # case per process. Set cacheSize to 0 to omit the cache.
+    chunkCache:
+      cacheSize: 2048
+      cacheDuration: 3600s
+      cacheReplacementPolicy: LEAST_RECENTLY_USED
 
 images:
   storage:

@@ -2,6 +2,7 @@
 {{- $are := .Values.config.actionCache.actionResultExpiring }}
 {{- $deadlineTimeout := .Values.config.blobstore.deadlineEnforcing.timeout }}
 {{- $cdc := .Values.config.contentAddressableStorage.cdcParameterCache }}
+{{- $chunkCache := .Values.config.contentAddressableStorage.chunkCache }}
 {{- if .Values.security.grpcMtls.enabled }}
 // Dialling half of the in-cluster mTLS hop to storage, shared by every shard
 // client below. The listening half is storage.jsonnet's grpcServers `tls` plus
@@ -69,6 +70,15 @@ local completenessCheckedActionCache = {
         cacheDuration: {{ $cdc.cacheDuration | quote }},
         cacheReplacementPolicy: {{ $cdc.cacheReplacementPolicy | quote }},
       },
+{{- if gt (int64 $chunkCache.cacheSize) 0 }}
+      // Decoded chunks kept in memory, so repeat reads skip ZSTD decoding and
+      // SHA-256 verification.
+      chunkCache: {
+        cacheSize: {{ int64 $chunkCache.cacheSize }},
+        cacheDuration: {{ $chunkCache.cacheDuration | quote }},
+        cacheReplacementPolicy: {{ $chunkCache.cacheReplacementPolicy | quote }},
+      },
+{{- end }}
     },
 {{- if $are.enabled }}
     // Hide ActionResults whose worker_completed_timestamp is older than

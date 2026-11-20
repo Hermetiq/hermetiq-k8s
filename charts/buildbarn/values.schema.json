@@ -70,6 +70,21 @@
                   "enum": ["FIRST_IN_FIRST_OUT", "LEAST_RECENTLY_USED", "RANDOM_REPLACEMENT"]
                 }
               }
+            },
+            "chunkCache": {
+              "type": "object",
+              "properties": {
+                "cacheSize": { "type": "integer", "minimum": 0 },
+                "cacheDuration": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+                  "not": { "pattern": "^0+(\\.0+)?s$" }
+                },
+                "cacheReplacementPolicy": {
+                  "type": "string",
+                  "enum": ["FIRST_IN_FIRST_OUT", "LEAST_RECENTLY_USED", "RANDOM_REPLACEMENT"]
+                }
+              }
             }
           }
         }
