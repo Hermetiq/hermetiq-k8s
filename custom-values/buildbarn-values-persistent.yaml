@@ -1,4 +1,6 @@
-# Opt-in persistent indexes for all five CDC storage-tier stores.
+# Explicit persistent-index settings for all five CDC storage-tier stores.
+# These match the chart defaults. Use this overlay to override older deployment
+# values that explicitly selected inMemory; a new installation does not need it.
 # Apply AFTER your deployment values:
 #   helm template buildbarn charts/buildbarn -f my-values.yaml \
 #     -f custom-values/buildbarn-values-persistent.yaml

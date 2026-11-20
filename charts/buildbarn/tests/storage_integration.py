@@ -4,6 +4,8 @@
 Requires helm, Docker, PyYAML, jsonnet, protobuf and grpcio. No cluster access.
 All mounts are named Docker volumes, so this also works with a Docker socket
 inside the CI container without assuming identical host/container paths.
+Raw-device tests require privileged helper containers to attach disposable
+volume files to loop devices; no existing disks or Kubernetes resources are used.
 """
 import base64
 import copy
@@ -25,6 +27,7 @@ import yaml
 CHART = Path(__file__).resolve().parents[1]
 LEGACY_IMAGE = ('ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041'
                 '@sha256:32ebc54b769b9e5fcc4beec3fdb527fd45853ca1ec9d1a112d00b1812f272a1f')
+LOOP_TOOL_IMAGE = 'debian:bookworm-slim'
 
 
 def docker(*args, check=True):
@@ -58,13 +61,34 @@ def message_class(descriptor):
     return message_factory.MessageFactory().GetPrototype(descriptor)
 
 
-def render_config(directory, ephemeral=False):
+def render_config(directory, ephemeral=False, optional_stores=False, raw=False, local=False):
     values = {'storage': {'replicas': 1, 'keyLocationMapSizing': {'validate': False}, 'persistence': {
         'cas': {'size': '4Gi', 'blocksSizeGi': 1, 'keyLocationMapSizeMi': 1},
         'ac': {'size': '2Gi', 'blocksSizeGi': 1,
-               'keyLocationMap': {'type': 'blockDevice', 'entries': 10000, 'sizeMi': 1}},
+               'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
         'cms': {'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
     }}}
+    if optional_stores:
+        for store in ('iscc', 'fsac'):
+            values['storage']['persistence'][store] = {
+                'enabled': True, 'size': '2Gi', 'blocksSizeGi': 1,
+                'keyLocationMap': {'entries': 10000, 'sizeMi': 1},
+            }
+    if raw:
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            values['storage']['persistence'][store].update({
+                'backend': 'blockDevice',
+                'blockDevice': {'size': '256Mi',
+                                'metadata': {'size': '2Gi', 'keyLocationMapSizeMi': 1}},
+            })
+        if local:
+            values['storage']['persistence'].update({
+                'mode': 'hostPath', 'blockDevice': {'allowHostPath': True},
+            })
+            for store in ('cas', 'ac', 'iscc', 'fsac'):
+                block = values['storage']['persistence'][store]['blockDevice']
+                block['hostPath'] = {'devicePath': '/dev/ephemeral/' + store}
+                block['metadata']['hostPath'] = {'path': '/mnt/buildbarn/' + store + '-meta'}
     if ephemeral:
         values['storage']['persistence']['cms']['keyLocationMap']['type'] = 'inMemory'
     values_file = directory / 'values.yaml'
@@ -111,7 +135,8 @@ class StorageMigrationTest(unittest.TestCase):
                             self.client_container, check=False)
         self.config = self.image = self.init = None
         self.mounts = []
-        for store in ('cas', 'ac'):
+        self.devices = []
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
             volume = self.prefix + '-' + store
             docker('volume', 'create', volume)
             self.addCleanup(docker, 'volume', 'rm', volume, check=False)
@@ -124,11 +149,41 @@ class StorageMigrationTest(unittest.TestCase):
         self.doCleanups()
         raise SystemExit(128 + signum)
 
-    def configure(self, ephemeral=False):
-        self.config, self.image, self.init = render_config(self.directory, ephemeral=ephemeral)
+    def configure(self, ephemeral=False, optional_stores=False, raw=False, local=False):
+        self.config, self.image, self.init = render_config(
+            self.directory, ephemeral=ephemeral, optional_stores=optional_stores, raw=raw, local=local,
+        )
+        if raw:
+            self.mounts = [arg + '-meta' if arg.startswith('type=volume,') else arg
+                           for arg in self.mounts]
+            self.prepare_loop_devices()
         # Kubernetes normally supplies fsGroup ownership; emulate it here, then
         # run both the rendered init and storage as the chart's non-root UID.
-        self.shell('chown 65534:65534 /storage-cas /storage-ac', user='0:0')
+        suffix = '-meta' if raw else ''
+        paths = ' '.join('/storage-' + store + suffix for store in ('cas', 'ac', 'iscc', 'fsac'))
+        self.shell('chown 65534:65534 ' + paths, user='0:0')
+
+    def prepare_loop_devices(self):
+        volume = self.prefix + '-raw-blocks'
+        docker('volume', 'create', volume)
+        self.addCleanup(docker, 'volume', 'rm', volume, check=False)
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            # --find --show selects and attaches an unused loop device. The
+            # backing file belongs to this test's named Docker volume.
+            result = docker('run', '--rm', '--privileged',
+                            '--mount', f'type=volume,source={volume},target=/blocks',
+                            LOOP_TOOL_IMAGE, 'sh', '-ec',
+                            f'truncate -s 256M /blocks/{store}; losetup --find --show /blocks/{store}',
+                            check=False)
+            self.assertEqual(result.returncode, 0,
+                             'Raw-device tests require privileged Docker helpers and unused Linux '
+                             'loop devices:\n' + result.stderr)
+            device = result.stdout.strip()
+            self.assertRegex(device, r'^/dev/loop[0-9]+$',
+                             'Loop helper did not return an allocated loop device: ' + result.stdout)
+            self.addCleanup(docker, 'run', '--rm', '--privileged', LOOP_TOOL_IMAGE,
+                            'losetup', '--detach', device, check=False)
+            self.devices += ['--device', f'{device}:/dev/bb/{store}']
 
     def shell(self, script, user='65534:65534', check=True):
         return docker('run', '--rm', '--user', user, *self.mounts,
@@ -142,7 +197,7 @@ class StorageMigrationTest(unittest.TestCase):
         port = '8980' if frontend else '8981'
         alias = 'frontend' if frontend else 'storage-0.storage.integration'
         publish = [] if self.client_container else ['-p', '127.0.0.1::' + port]
-        mounts = [] if frontend else self.mounts
+        mounts = [] if frontend else self.mounts + self.devices
         docker('create', '--name', name, '--user', '65534:65534',
                '--network', self.network, '--network-alias', alias,
                *publish, *mounts,
@@ -182,7 +237,8 @@ class StorageMigrationTest(unittest.TestCase):
         return channel
 
     def rpc(self, channel, method, data, service='ContentAddressableStorage'):
-        service = self.pool.FindServiceByName('build.bazel.remote.execution.v2.' + service)
+        name = service if '.' in service else 'build.bazel.remote.execution.v2.' + service
+        service = self.pool.FindServiceByName(name)
         descriptor = service.FindMethodByName(method)
         request = message_class(descriptor.input_type)
         response = message_class(descriptor.output_type)
@@ -222,6 +278,54 @@ class StorageMigrationTest(unittest.TestCase):
         self.initialize()
         docker('start', name)
         return self.channel(name)
+
+    def recreate(self, name, channel, abrupt=False):
+        channel.close()
+        if abrupt:
+            docker('kill', '--signal', 'KILL', name)
+        else:
+            docker('stop', '--time', '20', name)
+            exit_code = json.loads(docker('inspect', name).stdout)[0]['State']['ExitCode']
+            # Buildbarn re-raises SIGTERM after completing its shutdown groups.
+            # Exit 143 is expected; Docker's timeout-driven SIGKILL would be 137.
+            self.assertIn(exit_code, (0, 143), self.container_logs(name))
+        docker('rm', name)
+        # A replacement Pod reruns volume-init and starts a new process against
+        # retained volumes. No storage files or config paths are synthesized.
+        self.initialize()
+        return self.start_storage()
+
+    def put_learning_history(self, channel):
+        digest = self.digest(b'reduced action with learned scheduling and input hints')
+        stats = {
+            'sizeClasses': {
+                '1': {'previousExecutions': [{'succeeded': '1.250s'}, {'timedOut': '3s'}],
+                      'initialPageRankProbability': 0.25},
+                '2': {'previousExecutions': [{'succeeded': '0.750s'}],
+                      'initialPageRankProbability': 0.75},
+            },
+        }
+        profile = {
+            'bloomFilter': base64.b64encode(b'\x85\x14\x01').decode(),
+            'bloomFilterHashFunctions': 3,
+        }
+        request = {'reducedActionDigest': digest, 'digestFunction': 'SHA256'}
+        self.rpc(channel, 'UpdatePreviousExecutionStats',
+                 dict(request, previousExecutionStats=stats),
+                 service='buildbarn.iscc.InitialSizeClassCache')
+        self.rpc(channel, 'UpdateFileSystemAccessProfile',
+                 dict(request, fileSystemAccessProfile=profile),
+                 service='buildbarn.fsac.FileSystemAccessCache')
+        return request, stats, profile
+
+    def assert_learning_history(self, channel, history):
+        request, stats, profile = history
+        actual_stats = self.rpc(channel, 'GetPreviousExecutionStats', request,
+                                service='buildbarn.iscc.InitialSizeClassCache')
+        actual_profile = self.rpc(channel, 'GetFileSystemAccessProfile', request,
+                                  service='buildbarn.fsac.FileSystemAccessCache')
+        self.assertEqual(actual_stats, json_format.ParseDict(stats, type(actual_stats)()))
+        self.assertEqual(actual_profile, json_format.ParseDict(profile, type(actual_profile)()))
 
     def legacy_persistent_config(self):
         # Derive a persistent-AC variant from the pinned pre-CDC fixture so the
@@ -293,8 +397,10 @@ class StorageMigrationTest(unittest.TestCase):
         self.assertEqual(ac_hit.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
         self.assert_no_storage_errors(new)
 
-    def test_default_persistent_cms_survives_restart(self):
-        self.configure()
+    def check_all_five_stores_after_recreation(self, raw=False, local=False):
+        # Only sizes and optional-store enablement are overridden; index types
+        # come from chart defaults, so this catches accidental default reversions.
+        self.configure(optional_stores=True, raw=raw, local=local)
         self.initialize()
         name, channel = self.start_storage()
         blobs = [b'small blob' * 1024, os.urandom(3 * 1024 * 1024)]
@@ -302,7 +408,17 @@ class StorageMigrationTest(unittest.TestCase):
             self.put(channel, blob)
             self.assert_read(channel, blob)
         action = self.put_action(channel, blobs[1])
-        channel = self.restart(name, channel)
+        history = self.put_learning_history(channel)
+        self.assert_learning_history(channel, history)
+        name, channel = self.recreate(name, channel)
+        self.assert_learning_history(channel, history)
+        for blob in blobs:
+            self.assert_read(channel, blob)
+        # The graceful stop checkpointed these records. A subsequent hard kill
+        # must retain that checkpoint; newly unsynchronized writes are not tested
+        # or promised durable here, and there is no five-minute sleep.
+        name, channel = self.recreate(name, channel, abrupt=True)
+        self.assert_learning_history(channel, history)
         for blob in blobs:
             self.assert_read(channel, blob)
         # Exercise the chart's real completeness-checking frontend rather than
@@ -313,6 +429,17 @@ class StorageMigrationTest(unittest.TestCase):
         result = self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
         self.assertEqual(result.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
         self.assert_no_storage_errors(name)
+
+    def test_default_indexes_preserve_all_five_filesystem_stores(self):
+        self.check_all_five_stores_after_recreation()
+
+    def test_default_indexes_preserve_all_five_raw_pvc_stores(self):
+        self.check_all_five_stores_after_recreation(raw=True)
+
+    def test_default_indexes_preserve_all_five_raw_hostpath_stores(self):
+        # Loop devices stand in for retained NVMe; mounted metadata volumes
+        # stand in for retained node-local directories. No node-loss guarantee.
+        self.check_all_five_stores_after_recreation(raw=True, local=True)
 
     def test_explicit_ephemeral_cms_loses_only_composite_blobs(self):
         self.configure(ephemeral=True)

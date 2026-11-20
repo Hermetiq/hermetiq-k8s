@@ -16,8 +16,16 @@ explicit cache reset across CAS, AC, ISCC, and FSAC. volume-init refuses legacy
 files without modifying them. Snapshot the old cache if rollback is required;
 follow:
 https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback
-Shared CMS mappings persist under cdc-v1 by default. Explicit inMemory mappings
-make composite blobs unavailable after a storage process restart.
+CAS, CMS, AC, and enabled ISCC/FSAC now default to persistent indexes on both
+filesystem and raw-block backends. Remove old explicit inMemory overrides to
+adopt them. Raw PVCs need metadata claims and a StatefulSet recreation; raw
+hostPath needs retained metadata directories, including space for shared CMS.
+Combine these changes with the CDC cold cutover. ISCC/FSAC remain opt-in.
+Local NVMe persistence survives same-node pod replacement, not node/disk loss.
+For intentional volatile indexes, apply custom-values/buildbarn-values-ephemeral.yaml
+from the repository after deployment values. Filesystem CAS always has a file
+index; use bounded emptyDir volumes for pod-lifetime filesystem storage.
+https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes
 
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}

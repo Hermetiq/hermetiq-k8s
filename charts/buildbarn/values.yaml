@@ -385,14 +385,12 @@ storage:
   resources:
     requests:
       cpu: 500m
-      # With CAS/AC/ISCC/FSAC enabled and backend=blockDevice, their default RAM
-      # maps total 54M entries x 64 B = ~3.2 GiB. Shared CMS additionally needs
-      # ~256 MiB for its RAM map and 264 MiB for blocks when raw CAS has no
-      # metadata filesystem. Filesystem CAS and shared CMS keep maps on disk;
-      # AC, ISCC, and FSAC keep their maps in memory by default.
-      # Opting into persistent indexes uses file page cache instead of RAM maps.
-      # Budget for both heap and file page cache; raise this whenever you
-      # increase key-location-map capacity.
+      # Persistent indexes use file page cache in addition to Go heap/buffers.
+      # With all optional stores enabled, default index files total 9.06 GiB
+      # on filesystem backends or 9.75 GiB on raw backends with shared CMS.
+      # This request does not reserve the entire index working set: increase it
+      # for warm-index performance and budget CMS blocks, heap, and RPC buffers.
+      # See docs/buildbarn-storage-model.md for production sizing.
       memory: 4Gi
     limits:
       cpu: 7100m
@@ -432,8 +430,8 @@ storage:
   #
   # An in-memory KLM costs ~64 B/entry of RSS as it fills (reserved lazily at
   # startup, resident as touched), so a large device pushes you toward
-  # `keyLocationMap: file`, which puts the table on disk at the same 64 B/entry
-  # and additionally makes the store persistent across restarts.
+  # `keyLocationMap: file` (the default), which uses 66 B per disk record
+  # and makes the store recoverable across restarts when its volumes survive.
   #
   # Measure averageObjectSizeBytes from your own cluster rather than trusting the
   # defaults below — they come from one dev deployment:
@@ -457,13 +455,15 @@ storage:
       fsac: 2048 # path bloom filters, capped by bloomFilterMaximumSizeBytes
   persistence:
     # Volume retention alone does not make a store recoverable. The KLM and
-    # persistent_state must survive with its blocks. Filesystem CAS and CMS
-    # on a filesystem use disk-backed KLMs by default. AC/ISCC/FSAC and dedicated
-    # raw-block defaults are volatile. Shared CMS is also volatile when raw CAS
-    # has no metadata filesystem. Opt in with custom-values/buildbarn-values-persistent.yaml
-    # after reviewing capacity and the migration steps; it changes index modes
-    # for all five stores without enabling optional stores or resizing data devices.
-    # See docs/buildbarn-storage-operations.md for the full restart matrix.
+    # persistent_state must survive with its blocks. All five stores default to
+    # disk-backed indexes, on both filesystem and raw-block backends. ISCC/FSAC
+    # remain disabled until explicitly enabled. Raw hostPath requires retained
+    # metadata directories; raw PVCs need companion metadata claims.
+    # BREAKING: combine the CDC cold cutover with this change; see
+    # docs/buildbarn-storage-operations.md. Old explicit inMemory overrides still
+    # win: remove them or apply custom-values/buildbarn-values-persistent.yaml.
+    # Intentional volatile storage: custom-values/buildbarn-values-ephemeral.yaml.
+    # emptyDir remains pod-lifetime; hostPath remains tied to retained node disks.
     # Supported modes:
     # - pvc: PersistentVolumeClaims via volumeClaimTemplates. Durability across
     #   node replacement depends on the StorageClass (local PVs remain local).
@@ -497,9 +497,9 @@ storage:
         securityContext: {}
     cas:
       # filesystem: blocks live in a file on a Filesystem PVC (default).
-      # blockDevice: blocks live on a raw volumeMode:Block device; the KLM is in
-      #   memory by default (no persistence) or, when keyLocationMap=file, on a
-      #   small companion Filesystem PVC (persistent).
+      # blockDevice: blocks live on a raw volumeMode:Block device; the KLM and
+      #   state default to a companion Filesystem PVC or a retained hostPath
+      #   metadata directory. Explicit inMemory opts out of restart recovery.
       backend: filesystem
       storageClassName: premium-rwo
       size: 1000Gi
@@ -509,7 +509,7 @@ storage:
       # legacy cas-keys.db, cas-blocks.db or persistent_state still exist; follow
       # docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback.
       blocksSizeGi: 950
-      # 7168 MiB / 64 B = ~117M indexable objects, ~2.1x the ~57M objects that
+      # 7168 MiB / 66 B = ~114M indexable objects, ~2.1x the ~54.6M objects that
       # 885 GiB usable holds at keyLocationMapSizing.averageObjectSizeBytes.cas.
       # See the keyLocationMapSizing block above before changing either number.
       keyLocationMapSizeMi: 7168
@@ -536,25 +536,20 @@ storage:
       # Used only when backend=blockDevice.
       blockDevice:
         storageClassName: ""     # StorageClass that provisions volumeMode:Block
-        # Raw device size; block size is auto-inferred. Defaulted to 200Gi rather
-        # than 1000Gi because the default key-location map below is in memory:
-        # ~186 GiB usable / 17408 B = ~11.5M blobs, indexed 2.1x by 24M entries
-        # for ~1.5 GiB of RSS. A 1000Gi device would need ~117M entries (~7.4 GiB)
-        # to hold the same ratio — at that scale switch keyLocationMap to `file`.
+        # Raw device size; block size is auto-inferred. Kept at 200Gi so this
+        # default change does not resize existing devices or flush stores that
+        # already persist. Size the disk index against measured chunk sizes.
+        # The optional RAM index below covers ~11.5M chunks at a 2.1x ratio.
         size: 200Gi
         # Deprecated alias for storage.persistence.cas.writeConcurrencyLimit
         # (honored only when backend=blockDevice). null => omit from config.
         writeConcurrencyLimit: null
-        # inMemory (default; NOT persistent — the store returns empty after a
-        #   restart) | file (persistent; adds a small companion Filesystem PVC,
-        #   or with mode=hostPath a metadata.hostPath.path you must supply).
-        #
-        # Prefer `file` for anything large or production-facing: it keeps the map
-        # off the heap so it can be sized generously, and it makes the store
-        # survive restarts — which in turn lets you keep a longer
-        # frontend existenceCaching window safely. Size it with the formula in
-        # storage.keyLocationMapSizing above.
-        keyLocationMap: inMemory
+        # file (default): KLM and state on a companion Filesystem PVC, or on
+        # metadata.hostPath.path (required with mode=hostPath).
+        # inMemory: explicit ephemeral opt-out; starts empty after every process
+        # restart even if the device remains. Shared CMS becomes in-memory too.
+        # File indexes use metadata.keyLocationMapSizeMi, not RAM entries.
+        keyLocationMap: file
         keyLocationMapInMemoryEntries: 24000000
         metadata:                # used only when keyLocationMap=file
           storageClassName: premium-rwo
@@ -620,7 +615,7 @@ storage:
         storageClassName: ""
         size: 2Gi
         writeConcurrencyLimit: null
-        keyLocationMap: inMemory
+        keyLocationMap: file
         keyLocationMapInMemoryEntries: 8000000
         metadata:
           storageClassName: premium-rwo
@@ -637,9 +632,9 @@ storage:
       size: 12Gi
       blocksSizeGi: 10
       keyLocationMap:
-        type: inMemory # inMemory or blockDevice
+        type: blockDevice # blockDevice (persistent file) or inMemory (ephemeral opt-out)
         # ~9.2 GiB usable at averageObjectSizeBytes.ac holds ~8.5M ActionResults,
-        # so keep this (or sizeMi x 1Mi / 64) at >= 2x that.
+        # so keep RAM entries (or sizeMi x 1Mi / 66) at >= 2x that.
         entries: 21000000
         sizeMi: 1344
       # See the CAS block-geometry comment: changing any count (or the blocks/
@@ -664,7 +659,7 @@ storage:
         size: 8Gi
         # Deprecated alias for storage.persistence.ac.writeConcurrencyLimit.
         writeConcurrencyLimit: null
-        keyLocationMap: inMemory
+        keyLocationMap: file
         keyLocationMapInMemoryEntries: 14000000
         metadata:
           storageClassName: premium-rwo
@@ -678,10 +673,9 @@ storage:
     # Initial Size Class Cache (ISCC): consumed by bb-scheduler for size-class
     # analysis. Only useful when worker platforms declare multiple size classes.
     # Enable together with scheduler.sizeClassAnalysis.enabled.
-    # The compatible default is an in-memory KLM: learned history is lost on
-    # every storage-process restart. To retain it, opt into a disk-backed KLM
-    # below or use custom-values/buildbarn-values-persistent.yaml. This also
-    # enables persistent_state; blocks, KLM, and state must survive together.
+    # When enabled, its disk-backed KLM and persistent_state retain learned
+    # history through storage-process restarts. Blocks, KLM, and state must
+    # survive together. Explicit inMemory opts out and loses history on restart.
     # Durable PVCs can survive node replacement; hostPath requires the same
     # retained node and disks; emptyDir loses history when the pod is replaced.
     iscc:
@@ -695,7 +689,7 @@ storage:
       size: 2Gi
       blocksSizeGi: 1
       keyLocationMap:
-        type: inMemory # opt into blockDevice for a file-backed KLM on this filesystem
+        type: blockDevice # persistent file on this filesystem; inMemory opts out
         entries: 4000000
         # ~4.07M disk records; fits alongside the 1Gi blocks file in the 2Gi volume.
         sizeMi: 256
@@ -719,7 +713,7 @@ storage:
         # Switching an existing raw-block PVC store from inMemory adds an
         # iscc-meta claim template and requires a StatefulSet recreate (README).
         # The old volatile index cannot be recovered by switching to file.
-        keyLocationMap: inMemory
+        keyLocationMap: file
         keyLocationMapInMemoryEntries: 8000000
         metadata:
           storageClassName: premium-rwo
@@ -746,7 +740,7 @@ storage:
       size: 6Gi
       blocksSizeGi: 4
       keyLocationMap:
-        type: inMemory # inMemory or blockDevice
+        type: blockDevice # blockDevice (persistent file) or inMemory (ephemeral opt-out)
         entries: 4000000
         sizeMi: 256
       oldBlocks: 8
@@ -765,7 +759,7 @@ storage:
         size: 6Gi
         # Deprecated alias for storage.persistence.fsac.writeConcurrencyLimit.
         writeConcurrencyLimit: null
-        keyLocationMap: inMemory
+        keyLocationMap: file
         keyLocationMapInMemoryEntries: 8000000
         metadata:
           storageClassName: premium-rwo
@@ -797,13 +791,14 @@ storage:
   podDisruptionBudget:
     enabled: true
     maxUnavailable: 1
-  # Pod terminationGracePeriodSeconds (null => Kubernetes default, 30s).
+  # Allow persistent stores time to checkpoint during routine pod termination.
+  # Tune for measured flush time; null uses the Kubernetes default (30s).
   # Persistent stores flush on shutdown with two full syncs of the blocks
   # device plus a state write; on large network-attached volumes give this
   # enough headroom or recent unsynchronized writes may be lost. The 300s
   # minimumEpochInterval is not a maximum loss window: slow or failed syncs
   # can delay persistence further.
-  terminationGracePeriodSeconds: null
+  terminationGracePeriodSeconds: 120
   # Optional NetworkPolicy for the storage tier. Storage gRPC (:8981) accepts
   # unauthenticated traffic — authentication and cache-write authorization
   # happen at the frontend — so any pod that can reach the port can read and

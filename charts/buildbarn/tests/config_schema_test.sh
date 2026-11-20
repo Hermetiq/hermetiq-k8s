@@ -270,7 +270,7 @@ render_and_validate(
     inline_overrides={
         "storage": {
             "persistence": {
-                "cms": {"backend": "blockDevice", "blockDevice": {"size": "10Gi"}},
+                "cms": {"backend": "blockDevice", "blockDevice": {"size": "10Gi", "keyLocationMap": "inMemory"}},
             }
         },
     },
@@ -328,6 +328,76 @@ assert cas["chunkStorage"]["local"]["blocksOnBlockDevice"]["source"]["devicePath
 cms = cas["chunkMappingStorage"]["local"]
 assert "blocksInMemory" in cms and "blocksOnBlockDevice" not in cms, cms
 assert "inMemory" in cms["keyLocationMap"] and "persistent" not in cms, cms
+
+# Assert persistence on evaluated stores, not just strings in a manifest. These
+# cases deliberately omit the persistent overlay and all KLM selectors so a
+# default regression (including a volatile shared CMS) cannot hide behind one.
+def storage_stores(configs):
+    storage = configs["storage.jsonnet"]
+    cas = storage["contentAddressableStorageServer"]["contentAddressableStorage"]
+    stores = {
+        "cas": cas["chunkStorage"]["local"],
+        "cms": cas["chunkMappingStorage"]["local"],
+        "ac": storage["actionCache"]["backend"]["local"],
+    }
+    for name, field in (("iscc", "initialSizeClassCache"), ("fsac", "fileSystemAccessCache")):
+        if field in storage:
+            stores[name] = storage[field]["backend"]["local"]
+    return stores
+
+
+def assert_persistent_stores(configs):
+    stores = storage_stores(configs)
+    assert set(stores) == {"cas", "cms", "ac", "iscc", "fsac"}, stores.keys()
+    for name, store in stores.items():
+        assert "onBlockDevice" in store["keyLocationMap"], (name, store)
+        assert "persistent" in store and "blocksOnBlockDevice" in store, (name, store)
+        assert "blocksInMemory" not in store, (name, store)
+
+
+for mode in ("pvc", "hostPath"):
+    for dedicated_cms in (False, True):
+        persistence = {"mode": mode}
+        names = ["cas", "ac", "iscc", "fsac"]
+        if dedicated_cms:
+            names.append("cms")
+        for name in names:
+            store = {"backend": "blockDevice"}
+            if name in ("iscc", "fsac"):
+                store["enabled"] = True
+            if mode == "hostPath":
+                store["blockDevice"] = {
+                    "hostPath": {"devicePath": f"/dev/ephemeral/{name}"},
+                    "metadata": {"hostPath": {"path": f"/mnt/buildbarn/{name}-meta"}},
+                }
+            persistence[name] = store
+        if mode == "hostPath":
+            persistence["blockDevice"] = {"allowHostPath": True}
+        overrides = {"storage": {"persistence": persistence}}
+        label = f"persistent-raw-defaults-{mode}-{'dedicated' if dedicated_cms else 'shared'}-cms"
+        rendered = render_and_validate(label, value_files=[ci_values], inline_overrides=overrides)
+        assert_persistent_stores(rendered)
+
+        # The actual opt-out file must remove checkpoint recovery from every
+        # store, and does not require metadata paths even on node-local devices.
+        if mode == "hostPath":
+            for name in names:
+                del persistence[name]["blockDevice"]["metadata"]
+        ephemeral = render_and_validate(
+            f"ephemeral-{label}",
+            value_files=[ci_values, repo_root / "custom-values/buildbarn-values-ephemeral.yaml"],
+            inline_overrides=overrides,
+        )
+        for name, store in storage_stores(ephemeral).items():
+            assert "inMemory" in store["keyLocationMap"], (name, store)
+            assert "persistent" not in store, (name, store)
+
+filesystem = render_and_validate(
+    "persistent-filesystem-defaults-all-stores",
+    value_files=[ci_values],
+    inline_overrides={"storage": {"persistence": {"iscc": {"enabled": True}, "fsac": {"enabled": True}}}},
+)
+assert_persistent_stores(filesystem)
 
 # 7. Frontend existenceCaching=false branches (with and without readCache)
 render_and_validate(

@@ -1,0 +1,41 @@
+# Explicit opt-out from restart persistence. Apply AFTER deployment values:
+#   helm template buildbarn charts/buildbarn -f my-values.yaml \
+#     -f custom-values/buildbarn-values-ephemeral.yaml
+#
+# Raw-block stores use RAM indexes, omit metadata volumes, and start empty on
+# every storage-process restart. With raw CAS, shared CMS blocks are in RAM too.
+# CMS/AC/ISCC/FSAC filesystem indexes also use RAM. Filesystem CAS always uses a
+# file index; select mode: emptyDir with sized emptyDir limits for pod-lifetime
+# filesystem storage (this overlay deliberately does not change volume topology).
+#
+# This preserves optional-store enablement, backends, sizes, paths and resources.
+# Review RAM entry counts and budgets. Switching from file to RAM discards access
+# to existing data; removing metadata PVC templates requires StatefulSet recreation.
+# Old metadata is not automatically deleted. Do not later reuse a stale checkpoint
+# with blocks written by a volatile store: returning to file requires a cold reset.
+# See docs/buildbarn-storage-operations.md for cutover and restart behavior.
+storage:
+  persistence:
+    cas:
+      blockDevice:
+        keyLocationMap: inMemory
+    cms:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    ac:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    iscc:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory
+    fsac:
+      keyLocationMap:
+        type: inMemory
+      blockDevice:
+        keyLocationMap: inMemory

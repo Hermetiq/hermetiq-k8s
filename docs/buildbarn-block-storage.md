@@ -18,10 +18,8 @@ For each raw block store, the chart creates a dedicated blocks claim named `<sto
 
 The whole device becomes the block store. Buildbarn derives the block size from the device size and block counts, so `blocksSizeGi` is ignored in `backend: blockDevice` mode. For PVC-backed raw block storage, `blockDevice.size` is the PVC request. For hostPath raw block storage, the device size comes from the host device.
 
-The raw-block key-location map defaults to memory for CS, AC, ISCC, FSAC, and a
-dedicated raw CMS. These
-defaults remain unchanged unless you explicitly select `file` or apply the
-[persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes):
+The raw-block key-location map defaults to `file` for CS, AC, ISCC, FSAC, and a
+dedicated raw CMS. Both PVC-backed devices and local NVMe use persistent indexes:
 
 ```yaml
 storage:
@@ -32,17 +30,20 @@ storage:
       blockDevice:
         storageClassName: bb-block-hyperdisk
         size: 1000Gi
-        keyLocationMap: inMemory
-        keyLocationMapInMemoryEntries: 20000000
+        keyLocationMap: file # default
 ```
 
-That is simple and fast, but it is cache-only. A storage-pod restart empties the store because the bytes no longer have an index. To make a raw block store persistent across restarts, use:
+The chart creates a companion filesystem PVC named `<store>-meta` for the KLM
+file and `persistent_state` directory. Treat that metadata claim as part of the
+store. If either metadata or blocks are lost, the store starts empty. In
+`mode: hostPath`, instead supply each store's `blockDevice.metadata.hostPath.path`;
+Helm rejects a missing path rather than choosing a filesystem for you.
 
-```yaml
-keyLocationMap: file
-```
-
-The chart then creates a small companion filesystem PVC named `<store>-meta` for the KLM file and `persistent_state` directory. Treat that metadata claim as part of the store. If either the metadata claim or the blocks claim is lost, the store starts empty.
+For intentionally volatile storage, set `keyLocationMap: inMemory` or apply the
+[ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out).
+That removes metadata volumes for raw stores and starts them empty after every
+storage-process restart. Review the migration before removing metadata claims
+from an existing PVC deployment.
 
 CMS defaults to `backend: sharedCas`, so it does not need its own raw device or
 PVC. With a file-backed raw CAS index, shared CMS uses the CAS metadata volume
@@ -119,11 +120,12 @@ storage:
         keyLocationMap: file
 ```
 
-Use `keyLocationMap: file` for persistence, or `inMemory` when the disk is only being used as a cache tier.
+`keyLocationMap: file` is the default. Select `inMemory` only when losing this
+store on each process restart is intentional.
 
 ## GKE Example B: Local NVMe SSD with `partition_ephemeral_disks`
 
-Use this for the fastest cache-only tier. Buildbarn's `partition_ephemeral_disks` tool runs as a DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named `ephemeral`, and carves logical volumes for the stores.
+Use this for a fast node-local tier that retains cache contents across same-node pod restarts. Buildbarn's `partition_ephemeral_disks` tool runs as a DaemonSet, stripes a node's local NVMe SSDs into an LVM2 volume group named `ephemeral`, and carves logical volumes for the stores.
 
 This repository includes a ready-to-edit version of that pattern:
 
@@ -206,20 +208,26 @@ storage:
     cas:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
+        keyLocationMap: file
         hostPath:
           devicePath: /dev/ephemeral/cas
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/cas-meta
     ac:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
+        keyLocationMap: file
         hostPath:
           devicePath: /dev/ephemeral/ac
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/ac-meta
 ```
 
 > **Configure every enabled store.** If `mode: hostPath` is set and a store is left on `backend: filesystem`, the chart falls back to the default hostPath directory with `type: DirectoryOrCreate`. On a raw-block Local SSD node pool, nothing is mounted there, so Kubernetes creates the directory on the node boot disk. Configure `ac`, and `iscc`/`fsac` when enabled, on their own logical volumes.
 
-This path is cache-only by design. A node loss drops that shard, and builds refill it. The storage container is privileged, and the partitioning DaemonSet is privileged too, so use a namespace that permits that model.
+This layout preserves cache contents across pod replacement on the same retained node. A node loss still drops that shard, and builds refill it. The storage container is privileged, and the partitioning DaemonSet is privileged too, so use a namespace that permits that model.
 
 For `keyLocationMap: file`, explicitly choose a retained filesystem directory with
 `blockDevice.metadata.hostPath.path`. A filesystem on Local SSD works; for the
@@ -232,9 +240,9 @@ blocks or metadata empties the store, and durable metadata alone cannot rescue
 blocks lost with a Local SSD node. Node replacement requires durable storage for
 both pieces; see the [ISCC guide](iscc-size-classes.md#1-enable-iscc-storage).
 
-When applying the persistent profile to all four raw devices, provide a metadata
-directory for each one and include shared CMS capacity in the CAS directory.
-The profile changes index modes without resizing their configured files; CAS's
+With the persistent defaults, provide a metadata directory for each enabled raw
+device and include shared CMS capacity in the CAS directory. The chart does not
+resize the configured index files during migration; CAS's
 default `7360 MiB` index plus shared CMS's `1280 MiB` files already require
 `8640 MiB` before filesystem and checkpoint headroom.
 
@@ -271,7 +279,7 @@ storage:
       blockDevice:
         storageClassName: topolvm-ssd
         size: 700Gi
-        keyLocationMap: inMemory
+        keyLocationMap: file
     ac:
       backend: blockDevice
       blockDevice:
@@ -282,14 +290,19 @@ storage:
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
-        size: 8Gi
+        size: 2Gi
     fsac:
       enabled: true
       backend: blockDevice
       blockDevice:
         storageClassName: topolvm-ssd
-        size: 8Gi
+        size: 6Gi
 ```
+
+Set each raw store's `blockDevice.metadata.storageClassName` to a
+filesystem-capable class in your cluster (the chart defaults to `premium-rwo`).
+The companion metadata PVC is required with the persistent default. Network
+metadata does not protect blocks lost with a local storage node.
 
 Unlike hostPath mode, `blockDevice.size` matters here because it is the PVC request and therefore the logical volume size TopoLVM carves for each replica.
 

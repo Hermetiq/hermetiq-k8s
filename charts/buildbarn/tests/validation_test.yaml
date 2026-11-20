@@ -154,6 +154,7 @@ tests:
 
   - it: accepts a hostPath-mode block device without a size
     set:
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
       storage.persistence.mode: hostPath
       storage.persistence.blockDevice.allowHostPath: true
       storage.persistence.cas.backend: blockDevice
@@ -283,6 +284,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - notFailedTemplate: {}
@@ -291,6 +293,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - failedTemplate:

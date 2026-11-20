@@ -18,16 +18,17 @@ Lose any one of them and the store comes back empty. The data bytes may still be
 
 An in-memory key-location map means cache-only behavior. This is true even if the blocks sit on a durable Persistent Disk. After a pod restart, the bytes have no index and the store starts empty.
 
-The chart defaults to `backend: filesystem` and `mode: pvc`. This table shows the
-KLM default and storage-process restart behavior for each backend:
+The chart defaults to `backend: filesystem`, `mode: pvc`, and persistent indexes
+for every enabled store. ISCC and FSAC remain disabled until explicitly enabled.
+These defaults apply to both PVC storage and raw blocks on local NVMe:
 
 | Store | Enabled by default | Filesystem backend | Raw-block backend |
 |---|---|---|---|
-| CAS | yes | Disk-backed map; recovers | In-memory map; empty |
-| CMS | yes, sharing CAS | Disk-backed map; recovers | Dedicated raw CMS: in-memory map; empty |
-| AC | yes | In-memory map; empty | In-memory map; empty |
-| ISCC | no | In-memory map; empty | In-memory map; empty |
-| FSAC | no | In-memory map; empty | In-memory map; empty |
+| CAS | yes | Disk-backed map; recovers | Disk-backed map; recovers |
+| CMS | yes, sharing CAS | Disk-backed map; recovers | Shared CAS metadata or dedicated raw CMS; recovers |
+| AC | yes | Disk-backed map; recovers | Disk-backed map; recovers |
+| ISCC | no | Disk-backed map; recovers | Disk-backed map; recovers |
+| FSAC | no | Disk-backed map; recovers | Disk-backed map; recovers |
 
 “Recovers” requires the same blocks, KLM, and state directory to remain available;
 it does not make an ephemeral volume durable. Volume lifetime is a separate
@@ -45,13 +46,15 @@ The chart's disk-backed KLM settings are:
 - filesystem CAS: already disk-backed through `keyLocationMapSizeMi`
 - shared-CAS CMS: already file-backed on the CAS filesystem or metadata volume; raw CAS with an in-memory index falls back to an in-memory CMS
 - dedicated filesystem CMS: already disk-backed through `keyLocationMap.type: blockDevice`
-- filesystem AC/ISCC/FSAC: opt in with `keyLocationMap.type: blockDevice`
-- raw block stores: opt in with `blockDevice.keyLocationMap: file`
+- filesystem AC/ISCC/FSAC: `keyLocationMap.type: blockDevice` by default
+- raw block stores: `blockDevice.keyLocationMap: file` by default
 
-The [persistent profile](../custom-values/buildbarn-values-persistent.yaml) selects
-these settings for CAS, CMS, AC, ISCC, and FSAC. The chart defaults remain
-unchanged when the profile is omitted; adopting it is an explicit migration,
-described below.
+The [persistent profile](../custom-values/buildbarn-values-persistent.yaml)
+explicitly selects these same defaults. It is useful after older deployment
+values that still set `inMemory`; new deployments do not need it. This is a
+breaking default change: existing releases must review the migration below
+before upgrading. Raw hostPath stores must supply metadata directories, and raw
+PVC stores can gain immutable metadata claim templates.
 
 Explicit values take precedence over chart defaults; among values files, the
 last file wins. The first conversion from an in-memory index starts empty and
@@ -63,7 +66,7 @@ Barn Owl's `store_not_persistent` advisory identifies storage-tier stores whose
 contents are discarded on restart, even if their blocks are on a durable
 volume. Persistence requires both a disk-backed key-location map and the
 generated Buildbarn `persistent` configuration with a durable state directory.
-Use the chart settings above to opt in per store. Rebuilding a store after
+Check explicit index overrides when this advisory appears. Rebuilding a store after
 restart can be intentional; changing its key-location map layout flushes it
 once before subsequent restarts preserve its contents.
 
@@ -71,8 +74,9 @@ Persistent stores use a 300-second **minimum** interval between routine data syn
 A crash can lose recent unsynchronized writes; five minutes is not a maximum
 loss window because slow or failing syncs can delay persistence further. A clean
 shutdown performs two full block-device syncs plus a state write. If that cannot
-finish inside the pod grace period (30 seconds by default), recovery uses the
-last persisted state. Increase `storage.terminationGracePeriodSeconds` when the
+finish inside the pod grace period, recovery uses the last persisted state.
+The chart now sets `storage.terminationGracePeriodSeconds: 120`; setting it to
+`null` restores Kubernetes' 30-second default. Increase it further when the
 underlying disks need more time to flush.
 
 | Configuration | Pod restart on same node | Rescheduled to another node | Backing disk/PV lost |
@@ -147,29 +151,39 @@ Any sustained nonzero rate means the map is too small or too crowded. Grow the m
 
 ### Migrate to Persistent Indexes
 
-This procedure changes index placement within the CDC storage format. If you are
-also upgrading from a pre-CDC image, follow the complete
-[storage format cutover and rollback runbook](buildbarn-storage-model.md#storage-format-cutover-and-rollback)
-instead. That upgrade requires a coordinated cold reset of CAS and any enabled
-AC/ISCC/FSAC stores, including stores that were already persistent. Retaining
-their old PVCs or adding this profile does not convert their contents. You can
-apply the profile during that planned cutover after reviewing the capacity and
-claim changes below.
+Persistent indexes are now the chart default for all five stores in both
+filesystem and raw-block backends. The chart keeps existing sizes, block
+geometry, paths, and memory-resource defaults; it does not migrate old contents or
+provision missing hostPath filesystems automatically.
 
-Use [`custom-values/buildbarn-values-persistent.yaml`](../custom-values/buildbarn-values-persistent.yaml)
-to opt into disk-backed indexes for CAS, CMS, AC, ISCC, and FSAC. The profile only
-changes index types for both backends; it does not enable ISCC/FSAC or change
-backends, volume mode, block geometry, index sizes, paths, StorageClasses, or
-resources. CMS retains its configured backend, including the default `sharedCas`.
-Existing installations that omit it keep the defaults of the chart version
-they install. Within CDC, already-persistent stores keep their paths and sizes
-when this profile is added.
+For pre-CDC deployments, use one coordinated maintenance window for the
+[storage format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback)
+and these new defaults. Stop clients and storage, reset all old stores, prepare
+metadata volumes and claim templates, and start CDC with persistent indexes.
+That format change invalidates even previously persistent ISCC history; keeping
+old PVCs cannot avoid the cold start. The steps below are the capacity and values
+checklist for that cutover. Only deployments already on CDC should use the
+same-format rollout in step 5 instead of the complete cutover runbook.
+
+Remove old explicit `inMemory` overrides, or apply
+[`custom-values/buildbarn-values-persistent.yaml`](../custom-values/buildbarn-values-persistent.yaml)
+after deployment values to override them. The profile only changes index types;
+it does not enable ISCC/FSAC or change backends, volume mode, block geometry,
+index sizes, paths, StorageClasses, or resources. CMS retains its configured
+backend, including the default `sharedCas`. Within CDC, already-persistent
+stores keep their paths and sizes. To deliberately retain volatile indexes, use
+the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
 
 1. **Capture the current configuration.** Save the current release values and
-   rendered manifest, and retain your deployment values file. Check for
-   `configOverrides` that replace the generated storage config. Do not combine
-   this conversion with a shard-count, backend, block-size, or index-size change
-   on an already-persistent store: those changes can invalidate its existing data.
+   rendered manifest, and retain your deployment values file. Inspect
+   `helm get values buildbarn --namespace hermetiq --all` for inherited settings.
+   Explicit `inMemory` values and `helm upgrade --reuse-values` can preserve old
+   behavior despite the changed defaults; render the complete desired values
+   rather than relying on an upgrade flag to migrate them. Check for
+   `configOverrides` that replace the generated storage config. If the deployment
+   already uses CDC and existing persistent contents must be retained, keep its
+   shard count, backend, block size, and index size unchanged. The pre-CDC cutover
+   is already cold, so reviewed capacity changes can share that maintenance window.
 
 2. **Check capacity for every enabled store.** A disk index uses 66 bytes per
    record, so `index MiB >= desired entries × 66 / 1048576`, rounded up. Continue
@@ -184,8 +198,12 @@ when this profile is added.
    blocks and a 256Mi index. For example, the default filesystem AC uses 10Gi blocks
    plus a 1344Mi index inside a 12Gi claim; a customized 11Gi blocks file would
    not fit. Budget page-cache memory and sync I/O too: the raw-CAS file default
-   is 7360Mi, much larger than its default 24M-entry RAM map (~1.43GiB). The
-   profile deliberately does not resize indexes or adjust resource limits.
+   is 7360Mi, much larger than the former default 24M-entry RAM map (~1.43GiB).
+   All five default file indexes with raw CAS/AC/ISCC/FSAC total 9984Mi
+   (9.75GiB) before CMS blocks, Go heap, and I/O buffers. The unchanged 4Gi
+   memory request does not reserve that working set: size requests and limits
+   for the expected page cache and workload. The profile deliberately does not
+   resize indexes or adjust resource limits.
 
 3. **Prepare storage according to the existing backend.**
 
@@ -195,7 +213,7 @@ when this profile is added.
    | Filesystem + hostPath | Ensure free space in the existing `hostPath.path`; recovery remains limited to that retained node and filesystem. |
    | Filesystem + emptyDir | Ensure `emptyDir.sizeLimit` fits the blocks and index. Container restarts may recover, but replacing the pod still loses the store. |
    | Raw block + PVC | Set each store's `blockDevice.metadata.storageClassName` to a class that provisions Filesystem volumes and check `metadata.size`. New `<store>-meta` claim templates require the [StatefulSet recreate procedure](#recreate-the-storage-statefulset); retain the existing `<store>-blocks` claims. |
-   | Raw block + hostPath | Supply a retained filesystem `blockDevice.metadata.hostPath.path` for every enabled store. This adds pod volumes, not PVC templates, so no StatefulSet recreation is needed. |
+   | Raw block + hostPath | Supply a retained filesystem `blockDevice.metadata.hostPath.path` for every enabled raw store. This adds pod volumes, not PVC templates, so no StatefulSet recreation is needed. |
 
    CAS uses `cdc-v1/keys.db`; AC/ISCC/FSAC use
    `cdc-v1/<store>-keys.db`, with `cdc-v1/persistent_state/` alongside each map.
@@ -259,7 +277,10 @@ when this profile is added.
    settings are unchanged. A later `inMemory` override intentionally opts that
    store back out.
 
-5. **Perform the reviewed migration.** Schedule a cold-cache window, because
+5. **Perform the reviewed migration.** For pre-CDC, use the coordinated
+   [cutover runbook](buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+   including the stopped-StatefulSet recreation when claims change. For an
+   already-CDC deployment, schedule a cold-cache window, because
    each previously volatile store starts empty on the first conversion. Drain
    builds first; if CAS or CMS is reset, restart frontends before resuming clients
    so stale positive existence-cache entries cannot hide missing blobs. For raw
@@ -273,12 +294,46 @@ when this profile is added.
      -f persistence-overrides.yaml
    ```
 
-   Retain the profile in subsequent upgrades; omitting it can restore volatile
-   defaults. Confirm healthy storage pods and successful metadata mounts, then
+   Keep the reviewed values in subsequent upgrades. If older deployment files
+   retain `inMemory`, keep the persistent profile after them or remove those
+   overrides. Confirm healthy storage pods and successful metadata mounts, then
    verify retained history/cache entries through a controlled graceful restart
    after the store has warmed and persisted state. Allow enough termination
    grace time for the disks to sync. Abrupt failures can still lose unsynchronized
    writes as described above.
+
+### Explicit Ephemeral Opt-Out
+
+Apply [`custom-values/buildbarn-values-ephemeral.yaml`](../custom-values/buildbarn-values-ephemeral.yaml)
+**after** deployment values when losing indexes on restart is intentional:
+
+```bash
+helm template buildbarn ./charts/buildbarn --namespace hermetiq \
+  -f deployment-values.yaml \
+  -f custom-values/buildbarn-values-ephemeral.yaml
+```
+
+The overlay selects in-memory indexes for every raw-block store and filesystem
+CMS/AC/ISCC/FSAC. It leaves optional-store enablement, volume mode, backends,
+geometry, sizes, and resources unchanged. Shared CMS becomes wholly in-memory
+when raw CAS has no metadata filesystem. Raw stores no longer need metadata
+volumes; changing an existing PVC release to this layout also changes immutable
+claim templates, so use the reviewed StatefulSet recreation procedure and retain
+old claims until rollback is no longer needed. Returning to persistent indexes
+starts cold; do not reuse an old checkpoint over blocks modified in volatile mode.
+
+Filesystem CAS always uses a file-backed index in this chart. To make that store
+pod-lifetime as well, explicitly select `storage.persistence.mode: emptyDir` and
+set `emptyDir.sizeLimit` for every enabled filesystem store. Changing volume mode
+is a separate migration and must not be used to discard an existing release's
+PVCs accidentally. File-backed indexes on `emptyDir` can survive container-only
+restarts, but not pod replacement.
+
+The ephemeral overlay is not a speed recommendation. RAM maps avoid file writes
+but consume Go heap; disk maps use the OS page cache for hot lookups. Budget for
+either choice, and expect the opt-out to discard AC hits, ISCC learning, FSAC
+hints, and raw CAS/CMS contents on storage-process restart. Frontend read caches
+remain intentionally volatile in both configurations.
 
 ### Resize a Store
 

@@ -1,0 +1,149 @@
+suite: explicit ephemeral storage profile
+templates:
+  - templates/configmaps.yaml
+  - templates/statefulset-storage.yaml
+values:
+  - ../../../custom-values/buildbarn-values-ephemeral.yaml
+tests:
+  - it: leaves optional stores disabled and keeps the filesystem PVC backend
+    template: templates/statefulset-storage.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 2
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: cas
+      - equal:
+          path: spec.volumeClaimTemplates[1].metadata.name
+          value: ac
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeDevices
+
+  - it: explicitly drops mutable filesystem indexes while CAS remains file-backed
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.iscc.enabled: true
+      storage.persistence.fsac.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "(cms|ac|iscc|fsac)-keys.db|cms_persistent_state|storage-(ac|iscc|fsac)/cdc-v1/persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/cdc-v1/keys.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas/cdc-v1/persistent_state"
+
+  - it: opts all five raw stores out of checkpoint persistence
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "stateDirectoryPath:|onBlockDevice:|storage-.*-meta"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/cas'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/cms'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/ac'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/iscc'"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "devicePath: '/dev/bb/fsac'"
+
+  - it: raw opt-out omits all five metadata claims
+    template: templates/statefulset-storage.yaml
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 5
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cas-meta")]
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-meta")]
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "ac-meta")]
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "iscc-meta")]
+      - notExists:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "fsac-meta")]
+
+  - it: raw local NVMe opt-out works without metadata directories
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.hostPath.devicePath: /dev/ephemeral/ac
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.hostPath.devicePath: /dev/ephemeral/iscc
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+      storage.persistence.fsac.blockDevice.hostPath.devicePath: /dev/ephemeral/fsac
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "stateDirectoryPath:|onBlockDevice:|storage-.*-meta"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "blocksInMemory:"
+
+  - it: a later persistent selector restores persistence without enabling optional stores
+    template: templates/configmaps.yaml
+    values:
+      - ../../../custom-values/buildbarn-values-ephemeral.yaml
+      - ../../../custom-values/buildbarn-values-persistent.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+    asserts:
+      - notMatchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "inMemory:|blocksInMemory:|initialSizeClassCache:|fileSystemAccessCache:"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas-meta/cdc-v1/keys.db"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-cas-meta/cdc-v1/cms_persistent_state"
+      - matchRegex:
+          path: data["storage.jsonnet"]
+          pattern: "storage-ac-meta/cdc-v1/persistent_state"

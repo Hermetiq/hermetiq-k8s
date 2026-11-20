@@ -10,12 +10,14 @@ The ISCC key is a reduced action digest: command digest plus platform. It intent
 
 ## 1. Enable ISCC Storage
 
-ISCC is an extra bb-storage store served by the storage pod. It is disabled by
-default and retains the legacy in-memory index default when enabled. To preserve
-scheduling history, explicitly set `keyLocationMap.type: blockDevice` for filesystem
-storage or `blockDevice.keyLocationMap: file` for raw blocks. The
+ISCC is an extra bb-storage store served by the storage pod. It remains disabled
+by default. When enabled, it uses a persistent index for both filesystem storage
+(`keyLocationMap.type: blockDevice`) and raw blocks (`blockDevice.keyLocationMap: file`).
+Remove any old explicit `inMemory` override, or apply the
 [persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
-selects disk indexes for CAS, CMS, AC, ISCC, and FSAC without enabling ISCC or FSAC.
+after deployment values. Neither profile enables ISCC or FSAC. The
+[ephemeral opt-out](buildbarn-storage-operations.md#explicit-ephemeral-opt-out)
+deliberately discards learned history on storage-process restart.
 
 ```yaml
 storage:
@@ -23,7 +25,7 @@ storage:
     iscc:
       enabled: true
       keyLocationMap:
-        type: blockDevice # filesystem backend; preserve learned history
+        type: blockDevice # default for filesystem backend; preserve learned history
       # backend / blockDevice / size like the other stores.
       # Sizing: buildbarn-storage-model.md
       # Raw devices: buildbarn-block-storage.md

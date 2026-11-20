@@ -12,38 +12,36 @@
 #   hermetiq/ephemeral-lvm=ready.
 # - A namespace that permits privileged pods. HostPath raw block devices require
 #   privileged Buildbarn storage containers.
+# - At least 16 GiB free on the retained node boot filesystem for metadata below:
+#   default index files total 9.75 GiB, plus 1 GiB shared CMS blocks and headroom.
+#   Use a separately mounted metadata filesystem instead if appropriate; do not
+#   point metadata directories at an unmounted path unintentionally.
+#
+# File indexes retain the warmed cache and learned history across pod restarts
+# on the SAME retained node. Node replacement still loses the Local SSD blocks.
+# Apply buildbarn-values-ephemeral.yaml LAST to explicitly opt out; it removes
+# metadata mounts and makes all five storage-tier stores restart empty.
+# Upgrading from pre-CDC requires the coordinated cold cutover in the runbook.
 
 storage:
   replicas: 1
   resources:
     requests:
       cpu: 500m
-      # In-memory key-location maps are RESERVED at startup and become resident
-      # as slots are touched. CAS 80M + AC 16M + ISCC 8M + FSAC 8M = 112M entries
-      # x 64 B = ~6.7 GiB fully populated; 12Gi covers that plus Go GC headroom
-      # and large gRPC message buffers.
-      #
-      # A 680Gi CAS is the point where `keyLocationMap: file` (while `inMemory`
-      # is the chart default for blockDevice) becomes the better trade for larger
-      # shards: it moves the multi-GiB KLM to disk AND makes the store survive
-      # restarts. It needs a metadata volume, which this LVM layout does not
-      # carve, so this single-680Gi-shard overlay stays in-memory.
-      #
-      # Multi-NVMe / 10 TiB scale note: partition-ephemeral-disks-daemonset.yaml
-      # carves fixed 8G/2G/6G LVs for AC/ISCC/FSAC and gives 100%FREE to CAS. On
-      # nodes with 4x375 GB NVMe (~1350Gi CAS LV across 8 shards = ~10.5 TiB) or
-      # 8x375 GB NVMe (~2750Gi CAS LV across 4 shards = ~10.7 TiB), update
-      # cas.blockDevice.size below to match the real LV size and scale
-      # keyLocationMapInMemoryEntries (e.g. 160000000 for 1350Gi with 24Gi RAM
-      # request) or switch cas.blockDevice.keyLocationMap to `file`.
-      memory: 12Gi
+      # File indexes total 9.75 GiB at the configured sizes, including shared
+      # CMS. Reserve page-cache working set plus heap and RPC buffers.
+      # Multi-NVMe nodes need truthful cas.blockDevice.size and index sizing;
+      # the partitioning DaemonSet gives CAS the remaining space after fixed
+      # AC/ISCC/FSAC LVs. These metadata directories are on the node boot disk,
+      # not the raw LVs. metadata.size does not impose a hostPath quota.
+      memory: 16Gi
       # CAS/AC/ISCC/FSAC live on raw block devices; this only covers scratch.
       ephemeral-storage: 2Gi
     limits:
       cpu: 7100m
       memory: 24Gi
       ephemeral-storage: 2Gi
-  # Checks every entries/size pair below against the ratio formula documented in
+  # Checks each file index (or RAM index in ephemeral mode) against the formula in
   # the chart's storage.keyLocationMapSizing. An undersized map drops location
   # records once it saturates, and clients see "Lost inputs no longer available
   # remotely" (Bazel exit 39) for blobs that are actually on disk.
@@ -60,25 +58,30 @@ storage:
     cas:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
-        # ~634 GiB usable (41 of 44 blocks) / 17408 B average blob = ~39M
-        # indexable blobs, so 80M holds a 2.0x ratio. The previous 40M was 1.02x:
-        # enough to index the device exactly once, which is where put probes start
-        # failing and blobs become unreachable.
+        keyLocationMap: file
+        # Used only with the ephemeral opt-out: ~634 GiB usable / 17408 B
+        # average chunk = ~39M chunks, so 80M RAM entries gives a 2.0x ratio.
+        # File mode uses metadata.keyLocationMapSizeMi instead (7360 MiB default).
         keyLocationMapInMemoryEntries: 80000000
         # Documentation only in hostPath mode — but the sizing guard reads it, so
         # it must match the real LV or the check is meaningless.
         size: 680Gi
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/cas-meta
         hostPath:
           devicePath: /dev/ephemeral/cas
     ac:
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
+        keyLocationMap: file
         # Matches the 8G LV carved by partition-ephemeral-disks-daemonset.yaml.
         # ~7.3 GiB usable / 1152 B per ActionResult = ~6.8M -> 2.34x at 16M.
         keyLocationMapInMemoryEntries: 16000000
         size: 8Gi
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/ac-meta
         hostPath:
           devicePath: /dev/ephemeral/ac
     # ISCC/FSAC devices are deliberately SMALL: they hold one tiny object per
@@ -88,20 +91,26 @@ storage:
       enabled: true
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
+        keyLocationMap: file
         # ~1.8 GiB usable / 512 B per PreviousExecutionStats = ~3.8M -> 2.1x.
         keyLocationMapInMemoryEntries: 8000000
         size: 2Gi
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/iscc-meta
         hostPath:
           devicePath: /dev/ephemeral/iscc
     fsac:
       enabled: true
       backend: blockDevice
       blockDevice:
-        keyLocationMap: inMemory
+        keyLocationMap: file
         # ~5.5 GiB usable / 2048 B per path bloom filter = ~2.9M -> 2.8x.
         keyLocationMapInMemoryEntries: 8000000
         size: 6Gi
+        metadata:
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-storage/fsac-meta
         hostPath:
           devicePath: /dev/ephemeral/fsac
   nodeSelector:
@@ -133,20 +142,10 @@ config:
 
 frontend:
   contentAddressableStorage:
-    # Two-sided trade, not a "shorter is safer" knob. Longer keeps
-    # FindMissingBlobs off the storage shards — the frontend is the only component
-    # on the client path, so each miss costs frontend CPU plus a storage round
-    # trip and lengthens request residency at the ingress. Shorter bounds the
-    # window in which this cache lies: it remembers a blob was PRESENT, and these
-    # stores use in-memory key-location maps so they come back EMPTY after a
-    # storage restart, during which clients skip re-uploading and their actions
-    # fail with "Lost inputs no longer available remotely".
-    #
-    # Nothing is evicted here yet (block_allocator_releases_total is 0), so a
-    # storage restart is the only way a blob vanishes and re-running the build is
-    # the recovery. 180s keeps most of the caching benefit at a 3-minute window.
-    # Switching these stores to blockDevice.keyLocationMap: file removes the
-    # hazard entirely and makes a long duration safe.
+    # Persistence avoids a full cold cache on ordinary same-node restarts.
+    # Existence entries can still become stale after eviction, an abrupt crash,
+    # or node loss; 180s bounds that window. During the CDC cold cutover, restart
+    # frontends before resuming builds to clear cached positives.
     existenceCaching:
       enabled: true
       cacheSize: 1000000

@@ -12,8 +12,8 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: "Add an opt-in persistent-index values profile for CAS, CMS, AC, ISCC, and FSAC with migration guidance; preserve existing chart defaults"
+    - kind: changed
+      description: "Breaking: default CAS, CMS, AC, ISCC, and FSAC to persistent indexes for filesystem and raw-block storage; add an explicit ephemeral profile and coordinated CDC cutover guidance; keep optional stores disabled"
     - kind: fixed
       description: "Isolate CDC CAS files in cdc-v1 and refuse legacy data until an explicit maintenance reset; persist shared CMS mappings by default so composite blobs survive restarts"
     - kind: fixed
