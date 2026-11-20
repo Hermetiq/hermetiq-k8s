@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Render the actual Helm NOTES without contacting a Kubernetes cluster. NOTES
-# are not part of `helm template` manifests, so use a client-only dry install.
+# Render the actual NOTES source through a temporary ConfigMap using helm
+# template. Helm 3 install --dry-run=client still performs cluster discovery;
+# this wrapper keeps the same template context without an install action.
 set -euo pipefail
 python3 - "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" <<'PY'
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,21 +16,38 @@ import yaml
 chart = pathlib.Path(sys.argv[1])
 repo = chart.parent.parent
 
+# NOTES.txt is omitted from helm template output. Capture its unmodified source
+# in a named template in a temporary chart copy, then expose the rendered text
+# as data in one ordinary manifest. All production helpers, values, and files
+# remain available, and every assertion below reads the real NOTES implementation.
+render_temp = tempfile.TemporaryDirectory(prefix='buildbarn-notes-test-')
+render_chart = pathlib.Path(render_temp.name) / 'buildbarn'
+shutil.copytree(chart, render_chart)
+notes_source = (chart / 'templates/NOTES.txt').read_text()
+(render_chart / 'templates/storage-notes-test.yaml').write_text(
+    '{{- define "buildbarn.test.actualNotes" -}}\n' + notes_source +
+    '\n{{- end -}}\n'
+    'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: storage-notes-test\n'
+    'data:\n  notes: {{ include "buildbarn.test.actualNotes" . | toJson }}\n'
+)
+
 
 def notes(values=None, profiles=()):
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as overrides:
         yaml.safe_dump(values or {}, overrides)
         overrides.flush()
-        command = ['helm', 'install', 'storage-notes-test', str(chart),
-                   '--namespace', 'notes-test', '--dry-run=client',
+        command = ['helm', 'template', 'storage-notes-test', str(render_chart),
+                   '--namespace', 'notes-test',
+                   '--show-only', 'templates/storage-notes-test.yaml',
                    '-f', str(chart / 'ci-values/ci.yaml')]
         for profile in profiles:
             command += ['-f', str(repo / 'custom-values' / profile)]
         command += ['-f', overrides.name]
         output = subprocess.check_output(command, text=True,
                                          env=dict(os.environ, KUBECONFIG='/dev/null'))
-    assert '\nNOTES:\n' in output, 'Helm did not return NOTES'
-    return output.split('\nNOTES:\n', 1)[1]
+    document = yaml.safe_load(output)
+    assert document['kind'] == 'ConfigMap', document
+    return document['data']['notes']
 
 
 baseline = notes()
