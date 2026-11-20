@@ -106,7 +106,7 @@ for raw in (False, True):
 dedicated_script = render(['storage.persistence.cms.backend=filesystem', 'storage.persistence.cms.size=4Gi'])
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp)
-    mounts = ['/storage-cas', '/storage-cms', '/storage-ac']
+    mounts = ['/storage-cas', '/storage-cms', '/storage-ac', '/storage-iscc', '/storage-fsac']
     for m in mounts:
         (root / m.lstrip('/')).mkdir()
     subprocess.run(['sh', '-c', rewrite_paths(dedicated_script, root, mounts)], check=True)
@@ -114,6 +114,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not (root / 'storage-cas/cdc-v1/cms_persistent_state').exists()
     assert (root / 'storage-cms/persistent_state').is_dir()
     assert (root / 'storage-ac/cdc-v1/persistent_state').is_dir()
+    assert (root / 'storage-iscc/cdc-v1/persistent_state').is_dir()
+    assert (root / 'storage-fsac/cdc-v1/persistent_state').is_dir()
 
 print('Storage format guard rejects legacy CAS/AC/ISCC/FSAC files without mutating files or dirs; CDC init is repeatable.')
 PY

@@ -1,0 +1,54 @@
+# Explicit persistent-index settings for all five CDC storage-tier stores.
+# These match the chart defaults. Use this overlay to override older deployment
+# values that explicitly selected inMemory; a new installation does not need it.
+# Apply AFTER your deployment values:
+#   helm template buildbarn charts/buildbarn -f my-values.yaml \
+#     -f custom-values/buildbarn-values-persistent.yaml
+#
+# Review docs/buildbarn-storage-operations.md before applying to an existing
+# release. Filesystem stores need free space for their index; raw PVC stores
+# add immutable metadata claim templates and need a StatefulSet recreate;
+# raw hostPath stores require each blockDevice.metadata.hostPath.path.
+# Pre-CDC upgrades also require the explicit storage-format cutover; this
+# profile cannot preserve data encoded by an older Buildbarn version.
+#
+# Only index modes change here. Existing enable flags (including optional
+# ISCC/FSAC), backends, volume modes, sizes, StorageClasses, paths, and resource
+# budgets are preserved. Tune disk-index sizes for your workload: RAM `entries`
+# settings do not size file indexes. Later -f files or --set may override this
+# profile. Avoid resizing or moving an already-persistent index unintentionally.
+#
+# Recovery requires retained blocks, index, and persistent_state together.
+# Local blocks and metadata must share storage and reset lifecycle. Never keep
+# boot-disk/network metadata over wiped Local SSD blocks. The bundled Local SSD
+# overlay already selects persistent indexes and supplies same-SSD metadata
+# paths for its mount/generation-checking provisioner. See the GKE validation
+# runbook before adopting another layout. emptyDir cannot survive pod replacement.
+storage:
+  persistence:
+    cas:
+      # Filesystem CAS already has a file-backed index.
+      blockDevice:
+        keyLocationMap: file
+    cms:
+      # sharedCas stays on the CAS filesystem or companion metadata volume.
+      # Its blocks, index, and state must fit alongside the CAS metadata.
+      keyLocationMap:
+        type: blockDevice
+      blockDevice:
+        keyLocationMap: file
+    ac:
+      keyLocationMap:
+        type: blockDevice
+      blockDevice:
+        keyLocationMap: file
+    iscc:
+      keyLocationMap:
+        type: blockDevice
+      blockDevice:
+        keyLocationMap: file
+    fsac:
+      keyLocationMap:
+        type: blockDevice
+      blockDevice:
+        keyLocationMap: file

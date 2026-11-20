@@ -13,6 +13,10 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: fixed
+      description: "Keep raw Local SSD blocks and persistent metadata on the same SSDs with verified mount/generation checks; require paired resets and report volatile stores and undersized file indexes in Helm notes"
+    - kind: changed
+      description: "Breaking: default CAS, CMS, AC, ISCC, and FSAC to persistent indexes for filesystem and raw-block storage; add an explicit ephemeral profile and coordinated CDC cutover guidance; enable ISCC and FSAC stores by default while retaining consumer opt-ins"
+    - kind: fixed
       description: "Isolate CDC CAS files in cdc-v1 and refuse legacy data until an explicit maintenance reset; persist shared CMS mappings by default so composite blobs survive restarts"
     - kind: fixed
       description: "Use the CDC scheduler field for fork features, validate actual worker ConfigMap references and binary capability declarations, and require the internal browser route when the cache proxy enforces auth"

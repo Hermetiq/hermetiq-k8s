@@ -22,7 +22,8 @@ routing:
 storage:
   # Per storage shard; tune these requests for your shard count and cache load.
   # For 10 TiB deployments (e.g. 10 x 1 TiB or 5 x 2 TiB shards), also set
-  # terminationGracePeriodSeconds: 120 (or 180) and scale memory so the mmap'd
+  # terminationGracePeriodSeconds above the 120s default if flushes need longer,
+  # and scale memory so the mmap'd
   # key-location map stays resident in the OS page cache (16Gi for 1 TiB shards,
   # 28Gi-32Gi for 2 TiB shards). See charts/buildbarn/README.md for 10 TiB profiles.
   resources:
@@ -34,7 +35,7 @@ storage:
   keyLocationMapSizing:
     validate: true
   persistence:
-    # Enable ISCC and FSAC before first install when using mode=pvc: StatefulSet
+    # Keep the default-enabled ISCC and FSAC when using mode=pvc: StatefulSet
     # volumeClaimTemplates are immutable after creation, and the starter
     # RbeWorker manifests in custom-values/rbeworkers/ require FSAC for
     # FUSE input prefetching. If you first installed with an older copy of this
@@ -46,7 +47,7 @@ storage:
     fsac:
       enabled: true
     # Example: scale to a 10 TiB persistent cache across 10 x 1 TiB shards
-    # (also set storage.replicas: 10 and storage.terminationGracePeriodSeconds: 120):
+    # (also set storage.replicas: 10; shutdown grace already defaults to 120s):
     # cas:
     #   storageClassName: premium-rwo
     #   size: 1Ti
@@ -57,7 +58,7 @@ storage:
     #   size: 25Gi
     #   blocksSizeGi: 20
     #   keyLocationMap:
-    #     type: blockDevice
+    #     type: blockDevice # already the default
     #     sizeMi: 2688
 
 images:

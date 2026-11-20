@@ -59,7 +59,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: b23e42c39bbbd4957af1ae595c0bdec49aa555b5bdef47cb43fe206f644e5776
+          value: 1ed13980dae6664f38b4314b721344f40b64990dbde6bcf2ddad2d7ec4388d7e
       - equal:
           path: spec.template.spec.volumes[0].configMap.items
           value:
@@ -79,7 +79,7 @@ tests:
     asserts:
       - notEqual:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: b23e42c39bbbd4957af1ae595c0bdec49aa555b5bdef47cb43fe206f644e5776
+          value: 1ed13980dae6664f38b4314b721344f40b64990dbde6bcf2ddad2d7ec4388d7e
 
   # With configurationReloadInterval the scheduler applies changes to the
   # action router and predeclared queues itself, so they must not roll it.
@@ -96,7 +96,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 1f469bec5d3acc809234dbe10ac653f34fd7b2217da8ae7b5fbd65e80300f9a8
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce
       - contains:
           path: spec.template.spec.volumes[0].configMap.items
           content:
@@ -117,7 +117,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 1f469bec5d3acc809234dbe10ac653f34fd7b2217da8ae7b5fbd65e80300f9a8
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce
 
   - it: does not roll the scheduler when the actionRouter changes and reloading is enabled
     template: templates/deployment-scheduler.yaml
@@ -130,4 +130,4 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 1f469bec5d3acc809234dbe10ac653f34fd7b2217da8ae7b5fbd65e80300f9a8
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce

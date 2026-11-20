@@ -55,9 +55,10 @@ tests:
           path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
           content: ALL
 
-  # --- block-device backend, in-memory KLM (default), deviceAccess=group ---
+  # --- block-device backend, explicit in-memory KLM, deviceAccess=group ---
   - it: block backend renders Block PVCs, volumeDevices, and pod securityContext
     set:
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.storageClassName: bb-block
     asserts:
@@ -117,11 +118,11 @@ tests:
           path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
           value: /storage-cas-meta
 
-  - it: prepares separate CDC CAS, AC, and durable shared CMS state without adding PVCs
+  - it: prepares separate CDC and shared CMS state on the four default data PVCs
     asserts:
       - lengthEqual:
           path: spec.volumeClaimTemplates
-          count: 2
+          count: 4
       - matchRegex:
           path: spec.template.spec.initContainers[0].command[2]
           pattern: 'mkdir -p /storage-cas/cdc-v1/persistent_state'
@@ -176,6 +177,7 @@ tests:
   # --- hostPath mode with a raw block device (node-local NVMe LV) ---
   - it: hostPath block mode bind-mounts the device node and goes privileged
     set:
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
       storage.persistence.mode: hostPath
       storage.persistence.blockDevice.allowHostPath: true
       storage.persistence.cas.backend: blockDevice
@@ -201,18 +203,26 @@ tests:
           path: spec.volumeClaimTemplates
 
   # --- terminationGracePeriodSeconds passthrough ---
-  - it: terminationGracePeriodSeconds is unset by default
+  - it: persistent stores get a two-minute termination grace period by default
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
+
+  - it: an explicit null grace period uses the Kubernetes default
+    set:
+      storage.terminationGracePeriodSeconds: null
     asserts:
       - notExists:
           path: spec.template.spec.terminationGracePeriodSeconds
 
   - it: terminationGracePeriodSeconds passes through when set
     set:
-      storage.terminationGracePeriodSeconds: 120
+      storage.terminationGracePeriodSeconds: 180
     asserts:
       - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
-          value: 120
+          value: 180
 
   # The kubelet creates a DirectoryOrCreate hostPath as root:root 0755, and
   # fsGroup is not applied to hostPath volumes, so an unprivileged volume-init
@@ -268,6 +278,7 @@ tests:
 
   - it: CMS placement for raw memory index
     set:
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.storageClassName: bb-block
     asserts:

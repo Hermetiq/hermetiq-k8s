@@ -139,6 +139,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - hasDocuments:
           count: 0
@@ -154,6 +156,7 @@ tests:
 
   - it: accepts a hostPath-mode block device without a size
     set:
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
       storage.persistence.mode: hostPath
       storage.persistence.blockDevice.allowHostPath: true
       storage.persistence.cas.backend: blockDevice
@@ -181,6 +184,8 @@ tests:
       storage.persistence.cas.emptyDir.sizeLimit: 400Gi
       storage.persistence.cas.blocksSizeGi: 500
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - failedTemplate:
@@ -193,6 +198,8 @@ tests:
       storage.persistence.cas.blocksSizeGi: 300
       storage.persistence.cas.size: 10Gi
       storage.persistence.ac.emptyDir.sizeLimit: 50Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
       storage.persistence.ac.blocksSizeGi: 10
     asserts:
       - notFailedTemplate: {}
@@ -283,6 +290,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - notFailedTemplate: {}
@@ -291,6 +299,7 @@ tests:
     set:
       storage.keyLocationMapSizing.validate: true
       storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.keyLocationMap.type: inMemory
       storage.persistence.fsac.keyLocationMap.entries: 1000
     asserts:
       - failedTemplate:
@@ -1244,6 +1253,8 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 958Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - failedTemplate:
           errorPattern: 'sharedCas cms\.blocksSizeGi .* leaves no room inside storage\.persistence\.cas\.emptyDir\.sizeLimit'
@@ -1361,3 +1372,136 @@ tests:
   # a chart-level error rather than a template one. validate.yaml keeps the same
   # checks as a backstop for `--skip-schema-validation`; the enum lists
   # themselves live in values.schema.json.
+
+  - it: reports the filesystem AC file knob after an entries-only scale-up
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.entries: 42000000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage.persistence.ac: key-location map is too small.*that is 1.25x.*Set storage.persistence.ac.keyLocationMap.sizeMi to at least 2152 MiB.*RAM entry settings do not size this file index'
+
+  - it: rejects an AC file index one MiB below the rounded minimum
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.sizeMi: 2151
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.ac.keyLocationMap.sizeMi to at least 2152 MiB'
+
+  - it: accepts the rounded minimum AC file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.ac.blocksSizeGi: 20
+      storage.persistence.ac.keyLocationMap.sizeMi: 2152
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks enabled filesystem ISCC file-index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.size: 4Gi
+      storage.persistence.iscc.blocksSizeGi: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.iscc.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks enabled filesystem FSAC file-index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.size: 12Gi
+      storage.persistence.fsac.blocksSizeGi: 8
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.fsac.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: skips disabled filesystem FSAC even with an undersized file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: false
+      storage.persistence.fsac.keyLocationMap.sizeMi: 1
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks shared CMS file-index capacity on the CAS filesystem
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.blocksSizeGi: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks shared CMS file-index capacity on raw CAS metadata
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cms.blocksSizeGi: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: checks a dedicated filesystem CMS file index
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.backend: filesystem
+      storage.persistence.cms.size: 4Gi
+      storage.persistence.cms.blocksSizeGi: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.keyLocationMap.sizeMi to at least 484 MiB'
+
+  - it: reports raw CAS metadata index size rather than ignored RAM entries
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: 340Gi
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 1024
+      storage.persistence.cas.blockDevice.keyLocationMapInMemoryEntries: 40000000
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi to at least 2460 MiB'
+
+  - it: reports raw AC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.size: 16Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.ac.blockDevice.metadata.keyLocationMapSizeMi to at least 1721 MiB'
+
+  - it: reports raw ISCC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.iscc.enabled: true
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.size: 4Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.iscc.blockDevice.metadata.keyLocationMapSizeMi to at least 968 MiB'
+
+  - it: reports raw FSAC metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.fsac.enabled: true
+      storage.persistence.fsac.backend: blockDevice
+      storage.persistence.fsac.blockDevice.size: 12Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.fsac.blockDevice.metadata.keyLocationMapSizeMi to at least 726 MiB'
+
+  - it: reports dedicated raw CMS metadata index capacity
+    set:
+      storage.keyLocationMapSizing.validate: true
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.cms.blockDevice.size: 4Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Set storage.persistence.cms.blockDevice.metadata.keyLocationMapSizeMi to at least 968 MiB'

@@ -11,13 +11,37 @@
 {{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
 
-CDC STORAGE: upgrading pre-CDC storage requires a maintenance cutover and
-explicit cache reset across CAS, AC, ISCC, and FSAC. volume-init refuses legacy
-files without modifying them. Snapshot the old cache if rollback is required;
-follow:
-https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback
-Shared CMS mappings persist under cdc-v1 by default. Explicit inMemory mappings
-make composite blobs unavailable after a storage process restart.
+{{- if (index (default (dict) .Values.configOverrides) "storage.jsonnet" | default "") }}
+STORAGE CONFIG OVERRIDE: configOverrides["storage.jsonnet"] replaces the generated
+storage configuration. Index persistence and sizing cannot be inferred from chart
+values; inspect the rendered override for every store's persistent configuration.
+{{- else }}
+{{- $volatile := include "buildbarn.storage.volatileStores" . | fromJsonArray }}
+{{- if $volatile }}
+WARNING: VOLATILE STORAGE STORES: {{ join ", " $volatile }}.
+These enabled stores render without persistent indexes/checkpoints and start
+empty after a storage-process restart. Remove explicit inMemory overrides or
+apply custom-values/buildbarn-values-persistent.yaml after deployment values
+unless this loss is intentional. --reset-then-reuse-values refreshes inherited
+defaults, but preserves explicit inMemory overrides.
+{{- else }}
+All enabled storage stores use persistent indexes and checkpoint state.
+{{- end }}
+{{- if not .Values.storage.keyLocationMapSizing.validate }}
+{{- range $diagnostic := (include "buildbarn.storage.indexSizingDiagnostics" . | fromJsonArray) }}
+
+WARNING: STORAGE INDEX CAPACITY: {{ $diagnostic }}
+Set storage.keyLocationMapSizing.validate=true to make this a render error.
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq .Values.storage.persistence.mode "emptyDir" }}
+WARNING: storage.persistence.mode=emptyDir loses all stores on pod replacement,
+even when their indexes and checkpoint state are file-backed.
+{{- end }}
+Storage recovery requires matching blocks, indexes, and state to survive together.
+For the CDC cutover and volume-lifetime limits:
+https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes
 
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}

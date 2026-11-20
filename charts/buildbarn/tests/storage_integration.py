@@ -4,6 +4,8 @@
 Requires helm, Docker, PyYAML, jsonnet, protobuf and grpcio. No cluster access.
 All mounts are named Docker volumes, so this also works with a Docker socket
 inside the CI container without assuming identical host/container paths.
+Raw-device tests require privileged helper containers to attach disposable
+volume files to loop devices; no existing disks or Kubernetes resources are used.
 """
 import base64
 import copy
@@ -25,6 +27,7 @@ import yaml
 CHART = Path(__file__).resolve().parents[1]
 LEGACY_IMAGE = ('ghcr.io/buildbarn/bb-storage:20260908T142448Z-db62041'
                 '@sha256:32ebc54b769b9e5fcc4beec3fdb527fd45853ca1ec9d1a112d00b1812f272a1f')
+LOOP_TOOL_IMAGE = 'debian:bookworm-slim'
 
 
 def docker(*args, check=True):
@@ -58,13 +61,37 @@ def message_class(descriptor):
     return message_factory.MessageFactory().GetPrototype(descriptor)
 
 
-def render_config(directory, ephemeral=False):
+def render_config(directory, ephemeral=False, optional_stores=False, raw=False, local=False):
     values = {'storage': {'replicas': 1, 'keyLocationMapSizing': {'validate': False}, 'persistence': {
         'cas': {'size': '4Gi', 'blocksSizeGi': 1, 'keyLocationMapSizeMi': 1},
         'ac': {'size': '2Gi', 'blocksSizeGi': 1,
-               'keyLocationMap': {'type': 'blockDevice', 'entries': 10000, 'sizeMi': 1}},
+               'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
         'cms': {'keyLocationMap': {'entries': 10000, 'sizeMi': 1}},
+        # CMS-only cases do not allocate the default-enabled history stores.
+        'iscc': {'enabled': False},
+        'fsac': {'enabled': False},
     }}}
+    if optional_stores:
+        for store in ('iscc', 'fsac'):
+            values['storage']['persistence'][store] = {
+                'enabled': True, 'size': '2Gi', 'blocksSizeGi': 1,
+                'keyLocationMap': {'entries': 10000, 'sizeMi': 1},
+            }
+    if raw:
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            values['storage']['persistence'][store].update({
+                'backend': 'blockDevice',
+                'blockDevice': {'size': '256Mi',
+                                'metadata': {'size': '2Gi', 'keyLocationMapSizeMi': 1}},
+            })
+        if local:
+            values['storage']['persistence'].update({
+                'mode': 'hostPath', 'blockDevice': {'allowHostPath': True},
+            })
+            for store in ('cas', 'ac', 'iscc', 'fsac'):
+                block = values['storage']['persistence'][store]['blockDevice']
+                block['hostPath'] = {'devicePath': '/dev/ephemeral/' + store}
+                block['metadata']['hostPath'] = {'path': '/mnt/buildbarn/' + store + '-meta'}
     if ephemeral:
         values['storage']['persistence']['cms']['keyLocationMap']['type'] = 'inMemory'
     values_file = directory / 'values.yaml'
@@ -85,7 +112,25 @@ def render_config(directory, ephemeral=False):
     pod = statefulset['spec']['template']['spec']
     init = next(c for c in pod['initContainers'] if c['name'] == 'volume-init')
     image = next(c['image'] for c in pod['containers'] if c['name'] == 'storage')
-    return storage_file, image, init
+    init_context = dict(pod['securityContext'], **init['securityContext'])
+    return (storage_file, image, init, process_identity(pod['securityContext']),
+            process_identity(init_context))
+
+
+def process_identity(security_context):
+    """Docker flags for the identity Kubernetes gives the storage process.
+
+    fsGroup and supplementalGroups both become supplementary groups. Raw stores
+    depend on them: a device handed to a container keeps its host ownership
+    (root:disk 0660 on a Linux host), for a Docker --device exactly as for a
+    Kubernetes volumeDevice, so the chart's non-root UID opens it through
+    storage.persistence.blockDevice.supplementalGroups. Docker Desktop exposes
+    loop devices world-writable, which hides a missing group there.
+    """
+    user = f"{security_context['runAsUser']}:{security_context['runAsGroup']}"
+    groups = [security_context.get('fsGroup'), *security_context.get('supplementalGroups', [])]
+    return user, [arg for group in groups if group is not None
+                  for arg in ('--group-add', str(group))]
 
 
 class StorageMigrationTest(unittest.TestCase):
@@ -109,9 +154,12 @@ class StorageMigrationTest(unittest.TestCase):
             docker('network', 'connect', self.network, self.client_container)
             self.addCleanup(docker, 'network', 'disconnect', self.network,
                             self.client_container, check=False)
-        self.config = self.image = self.init = None
+        self.config = self.image = self.init = self.user = None
+        self.init_identity = None
+        self.groups = []
         self.mounts = []
-        for store in ('cas', 'ac'):
+        self.devices = []
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
             volume = self.prefix + '-' + store
             docker('volume', 'create', volume)
             self.addCleanup(docker, 'volume', 'rm', volume, check=False)
@@ -124,26 +172,108 @@ class StorageMigrationTest(unittest.TestCase):
         self.doCleanups()
         raise SystemExit(128 + signum)
 
-    def configure(self, ephemeral=False):
-        self.config, self.image, self.init = render_config(self.directory, ephemeral=ephemeral)
-        # Kubernetes normally supplies fsGroup ownership; emulate it here, then
-        # run both the rendered init and storage as the chart's non-root UID.
-        self.shell('chown 65534:65534 /storage-cas /storage-ac', user='0:0')
+    def configure(self, ephemeral=False, optional_stores=False, raw=False, local=False):
+        (self.config, self.image, self.init, (self.user, self.groups),
+         self.init_identity) = render_config(
+             self.directory, ephemeral=ephemeral, optional_stores=optional_stores, raw=raw, local=local,
+         )
+        if raw:
+            self.mounts = [arg + '-meta' if arg.startswith('type=volume,') else arg
+                           for arg in self.mounts]
+            self.prepare_loop_devices()
+        # PVC/emptyDir receive fsGroup ownership from Kubernetes. hostPath does
+        # not: leave its directories root-owned and let the rendered root init
+        # perform the chown that the storage UID needs.
+        suffix = '-meta' if raw else ''
+        paths = ' '.join('/storage-' + store + suffix for store in ('cas', 'ac', 'iscc', 'fsac'))
+        if local:
+            owners = self.shell("stat -c '%u:%g:%a' " + paths, user='0:0').stdout.splitlines()
+            self.assertEqual(owners, ['0:0:755'] * 4)
+            self.assertEqual(self.init_identity[0].split(':')[0], '0')
+        else:
+            self.shell(f'chown {self.user} {paths}', user='0:0')
 
-    def shell(self, script, user='65534:65534', check=True):
-        return docker('run', '--rm', '--user', user, *self.mounts,
+    def prepare_loop_devices(self):
+        volume = self.prefix + '-raw-blocks'
+        docker('volume', 'create', volume)
+        self.addCleanup(docker, 'volume', 'rm', volume, check=False)
+        nodes = self.prefix + '-device-nodes'
+        docker('volume', 'create', nodes)
+        self.addCleanup(docker, 'volume', 'rm', nodes, check=False)
+        self.device_mount = ['--mount', f'type=volume,source={nodes},target=/dev/bb']
+        self.devices = ['--device-cgroup-rule', 'b 7:* rwm', *self.device_mount]
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            # Start with a private /dev containing NO pre-created loop nodes.
+            # The kernel's loop-control supplies an unused minor; create its
+            # node only inside the helper, then expose a test-owned alias via a
+            # named volume. Docker --device would require a /dev/loopN node on
+            # the daemon host, which some CI hosts do not pre-create.
+            result = docker('run', '--rm', '--privileged',
+                            '--mount', f'type=volume,source={volume},target=/blocks',
+                            '--mount', f'type=volume,source={nodes},target=/devices',
+                            LOOP_TOOL_IMAGE, 'sh', '-ec',
+                            '''mount -t tmpfs tmpfs /dev
+                               mknod /dev/loop-control c 10 237
+                               mknod /dev/null c 1 3
+                               truncate -s 256M /blocks/''' + store + '''
+                               attached=""
+                               trap '[ -z "$attached" ] || losetup --detach "$attached"' EXIT
+                               for attempt in 1 2 3 4 5; do
+                                 device=$(losetup --find)
+                                 minor=${device#/dev/loop}
+                                 case "$minor" in ''|*[!0-9]*) exit 1;; esac
+                                 [ -b "$device" ] || mknod "$device" b 7 "$minor"
+                                 # Finding and attaching are separate operations;
+                                 # retry if another test claimed this device first.
+                                 if losetup "$device" /blocks/''' + store + '''; then
+                                   attached=$device
+                                   break
+                                 fi
+                               done
+                               [ -n "$attached" ]
+                               mknod /devices/''' + store + ''' b 7 "$minor"
+                               chown 0:6 /devices/''' + store + '''
+                               chmod 0660 /devices/''' + store + '''
+                               trap - EXIT
+                               echo "$attached"
+                            ''',
+                            check=False)
+            self.assertEqual(result.returncode, 0,
+                             'Raw-device tests require privileged Docker helpers and unused Linux '
+                             'loop devices:\n' + result.stderr)
+            device = result.stdout.strip()
+            self.assertRegex(device, r'^/dev/loop[0-9]+$',
+                             'Loop helper did not return an allocated loop device: ' + result.stdout)
+            self.addCleanup(docker, 'run', '--rm', '--privileged', *self.device_mount,
+                            LOOP_TOOL_IMAGE, 'losetup', '--detach', '/dev/bb/' + store,
+                            check=False)
+
+    def shell(self, script, user=None, check=True):
+        return docker('run', '--rm', '--user', user or self.user, *self.mounts,
                       self.init['image'], 'sh', '-c', script, check=check)
 
     def initialize(self, check=True):
-        return self.shell(self.init['command'][2], check=check)
+        user, groups = self.init_identity
+        context = self.init['securityContext']
+        flags = []
+        for capability in context.get('capabilities', {}).get('drop', []):
+            flags += ['--cap-drop', capability]
+        for capability in context.get('capabilities', {}).get('add', []):
+            flags += ['--cap-add', capability]
+        if context.get('readOnlyRootFilesystem'):
+            flags += ['--read-only']
+        if context.get('allowPrivilegeEscalation') is False:
+            flags += ['--security-opt', 'no-new-privileges']
+        return docker('run', '--rm', '--user', user, *groups, *flags,
+                      *self.mounts, self.init['image'], *self.init['command'], check=check)
 
     def start_storage(self, config=None, image=None, frontend=False):
         name = self.prefix + '-' + uuid.uuid4().hex[:6]
         port = '8980' if frontend else '8981'
         alias = 'frontend' if frontend else 'storage-0.storage.integration'
         publish = [] if self.client_container else ['-p', '127.0.0.1::' + port]
-        mounts = [] if frontend else self.mounts
-        docker('create', '--name', name, '--user', '65534:65534',
+        mounts = [] if frontend else self.groups + self.mounts + self.devices
+        docker('create', '--name', name, '--user', self.user,
                '--network', self.network, '--network-alias', alias,
                *publish, *mounts,
                image or self.image, '/storage.json')
@@ -154,6 +284,7 @@ class StorageMigrationTest(unittest.TestCase):
 
     def container_logs(self, name):
         logs = docker('logs', name, check=False)
+        self.assertEqual(logs.returncode, 0, logs.stderr)
         return (logs.stdout or '') + (logs.stderr or '')
 
     def assert_no_storage_errors(self, name):
@@ -182,7 +313,8 @@ class StorageMigrationTest(unittest.TestCase):
         return channel
 
     def rpc(self, channel, method, data, service='ContentAddressableStorage'):
-        service = self.pool.FindServiceByName('build.bazel.remote.execution.v2.' + service)
+        name = service if '.' in service else 'build.bazel.remote.execution.v2.' + service
+        service = self.pool.FindServiceByName(name)
         descriptor = service.FindMethodByName(method)
         request = message_class(descriptor.input_type)
         response = message_class(descriptor.output_type)
@@ -222,6 +354,68 @@ class StorageMigrationTest(unittest.TestCase):
         self.initialize()
         docker('start', name)
         return self.channel(name)
+
+    def recreate(self, name, channel, abrupt=False):
+        self.stop_and_remove(name, channel, abrupt=abrupt)
+        # A replacement Pod reruns volume-init and starts a new process against
+        # retained volumes. No storage files or config paths are synthesized.
+        self.initialize()
+        return self.start_storage()
+
+    def stop_and_remove(self, name, channel, abrupt=False):
+        channel.close()
+        if abrupt:
+            docker('kill', '--signal', 'KILL', name)
+        else:
+            docker('stop', '--time', '20', name)
+            exit_code = json.loads(docker('inspect', name).stdout)[0]['State']['ExitCode']
+            # Buildbarn re-raises SIGTERM after completing its shutdown groups.
+            # Exit 143 is expected; Docker's timeout-driven SIGKILL would be 137.
+            self.assertIn(exit_code, (0, 143), self.container_logs(name))
+        # Check each process before removing it: inspecting only the last
+        # replacement would hide errors emitted before either restart.
+        self.assert_no_storage_errors(name)
+        docker('rm', name)
+
+    def assert_present_blobs_readable(self, channel, blobs):
+        missing = self.rpc(channel, 'FindMissingBlobs',
+                           {'blobDigests': [self.digest(blob) for blob in blobs]})
+        absent = {digest.hash for digest in missing.missing_blob_digests}
+        for blob in blobs:
+            if self.digest(blob)['hash'] not in absent:
+                self.assert_read(channel, blob)
+
+    def put_learning_history(self, channel):
+        digest = self.digest(b'reduced action with learned scheduling and input hints')
+        stats = {
+            'sizeClasses': {
+                '1': {'previousExecutions': [{'succeeded': '1.250s'}, {'timedOut': '3s'}],
+                      'initialPageRankProbability': 0.25},
+                '2': {'previousExecutions': [{'succeeded': '0.750s'}],
+                      'initialPageRankProbability': 0.75},
+            },
+        }
+        profile = {
+            'bloomFilter': base64.b64encode(b'\x85\x14\x01').decode(),
+            'bloomFilterHashFunctions': 3,
+        }
+        request = {'reducedActionDigest': digest, 'digestFunction': 'SHA256'}
+        self.rpc(channel, 'UpdatePreviousExecutionStats',
+                 dict(request, previousExecutionStats=stats),
+                 service='buildbarn.iscc.InitialSizeClassCache')
+        self.rpc(channel, 'UpdateFileSystemAccessProfile',
+                 dict(request, fileSystemAccessProfile=profile),
+                 service='buildbarn.fsac.FileSystemAccessCache')
+        return request, stats, profile
+
+    def assert_learning_history(self, channel, history):
+        request, stats, profile = history
+        actual_stats = self.rpc(channel, 'GetPreviousExecutionStats', request,
+                                service='buildbarn.iscc.InitialSizeClassCache')
+        actual_profile = self.rpc(channel, 'GetFileSystemAccessProfile', request,
+                                  service='buildbarn.fsac.FileSystemAccessCache')
+        self.assertEqual(actual_stats, json_format.ParseDict(stats, type(actual_stats)()))
+        self.assertEqual(actual_profile, json_format.ParseDict(profile, type(actual_profile)()))
 
     def legacy_persistent_config(self):
         # Derive a persistent-AC variant from the pinned pre-CDC fixture so the
@@ -293,8 +487,10 @@ class StorageMigrationTest(unittest.TestCase):
         self.assertEqual(ac_hit.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
         self.assert_no_storage_errors(new)
 
-    def test_default_persistent_cms_survives_restart(self):
-        self.configure()
+    def check_all_five_stores_after_recreation(self, raw=False, local=False):
+        # Only sizes and optional-store enablement are overridden; index types
+        # come from chart defaults, so this catches accidental default reversions.
+        self.configure(optional_stores=True, raw=raw, local=local)
         self.initialize()
         name, channel = self.start_storage()
         blobs = [b'small blob' * 1024, os.urandom(3 * 1024 * 1024)]
@@ -302,8 +498,26 @@ class StorageMigrationTest(unittest.TestCase):
             self.put(channel, blob)
             self.assert_read(channel, blob)
         action = self.put_action(channel, blobs[1])
-        channel = self.restart(name, channel)
+        history = self.put_learning_history(channel)
+        self.assert_learning_history(channel, history)
+        name, channel = self.recreate(name, channel)
+        self.assert_learning_history(channel, history)
         for blob in blobs:
+            self.assert_read(channel, blob)
+        # Write more data after the checkpoint, then kill immediately. Losing
+        # unsynchronized writes is permitted; reporting unreadable blobs as
+        # present is not. Cover both single chunks and composite mappings.
+        recent = [os.urandom(11000), os.urandom(512 * 1024), os.urandom(3 * 1024 * 1024)]
+        for blob in recent:
+            self.put(channel, blob)
+            self.assert_read(channel, blob)
+        name, channel = self.recreate(name, channel, abrupt=True)
+        self.assert_learning_history(channel, history)
+        for blob in blobs:
+            self.assert_read(channel, blob)
+        self.assert_present_blobs_readable(channel, blobs + recent)
+        for blob in recent:
+            self.put(channel, blob)
             self.assert_read(channel, blob)
         # Exercise the chart's real completeness-checking frontend rather than
         # only reading an unchecked ActionResult directly from storage.
@@ -312,6 +526,55 @@ class StorageMigrationTest(unittest.TestCase):
             self.assert_read(frontend, blob)
         result = self.rpc(frontend, 'GetActionResult', {'actionDigest': action}, service='ActionCache')
         self.assertEqual(result.output_files[0].digest.hash, self.digest(blobs[1])['hash'])
+        self.assert_no_storage_errors(name)
+
+    def test_default_indexes_preserve_all_five_filesystem_stores(self):
+        self.check_all_five_stores_after_recreation()
+
+    def test_default_indexes_preserve_all_five_raw_pvc_stores(self):
+        self.check_all_five_stores_after_recreation(raw=True)
+
+    def test_default_indexes_preserve_all_five_raw_hostpath_stores(self):
+        # Loop devices stand in for retained NVMe; mounted metadata volumes
+        # stand in for retained node-local directories. No node-loss guarantee.
+        self.check_all_five_stores_after_recreation(raw=True, local=True)
+
+    def test_raw_blocks_and_metadata_reset_together_start_clean(self):
+        # Model losing a local SSD that contains both raw blocks and metadata.
+        # Retaining only the old metadata would let FindMissing advertise blobs
+        # whose bytes have disappeared; the supported reset discards both.
+        self.configure(optional_stores=True, raw=True, local=True)
+        self.initialize()
+        name, channel = self.start_storage()
+        blobs = [b'small blob' * 1024, os.urandom(3 * 1024 * 1024)]
+        for blob in blobs:
+            self.put(channel, blob)
+        action = self.put_action(channel, blobs[1])
+        history = self.put_learning_history(channel)
+        self.stop_and_remove(name, channel)
+
+        for store in ('cas', 'ac', 'iscc', 'fsac'):
+            docker('run', '--rm', '--privileged', *self.device_mount,
+                   LOOP_TOOL_IMAGE, 'dd', 'if=/dev/zero', 'of=/dev/bb/' + store,
+                   'bs=1M', 'count=256', 'conv=fsync', 'status=none')
+            self.shell('rm -rf /storage-' + store + '-meta/cdc-v1', user='0:0')
+        self.initialize()
+        name, channel = self.start_storage()
+        for blob in blobs:
+            self.assert_missing(channel, blob)
+        for method, request, service in (
+            ('GetActionResult', {'actionDigest': action}, 'ActionCache'),
+            ('GetPreviousExecutionStats', history[0], 'buildbarn.iscc.InitialSizeClassCache'),
+            ('GetFileSystemAccessProfile', history[0], 'buildbarn.fsac.FileSystemAccessCache'),
+        ):
+            with self.assertRaises(grpc.RpcError) as failure:
+                self.rpc(channel, method, request, service=service)
+            self.assertEqual(failure.exception.code(), grpc.StatusCode.NOT_FOUND)
+        for blob in blobs:
+            self.put(channel, blob)
+            self.assert_read(channel, blob)
+        self.put_action(channel, blobs[1])
+        self.assert_learning_history(channel, self.put_learning_history(channel))
         self.assert_no_storage_errors(name)
 
     def test_explicit_ephemeral_cms_loses_only_composite_blobs(self):

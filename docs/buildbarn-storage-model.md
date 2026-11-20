@@ -1,13 +1,13 @@
 # Buildbarn Storage Model and Sizing
 
-Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both RepMaxCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, maybe ISCC and FSAC - but each enabled store is the same kind of local backend:
+Read this before choosing disk sizes, enabling raw block devices, or changing storage geometry. Buildbarn storage looks simple from Kubernetes - a CAS volume (backing both RepMaxCDC `chunkStorage` and `chunkMappingStorage` by default), an Action Cache volume, and ISCC and FSAC volumes by default - but each enabled store is the same kind of local backend:
 
 - a fixed-size key-location map, which is the index from digest to location
 - a ring of fixed-size blocks, which holds the bytes
 
 With RepMaxCDC content-defined chunking (`contentAddressableStorageServer`), the CAS is split into two stores:
 - **`chunkStorage` (CS)**: holds compressed chunks plus small blobs (`storage.persistence.cas`). Defaults configure a 256 KiB minimum chunk size and a 2 MiB horizon; these are chunking parameters, not a claim that every chunk has that size.
-- **`chunkMappingStorage` (CMS)**: maps whole-blob CAS digests to their ordered list of chunk digests (`storage.persistence.cms`, defaulting to `backend: sharedCas` on the existing CAS filesystem/metadata volume). Its file-backed index and persistent state survive process restarts by default. This preserves `volumeClaimTemplates`, but upgrading the old CAS encoding still requires the explicit cutover below.
+- **`chunkMappingStorage` (CMS)**: maps whole-blob CAS digests to their ordered list of chunk digests (`storage.persistence.cms`, defaulting to `backend: sharedCas` on the CAS filesystem/metadata volume). Its file-backed index and persistent state survive process restarts by default. Shared placement adds no dedicated CMS claim; raw CAS still needs its metadata claim. Upgrading the old encoding requires the explicit cutover below.
 
 With the default chunking parameters, blobs at least 512 KiB require mappings.
 Setting CMS `keyLocationMap.type: inMemory` makes those blobs unavailable after
@@ -94,7 +94,30 @@ There are two placements:
 - **In memory**: `keyLocationMap.entries` for filesystem stores, or `blockDevice.keyLocationMapInMemoryEntries` for raw block stores. Budget about 64 bytes per entry of eager Go heap.
 - **On disk**: `keyLocationMapSizeMi` for the filesystem CAS, `keyLocationMap: { type: blockDevice, sizeMi: ... }` for the other filesystem stores, or `blockDevice.keyLocationMap: file` for raw block stores. Budget about 66 bytes per entry.
 
-Disk-backed maps are required for restart persistence. On `backend: filesystem`, the CAS is disk-backed by default. CMS also defaults to a file-backed index when its shared CAS has a filesystem or metadata volume. AC, ISCC and FSAC default to in-memory unless you opt in. For raw block stores, `keyLocationMap: inMemory` is the default and means cache-only behavior even when the blocks device is durable.
+Disk-backed maps are required for restart persistence and are the chart default
+for all five stores. Filesystem CAS uses `keyLocationMapSizeMi`; filesystem
+CMS/AC/ISCC/FSAC use `keyLocationMap.type: blockDevice`; all dedicated raw block
+stores use `blockDevice.keyLocationMap: file`. ISCC and FSAC are enabled by
+default; scheduler analysis and worker prefetching remain separate opt-ins.
+Shared CMS uses the CAS filesystem or raw CAS metadata volume for its
+blocks, index, and state, so budget for those files too.
+
+Older explicit `inMemory` overrides still take precedence. Remove them or apply
+the [persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
+after deployment values. Fresh deployments do not need that profile. The
+[ephemeral opt-out](buildbarn-storage-operations.md#explicit-ephemeral-opt-out)
+selects volatile indexes where supported without changing volume mode. An
+in-memory map starts empty on restart even when the blocks device is durable;
+filesystem CAS always has a disk-backed map and becomes pod-lifetime with
+`mode: emptyDir` instead. See [What Survives a Restart](buildbarn-storage-operations.md#what-survives-a-restart)
+for volume-lifetime limits.
+
+Adopt persistent defaults during the [all-store CDC cold-cache cutover](#storage-format-cutover-and-rollback)
+so the cache warms once. The new encoding invalidates old contents even for
+already-persistent ISCC. For deployments already using CDC, changing index
+placement starts previously volatile stores cold, while already-persistent
+stores can retain data when their paths, sizes, geometry, and volumes stay
+unchanged.
 
 Use this sizing rule:
 
@@ -220,40 +243,44 @@ Two more settings that are easy to copy wrongly from the storage tier:
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
 
-## Worked Example 1: One Local-NVMe Shard (680 GiB)
+## Worked Example 1: One Local-NVMe Shard (718 GiB)
 
-Suppose one cache-only shard uses raw block devices carved by `partition_ephemeral_disks` and in-memory maps, as configured in `custom-values/buildbarn-values-local-ssd-block.yaml`.
+The supplied `custom-values/buildbarn-values-local-ssd-block.yaml` uses persistent
+file indexes for all five stores. Its provisioner reserves a 16Gi metadata LV on
+the same Local SSD VG as the raw data LVs, mounts it at
+`/mnt/stateful_partition/buildbarn-local-ssd/metadata`, and publishes readiness
+only after checking the layout and mount. Never substitute boot-disk or network
+metadata: retained indexes over lost blocks can report nonexistent blobs present.
+See the [local SSD requirements](buildbarn-block-storage.md#gke-example-b-local-nvme-ssd-with-partition_ephemeral_disks)
+and [GKE validation runbook](buildbarn-gke-storage-validation.md).
 
-**1. Block geometry.** A 680 GiB CAS device with `3 + 8 + 30 + 3 = 44` total blocks gives a block size of about 15.5 GiB. That is also the largest storable blob. Usable capacity is `41/44`, or about 634 GiB.
+**1. Block geometry.** On the two-SSD example, the observed CAS LV is 717.992Gi;
+`size: 718Gi` rounds up for the sizing guard. With `3 + 8 + 30 + 3 = 44` total
+blocks, that gives about 16.3GiB per block and `41/44`, about 669GiB, usable
+capacity. Measure the actual LV when changing the node pool or device count.
 
-**2. Expected objects.** At the chart's measured `17,408`-byte (`17.4 KiB`) average CAS blob size (`storage.keyLocationMapSizing.averageObjectSizeBytes.cas`), 634 GiB holds roughly **39.1 million** live CAS objects. Estimating with a larger average blob (say 35 KB) would halve that count and lead to a map at barely `1x`, which saturates as the disk fills and surfaces as `Lost inputs no longer available remotely` (Bazel exit 39).
+**2. Expected objects.** At the illustrative 17,408-byte average chunk size,
+that is roughly 41.3 million live chunks. Measure your CDC chunk distribution;
+assuming larger objects undersizes the index.
 
-**3. Map entries.** Enforcing the `2x` floor (`storage.keyLocationMapSizing.validate: true`) gives `80,000,000` entries (`2.04x` ratio):
+**3. Persistent index capacity.** The 7360Mi CAS index holds about 116.9M
+records at 66 bytes each, about `2.83x` this shard's estimated live chunks.
+AC uses 1344Mi, ISCC and FSAC use 512Mi each, and shared CMS uses 256Mi. The
+overlay enables `storage.keyLocationMapSizing.validate` to catch undersizing
+before deployment. The raw-CAS chart default retains this generous file size
+for deployments near 1TiB; on its default 200Gi device it provides about `10.2x`.
+Choose a smaller reviewed size during a cold cutover if desired; resizing an
+already-persistent index discards its contents.
 
-```yaml
-storage:
-  keyLocationMapSizing:
-    validate: true
-  persistence:
-    cas:
-      backend: blockDevice
-      blockDevice:
-        size: 680Gi
-        keyLocationMap: inMemory
-        keyLocationMapInMemoryEntries: 80000000
-```
-
-**4. Memory.** In-memory maps are reserved at startup and faulted into RSS as slots are touched:
-
-```text
-CAS  80M entries * 64 B ~= 4.8 GiB
-CMS  4.2M entries * 64 B (256 MiB) + 33 * 8 MiB blocksInMemory (264 MiB) ~= 0.5 GiB
-AC   16M entries * 64 B ~= 1.0 GiB  (for an 8 GiB LV, 2.34x ratio)
-ISCC  8M entries * 64 B ~= 0.5 GiB  (for a 2 GiB LV)
-FSAC  8M entries * 64 B ~= 0.5 GiB  (for a 6 GiB LV)
-```
-
-That is about 7.3 GiB before Go garbage collector headroom, gRPC buffers, and in-flight unary messages. Set `storage.resources.requests.memory: 12Gi` and `limits.memory: 24Gi`.
+**4. Metadata and memory.** All five indexes total 9984Mi (9.75GiB); shared CMS
+adds a 1Gi blocks file. The 16Gi metadata LV leaves room for checkpoint state and
+filesystem overhead. `metadata.size` does not impose a hostPath quota. File
+indexes still consume memory for their resident pages, alongside Go heap, GC,
+CMS blocks and RPC buffers. The example requests 12Gi and limits memory to
+24Gi; measure page-cache pressure and the workload before reducing these limits.
+Storage pod restarts reuse retained blocks and metadata. SSD loss or replacement
+requires resetting both together and starts cold; an old full VG without the
+metadata LV needs the documented cutover to a fresh layout.
 
 ## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
 
@@ -263,9 +290,9 @@ Suppose you are sizing a **10 TiB persistent CAS** across either **`10 shards ×
 - **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~21.6 GiB`. At `17,408` B/blob, each shard holds **~54.6 million** CAS objects.
 - **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.85 TiB` cluster-wide), max blob size `~43.2 GiB`. At `17,408` B/blob, each shard holds **~109.2 million** CAS objects.
 
-**2. Map entries.** At a `2.3x` ratio, a 1 TiB shard needs **~125.8M entries (`7,680 MiB` = `7.5 GiB`)** and a 2 TiB shard needs **~251.6M entries (`15,360 MiB` = `15 GiB`)**. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` every 300s, so the index survives restarts. Keep CMS persistent too, and include its blocks and index when sizing the shared volume.
+**2. Map entries.** At 66 bytes per disk record, a **`7,680 MiB` (`7.5 GiB`)** map holds **~122.0M entries** for a 1 TiB shard, and a **`15,360 MiB` (`15 GiB`)** map holds **~244.0M entries** for a 2 TiB shard. Both give about `2.23x` the estimated live object count. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `12Gi` / `20Gi` `-meta` PVC. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` with a 300s minimum sync interval, so the index survives restarts. Delayed syncs can leave a longer window of unsynchronized writes. Keep CMS persistent too, and include its blocks and index when sizing the shared volume.
 
-**3. Memory.** Each lookup makes up to 16 random 64-byte probes into the mmap'd map, so it must stay resident in the page cache. Budget the total KLM size across CS, CMS, AC, ISCC and FSAC plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards. Remeasure average chunk and mapping sizes after migration rather than assuming the old whole-blob distribution remains unchanged.
+**3. Memory.** Each lookup makes up to 16 random 66-byte probes into the mmap'd map, so budget page-cache memory for its working set. Budget the total KLM size across CS, CMS, AC, ISCC and FSAC plus about 6 GiB: `storage.resources.requests.memory: 16Gi` (`limits: 24Gi`) for 1 TiB shards and `28Gi` (`limits: 40Gi`) for 2 TiB shards. Remeasure average chunk and mapping sizes after migration rather than assuming the old whole-blob distribution remains unchanged.
 
 **4. The other stores.** Scale AC to `20Gi–32Gi` per shard (`keyLocationMap` `sizeMi: 2688–4096`), ISCC to `1Gi–2Gi` blocks (`sizeMi: 256–512`), and FSAC to `8Gi–12Gi` (`sizeMi: 1024–1536`), all with persistent KLMs. Complete values for both shard layouts, plus frontend, scheduler, and gateway settings, are in the chart README's [Large-scale deployments](../charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards) section; shutdown and grace-period behaviour is covered in [buildbarn-storage-operations.md](buildbarn-storage-operations.md#what-survives-a-restart).
 
@@ -296,7 +323,7 @@ With `storage.persistence.cms.backend: sharedCas` (the default), CMS uses the CA
 
 The `blockDevice` CMS index setting refers to Buildbarn's block-device abstraction; here it opens a regular file. Persistence lasts only as long as the underlying volume: an `emptyDir` does not survive pod replacement. Shared placement adds no PVC. Dedicated CMS volumes/devices are opt-ins for new installations; Kubernetes cannot add a volume claim template to an existing StatefulSet in place.
 
-Customers can explicitly choose `storage.persistence.cms.keyLocationMap.type: inMemory`. On filesystem CAS this retains the CMS blocks file but loses its mapping index on restart, so large blobs may need uploading again. The default file-backed index avoids that extra loss.
+Customers can explicitly choose `storage.persistence.cms.keyLocationMap.type: inMemory`. On filesystem CAS this retains the CMS blocks file but loses its mapping index on restart, so large blobs may need uploading again. The default file-backed index avoids that extra loss. Applying the persistent profile after deployment values overrides that choice and also selects a file-backed index for a dedicated raw CMS, if configured; it preserves the chosen CMS backend.
 
 ## Upgrading Configurations to CDC
 
@@ -351,10 +378,19 @@ These cluster checks use `lookup`, so offline `helm template` and GitOps renders
 ### Storage format cutover and rollback
 
 The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for AC, ISCC, and FSAC. The CDC image (`8d2acac`) stores compressed CAS chunks and wraps AC, ISCC, and FSAC objects with `SHA256SuffixCoder` (a 32-byte SHA-256 suffix). Reopening old persistent indices causes decode/checksum failures that invalidate entire blocks (including newly written CDC data), and rolling back after CDC writes corrupts pre-CDC reads. This chart does not perform an in-place conversion. The supported cutover is an explicit **cold-cache reset during a maintenance window**.
+Adopt the persistent defaults in that same window, so CDC conversion and index
+placement cause one cold start rather than two. ISCC and FSAC are now enabled
+by default and add data claims when upgrading from the old defaults. Keep an
+explicit `enabled: false` for either store if unused, or create its claims during
+the same StatefulSet recreation. The persistent and ephemeral profiles preserve
+these enable flags.
 
-1. **Verify prerequisites and PVC headroom.**
+1. **Verify prerequisites and prepare persistent storage.**
    - Verify the compatible operator and `bep-nats` prerequisites above, and update the operator CRD separately (`kubectl apply --server-side -f charts/bb-worker-operator/crds/`).
-   - Check CAS PVC headroom for shared CMS: default `sharedCas` CMS adds `1 GiB` blocks + `256 MiB` KLM (`1280 MiB`) inside `storage.persistence.cas.size` (or `cas.blockDevice.metadata.size` for raw CAS with file KLM). If existing PVCs are too tight for `validate.yaml`, expand the PVCs (and recreate the StatefulSet if updating claim templates), shrink `blocksSizeGi` / `keyLocationMapSizeMi`, or set `storage.persistence.cms.keyLocationMap.type: inMemory`.
+   - Remove explicit `inMemory` overrides or apply the persistent profile after deployment values where the storage layout supports safe persistence. When carrying forward release overrides, use `--reset-then-reuse-values` to adopt new chart defaults, but remove/override explicit old `inMemory` values too. Render and lint the complete target configuration; `--reuse-values` can retain old implicit defaults as well.
+   - Check filesystem PVC space for every enabled store's blocks, index, and state. Shared CMS adds `1 GiB` blocks + `256 MiB` index (`1280 MiB`) on the CAS filesystem or raw CAS metadata volume. Review index capacity and page-cache resources using the [migration checklist](buildbarn-storage-operations.md#migrate-to-persistent-indexes); prepare PVC expansion where needed.
+   - For raw PVC stores, prepare filesystem metadata StorageClasses and sizes. Switching former RAM indexes to the new defaults adds `<store>-meta` claim templates, so plan to recreate the stopped StatefulSet while retaining existing blocks claims.
+   - For raw local NVMe persistence, metadata must be on the same Local SSD storage with verified mount readiness and paired reset when devices/VGs are replaced. Never keep boot-disk/network metadata over lost local blocks. The bundled local SSD overlay uses the provisioner's same-SSD metadata LV; follow its [migration and validation runbook](buildbarn-gke-storage-validation.md) before switching an existing node pool. Shared CMS is part of CAS metadata. For local PVCs, use the same local StorageClass/device class for blocks and metadata and reset/delete both claims together after loss.
    - Keep existing worker image pins until the operator is ready. If migrating to inherited images, stage the current worker and runner-installer image references into the existing `buildbarn-worker-config` before removing pins to avoid a `SpecInvalid` window while the old chart lacks those keys.
 2. **Drain clients and pause autoscalers/operator before scaling down.**
    - Stop new builds/cache clients and let active work finish. Record current replica counts and autoscaler settings.
@@ -373,18 +409,24 @@ The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for 
    | --- | --- | --- |
    | Filesystem CAS | `/storage-cas/cas-keys.db`, `cas-blocks.db`, `persistent_state/` | `/storage-cas/cdc-v1/{keys.db,blocks.db,persistent_state/}` + shared CMS `cdc-v1/{cms-keys.db,cms-blocks.db,cms_persistent_state/}` |
    | Raw CAS with file index | `/storage-cas-meta/cas-keys.db`, `persistent_state/` | `/storage-cas-meta/cdc-v1/{keys.db,persistent_state/}` + shared CMS under `cdc-v1/`; blocks remain on `/dev/bb/cas` |
-   | Raw CAS with in-memory index | No persistent index to retire | Starts empty as before; device reused; shared CMS uses `blocksInMemory` |
+   | Former raw CAS with in-memory index | No persistent index to retire | Device reused; new CAS index/state and shared CMS files start on the prepared CAS metadata volume |
    | Filesystem AC / ISCC / FSAC | `/storage-<store>/<store>-keys.db`, `<store>-blocks.db`, `persistent_state/` | `/storage-<store>/cdc-v1/{<store>-keys.db,<store>-blocks.db,persistent_state/}` |
    | Raw AC / ISCC / FSAC with file index | `/storage-<store>-meta/<store>-keys.db`, `persistent_state/` | `/storage-<store>-meta/cdc-v1/{<store>-keys.db,persistent_state/}`; blocks remain on `/dev/bb/<store>` |
 
    For raw block stores, resetting the metadata starts an empty logical store; a full device wipe is unnecessary. CDC writes overwrite old device contents, so rollback requires the device snapshot, not just the old metadata. `volume-init` checks **all** enabled stores before creating any `cdc-v1/` directory and never deletes, moves, or converts user data, including on repeated failed starts. Missing even one shard leaves that shard stuck in `volume-init` and blocks `FindMissingBlobs` cluster-wide.
-5. **Migrate configs/worker pins and start storage before clients.**
+5. **Recreate claim templates where needed, then start CDC storage before clients.**
+   - While storage remains at zero replicas, delete the StatefulSet with `kubectl delete statefulset storage --namespace hermetiq --cascade=orphan` if its claim templates must change. Retain all existing blocks PVCs; the reviewed upgrade recreates the StatefulSet with metadata claims. Do not use a deliberately failing Helm upgrade as the preflight.
    - While workers remain stopped, migrate custom Jsonnet/worker ConfigMaps and update any `RbeWorker` CRs that keep explicit `spec.images.worker` / `spec.images.runnerInstaller` pins to CDC images (`>= 20261102T`) or remove the pins to inherit from `buildbarn-worker-config` (live pre-CDC pins fail `helm upgrade` in `validate.yaml`). A worker ConfigMap the release itself renders through `extraObjects` is checked as rendered, since the upgrade replaces the live copy: migrate it in your values, not in the cluster. If an `RbeWorker` takes its image defaults from such a ConfigMap (its `commonConfigMapName`), publish `workerImage` and `runnerInstallerImage` there too.
    - Run `helm upgrade` with client replicas held at `0` (e.g., `--set frontend.replicas=0 --set scheduler.replicas=0 --set browser.replicas=0` plus `portal`/`remoteAsset` if enabled) so storage starts first, rather than letting `helm upgrade` immediately restart clients alongside storage.
    - Verify every `storage-0..N-1` pod completes `volume-init` and becomes Ready. Then restore client replicas (`helm upgrade` with normal replica counts), unpause KEDA `ScaledObject`s, and restore `RbeWorker` replicas. Restart any external cache clients to discard stale existence caches.
 6. **Verify end-to-end.**
-   - Verify both a small blob and a multi-megabyte (> 2 MiB) composite CAS upload/read through the frontend, then restart one storage shard and read both again.
-   - Verify a real remote build and an Action Cache hit with retained outputs. Expect old entries to miss and rebuild/reupload; confirm zero ZSTD decoding or SHA-256 data-integrity errors in storage logs. Check separate CS/CMS retention and KLM panels as the cache warms.
+   - Verify both a small blob and a multi-megabyte (> 2 MiB) composite CAS upload/read through the frontend, then gracefully restart one storage shard with the same backing volumes and read both again. For hostPath, keep the pod on the same retained node; for network PVCs, also verify volume reattachment when testing rescheduling.
+   - Verify a real remote build and an Action Cache hit with retained outputs after restart. When enabled, verify ISCC scheduling history and FSAC hints are retained too. Expect old entries to miss and rebuild/reupload during the initial cutover; confirm zero ZSTD decoding or SHA-256 data-integrity errors in storage logs. Check separate CS/CMS retention and KLM panels as the cache warms.
+
+For a deliberate cold discard of raw PVC storage, stop the shard and delete/reset
+both `<store>-blocks` and `<store>-meta` together (including shared CMS in CAS
+metadata). Do not recreate a missing blocks claim against an old metadata claim.
+Retained claims alone are not rollback copies once their blocks have been written.
 
 For rollback, stop all CDC clients and storage again. Restore a consistent pre-CDC snapshot (both block devices and metadata volumes for raw block stores, across CAS and any persistent AC/ISCC/FSAC) and its matching old configurations/images before restarting. Without a snapshot, perform another explicit cold-cache reset — remove `/storage-<store>/cdc-v1/` (and `/storage-<store>-meta/cdc-v1/` for raw metadata volumes) across **all** stores before starting pre-CDC images so old `blocks.db` allocation does not hit `ENOSPC`. **Never** point the old binary at CDC data or restore an old raw-device index over a device that CDC has modified. Independent `helm rollback` cannot restore the storage format or `RbeWorker` resources outside the release.
 
