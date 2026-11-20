@@ -109,7 +109,23 @@ def render_config(directory, ephemeral=False, optional_stores=False, raw=False, 
     pod = statefulset['spec']['template']['spec']
     init = next(c for c in pod['initContainers'] if c['name'] == 'volume-init')
     image = next(c['image'] for c in pod['containers'] if c['name'] == 'storage')
-    return storage_file, image, init
+    return storage_file, image, init, process_identity(pod['securityContext'])
+
+
+def process_identity(security_context):
+    """Docker flags for the identity Kubernetes gives the storage process.
+
+    fsGroup and supplementalGroups both become supplementary groups. Raw stores
+    depend on them: a device handed to a container keeps its host ownership
+    (root:disk 0660 on a Linux host), for a Docker --device exactly as for a
+    Kubernetes volumeDevice, so the chart's non-root UID opens it through
+    storage.persistence.blockDevice.supplementalGroups. Docker Desktop exposes
+    loop devices world-writable, which hides a missing group there.
+    """
+    user = f"{security_context['runAsUser']}:{security_context['runAsGroup']}"
+    groups = [security_context.get('fsGroup'), *security_context.get('supplementalGroups', [])]
+    return user, [arg for group in groups if group is not None
+                  for arg in ('--group-add', str(group))]
 
 
 class StorageMigrationTest(unittest.TestCase):
@@ -133,7 +149,8 @@ class StorageMigrationTest(unittest.TestCase):
             docker('network', 'connect', self.network, self.client_container)
             self.addCleanup(docker, 'network', 'disconnect', self.network,
                             self.client_container, check=False)
-        self.config = self.image = self.init = None
+        self.config = self.image = self.init = self.user = None
+        self.groups = []
         self.mounts = []
         self.devices = []
         for store in ('cas', 'ac', 'iscc', 'fsac'):
@@ -150,7 +167,7 @@ class StorageMigrationTest(unittest.TestCase):
         raise SystemExit(128 + signum)
 
     def configure(self, ephemeral=False, optional_stores=False, raw=False, local=False):
-        self.config, self.image, self.init = render_config(
+        self.config, self.image, self.init, (self.user, self.groups) = render_config(
             self.directory, ephemeral=ephemeral, optional_stores=optional_stores, raw=raw, local=local,
         )
         if raw:
@@ -161,7 +178,7 @@ class StorageMigrationTest(unittest.TestCase):
         # run both the rendered init and storage as the chart's non-root UID.
         suffix = '-meta' if raw else ''
         paths = ' '.join('/storage-' + store + suffix for store in ('cas', 'ac', 'iscc', 'fsac'))
-        self.shell('chown 65534:65534 ' + paths, user='0:0')
+        self.shell(f'chown {self.user} {paths}', user='0:0')
 
     def prepare_loop_devices(self):
         volume = self.prefix + '-raw-blocks'
@@ -185,8 +202,8 @@ class StorageMigrationTest(unittest.TestCase):
                             'losetup', '--detach', device, check=False)
             self.devices += ['--device', f'{device}:/dev/bb/{store}']
 
-    def shell(self, script, user='65534:65534', check=True):
-        return docker('run', '--rm', '--user', user, *self.mounts,
+    def shell(self, script, user=None, check=True):
+        return docker('run', '--rm', '--user', user or self.user, *self.mounts,
                       self.init['image'], 'sh', '-c', script, check=check)
 
     def initialize(self, check=True):
@@ -197,8 +214,8 @@ class StorageMigrationTest(unittest.TestCase):
         port = '8980' if frontend else '8981'
         alias = 'frontend' if frontend else 'storage-0.storage.integration'
         publish = [] if self.client_container else ['-p', '127.0.0.1::' + port]
-        mounts = [] if frontend else self.mounts + self.devices
-        docker('create', '--name', name, '--user', '65534:65534',
+        mounts = [] if frontend else self.groups + self.mounts + self.devices
+        docker('create', '--name', name, '--user', self.user,
                '--network', self.network, '--network-alias', alias,
                *publish, *mounts,
                image or self.image, '/storage.json')
