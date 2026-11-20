@@ -7,7 +7,7 @@ icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 0.10.0
-appVersion: "20261112T085002Z"
+appVersion: "20261118T120531Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0

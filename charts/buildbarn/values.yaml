@@ -147,8 +147,8 @@ config:
 images:
   storage:
     repository: ghcr.io/buildbarn/bb-storage
-    tag: 20261112T085002Z-8d2acac
-    digest: "" # sha256:fce87da151a817eb0b8c15f295da0566d5efadb682ebd2479a2ecce1bc4ab6c6
+    tag: 20261118T120531Z-06739f2
+    digest: "" # sha256:53f9b3834b6bc565bb1160e28f82d7750e00278413f89e9ebcee8519657a03ee
     pullPolicy: IfNotPresent
   scheduler:
     repository: ghcr.io/buildbarn/bb-scheduler
@@ -867,7 +867,7 @@ frontend:
       tolerations: null
       image:
         repository: ghcr.io/buildbarn/sync-jwks-to-configmap
-        tag: "20261112T085002Z-8d2acac"
+        tag: "20261118T120531Z-06739f2"
         digest: "" # sha256:9f23eb6d7126423f64bf97e18ca5eb8e850d65e4e68e4c1c4ff8ddce6b7be8e1
         pullPolicy: IfNotPresent
       resources:

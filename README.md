@@ -201,7 +201,7 @@ The following versions form the first tested bundle in this repository:
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
 | Hermetiq |       `0.9.8` |             `0.9.8` |
-| Buildbarn |      `0.10.0` |  `20261112T085002Z` |
+| Buildbarn |      `0.10.0` |  `20261118T120531Z` |
 | BB Worker Operator |      `0.3.13` |           `v0.3.14` |
 
 > **CDC compatibility note:** The bundled Hermetiq `0.9.8` `bep-nats` image is
