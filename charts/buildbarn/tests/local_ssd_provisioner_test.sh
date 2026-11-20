@@ -6,6 +6,7 @@ python3 - "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)" <<'PY'
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -226,12 +227,19 @@ def run(name, *, existing=True, mounted=True, marker=True, legacy=False,
         for command in ('apk', 'curl', 'vgs', 'lvs', 'vgcreate', 'vgchange', 'lvcreate', 'mkfs.ext4',
                         'blkid', 'findmnt', 'mount', 'chown', 'stat', 'sleep', 'readlink'):
             (root / 'bin' / command).symlink_to(stub_path)
-        script = source.replace('/mnt/stateful_partition/buildbarn-local-ssd/metadata', str(root / 'metadata'))
-        script = script.replace('/var/run/secrets/kubernetes.io/serviceaccount', str(root / 'serviceaccount'))
-        script = script.replace('/tmp/', str(root / 'run') + '/')
+        replacements = {
+            '/mnt/stateful_partition/buildbarn-local-ssd/metadata': str(root / 'metadata'),
+            '/var/run/secrets/kubernetes.io/serviceaccount': str(root / 'serviceaccount'),
+            '/tmp/': str(root / 'run') + '/',
+            '/dev/': str(root / 'dev') + '/',
+        }
+        # Rewrite original paths once. On Linux the replacement root itself
+        # starts with /tmp/, so successive replaces would rewrite inserted paths.
+        script = re.sub('|'.join(re.escape(path) for path in replacements),
+                        lambda match: replacements[match.group(0)], source)
         # Fake block devices are regular files; only the node-type predicate is
         # substituted. The command flow and mount/identity checks stay intact.
-        script = script.replace('/dev/', str(root / 'dev') + '/').replace('[ -b ', '[ -e ')
+        script = script.replace('[ -b ', '[ -e ')
         script_path = root / 'script.sh'
         script_path.write_text(script)
         result = subprocess.run(['/bin/sh', '-ec', script], text=True, capture_output=True,
