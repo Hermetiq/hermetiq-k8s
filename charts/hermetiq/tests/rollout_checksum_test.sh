@@ -67,4 +67,32 @@ expect changes rbe-access-policy-checksum 'an external policy is revised' "${ext
 expect keeps rbe-access-policy-checksum 'the assistant policy changes' "${inline_policies[@]}" \
   -- --set-json 'assistant.policy.data={"enforcement":{"mode":"enforce"}}'
 
-echo 'Rollout checksum checks passed'
+# A new inline public key must roll every publisher replica. Explicit source
+# selection also has to bypass the shared dashboard OIDC URL in ci.yaml.
+keyset_file=$(mktemp)
+trap 'rm -f "$keyset_file"' EXIT
+publisher_checksum() {
+  printf '%s' "$1" >"$keyset_file"
+  helm template checksum-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
+    --set publisher.jwks.source=inline --set-file "publisher.jwks.json=$keyset_file" \
+    --show-only templates/deployment-publisher.yaml |
+    sed -n 's|^ *checksum/publisher-jwks-secret: ||p'
+}
+before=$(publisher_checksum '{"keys":[]}')
+after=$(publisher_checksum '{"keys":[{"kid":"rotated"}]}')
+[[ -n "$before" && -n "$after" && "$before" != "$after" ]] || {
+  echo 'Publisher inline JWKS rotation did not change its rollout checksum' >&2
+  exit 1
+}
+for enabled in false true; do
+  count=$(helm template checksum-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
+    --set "publisher.enforceProjectAuthorization=$enabled" \
+    --show-only templates/deployment-publisher.yaml |
+    grep -c 'name: ENFORCE_PUB_AUTHZ')
+  [[ "$count" == 1 ]] || {
+    echo "Expected exactly one publisher enforcement environment entry, got $count" >&2
+    exit 1
+  }
+done
+
+echo 'Rollout checksum and publisher enforcement checks passed'

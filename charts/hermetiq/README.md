@@ -1434,8 +1434,9 @@ oidc:
 The value feeds `api.jwt.issuer`, `api.jwt.jwksUrl`, `publisher.jwks.issuer`,
 `publisher.jwks.url`, and `dashboard.oauth2Proxy.oidcIssuerUrl`. The JWKS URL
 defaults to `/.well-known/jwks.json` under the issuer; set `oidc.jwksUrl` if
-your provider publishes its keys elsewhere. A value set on an individual
-component still wins. Use the exact issuer string that appears in your tokens,
+your provider publishes its keys elsewhere. An issuer or URL set on an individual
+component still wins. Select an explicit `publisher.jwks.source` to use independent
+publisher keys, as described below. Use the exact issuer string that appears in your tokens,
 including a trailing slash if there is one.
 
 The issuer cannot supply the token audiences or the Buildbarn trust boundary.
@@ -1484,6 +1485,155 @@ because that would produce duplicate or conflicting entries.
 
 Buildbarn's completed-action calls carry no token. They are admitted only
 through `publisher.trustedCalCidrs`, described next.
+
+### Independent publisher signing keys and rotation
+
+`publisher.jwks.source` selects the publisher's public key source while leaving
+dashboard/API OIDC configuration intact:
+
+| Source | Required publisher value | Behavior |
+|---|---|---|
+| `auto` (default) | Existing configuration | Preserve publisher URL, then inherited OIDC URL, then existing Secret/inline JSON precedence. Helm notes identify local keys shadowed by the inherited URL. |
+| `url` | `publisher.jwks.url` | Fetch only this URL; do not inherit the global OIDC URL. |
+| `inline` | `publisher.jwks.json` | Render a Secret containing this public JWK set and mount it as a file. A keyset change rolls the publisher Pods. |
+| `secret` | `publisher.jwks.existingSecret` | Mount this Secret, which must contain `jwks.json`, as a projected directory without `subPath`. |
+
+Explicit modes require `publisher.jwks.enabled=true` and reject other nonempty
+publisher key-source values. Global `oidc` values may remain set. `auto` preserves
+previously accepted combinations; upgrading must not start trusting a formerly
+ignored keyset. `enabled=false` still means the custom-environment configuration
+mode above, not disabled token validation.
+
+For CI signing its own RS256 JWTs while dashboard users log in through Okta:
+
+```yaml
+publisher:
+  jwks:
+    source: inline
+    issuer: https://ci.example.com/hermetiq
+    audience: hermetiq-bep
+    # Use service only when this entire trusted profile represents machines.
+    principalKind: service
+    json: |
+      {"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":"ci-1","n":"REPLACE_WITH_PUBLIC_MODULUS","e":"AQAB"}]}
+```
+
+Keep the private signing key with the issuer. Match `iss`, `aud` and the JWT header's
+`kid`; use a stable `sub` such as `buildkite-ci`. This configures BEP authentication;
+configure Buildbarn's issuer/audience/keys separately for cache or execution traffic.
+
+Both `publisher.jwks` and `api.jwt` expose `refreshInterval` (default `1h`),
+`refreshRateLimit` (`5m`), `refreshTimeout` (`10s`) and `fileReloadInterval` (`10s`).
+They render the corresponding `GRPC_AUTH_JWKS_*` durations. The verifier validates
+positive durations and limits the file reload interval to ten seconds. URL-backed
+verification also refreshes on an unknown `kid`, subject to the refresh rate limit.
+Mounted file reload starts once Kubernetes projects the update; projection latency
+is additional. Inline updates roll Pods; existing-Secret updates do not require a
+chart upgrade. Run a matching application version with these reload controls.
+
+Publish overlapping old/new keys before switching signing keys, then replace
+credentials and retire the old key deliberately. Multi-key overlap requires JWTs
+to carry `kid`. Removing a key invalidates new requests using it, including requests
+with still-unexpired long-lived JWTs. A credential helper forwards the JWT and does
+not perform key rotation itself.
+
+`principalKind` defaults to `human` for compatibility and can be `service` for a
+machine-only credential profile. It renders `GRPC_AUTH_PRINCIPAL_KIND`; the verifier
+does not assume a provider's optional `idtyp` claim is present. Explicit service
+registrations in the project policy identify registered machines even when they
+share a profile with humans.
+
+### Project access policy
+
+`publisher.enforceProjectAuthorization` defaults to `false` to preserve existing
+on-prem installations. JWT verification and signed project restrictions still apply.
+Set it to `true` to require the publisher's `write:bep` project permission. Do not
+set `ENFORCE_PUB_AUTHZ` through `publisher.env`; the chart renders exactly one entry.
+
+The shared `authorization` block configures the API and publisher together through
+`PROJECT_AUTHORIZATION_CONFIG`. Its default `mode: legacy` keeps existing behavior.
+Prepare memberships and issuer-qualified group/service grants before deliberately
+activating `mode: enforced`, which requires publisher enforcement enabled:
+
+```yaml
+authorization:
+  mode: enforced
+  defaultAccess: viewer
+  groupBindings:
+    - projectId: my-project
+      issuer: https://idp.example.com/
+      group: engineering
+      roles: [builder]
+  serviceAccounts:
+    - issuer: https://ci.example.com/hermetiq
+      subject: buildkite-ci
+      projectRoles:
+        my-project: [builder]
+  instanceBindings:
+    - namespace: my-buildbarn-namespace
+      instancePrefix: my-instance
+      projectId: my-project
+publisher:
+  enforceProjectAuthorization: true
+```
+
+`defaultAccess: viewer` preserves optional automatic access to all projects for
+authenticated humans. Select `none` when access must come from explicit membership
+or group grants. Service accounts receive their explicit project roles instead of
+the human baseline. Roles are `viewer` (read builds and the cache, run remote
+execution), `builder` (also publish builds, write the cache, edit ConfigSets and
+issue build credentials) and `admin` (everything, including project
+administration); each includes the one before it. In enforced mode the API and
+publisher cache access decisions for 30 seconds, so membership changes and
+suspensions take effect within that window.
+
+Use the project's actual saved managed namespace and instance mapping; an empty
+`instancePrefix` is an explicit mapping choice, not an inferred default. Defining
+these mappings does not automatically configure Buildbarn's listeners or trust.
+`api.mcpAuthDisabled=true` remains supported: those MCP callers share its synthetic
+administrator identity and cannot receive individual user revocation semantics.
+
+### Optional SCIM provisioning
+
+SCIM is disabled by default. After activating enforced authorization and
+browser authorization, configure only the API workload. Setting a SCIM user
+`active: false`, or deleting it, suspends that person in every project:
+
+```yaml
+api:
+  scim:
+    enabled: true
+    issuer: https://idp.example.com/
+    userIdPrefix: "" # Must match this issuer's verified JWT identity mapping.
+    existingSecret: hermetiq-scim
+    existingSecretKey: token
+    rolloutVersion: "1"
+    groups:
+      - {id: engineering, displayName: Engineering}
+authorization:
+  groupBindings:
+    - projectId: my-project
+      issuer: https://idp.example.com/
+      group: engineering
+      source: scim
+      roles: [builder]
+```
+
+Create `hermetiq-scim` separately in the release namespace with a `token` key
+containing a random provisioning credential (32–4096 non-whitespace bytes).
+The chart mounts the Secret read-only into the API container; the token is never
+placed in values, policy JSON, environment variables, or publisher/subscriber pods.
+Point the IdP at `https://<API host>/api/v1/scim/v2`, using that bearer token.
+The SCIM `userName` must equal the issuer's stable JWT subject (or configured stable
+ID claim), never an email alias; `userIdPrefix` must match the JWT trust profile.
+Only the configured immutable group IDs are accepted. Each principal is limited to 128 SCIM group IDs and 6 KiB of serialized group IDs; an oversized mutation fails atomically with HTTP 413. `source: scim` bindings use
+current directory membership, while JWT bindings continue to use signed claims.
+Removing a group grant cannot remove access still provided by `defaultAccess: viewer`.
+
+The API reads its provisioning token at startup. To rotate it, update the Secret,
+change the nonsecret `api.scim.rolloutVersion` marker, complete the API rollout,
+and update the IdP's provisioning credential. Plan for provisioning retries during
+that transition. Normal user JWT/JWKS rotation is independent of this token.
 
 ### Completed Action Logger trust
 
@@ -2843,3 +2993,38 @@ packaged with this chart as `SOFTWARE-LICENSE-AGREEMENT.md`. Setting
 `license.agreement.accepted: true` confirms acceptance, and running Hermetiq
 requires a trial or purchased license key, as described in
 [Licensing and trials](#licensing-and-trials).
+
+### Browser authorization and independent JWT profiles
+
+`authorization.mode=enforced` requires `browserAuthorization.enabled=true`.
+This opts the dashboard into a same-origin BFF (`/grpc`, `/api/v1`, authoritative
+`/auth/me`) and inserts a per-request Hermetiq policy gate between Grafana's
+OIDC proxy and Grafana. Both forward the ID token oauth2-proxy already passes
+upstream; the oauth2-proxy configuration is otherwise unchanged. Legacy settings,
+shared cookies, default Viewer access, and `api.mcpAuthDisabled=true` remain
+available. Use API and dashboard images from the authorization release before
+activation.
+
+For Grafana, set `browserAuthorization.gateImage` to a digest-pinned
+grafana-auth-proxy image from the same release, `metricsDatasourceUID`, and
+`grafanaBackendPodSelector` with Grafana's actual pod labels. The gate caches
+allowed decisions for 10 seconds, so a revocation reaches open Grafana sessions
+within that window. `grafanaBackendPort` is its target port (default 3000). Grafana must
+use auth.proxy with `X-Forwarded-User`, `Role:X-Forwarded-Groups`, `sync_ttl=0`
+and `enable_login_token=false`. Remove raw backend routes or competing policies;
+Kubernetes NetworkPolicies are additive. Non-admin metrics require `read:bep`;
+shared logs require installation administration. Namespace-only metric names
+must be explicitly listed in `allowedNamespaceMetrics`.
+
+`api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the legacy
+single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,
+`principalKind: human|service`, `credentialUse: browser|build`, and exactly one
+of `jwksUrl`, `jwksInline` (JSON string), or `existingSecret` with optional
+`existingSecretKey` (default `jwks.json`). Optional `userIdClaim`, `userIdPrefix`,
+`groupsClaim`, `allowedAlgs` and refresh durations apply independently. Preserve
+existing IDs; reserve separate nonempty prefixes for distinct issuers. Project
+and groups claims are optional for CI credentials; current project grants still
+control authorization. The API sidecar delegates verification to the core in
+profile mode and strips asserted identity/XFCC. Secret directory mounts permit
+key rotation; inline keys require a rollout. See `ci-values/authorization.yaml`
+for a render-only browser fixture, not production credentials/images.

@@ -1071,8 +1071,34 @@ api:
   # Keep it true for chart-managed JWKS settings. Set it false only when api.env
   # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
   # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
+  # Optional directory provisioning. Requires authorization.mode=enforced.
+  # userName must match the verified stable subject; never map it from email.
+  scim:
+    enabled: false
+    issuer: ""
+    userIdPrefix: ""
+    existingSecret: ""
+    existingSecretKey: token
+    # Nonsecret marker: change after rotating the token Secret to restart API pods.
+    rolloutVersion: ""
+    # Only these immutable directory group IDs can be provisioned.
+    groups: []
+    # - {id: engineering, displayName: Engineering}
+
   jwt:
+    # Optional independent issuer/audience profiles replace all legacy jwt settings.
+    # Each profile chooses jwksUrl, jwksInline, or existingSecret + existingSecretKey.
+    profiles: []
     enabled: true
+    # Classify this trusted credential profile explicitly; optional provider
+    # claims are not sufficient to distinguish humans from machines.
+    principalKind: human
+    # Positive Go durations. URL refresh preserves the verifier's existing timing.
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Once a mounted key file changes, reload within this interval (maximum 10s).
+    fileReloadInterval: 10s
     jwksUrl: ""
     issuer: ""
     # gRPC API token audience. Leave empty to reuse the dashboard oauth2-proxy
@@ -1107,8 +1133,39 @@ api:
     enabled: true
     maxUnavailable: 1
 
+# Shared project authorization policy for API and publisher. Legacy preserves
+# existing membership/read-all behavior; activate enforced deliberately after
+# configuring project grants and publisher.enforceProjectAuthorization=true.
+authorization:
+  mode: legacy
+  # Authenticated humans may retain automatic Viewer access to every project.
+  # Service accounts receive only their explicit projectRoles.
+  # Roles: viewer, builder, admin (each includes the previous one).
+  defaultAccess: viewer
+  # Optional explicit installation-admin group trust; omit to retain the
+  # legacy verified admin group. Once set, only these issuer/source pairs apply.
+  # administratorGroups:
+  #   - {issuer: "https://idp.example.com/", group: admins, source: jwt}
+  groupBindings: []
+  # - projectId: my-project
+  #   issuer: https://idp.example.com/
+  #   group: engineering
+  #   roles: [builder]
+  serviceAccounts: []
+  # - issuer: https://ci.example.com/hermetiq
+  #   subject: buildkite-ci
+  #   projectRoles:
+  #     my-project: [builder]
+  instanceBindings: []
+  # - namespace: my-buildbarn-namespace
+  #   instancePrefix: my-instance
+  #   projectId: my-project
+
 publisher:
   replicas: 4
+  # Require write:bep membership for BEP ingestion. False preserves legacy
+  # on-prem behavior; JWT verification and signed project restrictions still apply.
+  enforceProjectAuthorization: false
   # Additional environment variables for the publisher deployment.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
@@ -1145,7 +1202,17 @@ publisher:
   trustedCalCidrs: ""
 
   jwks:
+    profiles: []
     enabled: true
+    principalKind: human
+    # auto keeps existing URL/global OIDC/local precedence. Explicit url,
+    # inline or secret selects only the corresponding publisher key source.
+    source: auto
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Maximum 10s; Kubernetes Secret projection latency is additional.
+    fileReloadInterval: 10s
     url: ""
     issuer: ""
     # BES/CAL token audience. Defaults to https://<hosts.bepGrpc> or
@@ -1389,3 +1456,22 @@ promqlQueries:
   # existingConfigMap, set this to a hash or version of the external data to
   # force a rollout when the ConfigMap contents change.
   rolloutChecksum: ""
+
+# Browser authorization: the dashboard calls the API same-origin through its
+# nginx BFF, /auth/me is answered by the API, and Grafana requests pass a
+# per-request policy gate. Off by default; legacy cross-origin settings are
+# unchanged until it is enabled. Required by authorization.mode=enforced.
+browserAuthorization:
+  enabled: false
+  # grafana-auth-proxy image for the Grafana gate, pinned by digest. Required
+  # when the Grafana route is enabled.
+  gateImage:
+    repository: ""
+    tag: ""
+    digest: ""
+  # Allowlisted shared namespace metrics. Project-labelled metrics require read:bep.
+  allowedNamespaceMetrics: []
+  # Explicit Grafana metrics datasource UID and backend labels in this namespace.
+  metricsDatasourceUID: ""
+  grafanaBackendPodSelector: {}
+  grafanaBackendPort: 3000

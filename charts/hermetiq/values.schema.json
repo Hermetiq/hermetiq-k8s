@@ -707,6 +707,135 @@
             },
             "nameClaim": {
               "type": "string"
+            },
+            "refreshInterval": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "refreshRateLimit": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "refreshTimeout": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "fileReloadInterval": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "principalKind": {
+              "type": "string",
+              "enum": [
+                "human",
+                "service"
+              ],
+              "description": "Explicit trusted-profile classification; optional provider claims are not assumed."
+            },
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "issuer",
+                  "audiences",
+                  "credentialUse",
+                  "principalKind"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "issuer": {
+                    "type": "string"
+                  },
+                  "jwksUrl": {
+                    "type": "string"
+                  },
+                  "jwksInline": {
+                    "type": "string"
+                  },
+                  "existingSecret": {
+                    "type": "string"
+                  },
+                  "existingSecretKey": {
+                    "type": "string"
+                  },
+                  "userIdPrefix": {
+                    "type": "string"
+                  },
+                  "userIdClaim": {
+                    "type": "string"
+                  },
+                  "emailClaim": {
+                    "type": "string"
+                  },
+                  "groupsClaim": {
+                    "type": "string"
+                  },
+                  "nameClaim": {
+                    "type": "string"
+                  },
+                  "providerType": {
+                    "type": "string"
+                  },
+                  "adminGroup": {
+                    "type": "string"
+                  },
+                  "refreshInterval": {
+                    "type": "string"
+                  },
+                  "refreshRateLimit": {
+                    "type": "string"
+                  },
+                  "refreshTimeout": {
+                    "type": "string"
+                  },
+                  "fileReloadInterval": {
+                    "type": "string"
+                  },
+                  "audiences": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowedAlgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "adminEmailAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "credentialUse": {
+                    "enum": [
+                      "browser",
+                      "build"
+                    ]
+                  },
+                  "principalKind": {
+                    "enum": [
+                      "human",
+                      "service"
+                    ]
+                  }
+                }
+              }
             }
           }
         },
@@ -720,6 +849,60 @@
         },
         "podDisruptionBudget": {
           "type": "object"
+        },
+        "scim": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "userIdPrefix": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^[^\\r\\n\\x00]*$"
+            },
+            "existingSecret": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+            },
+            "existingSecretKey": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "rolloutVersion": {
+              "type": "string"
+            },
+            "groups": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "displayName"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[^\\r\\n\\x00]+$"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -761,6 +944,145 @@
             },
             "json": {
               "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "url",
+                "inline",
+                "secret"
+              ],
+              "description": "auto retains legacy source precedence; explicit modes select publisher keys without inheriting dashboard OIDC."
+            },
+            "refreshInterval": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "refreshRateLimit": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "refreshTimeout": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "fileReloadInterval": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$",
+              "description": "Positive Go duration; validated by the verifier. fileReloadInterval may not exceed 10s."
+            },
+            "principalKind": {
+              "type": "string",
+              "enum": [
+                "human",
+                "service"
+              ],
+              "description": "Explicit trusted-profile classification; optional provider claims are not assumed."
+            },
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "issuer",
+                  "audiences",
+                  "credentialUse",
+                  "principalKind"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "issuer": {
+                    "type": "string"
+                  },
+                  "jwksUrl": {
+                    "type": "string"
+                  },
+                  "jwksInline": {
+                    "type": "string"
+                  },
+                  "existingSecret": {
+                    "type": "string"
+                  },
+                  "existingSecretKey": {
+                    "type": "string"
+                  },
+                  "userIdPrefix": {
+                    "type": "string"
+                  },
+                  "userIdClaim": {
+                    "type": "string"
+                  },
+                  "emailClaim": {
+                    "type": "string"
+                  },
+                  "groupsClaim": {
+                    "type": "string"
+                  },
+                  "nameClaim": {
+                    "type": "string"
+                  },
+                  "providerType": {
+                    "type": "string"
+                  },
+                  "adminGroup": {
+                    "type": "string"
+                  },
+                  "refreshInterval": {
+                    "type": "string"
+                  },
+                  "refreshRateLimit": {
+                    "type": "string"
+                  },
+                  "refreshTimeout": {
+                    "type": "string"
+                  },
+                  "fileReloadInterval": {
+                    "type": "string"
+                  },
+                  "audiences": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowedAlgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "adminEmailAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "credentialUse": {
+                    "enum": [
+                      "browser",
+                      "build"
+                    ]
+                  },
+                  "principalKind": {
+                    "enum": [
+                      "human",
+                      "service"
+                    ]
+                  }
+                }
+              }
             }
           }
         },
@@ -798,6 +1120,10 @@
         "trustedCalCidrs": {
           "type": "string",
           "description": "Comma-separated CIDRs whose peers may call the Buildbarn Completed Action Logger without a user credential. EMPTY DISABLES CAL INGEST."
+        },
+        "enforceProjectAuthorization": {
+          "type": "boolean",
+          "description": "Require write:bep membership at the publisher; false preserves legacy on-prem authorization."
         }
       }
     },
@@ -1024,6 +1350,209 @@
               }
             }
           }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "defaultAccess",
+        "groupBindings",
+        "serviceAccounts",
+        "instanceBindings"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "legacy",
+            "enforced"
+          ]
+        },
+        "defaultAccess": {
+          "type": "string",
+          "enum": [
+            "viewer",
+            "none"
+          ]
+        },
+        "groupBindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "projectId",
+              "issuer",
+              "group",
+              "roles"
+            ],
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "issuer": {
+                "type": "string",
+                "minLength": 1
+              },
+              "group": {
+                "type": "string",
+                "minLength": 1
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "viewer",
+                    "builder",
+                    "admin"
+                  ]
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "serviceAccounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "issuer",
+              "subject",
+              "projectRoles"
+            ],
+            "properties": {
+              "issuer": {
+                "type": "string",
+                "minLength": 1
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1
+              },
+              "projectRoles": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "viewer",
+                      "builder",
+                      "admin"
+                    ]
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        },
+        "instanceBindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "namespace",
+              "instancePrefix",
+              "projectId"
+            ],
+            "properties": {
+              "namespace": {
+                "type": "string",
+                "minLength": 1
+              },
+              "instancePrefix": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "administratorGroups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "issuer",
+              "group",
+              "source"
+            ],
+            "properties": {
+              "issuer": {
+                "type": "string",
+                "minLength": 1
+              },
+              "group": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "enum": [
+                  "jwt",
+                  "scim"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "browserAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "gateImage": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "string"
+            }
+          }
+        },
+        "allowedNamespaceMetrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metricsDatasourceUID": {
+          "type": "string"
+        },
+        "grafanaBackendPodSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "grafanaBackendPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
         }
       }
     }

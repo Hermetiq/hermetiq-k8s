@@ -1,0 +1,95 @@
+suite: opt-in SCIM provisioning configuration
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+  - ../ci-values/authorization.yaml
+set:
+  api.scim:
+    enabled: true
+    issuer: https://directory.example.test/
+    userIdPrefix: 'corp:'
+    existingSecret: directory-provisioning
+    existingSecretKey: bearer
+    rolloutVersion: '2'
+    groups:
+      - {id: engineering, displayName: Engineering}
+tests:
+  - it: mounts only the API token and renders a nonsecret explicit identity mapping
+    template: templates/deployment-api.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SCIM_CONFIG")].value
+          value: '{"bearerTokenFile":"/config/scim/token","groups":[{"displayName":"Engineering","id":"engineering"}],"issuer":"https://directory.example.test/","userIdPrefix":"corp:"}'
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "scim-credential")].secret
+          value:
+            secretName: directory-provisioning
+            items:
+              - {key: bearer, path: token}
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].volumeMounts[?(@.name == "scim-credential")]
+          value: {name: scim-credential, mountPath: /config/scim, readOnly: true}
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].volumeMounts[?(@.name == "scim-credential")]
+      - equal:
+          path: spec.template.metadata.annotations["hermetiq.com/scim-rollout-version"]
+          value: '2'
+  - it: leaves publisher credentials and routes independent
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "scim-credential")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "SCIM_CONFIG")]
+  - it: renders no provisioning state when disabled
+    template: templates/deployment-api.yaml
+    set:
+      api.scim.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "scim-credential")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SCIM_CONFIG")]
+      - notExists:
+          path: spec.template.metadata.annotations["hermetiq.com/scim-rollout-version"]
+  - it: refuses provisioning without enforced policy
+    template: templates/validate.yaml
+    set:
+      authorization.mode: legacy
+    asserts:
+      - failedTemplate:
+          errorPattern: api.scim requires authorization.mode=enforced
+  - it: refuses a missing provisioning secret
+    template: templates/validate.yaml
+    set:
+      api.scim.existingSecret: ''
+    asserts:
+      - failedTemplate:
+          errorPattern: api.scim requires existingSecret and existingSecretKey
+  - it: refuses ambiguous issuer URLs
+    template: templates/validate.yaml
+    set:
+      api.scim.issuer: https://idp.example.test/?tenant=other
+    asserts:
+      - failedTemplate:
+          errorPattern: api.scim.issuer must be an absolute HTTPS issuer
+  - it: refuses duplicate directory group IDs
+    template: templates/validate.yaml
+    set:
+      api.scim.groups:
+        - {id: build, displayName: Build}
+        - {id: build, displayName: Other}
+    asserts:
+      - failedTemplate:
+          errorPattern: api.scim.groups require unique nonempty IDs
+  - it: refuses unmounted raw environment configuration
+    template: templates/validate.yaml
+    set:
+      api.env.SCIM_CONFIG: '{}'
+    asserts:
+      - failedTemplate:
+          errorPattern: SCIM_CONFIG must be configured through api.scim

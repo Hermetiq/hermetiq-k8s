@@ -1,0 +1,22 @@
+{{- if and .Values.browserAuthorization.enabled .Values.gateway.routes.grafanaEnabled (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") }}
+# Existing Grafana sessions cannot bypass the per-request gate via its Service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermetiq-grafana-backend
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{ toJson .Values.browserAuthorization.grafanaBackendPodSelector }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ include "hermetiq-core.grafanaOauth2ProxyName" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.browserAuthorization.grafanaBackendPort }}
+{{- end }}

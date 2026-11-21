@@ -48,6 +48,11 @@ spec:
       {{- end }}
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.dashboard) | nindent 6 }}
       volumes:
+        {{- if .Values.browserAuthorization.enabled }}
+        # Writable directory for the BFF routes the entrypoint renders.
+        - name: dashboard-bff
+          emptyDir: {sizeLimit: 1Mi}
+        {{- end }}
         # Holds the init container's copy of the image's built web UI, about
         # 60 MB with source maps, so leave room for the bundle to grow.
         - name: dashboard-html
@@ -175,12 +180,29 @@ spec:
               value: "true"
             - name: REACT_APP_HMQ_METRICS_DASHBOARD_URL
               value: {{ include "hermetiq-core.victoriaMetricsDashboardUrl" . | quote }}
+            - name: REACT_APP_PROJECT_AUTHORIZATION_MODE
+              value: {{ .Values.authorization.mode | quote }}
+            {{- if .Values.browserAuthorization.enabled }}
+            - name: BROWSER_AUTHORIZATION
+              value: "true"
+            - name: GRPC_API_HOST
+              value: {{ include "hermetiq-core.apiName" . | quote }}
+            - name: BFF_USE_ID_TOKEN
+              value: "true"
+            - name: REACT_APP_API_URL
+              value: {{ include "hermetiq-core.dashboardUrl" . | quote }}
+            - name: REACT_APP_GRPC_WEB_URL
+              value: {{ printf "%s/grpc" (include "hermetiq-core.dashboardUrl" .) | quote }}
+            - name: REACT_APP_HMQ_API_URL
+              value: {{ include "hermetiq-core.dashboardUrl" . | quote }}
+            {{- else }}
             - name: REACT_APP_API_URL
               value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
             - name: REACT_APP_GRPC_WEB_URL
               value: {{ printf "https://%s" (include "hermetiq-core.apiGrpcHost" .) | quote }}
             - name: REACT_APP_HMQ_API_URL
               value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
+            {{- end }}
             - name: REACT_APP_HMQ_BES_RESULTS_URL
               value: {{ printf "%s/build/" (include "hermetiq-core.dashboardUrl" .) | quote }}
             - name: REACT_APP_HMQ_BES_SVC
@@ -206,6 +228,10 @@ spec:
             {{- include "hermetiq-core.tcpProbe" (dict "port" "http" "settings" .Values.dashboard.probes.readiness) | nindent 12 }}
           {{- end }}
           volumeMounts:
+            {{- if .Values.browserAuthorization.enabled }}
+            - name: dashboard-bff
+              mountPath: /etc/nginx/conf.d/bff
+            {{- end }}
             - name: dashboard-html
               mountPath: /usr/share/nginx/html
             {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}

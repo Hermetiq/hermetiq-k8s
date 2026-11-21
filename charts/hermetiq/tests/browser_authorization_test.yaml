@@ -1,0 +1,143 @@
+suite: browser authorization activation
+templates:
+  - templates/deployment-dashboard.yaml
+  - templates/deployment-grafana-oauth2-proxy.yaml
+  - templates/deployment-api.yaml
+  - templates/browser-authorization.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+  - ../ci-values/authorization.yaml
+tests:
+  - it: activates the same-origin BFF and authoritative /auth/me together
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "BROWSER_AUTHORIZATION")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "GRPC_API_HOST")].value
+          value: grpc-api
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_PROJECT_AUTHORIZATION_MODE")].value
+          value: enforced
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_API_URL")].value
+          value: https://dashboard.ci.hermetiq.test
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "BFF_USE_ID_TOKEN")].value
+          value: "true"
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts[?(@.name == "dashboard-bff")]
+
+  - it: keeps the dashboard oauth2-proxy on its environment configuration
+    template: templates/deployment-dashboard.yaml
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].args
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].volumeMounts
+
+  - it: routes every Grafana request through the policy gate
+    template: templates/deployment-grafana-oauth2-proxy.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "hermetiq-browser-gate")].env[?(@.name == "AUTHZ_REQUIRED")].value
+          value: "true"
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "hermetiq-browser-gate")].env[?(@.name == "AUTHZ_API_URL")].value
+          value: http://grpc-api/api/v1/auth/me
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env[?(@.name == "OAUTH2_PROXY_UPSTREAMS")].value
+          value: http://127.0.0.1:9191
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].args
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "hermetiq-browser-gate")].env[?(@.name == "DB_HOSTNAME")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "hermetiq-browser-gate")].env[?(@.name == "BROWSER_SESSION_RESET_ENABLED")]
+
+  - it: limits Grafana backend ingress to its gated proxy
+    template: templates/browser-authorization.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app: grafana
+
+  - it: renders no session reset settings
+    template: templates/deployment-api.yaml
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "BROWSER_SESSION_RESET_ENABLED")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "BROWSER_SESSION_COOKIES_JSON")]
+
+  - it: retains all legacy dashboard settings until explicit activation
+    template: templates/deployment-dashboard.yaml
+    set:
+      authorization.mode: legacy
+      publisher.enforceProjectAuthorization: false
+      browserAuthorization.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "BROWSER_AUTHORIZATION")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "GRPC_API_HOST")]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts[?(@.name == "dashboard-bff")]
+
+  - it: retains the direct Grafana upstream until explicit activation
+    template: templates/deployment-grafana-oauth2-proxy.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      authorization.mode: legacy
+      publisher.enforceProjectAuthorization: false
+      browserAuthorization.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "hermetiq-browser-gate")]
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env[?(@.name == "OAUTH2_PROXY_UPSTREAMS")]
+      - notEqual:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env[?(@.name == "OAUTH2_PROXY_UPSTREAMS")].value
+          value: http://127.0.0.1:9191
+
+  - it: renders no Grafana backend policy until explicit activation
+    template: templates/browser-authorization.yaml
+    set:
+      authorization.mode: legacy
+      publisher.enforceProjectAuthorization: false
+      browserAuthorization.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: requires browser authorization for enforced mode
+    template: templates/validate.yaml
+    set:
+      browserAuthorization.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: authorization.mode=enforced requires browserAuthorization.enabled=true
+
+  - it: requires the Grafana gate image when the Grafana route is enabled
+    template: templates/validate.yaml
+    set:
+      browserAuthorization.gateImage.digest: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: browserAuthorization requires gateImage repository/digest

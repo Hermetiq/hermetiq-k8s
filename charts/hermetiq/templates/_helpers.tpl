@@ -323,9 +323,29 @@ true
 {{- default (include "hermetiq-core.oidcIssuerUrl" .) .Values.publisher.jwks.issuer -}}
 {{- end -}}
 
-{{/* publisher.jwks.url with fallback to derived OIDC JWKS URL. */}}
+{{/* Explicit key sources never inherit the dashboard's OIDC JWKS URL.
+     auto retains the existing publisher URL -> global OIDC -> local precedence. */}}
 {{- define "hermetiq-core.publisherJwksUrl" -}}
+{{- $source := default "auto" .Values.publisher.jwks.source -}}
+{{- if eq $source "auto" -}}
 {{- default (include "hermetiq-core.oidcJwksUrl" .) .Values.publisher.jwks.url -}}
+{{- else if eq $source "url" -}}
+{{- .Values.publisher.jwks.url -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Shared verifier timing settings. Only called for chart-managed JWKS. */}}
+{{- define "hermetiq-core.jwksRefreshEnv" -}}
+- name: GRPC_AUTH_PRINCIPAL_KIND
+  value: {{ .principalKind | quote }}
+- name: GRPC_AUTH_JWKS_REFRESH_INTERVAL
+  value: {{ .refreshInterval | quote }}
+- name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT
+  value: {{ .refreshRateLimit | quote }}
+- name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT
+  value: {{ .refreshTimeout | quote }}
+- name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL
+  value: {{ .fileReloadInterval | quote }}
 {{- end -}}
 
 {{/* publisher.jwks.audience defaults to the public BEP gRPC origin. */}}
@@ -963,6 +983,13 @@ spec:
 {{- end -}}
 
 {{- define "hermetiq-core.apiAuthProxyRoleEnv" -}}
+{{- if .Values.api.jwt.profiles }}
+# The core owns the complete multi-profile verifier; the sidecar only frames gRPC-web.
+- name: GRPC_AUTH_PROXY_FORWARD_ONLY
+  value: "true"
+- name: JWT_AUTH_ENABLED
+  value: "false"
+{{- else }}
 {{- if .Values.api.jwt.enabled }}
 - name: JWT_AUTH_ENABLED
   value: "true"
@@ -1000,6 +1027,7 @@ spec:
 {{- with (include "hermetiq-core.adminEmails" .) }}
 - name: ADMIN_EMAIL_ALLOWLIST
   value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
 {{- /* When set, the auth-proxy answers gRPC-web CORS preflight itself (in

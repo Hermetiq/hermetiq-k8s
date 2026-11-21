@@ -34,4 +34,24 @@ expect_schema_failure 'gateway.timeouts.apiWeb.requestTimeout="five-minutes"' \
   "apiWeb\.requestTimeout: Does not match pattern|apiWeb/requestTimeout': .* does not match pattern"
 expect_schema_failure 'gateway.timeouts.mcp.maxStreamDuration="forever"' \
   "mcp\.maxStreamDuration: Does not match pattern|mcp/maxStreamDuration': .* does not match pattern"
-echo 'Assistant and RBE values schema checks passed'
+expect_schema_failure 'publisher.enforceProjectAuthorization="true"' \
+  "enforceProjectAuthorization.*(boolean|bool)"
+expect_schema_failure 'publisher.jwks.source="automatic"' \
+  "source.*(one of|enum)"
+expect_schema_failure 'publisher.jwks.refreshInterval="eventually"' \
+  "refreshInterval.*(pattern|match)"
+expect_schema_failure 'publisher.jwks.principalKind="machine"' \
+  "principalKind.*(one of|enum)"
+expect_schema_failure 'authorization.defaultAccess="admin"' \
+  "defaultAccess.*(one of|enum)"
+expect_schema_failure 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"engineers","roles":["owner"]}]' \
+  "roles.*(one of|enum)"
+expect_schema_failure 'authorization.serviceAccounts=[{"issuer":"https://issuer.example","subject":"ci"}]' \
+  "projectRoles.*required|missing property 'projectRoles'"
+expect_schema_failure 'api.scim.token="never-store-provisioning-tokens-in-values"' \
+  "token.*(not allowed|additionalProperties)|additional properties.*token"
+expect_schema_failure 'api.scim.existingSecretKey="../token"' \
+  "existingSecretKey.*(pattern|match)"
+expect_schema_failure 'api.scim.groups=[{"id":"build"}]' \
+  "displayName.*required|missing property 'displayName'"
+echo 'Assistant, RBE, publisher, and authorization values schema checks passed'

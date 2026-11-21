@@ -51,6 +51,48 @@
 {{- $apiEnv := default (dict) .Values.api.env -}}
 {{- $publisherEnv := default (dict) .Values.publisher.env -}}
 {{- $subscriberEnv := default (dict) .Values.subscriber.env -}}
+{{- if or (hasKey $apiEnv "SCIM_CONFIG") (hasKey $publisherEnv "SCIM_CONFIG") (hasKey $subscriberEnv "SCIM_CONFIG") -}}
+{{- fail "SCIM_CONFIG must be configured through api.scim with an existing Secret, not workload env" -}}
+{{- end -}}
+{{- if .Values.api.scim.enabled -}}
+  {{- if ne .Values.authorization.mode "enforced" -}}{{- fail "api.scim requires authorization.mode=enforced" -}}{{- end -}}
+  {{- if not (regexMatch "^https://[^/?#@[:space:]]+(/[^?#[:space:]]*)?$" .Values.api.scim.issuer) -}}{{- fail "api.scim.issuer must be an absolute HTTPS issuer without credentials, query or fragment" -}}{{- end -}}
+  {{- if or (not (trim .Values.api.scim.existingSecret)) (not .Values.api.scim.existingSecretKey) -}}{{- fail "api.scim requires existingSecret and existingSecretKey" -}}{{- end -}}
+  {{- if ne (trim .Values.api.scim.userIdPrefix) .Values.api.scim.userIdPrefix -}}{{- fail "api.scim.userIdPrefix must not have surrounding whitespace" -}}{{- end -}}
+  {{- $groups := dict -}}
+  {{- range .Values.api.scim.groups -}}
+    {{- if or (not (trim .id)) (ne (trim .id) .id) (not (trim .displayName)) (hasKey $groups .id) -}}{{- fail "api.scim.groups require unique nonempty IDs and display names" -}}{{- end -}}
+    {{- $_ := set $groups .id true -}}
+  {{- end -}}
+{{- end -}}
+
+{{- if or (hasKey $apiEnv "PROJECT_AUTHORIZATION_CONFIG") (hasKey $publisherEnv "PROJECT_AUTHORIZATION_CONFIG") -}}
+{{- fail "api.env and publisher.env must not set PROJECT_AUTHORIZATION_CONFIG; use authorization so both workloads share the same policy" -}}
+{{- end -}}
+{{- if and (eq .Values.authorization.mode "enforced") (not .Values.publisher.enforceProjectAuthorization) -}}
+{{- fail "authorization.mode=enforced requires publisher.enforceProjectAuthorization=true" -}}
+{{- end -}}
+{{- if hasKey $publisherEnv "ENFORCE_PUB_AUTHZ" -}}
+{{- fail "publisher.env must not set ENFORCE_PUB_AUTHZ; use publisher.enforceProjectAuthorization" -}}
+{{- end -}}
+{{- $publisherJwksSource := default "auto" .Values.publisher.jwks.source -}}
+{{- if not (has $publisherJwksSource (list "auto" "url" "inline" "secret")) -}}
+{{- fail "publisher.jwks.source must be one of: auto, url, inline, secret" -}}
+{{- end -}}
+{{- if ne $publisherJwksSource "auto" -}}
+  {{- if not .Values.publisher.jwks.enabled -}}
+  {{- fail "an explicit publisher.jwks.source requires publisher.jwks.enabled=true" -}}
+  {{- end -}}
+  {{- $publisherJwksSources := dict "url" (trim .Values.publisher.jwks.url) "inline" (trim .Values.publisher.jwks.json) "secret" (trim .Values.publisher.jwks.existingSecret) -}}
+  {{- if not (get $publisherJwksSources $publisherJwksSource) -}}
+  {{- fail (printf "publisher.jwks.source=%s requires a non-empty publisher.jwks.%s" $publisherJwksSource (get (dict "url" "url" "inline" "json" "secret" "existingSecret") $publisherJwksSource)) -}}
+  {{- end -}}
+  {{- range $sourceName, $sourceValue := $publisherJwksSources -}}
+    {{- if and (ne $sourceName $publisherJwksSource) $sourceValue -}}
+    {{- fail "explicit publisher.jwks.source cannot be combined with other publisher key sources; set only the selected url, json, or existingSecret (global oidc settings may remain)" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- if or (hasKey $apiEnv "APP_ENV") (hasKey $publisherEnv "APP_ENV") (hasKey $subscriberEnv "APP_ENV") -}}
 {{- fail "APP_ENV is fixed to on-prem for this chart; remove it from api.env, publisher.env, or subscriber.env" -}}
 {{- end -}}
@@ -73,7 +115,7 @@
      override because they are the custom environment the chart can inspect and
      prove it will render. */}}
 {{- if eq (default "" .Values.app.grpcAuthUserProvider) "jwks" -}}
-  {{- $requiredAuthKeys := list "GRPC_AUTH_JWKS_URL" "GRPC_AUTH_JWKS_FILE" "GRPC_AUTH_JWKS_INLINE" "GRPC_AUTH_ISSUER" "GRPC_AUTH_AUDIENCE" -}}
+  {{- $requiredAuthKeys := list "GRPC_AUTH_JWT_PROFILES" "GRPC_AUTH_JWKS_URL" "GRPC_AUTH_JWKS_FILE" "GRPC_AUTH_JWKS_INLINE" "GRPC_AUTH_ISSUER" "GRPC_AUTH_AUDIENCE" "GRPC_AUTH_PRINCIPAL_KIND" "GRPC_AUTH_JWKS_REFRESH_INTERVAL" "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT" "GRPC_AUTH_JWKS_REFRESH_TIMEOUT" "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL" -}}
   {{- $apiHasCustomAuth := false -}}
   {{- $publisherHasCustomAuth := false -}}
   {{- range $requiredAuthKeys -}}
@@ -81,7 +123,10 @@
     {{- if hasKey $publisherEnv . -}}{{- $publisherHasCustomAuth = true -}}{{- end -}}
   {{- end -}}
 
-  {{- if .Values.api.jwt.enabled -}}
+  {{- if .Values.api.jwt.profiles -}}
+    {{- include "hermetiq-core.validateJWTProfiles" .Values.api.jwt.profiles -}}
+    {{- if or (not .Values.api.jwt.enabled) $apiHasCustomAuth -}}{{- fail "api.jwt.profiles requires api.jwt.enabled=true and no legacy custom auth env" -}}{{- end -}}
+  {{- else if .Values.api.jwt.enabled -}}
     {{- if $apiHasCustomAuth -}}
     {{- fail "api.jwt.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in api.env; configure JWKS through api.jwt or set api.jwt.enabled=false" -}}
     {{- end -}}
@@ -109,7 +154,10 @@
     {{- end -}}
   {{- end -}}
 
-  {{- if .Values.publisher.jwks.enabled -}}
+  {{- if .Values.publisher.jwks.profiles -}}
+    {{- include "hermetiq-core.validateJWTProfiles" .Values.publisher.jwks.profiles -}}
+    {{- if or (not .Values.publisher.jwks.enabled) $publisherHasCustomAuth -}}{{- fail "publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env" -}}{{- end -}}
+  {{- else if .Values.publisher.jwks.enabled -}}
     {{- if $publisherHasCustomAuth -}}
     {{- fail "publisher.jwks.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in publisher.env; configure JWKS through publisher.jwks or set publisher.jwks.enabled=false" -}}
     {{- end -}}
@@ -251,5 +299,17 @@
 {{- range $key, $setting := $dashboardFeatureSettings -}}
   {{- if hasKey $.Values.dashboard.env $key -}}
   {{- fail (printf "dashboard.env must not set %s; %s" $key $setting) -}}
+  {{- end -}}
+{{- end -}}
+
+{{- if and (eq .Values.authorization.mode "enforced") (not .Values.browserAuthorization.enabled) -}}
+{{- fail "authorization.mode=enforced requires browserAuthorization.enabled=true (same-origin BFF and application policy gates)" -}}
+{{- end -}}
+{{- if .Values.browserAuthorization.enabled -}}
+  {{- /* oauth2-proxy injects the ID token the BFF and the Grafana gate forward. */ -}}
+  {{- if not .Values.dashboard.oauth2Proxy.enabled -}}{{- fail "browserAuthorization requires dashboard.oauth2Proxy.enabled=true" -}}{{- end -}}
+  {{- if .Values.gateway.routes.grafanaEnabled -}}
+    {{- if ne (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true" -}}{{- fail "browserAuthorization requires Grafana's oauth2-proxy when its route is enabled" -}}{{- end -}}
+    {{- if or (not .Values.browserAuthorization.gateImage.repository) (not .Values.browserAuthorization.gateImage.digest) (not .Values.browserAuthorization.grafanaBackendPodSelector) (not .Values.browserAuthorization.metricsDatasourceUID) -}}{{- fail "browserAuthorization requires gateImage repository/digest, metricsDatasourceUID and grafanaBackendPodSelector for Grafana" -}}{{- end -}}
   {{- end -}}
 {{- end -}}
