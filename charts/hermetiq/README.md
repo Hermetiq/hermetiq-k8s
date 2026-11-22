@@ -2998,23 +2998,14 @@ requires a trial or purchased license key, as described in
 
 `authorization.mode=enforced` requires `browserAuthorization.enabled=true`.
 This opts the dashboard into a same-origin BFF (`/grpc`, `/api/v1`, authoritative
-`/auth/me`) and inserts a per-request Hermetiq policy gate between Grafana's
-OIDC proxy and Grafana. Both forward the ID token oauth2-proxy already passes
-upstream; the oauth2-proxy configuration is otherwise unchanged. Legacy settings,
-shared cookies, default Viewer access, and `api.mcpAuthDisabled=true` remain
-available. Use API and dashboard images from the authorization release before
-activation.
+`/auth/me`) that forwards the ID token oauth2-proxy already passes upstream; the
+oauth2-proxy configuration is otherwise unchanged. Legacy settings, shared
+cookies, default Viewer access, and `api.mcpAuthDisabled=true` remain available.
+Use API and dashboard images from the authorization release before activation.
 
-For Grafana, set `browserAuthorization.gateImage` to a digest-pinned
-grafana-auth-proxy image from the same release, `metricsDatasourceUID`, and
-`grafanaBackendPodSelector` with Grafana's actual pod labels. The gate caches
-allowed decisions for 10 seconds, so a revocation reaches open Grafana sessions
-within that window. `grafanaBackendPort` is its target port (default 3000). Grafana must
-use auth.proxy with `X-Forwarded-User`, `Role:X-Forwarded-Groups`, `sync_ttl=0`
-and `enable_login_token=false`. Remove raw backend routes or competing policies;
-Kubernetes NetworkPolicies are additive. Non-admin metrics require `read:bep`;
-shared logs require installation administration. Namespace-only metric names
-must be explicitly listed in `allowedNamespaceMetrics`.
+Grafana is not covered by project authorization: it stays behind its own
+oauth2-proxy, so every user who can sign in through the identity provider can
+open it, as before.
 
 `api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the legacy
 single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,

@@ -42,9 +42,6 @@ spec:
         - podSelector:
             matchLabels:
               app: {{ include "hermetiq-core.dashboardName" $ }}
-        - podSelector:
-            matchLabels:
-              app: {{ include "hermetiq-core.grafanaOauth2ProxyName" $ }}
         {{- end }}
       {{- end }}
 ---

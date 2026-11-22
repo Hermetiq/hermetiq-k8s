@@ -1458,20 +1458,8 @@ promqlQueries:
   rolloutChecksum: ""
 
 # Browser authorization: the dashboard calls the API same-origin through its
-# nginx BFF, /auth/me is answered by the API, and Grafana requests pass a
-# per-request policy gate. Off by default; legacy cross-origin settings are
-# unchanged until it is enabled. Required by authorization.mode=enforced.
+# nginx BFF and /auth/me is answered by the API. Off by default; legacy
+# cross-origin settings are unchanged until it is enabled. Required by
+# authorization.mode=enforced. Grafana stays behind its oauth2-proxy.
 browserAuthorization:
   enabled: false
-  # grafana-auth-proxy image for the Grafana gate, pinned by digest. Required
-  # when the Grafana route is enabled.
-  gateImage:
-    repository: ""
-    tag: ""
-    digest: ""
-  # Allowlisted shared namespace metrics. Project-labelled metrics require read:bep.
-  allowedNamespaceMetrics: []
-  # Explicit Grafana metrics datasource UID and backend labels in this namespace.
-  metricsDatasourceUID: ""
-  grafanaBackendPodSelector: {}
-  grafanaBackendPort: 3000

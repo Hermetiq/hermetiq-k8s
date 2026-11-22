@@ -4,13 +4,6 @@ publisher:
   enforceProjectAuthorization: true
 browserAuthorization:
   enabled: true
-  gateImage:
-    repository: gate
-    tag: authz-test-only
-    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  metricsDatasourceUID: metrics
-  grafanaBackendPodSelector:
-    app: grafana
 dashboard:
   oauth2Proxy:
     enabled: true

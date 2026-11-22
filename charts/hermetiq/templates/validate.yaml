@@ -303,13 +303,9 @@
 {{- end -}}
 
 {{- if and (eq .Values.authorization.mode "enforced") (not .Values.browserAuthorization.enabled) -}}
-{{- fail "authorization.mode=enforced requires browserAuthorization.enabled=true (same-origin BFF and application policy gates)" -}}
+{{- fail "authorization.mode=enforced requires browserAuthorization.enabled=true (same-origin dashboard BFF)" -}}
 {{- end -}}
-{{- if .Values.browserAuthorization.enabled -}}
-  {{- /* oauth2-proxy injects the ID token the BFF and the Grafana gate forward. */ -}}
-  {{- if not .Values.dashboard.oauth2Proxy.enabled -}}{{- fail "browserAuthorization requires dashboard.oauth2Proxy.enabled=true" -}}{{- end -}}
-  {{- if .Values.gateway.routes.grafanaEnabled -}}
-    {{- if ne (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true" -}}{{- fail "browserAuthorization requires Grafana's oauth2-proxy when its route is enabled" -}}{{- end -}}
-    {{- if or (not .Values.browserAuthorization.gateImage.repository) (not .Values.browserAuthorization.gateImage.digest) (not .Values.browserAuthorization.grafanaBackendPodSelector) (not .Values.browserAuthorization.metricsDatasourceUID) -}}{{- fail "browserAuthorization requires gateImage repository/digest, metricsDatasourceUID and grafanaBackendPodSelector for Grafana" -}}{{- end -}}
-  {{- end -}}
+{{- /* oauth2-proxy injects the ID token the dashboard BFF forwards. */ -}}
+{{- if and .Values.browserAuthorization.enabled (not .Values.dashboard.oauth2Proxy.enabled) -}}
+{{- fail "browserAuthorization requires dashboard.oauth2Proxy.enabled=true" -}}
 {{- end -}}

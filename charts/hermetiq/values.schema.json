@@ -1519,40 +1519,6 @@
       "properties": {
         "enabled": {
           "type": "boolean"
-        },
-        "gateImage": {
-          "type": "object",
-          "properties": {
-            "repository": {
-              "type": "string"
-            },
-            "tag": {
-              "type": "string"
-            },
-            "digest": {
-              "type": "string"
-            }
-          }
-        },
-        "allowedNamespaceMetrics": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "metricsDatasourceUID": {
-          "type": "string"
-        },
-        "grafanaBackendPodSelector": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "grafanaBackendPort": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
         }
       }
     }
