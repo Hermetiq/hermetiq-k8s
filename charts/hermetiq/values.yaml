@@ -1243,7 +1243,7 @@ dashboard:
   remoteCacheUrl: ""
   # Additional environment variables for the dashboard deployment.
   env:
-    REACT_APP_HERMETIQ_AI_PLUGIN_VERSION: "v0.9.12-beta"
+    REACT_APP_HERMETIQ_AI_PLUGIN_VERSION: "v1.0.0"
   prepareDashboardHtml:
     # Additional environment variables for the dashboard HTML preparation init container.
     env: {}
