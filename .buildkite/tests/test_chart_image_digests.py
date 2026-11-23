@@ -182,7 +182,15 @@ images:
                 inventory, "inspect_reference", side_effect=lambda ref: ref.partition("@")[2] or digest
             ):
                 inventory.main()
-            command = ["helm", "template", "test", str(chart), "-f", str(chart / "ci-values/ci.yaml")]
+            # The general render fixture selects authorization-capable test
+            # images. Image-pinning coverage must use the chart's own image
+            # values, with legacy mode for the currently published images.
+            runtime_values = yaml.safe_load((chart / "ci-values/ci.yaml").read_text())
+            runtime_values.pop("images", None)
+            runtime_fixture = Path(tmp) / "runtime-values.yaml"
+            runtime_fixture.write_text(yaml.safe_dump(runtime_values))
+            command = ["helm", "template", "test", str(chart), "-f", str(runtime_fixture),
+                       "-f", str(chart / "ci-values/legacy.yaml")]
             rendered = subprocess.check_output(command, text=True)
             containers = [container for document in yaml.safe_load_all(rendered)
                           if document and document["kind"] == "Deployment"
