@@ -51,11 +51,19 @@
 {{- $apiEnv := default (dict) .Values.api.env -}}
 {{- $publisherEnv := default (dict) .Values.publisher.env -}}
 {{- $subscriberEnv := default (dict) .Values.subscriber.env -}}
+{{- if hasKey .Values.authorization "mode" -}}
+{{- fail "authorization.mode is not supported; this Helm chart always enforces project authorization" -}}
+{{- end -}}
+{{- if hasKey .Values.publisher "enforceProjectAuthorization" -}}
+{{- fail "publisher.enforceProjectAuthorization is not supported; this Helm chart always enforces publisher project authorization" -}}
+{{- end -}}
+{{- if hasKey .Values "browserAuthorization" -}}
+{{- fail "browserAuthorization is not supported; this Helm chart always enables browser authorization" -}}
+{{- end -}}
 {{- if or (hasKey $apiEnv "SCIM_CONFIG") (hasKey $publisherEnv "SCIM_CONFIG") (hasKey $subscriberEnv "SCIM_CONFIG") -}}
 {{- fail "SCIM_CONFIG must be configured through api.scim with an existing Secret, not workload env" -}}
 {{- end -}}
 {{- if .Values.api.scim.enabled -}}
-  {{- if ne .Values.authorization.mode "enforced" -}}{{- fail "api.scim requires authorization.mode=enforced" -}}{{- end -}}
   {{- if not (regexMatch "^https://[^/?#@[:space:]]+(/[^?#[:space:]]*)?$" .Values.api.scim.issuer) -}}{{- fail "api.scim.issuer must be an absolute HTTPS issuer without credentials, query or fragment" -}}{{- end -}}
   {{- if or (not (trim .Values.api.scim.existingSecret)) (not .Values.api.scim.existingSecretKey) -}}{{- fail "api.scim requires existingSecret and existingSecretKey" -}}{{- end -}}
   {{- if ne (trim .Values.api.scim.userIdPrefix) .Values.api.scim.userIdPrefix -}}{{- fail "api.scim.userIdPrefix must not have surrounding whitespace" -}}{{- end -}}
@@ -69,11 +77,8 @@
 {{- if or (hasKey $apiEnv "PROJECT_AUTHORIZATION_CONFIG") (hasKey $publisherEnv "PROJECT_AUTHORIZATION_CONFIG") -}}
 {{- fail "api.env and publisher.env must not set PROJECT_AUTHORIZATION_CONFIG; use authorization so both workloads share the same policy" -}}
 {{- end -}}
-{{- if and (eq .Values.authorization.mode "enforced") (not .Values.publisher.enforceProjectAuthorization) -}}
-{{- fail "authorization.mode=enforced requires publisher.enforceProjectAuthorization=true" -}}
-{{- end -}}
 {{- if hasKey $publisherEnv "ENFORCE_PUB_AUTHZ" -}}
-{{- fail "publisher.env must not set ENFORCE_PUB_AUTHZ; use publisher.enforceProjectAuthorization" -}}
+{{- fail "publisher.env must not set ENFORCE_PUB_AUTHZ; this Helm chart always enforces publisher project authorization" -}}
 {{- end -}}
 {{- $publisherJwksSource := default "auto" .Values.publisher.jwks.source -}}
 {{- if not (has $publisherJwksSource (list "auto" "url" "inline" "secret")) -}}
@@ -310,11 +315,13 @@
   {{- end -}}
 {{- end -}}
 
-{{- if and (eq .Values.authorization.mode "enforced") (not .Values.browserAuthorization.enabled) -}}
-{{- fail "authorization.mode=enforced requires browserAuthorization.enabled=true (same-origin dashboard BFF)" -}}
+{{- range $key := list "REACT_APP_PROJECT_AUTHORIZATION_MODE" "BROWSER_AUTHORIZATION" "BFF_USE_ID_TOKEN" "GRPC_API_HOST" "REACT_APP_API_URL" "REACT_APP_GRPC_WEB_URL" "REACT_APP_HMQ_API_URL" -}}
+  {{- if hasKey $.Values.dashboard.env $key -}}
+  {{- fail (printf "dashboard.env must not set %s; this Helm chart manages enforced browser authorization" $key) -}}
+  {{- end -}}
 {{- end -}}
 {{- /* oauth2-proxy injects the ID token the dashboard BFF forwards. */ -}}
-{{- if and .Values.browserAuthorization.enabled (not .Values.dashboard.oauth2Proxy.enabled) -}}
-{{- fail "browserAuthorization requires dashboard.oauth2Proxy.enabled=true" -}}
+{{- if not .Values.dashboard.oauth2Proxy.enabled -}}
+{{- fail "this Helm chart requires dashboard.oauth2Proxy.enabled=true for browser authorization" -}}
 {{- end -}}
 {{- include "hermetiq-core.validateAuthorizationImages" . -}}

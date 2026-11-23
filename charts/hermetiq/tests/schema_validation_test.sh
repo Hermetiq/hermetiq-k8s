@@ -44,8 +44,10 @@ expect_schema_failure 'gateway.timeouts.apiWeb.requestTimeout="five-minutes"' \
   "apiWeb\.requestTimeout: Does not match pattern|apiWeb/requestTimeout': .* does not match pattern"
 expect_schema_failure 'gateway.timeouts.mcp.maxStreamDuration="forever"' \
   "mcp\.maxStreamDuration: Does not match pattern|mcp/maxStreamDuration': .* does not match pattern"
-expect_schema_failure 'publisher.enforceProjectAuthorization="true"' \
-  "enforceProjectAuthorization.*(boolean|bool)"
+expect_schema_failure 'authorization.mode="legacy"' \
+  "mode.*(not allowed|additionalProperties)|additional properties.*mode"
+expect_schema_failure 'authorization.mode="enforced"' \
+  "mode.*(not allowed|additionalProperties)|additional properties.*mode"
 expect_schema_failure 'publisher.jwks.source="automatic"' \
   "source.*(one of|enum)"
 expect_schema_failure 'publisher.jwks.refreshInterval="eventually"' \

@@ -170,7 +170,7 @@ spec:
               value: {{ dict "issuer" .Values.api.scim.issuer "userIdPrefix" .Values.api.scim.userIdPrefix "bearerTokenFile" "/config/scim/token" "groups" .Values.api.scim.groups | mustToJson | quote }}
             {{- end }}
             - name: PROJECT_AUTHORIZATION_CONFIG
-              value: {{ mustToJson .Values.authorization | quote }}
+              value: {{ include "hermetiq-core.projectAuthorizationJSON" . | quote }}
 {{- with .Values.api.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}

@@ -27,9 +27,10 @@ standardLabels:
 buildbarnCdcCompatible: false
 
 images:
-  # Enforced authorization requires matching authorization-capable API,
+  # This chart requires matching authorization-capable API,
   # publisher, bootstrap and dashboard images; JWT profiles also require the
-  # matching auth-proxy image. The v0.9.8 pins below support legacy mode only.
+  # matching auth-proxy image. The v0.9.8 pins below predate this requirement
+  # and must be replaced before installing this chart.
   # Upgrade tags AND digests together (or clear a digest to use its tag).
   # See README: Upgrading project authorization.
   bepNats:
@@ -126,8 +127,8 @@ app:
   # and CrashLoopBackOffs.
   grpcAuthUserProvider: jwks
   environment: prod
-  # Legacy-mode installation administrators. Enforced mode requires trusted
-  # administrator groups instead; email allowlists do not grant admin authority.
+  # Retained application metadata; configure trusted administrator groups under
+  # authorization instead. Email allowlists do not grant admin authority.
   # Rendered as ADMIN_EMAIL_ALLOWLIST for the API and publisher workloads.
   adminEmails: []
   # How invocation rows are driven. "build_tool" (the chart default) creates
@@ -1077,7 +1078,7 @@ api:
   # Keep it true for chart-managed JWKS settings. Set it false only when api.env
   # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
   # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
-  # Optional directory provisioning. Requires authorization.mode=enforced.
+  # Optional directory provisioning for the enforced project authorization policy.
   # userName must match the verified stable subject; never map it from email.
   scim:
     enabled: false
@@ -1139,11 +1140,9 @@ api:
     enabled: true
     maxUnavailable: 1
 
-# Shared project authorization policy for API and publisher. Enforced is the
-# default; configure builder grants before sending builds. Existing installs
-# can explicitly select legacy while migrating (see README).
+# Shared project authorization policy for API and publisher. This chart always
+# enforces the policy; configure builder grants before sending builds.
 authorization:
-  mode: enforced
   # Authenticated humans may retain automatic Viewer access to every project.
   # Service accounts receive only their explicit projectRoles.
   # Roles: viewer, builder, admin (each includes the previous one).
@@ -1169,10 +1168,7 @@ authorization:
 
 publisher:
   replicas: 4
-  # Require write:bep membership for BEP ingestion. Set false together with
-  # authorization.mode=legacy only while migrating an existing installation.
-  # JWT verification and signed project restrictions still apply in legacy mode.
-  enforceProjectAuthorization: true
+  # BEP ingestion always requires write:bep membership for the selected project.
   # Additional environment variables for the publisher deployment.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
@@ -1463,10 +1459,3 @@ promqlQueries:
   # existingConfigMap, set this to a hash or version of the external data to
   # force a rollout when the ConfigMap contents change.
   rolloutChecksum: ""
-
-# Browser authorization: the dashboard calls the API same-origin through its
-# nginx BFF and /auth/me is answered by the API. Enabled by default and required
-# by authorization.mode=enforced. Set false with legacy mode to retain the
-# previous cross-origin flow. Grafana stays behind its oauth2-proxy.
-browserAuthorization:
-  enabled: true

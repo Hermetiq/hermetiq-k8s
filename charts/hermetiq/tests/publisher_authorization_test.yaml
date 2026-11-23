@@ -6,31 +6,29 @@ templates:
   - templates/validate.yaml
 values:
   - ../ci-values/ci.yaml
-  - ../ci-values/legacy.yaml
 tests:
-  - it: preserves legacy publisher membership enforcement when explicitly disabled
+  - it: always enables publisher membership enforcement
     template: templates/deployment-publisher.yaml
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
-          value: "false"
-
-  - it: enables publisher membership enforcement explicitly
-    template: templates/deployment-publisher.yaml
-    set:
-      publisher.enforceProjectAuthorization: true
     asserts:
       - equal:
           path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
           value: "true"
 
+  - it: rejects the removed publisher enforcement switch
+    template: templates/validate.yaml
+    set:
+      publisher.enforceProjectAuthorization: false
+    asserts:
+      - failedTemplate:
+          errorPattern: publisher.enforceProjectAuthorization is not supported
+
   - it: rejects a duplicate publisher enforcement environment entry
     template: templates/validate.yaml
     set:
-      publisher.env.ENFORCE_PUB_AUTHZ: "true"
+      publisher.env.ENFORCE_PUB_AUTHZ: "false"
     asserts:
       - failedTemplate:
-          errorPattern: use publisher.enforceProjectAuthorization
+          errorPattern: publisher.env must not set ENFORCE_PUB_AUTHZ; this Helm chart always enforces publisher project authorization
 
   - it: preserves auto URL precedence over local keys
     template: templates/deployment-publisher.yaml
@@ -307,9 +305,6 @@ tests:
 
   - it: preserves existing verifier env overrides when project authorization is enforced
     set:
-      authorization.mode: enforced
-      publisher.enforceProjectAuthorization: true
-      browserAuthorization.enabled: true
       dashboard.oauth2Proxy.enabled: true
       api.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 12m
       publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 15m
@@ -355,20 +350,9 @@ tests:
       - failedTemplate:
           errorPattern: publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env
 
-  - it: requires publisher enforcement before activating the shared policy
-    template: templates/validate.yaml
-    set:
-      authorization.mode: enforced
-    asserts:
-      - failedTemplate:
-          errorPattern: authorization.mode=enforced requires publisher.enforceProjectAuthorization=true
-
-  - it: retains auth-disabled MCP while activating the shared policy
+  - it: retains the explicit shared MCP identity under enforced project policy
     template: templates/deployment-api.yaml
     set:
-      authorization.mode: enforced
-      publisher.enforceProjectAuthorization: true
-      browserAuthorization.enabled: true
       dashboard.oauth2Proxy.enabled: true
       dashboard.oauth2Proxy.client.existingSecret: test-oidc
       gateway.routes.grafanaEnabled: false
@@ -380,13 +364,10 @@ tests:
 
   - it: gives both cores the same complete policy
     set:
-      authorization.mode: enforced
-      browserAuthorization.enabled: true
       dashboard.oauth2Proxy.enabled: true
       dashboard.oauth2Proxy.client.existingSecret: test-oidc
       gateway.routes.grafanaEnabled: false
       authorization.defaultAccess: none
-      publisher.enforceProjectAuthorization: true
       authorization.groupBindings:
         - projectId: project-a
           issuer: https://oidc.ci.test/

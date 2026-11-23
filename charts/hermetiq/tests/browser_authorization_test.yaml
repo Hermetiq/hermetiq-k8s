@@ -1,4 +1,4 @@
-suite: enforced authorization defaults and legacy migration
+suite: enforced authorization and browser contract
 templates:
   - templates/deployment-dashboard.yaml
   - templates/deployment-grafana-oauth2-proxy.yaml
@@ -101,50 +101,13 @@ tests:
       - notExists:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "BROWSER_SESSION_COOKIES_JSON")]
 
-  - it: restores the cross-origin dashboard with the documented legacy overrides
-    template: templates/deployment-dashboard.yaml
-    set:
-      authorization.mode: legacy
-      publisher.enforceProjectAuthorization: false
-      browserAuthorization.enabled: false
-    asserts:
-      - notExists:
-          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "BROWSER_AUTHORIZATION")]
-      - notExists:
-          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "GRPC_API_HOST")]
-      - notExists:
-          path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts[?(@.name == "dashboard-bff")]
-      - equal:
-          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_API_URL")].value
-          value: https://api-web.ci.hermetiq.test
-      - equal:
-          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_PROJECT_AUTHORIZATION_MODE")].value
-          value: legacy
-
-  - it: restores legacy policy and publisher behavior with the migration fixture
-    values:
-      - ../ci-values/legacy.yaml
-    asserts:
-      - matchRegex:
-          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
-          pattern: '"mode":"legacy"'
-        template: templates/deployment-api.yaml
-      - matchRegex:
-          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
-          pattern: '"mode":"legacy"'
-        template: templates/deployment-publisher.yaml
-      - equal:
-          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
-          value: "false"
-        template: templates/deployment-publisher.yaml
-
-  - it: requires browser authorization for enforced mode
+  - it: rejects the removed browser authorization switch
     template: templates/validate.yaml
     set:
       browserAuthorization.enabled: false
     asserts:
       - failedTemplate:
-          errorPattern: authorization.mode=enforced requires browserAuthorization.enabled=true
+          errorPattern: browserAuthorization is not supported; this Helm chart always enables browser authorization
 
   - it: requires the dashboard oauth2-proxy for browser authorization
     template: templates/validate.yaml
@@ -152,4 +115,28 @@ tests:
       dashboard.oauth2Proxy.enabled: false
     asserts:
       - failedTemplate:
-          errorPattern: browserAuthorization requires dashboard.oauth2Proxy.enabled=true
+          errorPattern: this Helm chart requires dashboard.oauth2Proxy.enabled=true for browser authorization
+
+  - it: rejects a browser authorization environment bypass
+    template: templates/validate.yaml
+    set:
+      dashboard.env.BROWSER_AUTHORIZATION: "false"
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboard.env must not set BROWSER_AUTHORIZATION
+
+  - it: rejects a legacy UI policy mode environment override
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_PROJECT_AUTHORIZATION_MODE: legacy
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboard.env must not set REACT_APP_PROJECT_AUTHORIZATION_MODE
+
+  - it: rejects a cross-origin API environment override
+    template: templates/validate.yaml
+    set:
+      dashboard.env.REACT_APP_API_URL: https://api.example.test
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboard.env must not set REACT_APP_API_URL

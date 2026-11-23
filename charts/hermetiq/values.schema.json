@@ -1120,10 +1120,6 @@
         "trustedCalCidrs": {
           "type": "string",
           "description": "Comma-separated CIDRs whose peers may call the Buildbarn Completed Action Logger without a user credential. EMPTY DISABLES CAL INGEST."
-        },
-        "enforceProjectAuthorization": {
-          "type": "boolean",
-          "description": "Require write:bep membership at the publisher; false preserves legacy on-prem authorization."
         }
       }
     },
@@ -1357,20 +1353,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "mode",
         "defaultAccess",
         "groupBindings",
         "serviceAccounts",
         "instanceBindings"
       ],
       "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "legacy",
-            "enforced"
-          ]
-        },
         "defaultAccess": {
           "type": "string",
           "enum": [
@@ -1518,15 +1506,6 @@
               }
             }
           }
-        }
-      }
-    },
-    "browserAuthorization": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
         }
       }
     }

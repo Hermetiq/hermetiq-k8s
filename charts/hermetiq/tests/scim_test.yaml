@@ -6,7 +6,6 @@ templates:
   - templates/validate.yaml
 values:
   - ../ci-values/ci.yaml
-  - ../ci-values/authorization.yaml
 set:
   api.scim:
     enabled: true
@@ -82,13 +81,6 @@ tests:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "SCIM_CONFIG")]
       - notExists:
           path: spec.template.metadata.annotations["hermetiq.com/scim-rollout-version"]
-  - it: refuses provisioning without enforced policy
-    template: templates/validate.yaml
-    set:
-      authorization.mode: legacy
-    asserts:
-      - failedTemplate:
-          errorPattern: api.scim requires authorization.mode=enforced
   - it: refuses a missing provisioning secret
     template: templates/validate.yaml
     set:

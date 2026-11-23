@@ -334,6 +334,14 @@ true
 {{- end -}}
 {{- end -}}
 
+{{/* The chart always enforces project authorization. Copy the configurable
+     policy before injecting the fixed mode so rendering never mutates Values. */}}
+{{- define "hermetiq-core.projectAuthorizationJSON" -}}
+{{- $policy := deepCopy (default (dict) .Values.authorization) -}}
+{{- $_ := set $policy "mode" "enforced" -}}
+{{- mustToJson $policy -}}
+{{- end -}}
+
 {{/* Shared verifier settings for chart-managed JWKS. Historical workload env
      overrides take precedence and are rendered once by extraEnv. */}}
 {{- define "hermetiq-core.jwksRefreshEnv" -}}

@@ -52,18 +52,6 @@ tests:
           path: metadata.name
           value: bep-nats-pub
 
-  - it: allows web-ui appPort when dashboard oauth2Proxy is disabled
-    set:
-      networkPolicy.enabled: true
-      dashboard.oauth2Proxy.enabled: false
-    asserts:
-      - equal:
-          path: spec.ingress[0].ports[0].port
-          value: 3000
-        documentSelector:
-          path: metadata.name
-          value: web-ui
-
   # The Service's gRPC ports target grpc-auth-proxy (50081); the api
   # container's own listener stays unreachable from other pods.
   - it: admits grpc-api only on its Service target ports

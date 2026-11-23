@@ -3,7 +3,7 @@
 # NOT a real deployment — just enough to render for validation.
 # Render-only image names exercise the authorization-capable runtime contract.
 # These tags are fixtures, not published releases or deployable images. No
-# authorization switches are overridden here: CI tests the chart defaults.
+# authorization switches exist: CI tests the chart's enforced contract.
 images:
   bepNats:
     apiTag: authorization-test
