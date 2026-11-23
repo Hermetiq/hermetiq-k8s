@@ -40,13 +40,19 @@ The sector size is the host's, `max(st_blksize, page size)` — 4096 bytes on th
 
 For `backend: filesystem`, `blocks bytes` is `blocksSizeGi`. For `backend: blockDevice`, it is the usable size of the whole device, which is why `blocksSizeGi` is ignored in raw block mode. `blockDevice.size` requests the PVC size; with `mode: hostPath`, even that is only documentation.
 
-The largest storable blob is one block. A larger upload fails with an error like:
+The largest **stored record** must fit in one block. In CDC `chunkStorage`, that
+record is a compressed chunk or a small unchunked blob, not an entire
+multi-chunk CAS blob. CMS stores an encoded mapping; AC, ISCC and FSAC store
+their own encoded records. An oversized record fails with an error like:
 
 ```text
 Blob is X bytes in size, while this backend is only capable of storing blobs of up to Y bytes in size
 ```
 
-Check this ceiling before shrinking a store if your builds produce large archives, test outputs, link artifacts, or container layers. Also keep the total block count reasonable: bb-storage refuses configurations with more than 100 blocks for a single local backend.
+Check this ceiling before shrinking a store. Large archives and outputs may be
+split across many CS records, but their CMS mapping must still fit in one CMS
+block. Also keep the total block count reasonable: bb-storage refuses
+configurations with more than 100 blocks for a single local backend.
 
 `spareBlocks` are not usable capacity. They give blocks that just rotated out enough time to finish in-flight reads before being reused. Too few spare blocks can surface as:
 
@@ -144,23 +150,26 @@ record:
 
 | `storage_type` | The histogram records | The store holds |
 | --- | --- | --- |
-| `cs` | The uncompressed chunk size | The ZSTD-compressed chunk, which is smaller |
+| `cs` | The uncompressed chunk size | The encoded chunk; ZSTD often reduces its size, but incompressible input can incur overhead |
 | `cms` | The size of the whole blob | Its chunk mapping, 104 bytes or more |
 | `ac`, `iscc`, `fsac` | The size in the digest that keys the record (the Action for AC, the reduced Action for ISCC and FSAC) | The ActionResult, execution stats or access profile |
 
-Sizing CS from it undersizes the index by the compression ratio. Sizing CMS
-from it makes any index look large enough.
+Sizing CS from it can undersize the index when compression lets more records
+fit on disk. Sizing CMS from whole-blob sizes can make an undersized index look
+large enough.
 
 Use these instead, on the storage pods:
 
 - **CMS:** `32 + 36 * (mean blob size / mean chunk size)` bytes, and never
   below 104. A stored mapping is 36 bytes per chunk (a 4-byte size and a
   32-byte SHA-256 hash) plus a 32-byte checksum suffix, and a mapping has at
-  least two chunks. Mean blob size is that histogram's `_sum / _count` for
-  `storage_type="cms", operation="Put"`. Mean chunk size is about 1.338 times
+  least two chunks. For a planning estimate, use that histogram's `_sum / _count`
+  for `storage_type="cms", operation="Put"` as the mean blob size; this samples
+  writes, not the retained mapping population. A theoretical mean chunk size is about 1.338 times
   `config.contentAddressableStorage.chunkingParameters.minChunkSizeBytes`
   (upstream's figure; about 343 KiB by default). Do not take it from the `cs`
-  series, which also counts every blob small enough to be one chunk.
+  series, which also counts every blob small enough to be one chunk. These are
+  workload-dependent estimates, not observed mapping sizes or capacity proof.
 - **CS, AC, ISCC, FSAC:** per `storage_type`,
 
   ```text
@@ -237,11 +246,18 @@ The sizing consequence is simple: CAS retention should comfortably exceed AC ret
 
 ### The Frontend Read-Through Cache
 
-`frontend.readCache.enabled` puts a `readCaching` backend in front of the shard ring: a `local` block store on the frontend pod's own disk, with the sharded backend as the slow tier and a deduplicating replicator that collapses concurrent misses for the same blob into one copy.
+`frontend.readCache.enabled` wraps the CDC `chunkStorage` path in a
+`readCaching` backend: a `local` block store on the frontend pod's own disk,
+with sharded chunk storage as the slow tier and a deduplicating replicator
+that collapses concurrent fills for the same chunk into one copy. It holds
+compressed chunks and small unchunked blobs, not reconstructed multi-chunk
+CAS blobs. `chunkMappingStorage` remains a separate path.
 
 Four properties decide how you size it.
 
-**Writes are never cached.** Only `Get` and `GetFromComposite` consult the fast tier. Every `Put` goes straight to the shards, so the cache does nothing for upload-heavy workloads and its capacity is sized against the *read* working set.
+**Writes are never cached.** Reads consult the fast tier. Every `Put` goes
+straight to the shards, so size this cache against the *read* working set;
+uploads do not populate it.
 
 **It does not replace the existence cache.** `ReadCachingBlobAccess` embeds the slow backend for everything it does not override, so `FindMissingBlobs` still crosses to the shards — and that is the most frequent CAS call a Bazel client makes, before every upload. The chart therefore nests `readCaching` *inside* `existenceCaching` when both are on. Leave `frontend.contentAddressableStorage.existenceCaching.enabled` alone when you turn the read cache on; they are not alternatives.
 
@@ -251,20 +267,26 @@ Four properties decide how you size it.
 block size = floor(blocksSizeGi / sector size / (spareBlocks + oldBlocks + currentBlocks + newBlocks)) * sector size
 ```
 
-A blob larger than one block cannot be stored in the cache at all, and the failure does not stay inside the cache. The fast `Put` fails with `InvalidArgument`. The chart's deduplicating replicator copies the whole blob before serving it, so the read fails up front with `Failed to replicate blob <digest>` (a bare `local` replicator streams while it copies and fails the read mid-stream with `Replication failed`). Either way an undersized cache turns a miss on a large blob into a **failed build**, not a slow read. There is no way to route large blobs around it; the `size_distinguishing` backend that once did this was removed from Buildbarn.
+A stored record larger than one block cannot be cached. The fast `Put` fails
+with `InvalidArgument`, and a failed fill can fail the read and therefore the
+build. In CDC, even a bare `local` replicator completes the source read and
+sink write before returning; it does not stream a whole CAS blob to the caller
+while filling the cache. The chart's deduplicating wrapper coalesces fills and
+reports failures as `Failed to replicate blob <digest>`. Do not assume that a
+failed fill silently bypasses the cache.
 
-Size the block above the largest blob the frontend actually moves, measured from its own histogram — and scope the query, because every worker runs its own `readCaching` local CAS and an unscoped query reports the worker's blobs, not the frontend's:
+Compare the per-block capacity with the largest **encoded record** passed to
+this fast tier. The blob-size histogram records the request digest's size;
+for CS that is the uncompressed chunk size, not the encoded record size. It
+cannot establish the maximum stored size, and a bucketed quantile is not an
+exact maximum. Scope telemetry to the frontend or worker being sized and use
+the deployed chunking parameters and encoding when checking this ceiling.
+The block does not need to fit the largest reconstructed multi-chunk output.
 
-```text
-histogram_quantile(1.0, sum by (le) (rate(
-  buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket{
-    pod=~"frontend.*", backend_type="read_caching"
-  }[7d])))
-```
-
-Both filters matter, and so does `sum by (le)` rather than `max by (le)` — a max across heterogeneous series is not a distribution. The `backend_type` label names each decorator in the stack, so the chain is directly observable and you can confirm you are reading the right one: `deadline_enforcing, existence_caching, read_caching, local_block_device, sharding, grpc`.
-
-The chart defaults give `250 GiB / (3 + 8 + 24 + 3)` ≈ 6.58 GiB per block (7,064,088,576 bytes with 4096-byte sectors), which clears any realistic Bazel output. Shrink `blocksSizeGi` and the block shrinks with it.
+The chart defaults give `250 GiB / (3 + 8 + 24 + 3)` ≈ 6.58 GiB per block
+(7,064,088,576 bytes with 4096-byte sectors). These are chart defaults, not
+evidence of the live configuration. Shrink `blocksSizeGi` and the block shrinks
+with it.
 
 **The fast tier is node ephemeral storage, and the scheduler does not know it exists.** `volume.emptyDir` is the default, and an `emptyDir` draws from the node's allocatable `ephemeral-storage`, which is the kubelet root filesystem. Where that physically lands is a property of the node pool, not of the workload: on a GKE pool created with `--ephemeral-storage-local-ssd count=N` the kubelet root is a RAID-0 of the local SSDs, so the cache gets NVMe with no opt-in from the chart at all. A pool whose local SSDs are attached raw (`--local-nvme-ssd-block`) does **not** back `emptyDir`; those devices exist for the storage tier's `backend: blockDevice`.
 
@@ -291,7 +313,7 @@ Two more settings that are easy to copy wrongly from the storage tier:
 
   ```text
   live capacity    = block size * (old + current + new)
-  objects that fit = live capacity / mean size of a blob that enters the cache
+  objects that fit = live capacity / mean encoded chunk or small-blob size
   entries          = 2 to 10 * objects that fit
   ```
 
@@ -299,6 +321,39 @@ Two more settings that are easy to copy wrongly from the storage tier:
 - Note: `dataIntegrityValidationCache` was removed from `local.BlobAccessConfiguration` in CDC `bb-storage` (integrity validation is now performed per RepMaxCDC chunk and via `chunkMappingValidating`).
 
 A worker's CAS is the one place this shape appears without an existence cache, and that is deliberate: a worker never serves `FindMissingBlobs` to anyone.
+
+## Worker Local Cache and Volume Sizing
+
+Keep these worker resources separate when assessing capacity:
+
+- `chunkStorage.readCaching.fast.local` holds compressed chunks and small
+  blobs on disk, with its own blocks and key-location map.
+- `chunkCache` holds decoded, verified chunks in process memory;
+  `chunkMappingCache` holds parsed mappings.
+- A virtual build directory's `filePool` backs writable temporary and output
+  files. It is not an input cache. Its files may share a volume with the local
+  disk cache, depending on the configured paths and mounts.
+
+Match each path to the actual volume before adding capacity budgets. For
+example, 16 GiB of cache blocks, a 200 MiB index and a 32 GiB file pool on one
+volume create a combined configured demand of about 48.2 GiB, plus state and
+filesystem overhead. They do not prove the volume is overcommitted: files can
+be sparse, a file pool has a configured ceiling, and an `emptyDir: {}` has no
+explicit volume size limit. Check the backing filesystem's capacity and free
+space, any volume quota, node ephemeral-storage pressure and colocated pods.
+A limit on a different mount, such as `/worker`, does not limit the CAS volume.
+Pod memory headroom cannot establish disk headroom.
+
+`persistent` plus a file-backed index can recover only while the cache's
+blocks, index and checkpoint state survive together. `emptyDir` can survive a
+container restart in the same Pod, but not Pod replacement. Replacing
+`spec.storage.casVolume` with one PVC is not sufficient for a scalable worker
+pool: the operator copies that volume source into every replica. A shared
+claim can cause mount conflicts or concurrent access to the same cache and
+file-pool paths. Persistence requires exclusive storage and paths per worker,
+plus stable reattachment of that worker's data. A node-local PV remains tied
+to its node and does not preserve data after node or local-disk loss. Verify
+these lifecycle properties before recommending a persistence conversion.
 
 ## Worker Decoded Chunk Cache
 
@@ -330,6 +385,14 @@ in-flight reads and other worker activity. `horizonSizeBytes` is a chunking
 lookahead parameter, not the maximum chunk size. These bounds do not establish
 an optimal cache size; compare CPU profiles, input-fetch timing and memory
 under representative builds before increasing capacity.
+
+Eviction counters need the same care. A `Remove`/`Insert` ratio measures
+replacement activity, not hit rate, occupancy or memory headroom. Missing
+`Remove` series are missing evidence, not measured zero removals. Observed
+removals alone do not show that a larger cache would improve builds; correlate
+them with repeated decoding, input-fetch latency and the memory budget. A
+count of distinct worker Pods likewise does not establish churn or a cold-cache
+penalty without their lifetimes and workload placement.
 
 Barn Owl's `worker_chunk_cache` rule checks the effective rendered CAS of workers
 with virtual build directories. A missing or null cache is performance guidance,
@@ -386,10 +449,14 @@ metadata LV cannot be reused and needs the
 ## Worked Example 2: 10 TiB Multi-Shard Production Cache (5–10 Shards)
 
 Suppose you are sizing a **10 TiB persistent CAS** across either **`10 shards × 1 TiB`** or **`5 shards × 2 TiB`**.
+The arithmetic below uses 17,408 bytes per stored CS record as an illustrative
+assumption inherited from pre-CDC measurements. It is not a measured compressed
+chunk size or a recommended value for your deployment. Substitute your stored
+record sizes before choosing index and memory capacities.
 
 **1. Usable capacity and object count per shard.**
-- **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.64 TiB` cluster-wide), max blob size `~21.6 GiB`. At `17,408` B/blob, each shard holds **~54.6 million** CAS objects.
-- **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.64 TiB` cluster-wide), max blob size `~43.2 GiB`. At `17,408` B/blob, each shard holds **~109.2 million** CAS objects.
+- **1 TiB shard (`blocksSizeGi: 950`, 10 shards)**: `950 GiB * 41 / 44 ≈ 885.2 GiB` usable per shard (`~8.64 TiB` cluster-wide), per-block stored-record ceiling `~21.6 GiB`. At the assumed `17,408` B/record, each shard holds **~54.6 million** CS records.
+- **2 TiB shard (`blocksSizeGi: 1900`, 5 shards)**: `1900 GiB * 41 / 44 ≈ 1770.5 GiB` usable per shard (`~8.64 TiB` cluster-wide), per-block stored-record ceiling `~43.2 GiB`. At the assumed `17,408` B/record, each shard holds **~109.2 million** CS records.
 
 **2. Map entries.** At 66 bytes per disk record, a **`7,680 MiB` (`7.5 GiB`)** map holds **~122.0M entries** for a 1 TiB shard, and a **`15,360 MiB` (`15 GiB`)** map holds **~244.0M entries** for a 2 TiB shard. Both give about `2.23x` the estimated live object count of a filesystem shard. A map that size belongs on disk, not on the Go heap, where it would also be lost on every restart: use `backend: filesystem` with `keyLocationMapSizeMi: 7680` / `15360`, or `backend: blockDevice` with `blockDevice.keyLocationMap: file` on a companion `-meta` PVC. A raw device is all blocks (about 954 GiB and 1908 GiB usable), so the same maps cover it only `2.07x`; use `8192` / `16384` MiB (`2.21x`) on a `12Gi` / `24Gi` `-meta` PVC there. Either way `bb-storage` `mmap`s `cdc-v1/keys.db` and checkpoints `cdc-v1/persistent_state` with a 300s minimum sync interval, so the index survives restarts. Delayed syncs can leave a longer window of unsynchronized writes. Keep CMS persistent too, and include its blocks and index when sizing the shared volume: 2304 MiB at the defaults (step 4), which the `12Gi` / `24Gi` `-meta` claims above hold next to the CAS index.
 
@@ -403,7 +470,11 @@ Complete values for both shard layouts, plus frontend, scheduler, and gateway se
 
 **5. Verify with production traffic.** After a few days, check that blobs are not discarded before they are reused (for example, cache misses or `NOT_FOUND` errors for recently uploaded outputs, and AC hits failing completeness checks) and that the KLM dropped-put alert stays quiet. The eviction-age gauge (insertion age of the last removed block) is useful context, but it resets on restart and on its own proves neither that eviction happened nor that the cache is big enough. If either signal is wrong, resize the blocks and the map together.
 
-Do this arithmetic before the first install when you can. Changing block counts, block size, or map placement later is a cache flush, as described in [buildbarn-storage-operations.md](buildbarn-storage-operations.md).
+Do this arithmetic before the first install when you can. Treat later changes
+to block counts, block size or map placement as potentially cache-invalidating
+and plan for a cold cache. Preservation must be verified against the exact
+geometry and retained state; see
+[buildbarn-storage-operations.md](buildbarn-storage-operations.md#changes-that-flush-the-cache).
 
 ## Checked Automatically
 
