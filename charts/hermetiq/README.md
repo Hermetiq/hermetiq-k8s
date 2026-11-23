@@ -1682,6 +1682,15 @@ administration); each includes the one before it. The API and publisher cache
 access decisions for 30 seconds, so membership changes and
 suspensions take effect within that window.
 
+In the dashboard, **Users** shows direct project memberships in a table. Project
+administrators can use **Manage** to change a member's role or remove their direct
+membership, and **Add member** to assign a role to an existing principal.
+**Project Settings → Access** contains group bindings, effective access details,
+and the role-permission reference. Installation-managed grants remain in the
+Helm `authorization` values. A person admitted through a group or the default
+Viewer policy does not automatically appear as a direct member; removing a
+direct membership does not revoke access from those other sources.
+
 Issuing Hermetiq build credentials requires direct membership or SCIM-backed
 grants. A Builder role obtained only through JWT groups can publish builds with
 an issuer-provided credential helper, but cannot issue Hermetiq build credentials.
