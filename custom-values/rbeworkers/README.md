@@ -5,18 +5,21 @@ worker pools. After copying `custom-values/` to `my-custom-values/` and
 entering the copied directory, edit the manifests for your environment. Apply
 them in the Buildbarn release namespace after the Buildbarn release and
 `buildbarn-worker-config` are ready. The example release namespace is
-`hermetiq`:
+`hermetiq`.
+
+These manifests require bb-worker-operator v0.3.13 or later and its matching
+CRD (operator chart 0.3.11 or later), which support the FUSE kernel tunables
+and Envoy's `spec.autoscaling.idleReplicas`. Upgrade the CRD and controller
+together following the [CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
+FUSE-backed pools also need Linux 6.2 or newer and writable `/sys`; see
+[FUSE kernel tuning](#fuse-kernel-tuning) for prerequisites and the fallback.
+When upgrading from operator versions before 0.3.4, drop
+`spec.autoscaling.prometheus.projectID` from existing manifests and overlays;
+queue-depth queries now filter by the worker's namespace.
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
-
-These manifests require operator 0.3.4 or later, which filters queue-depth
-queries by the worker's namespace. Existing `RbeWorker` manifests and overlays
-must drop `spec.autoscaling.prometheus.projectID` after the upgrade.
-The Envoy example also uses `spec.autoscaling.idleReplicas`; install a matching
-operator and CRD that support this field, as packaged by the current
-[operator chart](../../charts/bb-worker-operator/README.md#crd-lifecycle).
 
 ## Pools
 
@@ -243,7 +246,10 @@ taints, runtime, and scratch-storage needs.
   other scratch files. Check available disk capacity and set appropriate
   ephemeral-storage requests and limits for your cluster. If you use a local
   disk through `hostPath` instead, patch `spec.storage.casVolume` and ensure
-  concurrently scheduled workers cannot share the same CAS cache path.
+  concurrently scheduled workers cannot share the same CAS cache path. The
+  path must be under one of the operator's `specPolicy.allowedHostPathPrefixes`;
+  the default allows GKE's `/mnt/stateful_partition/kube-ephemeral-ssd`. See
+  [RbeWorker Spec Policy](../../charts/bb-worker-operator/README.md#rbeworker-spec-policy).
 - Docker-in-Docker workers need nodes and Pod policies that permit their
   privileged Docker container. Sysbox workers need Sysbox installed on the
   selected nodes and the `sysbox-runc` RuntimeClass. Configure RuntimeClass
@@ -290,6 +296,69 @@ resize a pool:
 - If the worker container keeps reading more from disk than it writes
   (`container_fs_reads_bytes_total` and `container_fs_writes_bytes_total` with
   `container="worker"`), its cache does not fit in its limit.
+
+## FUSE kernel tuning
+
+All eight FUSE-backed examples configure
+`spec.config.generated.virtualBuildDirectory.fuse` explicitly. One FUSE mount
+serves every concurrent action in a Pod; the kernel's default of 12 background
+requests can bottleneck asynchronous readahead and writeback on these pools.
+The examples start `maximumBackgroundTasks` at
+`128 × max(runner CPU limit in cores, concurrency)`:
+
+| Pools | `maximumBackgroundTasks` |
+|---|---:|
+| Ubuntu 22.04, Codex, size class large, Drake | 1664 |
+| Ubuntu 24.04, Envoy | 2048 |
+| Size class small | 3072 |
+| Testcontainers (DinD) | 1024 |
+
+Recompute this value whenever an overlay changes
+`spec.runner.resources.limits.cpu` or `spec.config.generated.concurrency`;
+`13000m` means 13 CPU cores. These are starting points for load testing, not
+values the operator recalculates automatically. The Sysbox example uses a
+native build directory and has no FUSE tunables.
+
+Each FUSE example also sets `linuxBackingDevInfoTunables` to
+`{max_ratio: "10", strict_limit: "0"}`. These per-mount settings increase its
+share of the kernel writeback cache and relax strict per-device dirty limits
+for random-access writes. They do not reserve 10% of node RAM or increase the
+worker container's memory limit.
+
+Before applying the examples, check the **node kernel**, regardless of the
+runner's Ubuntu version:
+
+```bash
+kubectl get nodes -o custom-columns=NODE:.metadata.name,KERNEL:.status.nodeInfo.kernelVersion
+kubectl explain rbeworker.spec.config.generated.virtualBuildDirectory.fuse
+```
+
+`strict_limit` requires Linux 6.2 or newer. The worker must also be able to
+write the mount's `/sys/class/bdi/<major>:<minor>/` files; these examples already
+run the worker privileged. If a configured file is absent or unwritable,
+`bb_worker` fails at startup. For older kernels or read-only sysfs, remove the
+`linuxBackingDevInfoTunables` map from each affected pool while keeping
+`maximumBackgroundTasks`. For example, add this to an overlay's `patches` list
+for Ubuntu 22.04, repeating it for any other affected FUSE pools:
+
+```yaml
+patches:
+  - target:
+      group: bb.hermetiq.com
+      version: v1
+      kind: RbeWorker
+      name: worker-ubuntu22-04
+    patch: |-
+      - op: remove
+        path: /spec/config/generated/virtualBuildDirectory/fuse/linuxBackingDevInfoTunables
+```
+
+Changing these fields rolls the pool's Pods. When updating an existing
+installation, start with one pool and confirm that its workers stay healthy.
+See the [operator's kernel tunables guide](../../charts/bb-worker-operator/README.md#kernel-tunables)
+for the upstream guidance and sysfs access details. An overlay using JSON Patch
+`add` or `replace` on the whole `fuse` object replaces these defaults; patch
+individual fields when you want to retain the other settings.
 
 ## Environment overlays
 

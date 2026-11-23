@@ -6,19 +6,15 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.10
-appVersion: "v0.3.11"
+version: 0.3.12
+appVersion: "v0.3.13"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: security
+      description: "Pin the operator v0.3.13 image to its immutable SHA-256 manifest digest; the operator Deployment rolls once on upgrade"
     - kind: changed
-      description: "Use bb-worker-operator v0.3.11"
-    - kind: added
-      description: "spec.config.generated.nativeBuildDirectory sets the file-count and size limits of a native build directory's cache, which were fixed at 100000 files and 5 GiB"
-    - kind: added
-      description: "spec.config.generated.instanceNamePrefix registers a pool's workers under a Buildbarn instance name prefix, so a private pool serves only that tenant's instance name; the generated KEDA query follows it unless autoscaling.prometheus.instanceNamePrefix is set"
-    - kind: changed
-      description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed"
+      description: "image.digest now has a default and takes precedence over image.tag; set or clear image.digest when overriding image.tag"
 keywords:
   - buildbarn
   - bazel

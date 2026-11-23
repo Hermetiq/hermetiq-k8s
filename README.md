@@ -200,9 +200,9 @@ The following versions form the first tested bundle in this repository:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.7` |             `0.9.6` |
-| Buildbarn |       `0.9.8` |  `20260908T142448Z` |
-| BB Worker Operator |      `0.3.10` |           `v0.3.11` |
+| Hermetiq |       `0.9.8` |             `0.9.8` |
+| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
+| BB Worker Operator |      `0.3.12` |           `v0.3.13` |
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -482,6 +482,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/buildbarn-storage-operations.md`](docs/buildbarn-storage-operations.md) | Buildbarn storage lifecycle and runbooks |
 | [`docs/buildbarn-block-storage.md`](docs/buildbarn-block-storage.md) | Raw block-device deployment guidance |
 | [`docs/iscc-size-classes.md`](docs/iscc-size-classes.md) | Initial Size Class Cache design and operations |
+| [`docs/bb-clientd.md`](docs/bb-clientd.md) | bb_clientd local cache and lazy Bazel outputs on developer machines |
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 | [`docs/image-integrity.md`](docs/image-integrity.md) | Public signing keys and Cosign verification for charts and container images |
@@ -496,6 +497,17 @@ individual chart defaults as the exact contract.
   runner images.
 - `global.imagePullSecrets` is combined with chart-level `imagePullSecrets`.
 - Image `digest` values pin immutable content while retaining readable tags.
+- Each newly published chart contains `image-digests.yaml`, an inventory of the
+  chart's default images and their registry manifest digests at publication.
+  To inspect it, run `helm pull oci://ghcr.io/hermetiq/<chart> --version <version>
+  --untar` and open `<chart>/image-digests.yaml`. The inventory includes
+  optional images, but excludes dependency charts, worker images and images
+  supplied through custom values. Chart publication also sets these digests in
+  the packaged default values, so default deployments pull immutable content.
+  To use a different image, set its repository, tag and digest together. For a
+  tag-only override, explicitly clear its digest, because Kubernetes pulls by
+  digest when both are set. Registry mirrors must preserve the pinned digest.
+  See [image integrity](docs/image-integrity.md) for verification guidance.
 - `commonLabels` and `commonAnnotations` add organizational metadata without
   changing immutable workload selectors.
 - `standardLabels.appVersion` opts into the standard application-version label.

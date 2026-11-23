@@ -13,6 +13,24 @@
 {{- if and (or .Values.otel.metrics.enabled .Values.otel.logs.enabled) (not .Values.otel.endpoint) -}}
 {{- fail "otel.endpoint is required when otel.metrics.enabled=true or otel.logs.enabled=true" -}}
 {{- end -}}
+{{/* The operator refuses to start on these, so fail at render time instead of
+     shipping a crash-looping manager. The schema already requires a leading
+     "/" and no commas. */}}
+{{- range .Values.specPolicy.allowedHostPathPrefixes -}}
+{{- if has ".." (splitList "/" .) -}}
+{{- fail (printf "specPolicy.allowedHostPathPrefixes entry %q must not contain '..'" .) -}}
+{{- end -}}
+{{- end -}}
+{{/* Operator v0.3.13 stops reconciling an RbeWorker its spec policy refuses,
+     so refuse the install or upgrade instead while the RbeWorkers are still
+     valid. Skipped until the RbeWorker API exists, which also covers renders
+     without a cluster. */}}
+{{- if and .Values.specPolicy.checkExistingRbeWorkers (.Capabilities.APIVersions.Has "bb.hermetiq.com/v1/RbeWorker") -}}
+{{- $violations := include "bb-worker-operator.specPolicyViolations" . -}}
+{{- if $violations -}}
+{{- fail (printf "bb-worker-operator v0.3.13 and newer would stop reconciling these existing RbeWorkers:%s\nWiden specPolicy or fix the RbeWorkers as noted; see \"Upgrading to 0.3.11\" in the chart README. Set specPolicy.checkExistingRbeWorkers=false to skip this check." $violations) -}}
+{{- end -}}
+{{- end -}}
 {{- if not (has .Values.rbac.managerBindingMode (list "cluster" "namespace")) -}}
 {{- fail (printf "rbac.managerBindingMode must be one of: cluster, namespace (got %s)" .Values.rbac.managerBindingMode) -}}
 {{- end -}}

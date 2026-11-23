@@ -1,0 +1,34 @@
+suite: RbeWorker spec policy check without the RbeWorker API
+templates:
+  - templates/validate.yaml
+release:
+  name: o
+  namespace: hermetiq
+# No RbeWorker API in .Capabilities, as under `helm template` or before the
+# CRD is installed, so the check must not run even though lookup would find a
+# RbeWorker the policy refuses.
+kubernetesProvider:
+  scheme:
+    "bb.hermetiq.com/v1/RbeWorker":
+      gvr:
+        group: bb.hermetiq.com
+        version: v1
+        resource: rbeworkers
+      namespaced: true
+  objects:
+    - apiVersion: bb.hermetiq.com/v1
+      kind: RbeWorker
+      metadata:
+        name: worker-ssd
+        namespace: buildbarn
+      spec:
+        storage:
+          casVolume:
+            hostPath:
+              path: /mnt/stateful_partition/kube-ephemeral-ssd/cas-ssd
+tests:
+  - it: skips the check when the cluster has no RbeWorker API
+    set:
+      specPolicy.allowedHostPathPrefixes: []
+    asserts:
+      - notFailedTemplate: {}
