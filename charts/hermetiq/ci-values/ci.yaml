@@ -55,5 +55,6 @@ license:
 # A pre-existing Secret supplies render-only OAuth client/cookie credentials.
 dashboard:
   oauth2Proxy:
+    emailDomains: [example.com]
     client:
       existingSecret: test-oidc

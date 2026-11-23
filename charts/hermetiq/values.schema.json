@@ -4,7 +4,7 @@
   "definitions": {
     "routeTimeout": {
       "type": "object",
-      "description": "Envoy Gateway BackendTrafficPolicy spec.timeout.http for one gRPC route. An empty string omits the field, leaving Envoy's own default; \"0s\" disables the timeout outright.",
+      "description": "Envoy Gateway BackendTrafficPolicy spec.timeout.http for one route. An empty string omits the field, leaving Envoy's own default; \"0s\" disables the timeout outright.",
       "properties": {
         "requestTimeout": {
           "type": "string",
@@ -306,6 +306,30 @@
     "gateway": {
       "type": "object",
       "properties": {
+        "dashboardGrpcWeb": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "listenerNames"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "listenerNames": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+              }
+            }
+          }
+        },
         "clientTrafficPolicy": {
           "type": "object",
           "properties": {
@@ -398,6 +422,9 @@
               "$ref": "#/definitions/routeTimeout"
             },
             "apiWeb": {
+              "$ref": "#/definitions/routeTimeout"
+            },
+            "dashboard": {
               "$ref": "#/definitions/routeTimeout"
             },
             "mcp": {
@@ -1180,6 +1207,27 @@
         "oauth2Proxy": {
           "type": "object",
           "properties": {
+            "emailDomains": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s,]+$"
+              }
+            },
+            "allowedGroups": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^,\\r\\n]+$"
+              }
+            },
+            "oidcGroupsClaim": {
+              "type": "string"
+            },
             "cookieExpire": {
               "type": "string"
             },

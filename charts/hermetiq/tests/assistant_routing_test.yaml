@@ -12,7 +12,7 @@ set:
   assistant.streamTimeoutSeconds: 720
   gateway.name: test-gateway
 tests:
-  - it: extends only the API route in its existing Envoy health policy
+  - it: extends native API and same-origin browser streams in their Envoy policies
     template: templates/gateway-routes.yaml
     set:
       routing.provider: gateway
@@ -36,6 +36,15 @@ tests:
           path: metadata.name
           value: api-web-health-check
       - equal:
+          path: spec.timeout.http
+          value:
+            requestTimeout: 720s
+            maxStreamDuration: 0s
+            connectionIdleTimeout: 1h
+        documentSelector:
+          path: metadata.name
+          value: dashboard-timeouts
+      - equal:
           path: spec.timeout.http.requestTimeout
           value: 0s
         documentSelector:
@@ -54,6 +63,35 @@ tests:
         documentSelector:
           path: metadata.name
           value: api-cloud-grpc-health-check
+      - equal:
+          path: spec.timeout.http.requestTimeout
+          value: 720s
+        documentSelector:
+          path: metadata.name
+          value: dashboard-timeouts
+      - notExists:
+          path: spec.healthCheck
+        documentSelector:
+          path: metadata.name
+          value: dashboard-timeouts
+
+  - it: retains a longer or unbounded browser timeout while lifting a short stream limit
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.timeouts.dashboard.requestTimeout: 0s
+      gateway.timeouts.dashboard.maxStreamDuration: 60s
+      gateway.timeouts.dashboard.connectionIdleTimeout: 2h
+    documentSelector:
+      path: metadata.name
+      value: dashboard-timeouts
+    asserts:
+      - equal:
+          path: spec.timeout.http
+          value:
+            requestTimeout: 0s
+            maxStreamDuration: 720s
+            connectionIdleTimeout: 2h
   - it: extends the Contour API route without changing publisher response limits
     template: templates/contour-routes.yaml
     set:

@@ -15,6 +15,12 @@ annotations:
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   # Keep track 0.9.9 changes here (we'll bump the chart version in the release PR when we're ready to release 0.9.9)
   artifacthub.io/changes: |
+    - kind: security
+      description: "Require explicit shared browser login admission and default the Grafana starter to Viewer with backend network isolation"
+    - kind: fixed
+      description: "Preserve dashboard gRPC-web through Envoy Gateway and the authenticated BFF to prevent HTTP 505 responses"
+    - kind: fixed
+      description: "Give same-origin dashboard API calls and assistant streams the configured Envoy Gateway timeout headroom"
     - kind: added
       description: "Add an explicit buildbarnCdcCompatible declaration for verified dual-schema bep-nats images; existing default images are not automatically declared compatible"
     - kind: fixed

@@ -68,4 +68,12 @@ expect_schema_failure 'api.scim.existingSecretKey="../token"' \
   "existingSecretKey.*(pattern|match)"
 expect_schema_failure 'api.scim.groups=[{"id":"build"}]' \
   "displayName.*required|missing property 'displayName'"
-echo 'Assistant, RBE, publisher, and authorization values schema checks passed'
+expect_schema_failure 'dashboard.oauth2Proxy.emailDomains="example.com"' \
+  "emailDomains.*(array|type)"
+expect_schema_failure 'dashboard.oauth2Proxy.emailDomains=["example.com,*"]' \
+  "emailDomains.*(pattern|match)"
+expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=[""]' \
+  "allowedGroups.*(length|minLength)"
+expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=["users,admins"]' \
+  "allowedGroups.*(pattern|match)"
+echo 'Assistant, RBE, publisher, authorization, and OAuth admission values schema checks passed'

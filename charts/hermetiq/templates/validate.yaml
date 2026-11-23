@@ -324,4 +324,5 @@
 {{- if not .Values.dashboard.oauth2Proxy.enabled -}}
 {{- fail "this Helm chart requires dashboard.oauth2Proxy.enabled=true for browser authorization" -}}
 {{- end -}}
+{{- include "hermetiq-core.validateOauth2Admission" . -}}
 {{- include "hermetiq-core.validateAuthorizationImages" . -}}

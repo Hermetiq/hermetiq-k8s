@@ -429,11 +429,14 @@ OAUTH2_PROXY_COOKIE_EXPIRE: {{ .Values.dashboard.oauth2Proxy.cookieExpire | quot
 {{- if .Values.dashboard.oauth2Proxy.cookieRefresh }}
 OAUTH2_PROXY_COOKIE_REFRESH: {{ .Values.dashboard.oauth2Proxy.cookieRefresh | quote }}
 {{- end }}
-OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+OAUTH2_PROXY_EMAIL_DOMAINS: {{ join "," .Values.dashboard.oauth2Proxy.emailDomains | quote }}
+{{- if .Values.dashboard.oauth2Proxy.allowedGroups }}
+OAUTH2_PROXY_ALLOWED_GROUPS: {{ join "," .Values.dashboard.oauth2Proxy.allowedGroups | quote }}
+{{- end }}
 OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:8888
 OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: {{ .Values.dashboard.oauth2Proxy.insecureOidcAllowUnverifiedEmail | quote }}
 OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: {{ .Values.dashboard.oauth2Proxy.insecureOidcSkipIssuerVerification | quote }}
-OAUTH2_PROXY_OIDC_GROUPS_CLAIM: {{ .Values.dashboard.oauth2Proxy.oidcGroupsClaim | quote }}
+OAUTH2_PROXY_OIDC_GROUPS_CLAIM: {{ include "hermetiq-core.oauth2ProxyGroupsClaim" . | quote }}
 OAUTH2_PROXY_OIDC_ISSUER_URL: {{ required "dashboard.oauth2Proxy.oidcIssuerUrl or oidc.issuerUrl is required when oauth2Proxy is enabled" (include "hermetiq-core.dashboardOidcIssuerUrl" .) | quote }}
 OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
 OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
@@ -825,10 +828,10 @@ nginx.ingress.kubernetes.io/cors-max-age: {{ .Values.ingress.cors.maxAgeSeconds 
 nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors.allowMethods | quote }}
 {{- end -}}
 
-{{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one gRPC route.
+{{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one route.
      Args: dict "root" $ "route" <key under gateway.timeouts>.
 
-     With the assistant enabled, the API route always gets a block, even when
+     With the assistant enabled, API gRPC and dashboard routes get a block, even when
      ordinary route timeouts are disabled, and its request and stream limits are
      raised to at least assistant.streamTimeoutSeconds. Otherwise renders nothing
      when gateway.timeouts.enabled is false or the route sets none of the three
@@ -838,17 +841,17 @@ nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors
      *immediate*). */}}
 {{- define "hermetiq-core.routeTimeout" -}}
 {{- $timeouts := .root.Values.gateway.timeouts | default dict -}}
-{{- if and .root.Values.assistant.enabled (eq .route "apiGrpc") -}}
+{{- if and .root.Values.assistant.enabled (has .route (list "apiGrpc" "dashboard")) -}}
 {{- $route := dict -}}
 {{- if $timeouts.enabled -}}
 {{- $route = index $timeouts .route | default dict -}}
 {{- end -}}
-{{- $apiGrpc := index $timeouts "apiGrpc" | default dict -}}
+{{- $configuredRoute := index $timeouts .route | default dict -}}
 timeout:
   http:
     requestTimeout: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.requestTimeout) | quote }}
     maxStreamDuration: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.maxStreamDuration "unset" "0s") | quote }}
-    connectionIdleTimeout: {{ default "1h" $apiGrpc.connectionIdleTimeout | quote }}
+    connectionIdleTimeout: {{ default "1h" $configuredRoute.connectionIdleTimeout | quote }}
 {{- else if $timeouts.enabled -}}
 {{- $route := index $timeouts .route | default dict -}}
 {{- if or $route.requestTimeout $route.maxStreamDuration $route.connectionIdleTimeout -}}

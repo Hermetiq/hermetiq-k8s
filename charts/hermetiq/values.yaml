@@ -381,6 +381,12 @@ hosts:
 #         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
 #         auto_sign_up: true
 #         enable_login_token: true
+#       users:
+#         allow_sign_up: false
+#         auto_assign_org_role: Viewer
+# Protect the Grafana backend with NetworkPolicy or a proxy IP whitelist;
+# ClusterIP alone does not prevent callers from forging identity headers.
+# The starter VictoriaMetrics values include the backend NetworkPolicy.
 #
 # Also register https://grafana.<domainBase>/oauth2/callback as an allowed
 # callback URL with your IdP.
@@ -437,6 +443,19 @@ gateway:
   enabled: true
   name: ""
   namespace: ""
+  # Preserve gRPC-web through the dashboard's oauth2-proxy and nginx BFF.
+  # Envoy's listener-wide translator would otherwise send native gRPC over
+  # the BFF's HTTP/1.1 upstream and produce HTTP 505 before authentication.
+  # Renders a dashboard-only EnvoyPatchPolicy in routing.provider=gateway.
+  # Requires extensionApis.enableEnvoyPatchPolicy=true in Envoy Gateway's
+  # controller configuration. Disable for other Gateway implementations.
+  dashboardGrpcWeb:
+    enabled: true
+    # Per-Gateway HTTPS listeners serving the dashboard host. Both Envoy
+    # naming schemes use <gateway namespace>/<gateway name>/<listener> for
+    # their RouteConfiguration. See README for HTTP V2 or merged Gateways.
+    listenerNames:
+      - https
   routes:
     bepGrpcName: bep-cloud-grpc
     apiGrpcName: api-cloud-grpc
@@ -470,7 +489,7 @@ gateway:
     # active health checks use unauthenticated readiness endpoints instead of
     # default /healthz or grpc.health.v1 checks on auth-sensitive backends.
     enabled: true
-  # Envoy Gateway stream timeouts for the chart's gRPC routes
+  # Envoy Gateway stream timeouts for the chart's gRPC and HTTP routes
   # (routing.provider=gateway only). Without these, Envoy applies its default
   # 15s route timeout — the only routing provider this chart supports that
   # leaves the gRPC routes uncapped-by-omission. Contour already sets
@@ -527,10 +546,17 @@ gateway:
       requestTimeout: "0s"
       maxStreamDuration: "0s"
       connectionIdleTimeout: "1h"
-    # The dashboard's REST/gRPC-web traffic. The same unary analytics queries
-    # that reach apiGrpc arrive over this route too, so it gets the same 300s
-    # bound rather than Envoy Gateway's 15s default.
+    # External REST/gRPC-web API traffic gets the same 300s bound as apiGrpc.
     apiWeb:
+      requestTimeout: "300s"
+      maxStreamDuration: ""
+      connectionIdleTimeout: "1h"
+    # Same-origin browser REST and gRPC-web calls pass through the dashboard
+    # BFF. Give these queries the same headroom as the external API. With the
+    # assistant enabled, request and stream limits are raised to at least
+    # assistant.streamTimeoutSeconds, even if timeouts.enabled is false.
+    # This policy adds no active health checks to the authenticated dashboard.
+    dashboard:
       requestTimeout: "300s"
       maxStreamDuration: ""
       connectionIdleTimeout: "1h"
@@ -1369,7 +1395,16 @@ dashboard:
     provider: oidc
     oidcIssuerUrl: ""
     scope: openid email profile offline_access
-    oidcGroupsClaim: groups
+    # Required browser admission policy, shared by dashboard, Grafana and
+    # Buildbarn Browser. Set your organization domains, e.g. ["example.com"].
+    # ["*"] is accepted only together with a nonempty allowedGroups list.
+    emailDomains: []
+    # Optional additional restriction: a user must belong to at least one
+    # listed IdP group AND pass emailDomains. These groups do not grant roles.
+    allowedGroups: []
+    # Empty uses api.jwt.groupsClaim, then "groups". With JWT profiles, set
+    # this explicitly to the browser identity provider's groups claim.
+    oidcGroupsClaim: ""
     validateUrl: ""
     # IdP logout URL. When `/oauth2/sign_out` is called, oauth2-proxy clears
     # its cookie and then redirects the browser here so the IdP also ends

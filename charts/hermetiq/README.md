@@ -462,7 +462,8 @@ values where they differ from the starter.
    should list `vmpodscrapes`; if it prints nothing, install the metrics stack
    or disable the [pod scrapes](#dashboards-and-scrape-objects). The second
    matters for `routing.provider: gateway` and should list
-   `backendtrafficpolicies`, `securitypolicies`, and `clienttrafficpolicies`;
+   `backendtrafficpolicies`, `securitypolicies`, `clienttrafficpolicies`, and
+   `envoypatchpolicies`;
    if it prints nothing, your controller is not Envoy Gateway, so disable the
    [Envoy Gateway policies](#envoy-gateway-policies):
 
@@ -470,6 +471,10 @@ values where they differ from the starter.
    kubectl api-resources --api-group=operator.victoriametrics.com
    kubectl api-resources --api-group=gateway.envoyproxy.io
    ```
+
+   Envoy Gateway must also enable its patch-policy extension and use the
+   configured dashboard listener names; see
+   [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding).
 
 5. Confirm the external pieces: the OIDC issuer's discovery document is
    reachable, the dashboard callback URL and BEP audience are registered, and
@@ -924,14 +929,16 @@ With `routing.provider: gateway`, the chart renders Envoy Gateway
 
 | Kind | Purpose | Toggle |
 |---|---|---|
-| `BackendTrafficPolicy` | Active health checks and route timeouts for the BEP, gRPC API, `bbcal`, web API, and MCP routes, one policy each | `gateway.healthChecks.enabled`, `gateway.timeouts.enabled` |
+| `BackendTrafficPolicy` | Active health checks and route timeouts for the BEP, gRPC API, `bbcal`, web API, and MCP routes; timeouts for the dashboard BFF | `gateway.healthChecks.enabled`, `gateway.timeouts.enabled` |
 | `SecurityPolicy` | CORS for the Gateway and for the MCP route | `gateway.cors.enabled` |
 | `ClientTrafficPolicy` | [Client connection tuning](#client-connection-tuning-for-high-rtt-clients) | `gateway.clientTrafficPolicy.enabled`, off by default |
+| `EnvoyPatchPolicy` | Preserve gRPC-web on the dashboard's same-origin API path | `gateway.dashboardGrpcWeb.enabled`, on by default |
 
 Health checks probe gRPC routes over TCP and HTTP routes on unauthenticated
-readiness or metadata endpoints. The dashboard and Grafana routes get no
+readiness or metadata endpoints. The dashboard gets a timeout-only policy,
+`<dashboard-route>-timeouts`, without active health checks. Grafana gets no
 `BackendTrafficPolicy`. The Gateway-wide CORS policy (`gateway-cors-policy`)
-and the `ClientTrafficPolicy` are created in the Gateway's namespace, because
+and the `ClientTrafficPolicy` and `EnvoyPatchPolicy` are created in the Gateway's namespace, because
 a policy must live beside the Gateway it targets.
 
 Health checks and timeouts for a route share one `BackendTrafficPolicy`, named
@@ -953,18 +960,76 @@ gateway:
     enabled: false
   clientTrafficPolicy:
     enabled: false
+  dashboardGrpcWeb:
+    enabled: false
 ```
 
 Two caveats apply. With `assistant.enabled: true` the chart still renders the
-API gRPC route's `BackendTrafficPolicy`, because it carries the assistant's
-streaming timeout. And without the timeout policies, whatever default route
+API gRPC and dashboard routes' `BackendTrafficPolicy` resources, because they
+carry the assistant's streaming timeout. And without the timeout policies, whatever default route
 timeout your controller applies governs long-lived gRPC streams; check that it
 does not truncate BES uploads.
+
+### Dashboard gRPC-web forwarding
+
+The dashboard's `/grpc/` calls pass through oauth2-proxy and nginx before reaching
+the API's gRPC-web adapter. They must keep their gRPC-web framing along this
+HTTP/1.1 path. Envoy Gateway's shared gRPC-web filter otherwise translates them
+to native gRPC too early, producing HTTP 505 even though `/auth/me` succeeds.
+
+With `routing.provider: gateway`, the chart's `EnvoyPatchPolicy` disables that
+translation only for the configured dashboard hostname. The API and Buildbarn
+hosts keep their existing translation, and other virtual-host filters are
+preserved. The policy is not rendered for Contour, ingress-nginx, or GKE's
+`gateway-httproute-only` provider.
+
+Enable patch policies in the Envoy Gateway controller before installing Hermetiq.
+For the controller's Helm chart, merge this into its existing values:
+
+```yaml
+config:
+  envoyGateway:
+    extensionApis:
+      enableEnvoyPatchPolicy: true
+```
+
+Restart the controller after updating its configuration. See the
+[Envoy Gateway patch-policy guide](https://gateway.envoyproxy.io/v1.7/tasks/extensibility/envoy-patch-policy/)
+for the controller setup. This controller setting is separate from the Hermetiq
+chart's values:
+
+```yaml
+gateway:
+  dashboardGrpcWeb:
+    enabled: true
+    listenerNames: [https]
+```
+
+Set `listenerNames` to every HTTPS listener serving the dashboard. The default
+is `https`; the chart supports per-Gateway HTTPS listeners and derives each
+route-configuration name as `<Gateway namespace>/<Gateway name>/<listener>`.
+This HTTPS format is unchanged by Envoy Gateway's `XDSNameSchemeV2`; the policy
+has been verified with v1.7.2. See the
+[xDS naming reference](https://gateway.envoyproxy.io/v1.8/tasks/extensibility/envoy-patch-policy/#xds-name-scheme-v2).
+
+For plaintext HTTP listeners with `XDSNameSchemeV2`, route-configuration names
+use `http-<port>`. With `mergeGateways`, Envoy Gateway requires the patch policy
+to target the GatewayClass. For either layout, install an operator-managed
+dashboard exception using the actual xDS names and target, then set
+`gateway.dashboardGrpcWeb.enabled: false` to avoid rendering this chart's
+per-Gateway policy. The exception must preserve gRPC-web on the dashboard host;
+disabling the chart policy alone does not correct the transport.
+
+Confirm the applicable `EnvoyPatchPolicy` reports `Programmed=True` after the
+upgrade, and verify a dashboard gRPC call as well as sign-in. A policy that
+names a missing listener cannot protect that route. For another Gateway
+implementation, disable `gateway.dashboardGrpcWeb.enabled` with the other
+Envoy-specific policies above.
 
 ### Route timeouts
 
 `gateway.timeouts` sets Envoy Gateway timeouts on the chart's gRPC, web API,
-and MCP routes. It applies to `routing.provider: gateway` only and is on by
+dashboard, and MCP routes. It applies to `routing.provider: gateway` only and is on by
 default. Without it, Envoy applies its 15-second default route timeout. The
 other providers already bound the same backends: Contour through
 `contour.httpProxy.responseTimeout` and GKE through
@@ -976,12 +1041,13 @@ other providers already bound the same backends: Contour through
 | `apiGrpc` | `300s` | not set |
 | `bbcalGrpc` | `0s` | `0s` |
 | `apiWeb` | `300s` | not set |
+| `dashboard` | `300s` | not set |
 | `mcp` | `300s` | `0s` |
 
 `"0s"` disables a timeout; it does not mean "immediate". A value that is not
 set is omitted, which leaves Envoy's own default in place. Each of these
-routes also sets `connectionIdleTimeout: 1h`. The dashboard and Grafana routes
-have no chart-managed timeouts.
+routes also sets `connectionIdleTimeout: 1h`. Grafana has no chart-managed
+timeouts.
 
 Envoy measures a route timeout from the end of the downstream request (the
 client's half-close) to the completed upstream response. It therefore does not
@@ -1010,16 +1076,20 @@ clients half-close immediately. That explains the defaults:
   worst case: the client half-closes immediately, so a 15-second cap covers
   the entire blob download. The defaults mirror the Buildbarn chart's frontend
   timeouts.
-- `apiWeb`: the dashboard's REST and gRPC-web traffic. The same analytics
-  queries that reach `apiGrpc` arrive over this route, so it gets the same
-  bound.
+- `apiWeb`: REST and gRPC-web traffic on the external API hostname. Analytics
+  queries receive the same bound as `apiGrpc`.
+- `dashboard`: same-origin browser REST and gRPC-web calls through the
+  authenticated dashboard BFF, with the same bound as the external API.
+  Assistant streams also use this route, so enabling the assistant raises its
+  request and stream limits to at least `assistant.streamTimeoutSeconds`.
 - `mcp`: streamable-HTTP MCP traffic. A tool call can run a wide-time-range
   analytics query while the response stream stays open, so it needs the same
   headroom as `apiGrpc`.
 
 Set `gateway.timeouts.enabled: false` to drop the chart-managed timeouts and
-keep the health checks. With `assistant.enabled: true`, the API gRPC route's
-request and stream limits are raised to at least
+keep the health checks. With `assistant.enabled: true`, the API gRPC and
+dashboard routes retain timeout policies even when ordinary timeouts are
+disabled, and their request and stream limits are raised to at least
 `assistant.streamTimeoutSeconds`; see [Streaming timeout](#streaming-timeout).
 
 ### Client connection tuning for high-RTT clients
@@ -1413,6 +1483,19 @@ their chart defaults in the starter.
 `grafana.oauth2Proxy`. The starter sets the issuer and the OAuth client Secret;
 configure project grants and administrator groups for your installation.
 
+These controls answer different questions:
+
+| Control | What it decides |
+|---|---|
+| `dashboard.oauth2Proxy.emailDomains` and `allowedGroups` | Who may sign in through the shared UI proxies. Passing this gate grants no Hermetiq or Grafana role. |
+| `api.jwt.groupsClaim`, `publisher.jwks.groupsClaim` | Which verified JWT claim contains group names. These fields name a claim; they do not grant a role. |
+| `authorization.administratorGroups` or the default verified admin group | Who administers the Hermetiq installation. See [Admin access](#admin-access). |
+| `authorization.defaultAccess`, project memberships, `groupBindings`, and `serviceAccounts` | Which projects a principal may access and whether they have Viewer, Builder, or project Admin permissions. |
+| Grafana's own organization roles | What a signed-in user may do in Grafana. Hermetiq project and installation roles do not assign Grafana roles. |
+
+The [dashboard BFF](#browser-authorization-and-independent-jwt-profiles) transports
+the signed-in user's token to the API; the API makes the permission decisions.
+
 Three kinds of caller reach Hermetiq: browsers, which sign in through
 oauth2-proxy; clients of the gRPC API, BEP ingest, and MCP endpoints, which
 present bearer tokens; and Buildbarn workers, which present no credential and
@@ -1472,7 +1555,10 @@ publisher, choose one configuration mode each.
    | API | `api.jwt.audience` | The dashboard's oauth2-proxy client ID, read from the client Secret. The chart always adds the MCP resource URLs to it. If the dashboard oauth2-proxy is disabled, set this value; the chart refuses to render otherwise. |
 
    Group membership is read from the claim named by `api.jwt.groupsClaim` and
-   `publisher.jwks.groupsClaim`, both `hermetiq/roles` by default.
+   `publisher.jwks.groupsClaim`, both `hermetiq/roles` by default. For example,
+   `groupsClaim: hermetiq/roles` reads the array in `"hermetiq/roles":
+   ["engineering"]`; it does not assign the engineering group any project role.
+   Assign that group's permissions through the policy below.
 
 2. Custom environment. Set the component's `enabled: false` and put a
    complete contract in `api.env` or `publisher.env`: exactly one non-empty
@@ -1677,16 +1763,29 @@ it does not provide individual user authorization or revocation.
 
 ### Browser authorization and independent JWT profiles
 
-The dashboard always uses a same-origin BFF (`/grpc`, `/api/v1`,
-authoritative `/auth/me`) that forwards the ID token oauth2-proxy already passes
-upstream. The dashboard oauth2-proxy must remain enabled. Shared cookies and the
-default Viewer access policy remain configurable.
+The chart requires the dashboard's backend-for-frontend (BFF): an nginx reverse
+proxy that sends browser API requests through the dashboard's own origin and
+authenticated session. Browser calls to `/grpc/` and `/api/v1/` reach the API
+through this proxy; `/auth/me` reads the API's authoritative identity and access
+decision. The BFF forwards the ID token provided by oauth2-proxy, so the IdP must
+include the configured groups claim in that ID token when using group grants.
+Putting groups only in an access token does not supply them to this browser flow.
+
+The BFF carries credentials; it does not grant permissions. API and publisher
+authorization, the BFF, and dashboard oauth2-proxy are required by this chart.
+Shared cookies and `authorization.defaultAccess` remain configurable. In Gateway
+mode the browser uses the existing dashboard `HTTPRoute`; no dashboard
+`GRPCRoute` is added. Envoy must preserve gRPC-web through the HTTP/1.1 proxy
+chain; see [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding).
+HTTP 505 on `/grpc/` while `/auth/me` succeeds indicates the transport problem
+described there, not evidence that an administrator lost their group grant.
+
 Use compatible API, publisher, dashboard, and auth-proxy images as described in
 [Upgrading project authorization](#upgrading-project-authorization).
 
-Grafana is not covered by project authorization: it stays behind its own
-oauth2-proxy, so every user who can sign in through the identity provider can
-open it, as before.
+Grafana uses its own oauth2-proxy with the shared login-admission settings, then
+applies its own organization roles. It does not use Hermetiq project
+authorization; see [Grafana SSO](#grafana-sso).
 
 `api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the
 single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,
@@ -1793,7 +1892,24 @@ is a worked IdP example.
 
 ### Admin access
 
-Configure installation administrators through trusted groups:
+Installation administrators manage access across Hermetiq. With the default
+single-issuer configuration and no `authorization.administratorGroups` override,
+the verified `hermetiq-admin` group grants this access. For example, the browser's
+verified ID token would include:
+
+```json
+{
+  "iss": "https://idp.example.com/",
+  "hermetiq/roles": ["hermetiq-admin"]
+}
+```
+
+Here `api.jwt.groupsClaim: hermetiq/roles` selects the claim, while
+`publisher.hermetiqAdminGroup: hermetiq-admin` selects the administrator group
+for both the API and publisher. These are the chart defaults. The token must
+also satisfy the configured issuer, audience, signature, and lifetime checks.
+
+To explicitly restrict administrator trust to an issuer and group, configure:
 
 ```yaml
 authorization:
@@ -1811,7 +1927,8 @@ verified admin-group trust. When omitted, the verified admin group remains
 available (`publisher.hermetiqAdminGroup`, default `hermetiq-admin` for the
 single-issuer configuration).
 
-The chart does not grant installation administration through `app.adminEmails`.
+`app.adminEmails` has no effect on installation administration under the chart's
+enforced authorization policy.
 Move email-allowlisted administrators into a trusted group before upgrading.
 Existing direct project Admin memberships continue to grant administration
 of those projects; they do not grant installation-wide administration.
@@ -1844,12 +1961,41 @@ can reuse the ConfigMap and the Secret and share one sign-in session.
 | Value under `dashboard.oauth2Proxy` | Default | Purpose |
 |---|---|---|
 | `scope` | `openid email profile offline_access` | Scopes requested from the IdP |
-| `oidcGroupsClaim` | `groups` | Claim oauth2-proxy reads groups from |
+| `emailDomains` | `[]` (required) | Email domains permitted to sign in to all proxies sharing the ConfigMap. `['*']` requires nonempty `allowedGroups`. |
+| `allowedGroups` | `[]` | Additional admission restriction: membership in at least one listed IdP group is required. Does not grant application roles. |
+| `oidcGroupsClaim` | empty | Claim oauth2-proxy reads groups from; falls back to `api.jwt.groupsClaim`, then `groups`. Set it explicitly with multiple JWT profiles. |
 | `whitelistDomains` | `[]` | Extra domains allowed as redirect targets (`OAUTH2_PROXY_WHITELIST_DOMAINS`). `.<hosts.domainBase>` is added automatically, so redirects to the dashboard, Browser, and Grafana work without configuration. |
 | `backendLogoutUrl` | empty | IdP logout URL to chain after oauth2-proxy clears its cookie |
 | `cookieExpire`, `cookieRefresh` | oauth2-proxy defaults | Session lifetime and refresh interval. Keep the refresh below the IdP's access-token lifetime for silent refresh. |
 | `cookieDomains` | `[]` | Share a session across subdomains, for example `[".example.com"]` |
 | `env` | `{}` | Any other oauth2-proxy variable |
+
+Configure admission explicitly before upgrading. For one organization, set
+`dashboard.oauth2Proxy.emailDomains: [example.com]` to your permitted email
+domains. For an identity provider serving multiple organizations, use an
+explicit group gate:
+
+```yaml
+dashboard:
+  oauth2Proxy:
+    emailDomains: ["*"]
+    allowedGroups: [hermetiq-users]
+    oidcGroupsClaim: hermetiq/roles
+```
+
+With both domain and group restrictions, users must satisfy both. The settings
+are shared by the dashboard, Grafana and Buildbarn Browser; overriding
+`OAUTH2_PROXY_EMAIL_DOMAINS`, `OAUTH2_PROXY_ALLOWED_GROUPS` or
+`OAUTH2_PROXY_OIDC_GROUPS_CLAIM` in a workload's `env` is rejected. Move existing
+overrides into these shared values. Keep email verification enabled. Hermetiq
+project roles and installation administrator groups remain separate from this
+sign-in gate, as do Grafana roles.
+
+Manage account registration at the identity provider. For Auth0 database
+connections, configure whether signup is allowed on the connection; this chart
+does not change tenant or connection settings. Directory-managed identities or
+an intentionally shared tenant may need registration enabled, with admission
+restricted by verified email domains or groups as above.
 
 Without `dashboard.oauth2Proxy.backendLogoutUrl`, signing out clears only the
 local cookie and the still-active IdP session silently signs the user back in.
@@ -1894,7 +2040,9 @@ rename the Grafana release.
 If no Grafana runs beside this release, set
 `gateway.routes.grafanaEnabled: false` to drop both the route and the proxy.
 To expose Grafana without the proxy, set `grafana.oauth2Proxy.enabled: false`;
-the route then targets the Grafana Service directly.
+the route then targets the Grafana Service directly. First configure Grafana
+to authenticate callers itself and adjust its backend policy; a direct route
+must not trust caller-supplied authentication headers.
 
 Register `https://grafana.<domainBase>/oauth2/callback` with the IdP, and
 configure Grafana to trust the proxy headers in the VictoriaMetrics values:
@@ -1902,6 +2050,10 @@ configure Grafana to trust the proxy headers in the VictoriaMetrics values:
 ```yaml
 grafana:
   grafana.ini:
+    users:
+      allow_sign_up: false
+      auto_assign_org: true
+      auto_assign_org_role: Viewer
     auth.proxy:
       enabled: true
       header_name: X-Forwarded-User
@@ -1910,6 +2062,32 @@ grafana:
       auto_sign_up: true
       enable_login_token: true
 ```
+
+These settings belong to the **VictoriaMetrics/Grafana release**, not the
+Hermetiq release. Apply them by upgrading that release with its complete values
+and waiting for Grafana's rollout; upgrading Hermetiq alone does not change
+Grafana's configuration. The [starter VictoriaMetrics values](../../custom-values/victoriametrics-values.yaml)
+also create a Grafana backend NetworkPolicy through the Grafana chart's
+`extraObjects`. It permits only the same-namespace Hermetiq Grafana proxy and
+the VictoriaMetrics agent belonging to that metrics release. The metrics agent
+is also trusted: Grafana serves `/metrics` on the same port as header-based
+authentication, and a NetworkPolicy cannot restrict URL paths. Keep permission
+to create or relabel pods in that namespace limited to trusted operators.
+
+Use a CNI that enforces NetworkPolicy and check that other policies do not
+grant broader access to the Grafana pod. A ClusterIP Service alone does not
+isolate Grafana, and Hermetiq's `networkPolicy.enabled` protects its proxy, not
+this external backend. If the proxy or metrics agent runs in another namespace,
+adjust the policy selectors deliberately. `auth.proxy.whitelist` can provide
+additional protection when proxy source addresses are stable; a whole-cluster
+pod CIDR does not distinguish the proxy from other pods.
+
+`users.auto_assign_org_role: Viewer` applies to newly created users; it does not
+demote existing administrators. Review existing Grafana memberships separately.
+Passing `X-Forwarded-Groups` does not map groups to Grafana Admin, and Hermetiq's
+API administrator group does not grant Grafana privileges. Manage Grafana roles
+explicitly or configure a supported role mapping in Grafana's identity provider
+integration. See [Grafana's auth proxy configuration](https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/auth-proxy/).
 
 ## Workload sizing, scheduling, and availability
 
@@ -2518,7 +2696,8 @@ the API Pods automatically; for an external policy, change `rolloutChecksum`.
 turn deadline plus headroom. It applies to the API gRPC route for Envoy
 Gateway, Contour, and ingress-nginx, and to the API Service's GKE backend
 policy. GKE shares that Service policy across the API ports, including REST
-and MCP. Publisher timeouts are unchanged.
+and MCP. Envoy Gateway also applies it to the dashboard route carrying
+same-origin browser gRPC-web streams. Publisher timeouts are unchanged.
 
 Raise the streaming timeout whenever you raise the assistant's turn deadline,
 and check the total response timeout of any external load balancer.
@@ -3039,6 +3218,7 @@ README describes, by symptom.
 | `413 request_payload_too_large` through Envoy Gateway | Buffer limit or HTTP/2 windows too small for the upload | [Client connection tuning](#client-connection-tuning-for-high-rtt-clients) |
 | MCP clients are refused, for example with Auth0's `Service not found` | The IdP's resource identifier does not match `https://mcp.<domainBase>/mcp` exactly | [MCP authentication](#mcp-authentication) |
 | Signing out of the dashboard signs the user straight back in | `backendLogoutUrl` is not set | [Dashboard sign-in](#dashboard-sign-in) |
+| Dashboard API calls return HTTP 505 while `/auth/me` succeeds | Envoy translated gRPC-web before the dashboard's HTTP/1.1 BFF | [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding); verify the patch-policy extension, listener names, and `Programmed` status |
 | Rows accumulate in `*_default` tables | A partition is missing or maintenance is failing | [Inspect database partitions](#inspect-database-partitions) |
 | Cache views are empty | Shard counts differ, Action Cache Hit Tracker is off, or `app.cacheEventsEnabled` is `false` | [Cache-event analytics](#cache-event-analytics) |
 | A completed build's logs are empty | The build is older than its project's log retention | [Progress log storage](#progress-log-storage) |

@@ -153,6 +153,8 @@ dashboard:
   # Quickstart's Bazel remote-cache URL derives as grpcs://bb.<hosts.domainBase>.
   # Override dashboard.remoteCacheUrl only if Buildbarn uses another host.
   oauth2Proxy:
+    # Replace with the email domains permitted to sign in to all shared UIs.
+    emailDomains: [example.com]
     # .<hosts.domainBase> is auto-included when hosts.domainBase is set. Add
     # external redirect domains here only when needed (e.g. [".auth0.com"]).
     whitelistDomains: []
