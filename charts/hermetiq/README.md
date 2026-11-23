@@ -1706,7 +1706,8 @@ images before upgrading an existing installation:
    Grant existing Bazel and CI principals Builder or Admin access to their
    projects through direct memberships, group bindings, or `serviceAccounts`.
    A valid JWT alone no longer permits BEP publication, and Viewer access cannot
-   publish builds.
+   publish builds. For external client-credentials helpers, follow
+   [External Auth0 credential helpers](#external-auth0-credential-helpers).
 3. Move administrators who rely on `app.adminEmails` to a trusted administrator
    group; see [Admin access](#admin-access). Confirm an administrator can still
    sign in and manage access.
@@ -1760,6 +1761,47 @@ intended chart reference and version in place of `./charts/hermetiq`.
 
 `api.mcpAuthDisabled: true` remains an explicit shared-administrator option;
 it does not provide individual user authorization or revocation.
+
+### External Auth0 credential helpers
+
+An Auth0 helper using `grant_type: client_credentials` authenticates the
+application named by the token's `sub`, commonly `<client-id>@clients`. It does
+not inherit the user identity or installation-admin groups of the person who
+created the application, owns its secret, or is signed in to the dashboard.
+Browser email-domain admission does not apply to the BEP endpoint.
+
+Before upgrading a helper that previously published with a valid token alone,
+grant its exact verified `iss` and `sub` Builder access to each required project.
+For a token with issuer `https://idp.example.com/` and subject
+`example-build-client@clients`:
+
+```yaml
+authorization:
+  serviceAccounts:
+    - issuer: https://idp.example.com/
+      subject: example-build-client@clients
+      projectRoles:
+        my-project: [builder]
+```
+
+Replace these example values with the token's issuer and subject and the project
+selected by Bazel's `--bes_instance_name`. Preserve the issuer's trailing slash
+and quote numeric project IDs as YAML keys, for example `"0": [builder]`.
+Merge the entry with existing grants, then upgrade the chart and wait for the
+API and publisher rollouts. This registers that application as a service
+principal even when humans share the same JWT trust profile; changing the whole
+profile to `principalKind: service` is unnecessary in that case.
+
+Verify the helper still sends its JWT in `Authorization: Bearer <token>` for the
+BEP hostname, with the audience accepted by `publisher.jwks.audience`, then run
+a build with the matching project selected. Auth0 token scopes alone do not
+create a Hermetiq project grant. Keep project authorization enforced.
+
+For diagnosis, gRPC `Unauthenticated` (code 16) means authentication failed;
+check the credential, signature, issuer, audience, and expiry. A verified token
+that lacks `write:bep` receives `PermissionDenied` (code 7); check the exact
+principal's project grants. Successful token exchange or browser admin access
+does not by itself establish permission for the helper's application token.
 
 ### Browser authorization and independent JWT profiles
 

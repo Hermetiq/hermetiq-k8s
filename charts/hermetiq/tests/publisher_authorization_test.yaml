@@ -392,6 +392,41 @@ tests:
           value: '{"defaultAccess":"none","groupBindings":[{"group":"engineering","issuer":"https://oidc.ci.test/","projectId":"project-a","roles":["builder"]}],"instanceBindings":[{"instancePrefix":"","namespace":"build-system","projectId":"project-a"}],"mode":"enforced","serviceAccounts":[{"issuer":"https://ci.example.com/hermetiq","projectRoles":{"project-a":["builder"]},"subject":"buildkite-ci"}]}'
         template: templates/deployment-publisher.yaml
 
+  - it: carries an explicit Auth0 application builder grant to both cores without widening the human baseline
+    set:
+      oidc.issuerUrl: https://idp.example.com/
+      publisher.jwks.audience: https://bep.example.com
+      authorization.serviceAccounts:
+        - issuer: https://idp.example.com/
+          subject: example-build-client@clients
+          projectRoles:
+            "0": [builder]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://idp.example.com/","projectRoles":{"0":["builder"]},"subject":"example-build-client@clients"}]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://idp.example.com/","projectRoles":{"0":["builder"]},"subject":"example-build-client@clients"}]}'
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
+          value: "true"
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_PRINCIPAL_KIND")].value
+          value: human
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://idp.example.com/
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://bep.example.com
+        template: templates/deployment-publisher.yaml
+
   - it: rejects a per-workload policy override
     template: templates/validate.yaml
     set:
