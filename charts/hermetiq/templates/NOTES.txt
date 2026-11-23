@@ -20,6 +20,12 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
 EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
 {{- end }}
 
+{{ if and .Values.publisher.jwks.enabled (eq (default "auto" .Values.publisher.jwks.source) "auto") (not .Values.publisher.jwks.url) (include "hermetiq-core.oidcJwksUrl" .) (or .Values.publisher.jwks.json .Values.publisher.jwks.existingSecret) -}}
+PUBLISHER JWKS — source=auto uses the inherited OIDC URL and ignores configured
+publisher local keys. This preserves existing trust. To deliberately use the local
+keys, select publisher.jwks.source=inline or secret and clear other publisher sources.
+
+{{ end -}}
 {{ if .Values.license.airGapped -}}
 LICENSING — air-gapped (offline license file) mode.
 The pods verify {{ .Values.license.key.existingSecretKey }} and {{ .Values.license.licenseFileSecretKey }}

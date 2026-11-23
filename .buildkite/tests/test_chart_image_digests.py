@@ -177,12 +177,31 @@ images:
             values = chart / "values.yaml"
             unpinned, count = re.subn(r'(?m)^(\s+apiDigest:).*$', r'\1 ""', values.read_text())
             self.assertEqual(count, 1)
+            # No authorization-capable public release is pinned yet. Give the
+            # other required workloads synthetic compatible digests while
+            # leaving the API unpinned for the release command under test.
+            unpinned = inventory.pin_values(unpinned, [
+                {"value": image_path, "digest": "sha256:" + "c" * 64}
+                for image_path in (
+                    "images.bepNats.pubTag",
+                    "images.bepNats.bootstrapTag",
+                    "images.dashboard.tag",
+                )
+            ])
             values.write_text(unpinned)
             with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
                 inventory, "inspect_reference", side_effect=lambda ref: ref.partition("@")[2] or digest
             ):
                 inventory.main()
-            command = ["helm", "template", "test", str(chart), "-f", str(chart / "ci-values/ci.yaml")]
+            self.assertEqual(yaml.safe_load(values.read_text())["images"]["bepNats"]["apiDigest"], digest)
+            # The general render fixture selects authorization-capable test
+            # images. Strip those selections so the rendered API uses the
+            # source digest written above, not an unrelated fixture override.
+            runtime_values = yaml.safe_load((chart / "ci-values/ci.yaml").read_text())
+            runtime_values.pop("images", None)
+            runtime_fixture = Path(tmp) / "runtime-values.yaml"
+            runtime_fixture.write_text(yaml.safe_dump(runtime_values))
+            command = ["helm", "template", "test", str(chart), "-f", str(runtime_fixture)]
             rendered = subprocess.check_output(command, text=True)
             containers = [container for document in yaml.safe_load_all(rendered)
                           if document and document["kind"] == "Deployment"

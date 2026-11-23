@@ -1,0 +1,103 @@
+suite: dashboard gRPC-web preservation through Envoy Gateway
+templates:
+  - templates/dashboard-grpc-web-policy.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: disables translation only for the dashboard virtual host
+    release:
+      name: analytics
+      namespace: team-builds
+    set:
+      routing.provider: gateway
+      gateway.name: public-edge
+    asserts:
+      - isKind:
+          of: EnvoyPatchPolicy
+      - equal:
+          path: metadata.name
+          value: team-builds-analytics-dashboard-grpc-web
+      - equal:
+          path: metadata.namespace
+          value: team-builds
+      - equal:
+          path: spec.targetRef
+          value:
+            group: gateway.networking.k8s.io
+            kind: Gateway
+            name: public-edge
+      - equal:
+          path: spec.jsonPatches
+          value:
+            - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+              name: team-builds/public-edge/https
+              operation:
+                op: add
+                jsonPath: '$.virtual_hosts[?(@.domains[0] == "dashboard.ci.hermetiq.test")]'
+                path: /typed_per_filter_config/envoy.filters.http.grpc_web
+                value:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+  - it: derives all listener targets from the Gateway namespace and configured hostname
+    release:
+      namespace: workloads
+    set:
+      routing.provider: gateway
+      gateway.name: shared-edge
+      gateway.namespace: networking
+      gateway.dashboardGrpcWeb.listenerNames: [public-tls, private-tls]
+      hosts.dashboard: analytics.example.test
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: networking
+      - lengthEqual:
+          path: spec.jsonPatches
+          count: 2
+      - equal:
+          path: spec.jsonPatches[0].name
+          value: networking/shared-edge/public-tls
+      - equal:
+          path: spec.jsonPatches[1].name
+          value: networking/shared-edge/private-tls
+      - equal:
+          path: spec.jsonPatches[0].operation.jsonPath
+          value: '$.virtual_hosts[?(@.domains[0] == "analytics.example.test")]'
+
+  - it: permits other GRPCRoute controllers to omit the Envoy-specific policy
+    set:
+      routing.provider: gateway
+      gateway.dashboardGrpcWeb.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: leaves Contour routing unchanged
+    set:
+      routing.provider: contour
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: leaves GKE HTTPRoute-only routing unchanged
+    set:
+      routing.provider: gateway-httproute-only
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: leaves ingress routing unchanged
+    set:
+      routing.provider: ingress
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: emits no policy when chart routing is disabled
+    set:
+      routing.provider: gateway
+      routing.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

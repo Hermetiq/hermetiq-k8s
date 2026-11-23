@@ -1,6 +1,23 @@
 # Minimal values to render the hermetiq chart in CI. The chart `required`s these
 # runtime settings, so `helm template` / kubeconform need them supplied. This is
 # NOT a real deployment — just enough to render for validation.
+# Render-only image names exercise the authorization-capable runtime contract.
+# These tags are fixtures, not published releases or deployable images. No
+# authorization switches exist: CI tests the chart's enforced contract.
+images:
+  bepNats:
+    apiTag: authorization-test
+    apiDigest: ""
+    pubTag: authorization-test
+    pubDigest: ""
+    bootstrapTag: authorization-test
+    bootstrapDigest: ""
+  authProxy:
+    tag: authorization-test
+    digest: ""
+  dashboard:
+    tag: authorization-test
+    digest: ""
 hosts:
   domainBase: ci.hermetiq.test
 routing:
@@ -35,8 +52,9 @@ license:
   contactEmail: ci@hermetiq.test
   agreement:
     accepted: true
-# Disable the dashboard oauth2-proxy for the render fixture (it requires client
-# id/secret/cookie creds). A fixture exercising the oauth2-proxy path is a follow-on.
+# A pre-existing Secret supplies render-only OAuth client/cookie credentials.
 dashboard:
   oauth2Proxy:
-    enabled: false
+    emailDomains: [example.com]
+    client:
+      existingSecret: test-oidc

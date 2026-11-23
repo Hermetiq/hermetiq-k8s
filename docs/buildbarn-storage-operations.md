@@ -141,13 +141,24 @@ temporarily tell clients that missing blobs still exist.
 
 ## Changes That Flush the Cache
 
-Block geometry must match exactly for Buildbarn to reattach persistent data. Changing `spareBlocks`, `oldBlocks`, `currentBlocks`, `newBlocks`, `blocksSizeGi`, or the raw device size changes the derived block size. A persistent store discards all existing data on the next start.
+Treat changes to block counts, `blocksSizeGi`, raw device size or index layout
+as potentially cache-invalidating and plan for a cold cache. Buildbarn must
+reattach the same block offsets and sizes to recover persistent data. Changing
+the total block count or backing size normally changes that geometry.
+
+Redistributing `oldBlocks` and `currentBlocks` while keeping the total count,
+spare count and physical geometry unchanged can retain persisted data, but
+unchanged totals alone are not a preservation guarantee. The backing storage,
+disk-backed key-location map and checkpoint state must also remain compatible
+and survive together. This is restart recovery, not online resizing, and the
+new retention policy can still evict data. Unless those conditions are
+verified for the deployed version and layout, keep the cold-cache plan.
 
 Treat these as scheduled cache flushes:
 
 | Change | Effect |
 |---|---|
-| Block counts, `blocksSizeGi`, or raw device size | Full flush of that store in persistent modes |
+| Block counts, `blocksSizeGi`, or raw device size | Plan for a full flush; changed physical geometry prevents reattachment. See the restricted redistribution case above before claiming preservation |
 | Key-location map size or placement | Index starts empty; effectively a full flush |
 | CMS index size (`cms.keyLocationMap.sizeMi`, or `cms.blockDevice.metadata.keyLocationMapSizeMi` for a dedicated raw CMS), including a changed chart default taken on upgrade | The CMS starts empty. The chunks stay in CAS, but every blob of 512 KiB or more (two or more chunks at the default chunking parameters) is unreadable and reported missing until it is uploaded again |
 | `storage.replicas` increased by 1 | Roughly `1/N` of keys remap to the new shard; temporary miss-rate dip |
@@ -202,7 +213,7 @@ label too, or the six records are empty and both alerts stay silent.
 | AC hits but actions still rerun | CAS evicted outputs before the AC evicted the ActionResult | Grow CAS, reduce AC retention, or expire the AC |
 | Shard empty after node reboot | In-memory KLM or ephemeral storage tier | Expected for cache-only tiers; use disk-backed KLM if persistence is required |
 | Disk was grown, but new blobs disappear early | KLM was not grown with the blocks | Resize blocks and map together |
-| Writes fail with `No unused blocks available` | Reads are pinning old blocks and there are too few spare blocks | Raise `spareBlocks`; this is a geometry change and flushes persistent stores |
+| Writes fail with `No unused blocks available` | Reads are pinning old blocks and there are too few spare blocks | Review `spareBlocks`; increasing the total block count changes geometry, so plan the change as a cache flush |
 
 ## Runbooks
 

@@ -27,6 +27,12 @@ standardLabels:
 buildbarnCdcCompatible: false
 
 images:
+  # This chart requires matching authorization-capable API,
+  # publisher, bootstrap and dashboard images; JWT profiles also require the
+  # matching auth-proxy image. The v0.9.8 pins below predate this requirement
+  # and must be replaced before installing this chart.
+  # Upgrade tags AND digests together (or clear a digest to use its tag).
+  # See README: Upgrading project authorization.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
@@ -121,8 +127,9 @@ app:
   # and CrashLoopBackOffs.
   grpcAuthUserProvider: jwks
   environment: prod
-  # Emails that should receive the Hermetiq admin role. Rendered as the
-  # comma-delimited ADMIN_EMAIL_ALLOWLIST env var for the API and publisher workloads.
+  # Retained application metadata; configure trusted administrator groups under
+  # authorization instead. Email allowlists do not grant admin authority.
+  # Rendered as ADMIN_EMAIL_ALLOWLIST for the API and publisher workloads.
   adminEmails: []
   # How invocation rows are driven. "build_tool" (the chart default) creates
   # invocations from BEP build-tool events and provisions NO BEP_LIFECYCLE
@@ -374,6 +381,12 @@ hosts:
 #         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
 #         auto_sign_up: true
 #         enable_login_token: true
+#       users:
+#         allow_sign_up: false
+#         auto_assign_org_role: Viewer
+# Protect the Grafana backend with NetworkPolicy or a proxy IP whitelist;
+# ClusterIP alone does not prevent callers from forging identity headers.
+# The starter VictoriaMetrics values include the backend NetworkPolicy.
 #
 # Also register https://grafana.<domainBase>/oauth2/callback as an allowed
 # callback URL with your IdP.
@@ -430,6 +443,19 @@ gateway:
   enabled: true
   name: ""
   namespace: ""
+  # Preserve gRPC-web through the dashboard's oauth2-proxy and nginx BFF.
+  # Envoy's listener-wide translator would otherwise send native gRPC over
+  # the BFF's HTTP/1.1 upstream and produce HTTP 505 before authentication.
+  # Renders a dashboard-only EnvoyPatchPolicy in routing.provider=gateway.
+  # Requires extensionApis.enableEnvoyPatchPolicy=true in Envoy Gateway's
+  # controller configuration. Disable for other Gateway implementations.
+  dashboardGrpcWeb:
+    enabled: true
+    # Per-Gateway HTTPS listeners serving the dashboard host. Both Envoy
+    # naming schemes use <gateway namespace>/<gateway name>/<listener> for
+    # their RouteConfiguration. See README for HTTP V2 or merged Gateways.
+    listenerNames:
+      - https
   routes:
     bepGrpcName: bep-cloud-grpc
     apiGrpcName: api-cloud-grpc
@@ -463,7 +489,7 @@ gateway:
     # active health checks use unauthenticated readiness endpoints instead of
     # default /healthz or grpc.health.v1 checks on auth-sensitive backends.
     enabled: true
-  # Envoy Gateway stream timeouts for the chart's gRPC routes
+  # Envoy Gateway stream timeouts for the chart's gRPC and HTTP routes
   # (routing.provider=gateway only). Without these, Envoy applies its default
   # 15s route timeout — the only routing provider this chart supports that
   # leaves the gRPC routes uncapped-by-omission. Contour already sets
@@ -520,10 +546,17 @@ gateway:
       requestTimeout: "0s"
       maxStreamDuration: "0s"
       connectionIdleTimeout: "1h"
-    # The dashboard's REST/gRPC-web traffic. The same unary analytics queries
-    # that reach apiGrpc arrive over this route too, so it gets the same 300s
-    # bound rather than Envoy Gateway's 15s default.
+    # External REST/gRPC-web API traffic gets the same 300s bound as apiGrpc.
     apiWeb:
+      requestTimeout: "300s"
+      maxStreamDuration: ""
+      connectionIdleTimeout: "1h"
+    # Same-origin browser REST and gRPC-web calls pass through the dashboard
+    # BFF. Give these queries the same headroom as the external API. With the
+    # assistant enabled, request and stream limits are raised to at least
+    # assistant.streamTimeoutSeconds, even if timeouts.enabled is false.
+    # This policy adds no active health checks to the authenticated dashboard.
+    dashboard:
       requestTimeout: "300s"
       maxStreamDuration: ""
       connectionIdleTimeout: "1h"
@@ -1071,8 +1104,34 @@ api:
   # Keep it true for chart-managed JWKS settings. Set it false only when api.env
   # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
   # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
+  # Optional directory provisioning for the enforced project authorization policy.
+  # userName must match the verified stable subject; never map it from email.
+  scim:
+    enabled: false
+    issuer: ""
+    userIdPrefix: ""
+    existingSecret: ""
+    existingSecretKey: token
+    # Nonsecret marker: change after rotating the token Secret to restart API pods.
+    rolloutVersion: ""
+    # Only these immutable directory group IDs can be provisioned.
+    groups: []
+    # - {id: engineering, displayName: Engineering}
+
   jwt:
+    # Optional independent issuer/audience profiles replace all legacy jwt settings.
+    # Each profile chooses jwksUrl, jwksInline, or existingSecret + existingSecretKey.
+    profiles: []
     enabled: true
+    # Classify this trusted credential profile explicitly; optional provider
+    # claims are not sufficient to distinguish humans from machines.
+    principalKind: human
+    # Positive Go durations. URL refresh preserves the verifier's existing timing.
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Once a mounted key file changes, reload within this interval (maximum 10s).
+    fileReloadInterval: 10s
     jwksUrl: ""
     issuer: ""
     # gRPC API token audience. Leave empty to reuse the dashboard oauth2-proxy
@@ -1107,8 +1166,35 @@ api:
     enabled: true
     maxUnavailable: 1
 
+# Shared project authorization policy for API and publisher. This chart always
+# enforces the policy; configure builder grants before sending builds.
+authorization:
+  # Authenticated humans may retain automatic Viewer access to every project.
+  # Service accounts receive only their explicit projectRoles.
+  # Roles: viewer, builder, admin (each includes the previous one).
+  defaultAccess: viewer
+  # Optional explicit installation-admin group trust; omit to retain the
+  # legacy verified admin group. Once set, only these issuer/source pairs apply.
+  # administratorGroups:
+  #   - {issuer: "https://idp.example.com/", group: admins, source: jwt}
+  groupBindings: []
+  # - projectId: my-project
+  #   issuer: https://idp.example.com/
+  #   group: engineering
+  #   roles: [builder]
+  serviceAccounts: []
+  # - issuer: https://ci.example.com/hermetiq
+  #   subject: buildkite-ci
+  #   projectRoles:
+  #     my-project: [builder]
+  instanceBindings: []
+  # - namespace: my-buildbarn-namespace
+  #   instancePrefix: my-instance
+  #   projectId: my-project
+
 publisher:
   replicas: 4
+  # BEP ingestion always requires write:bep membership for the selected project.
   # Additional environment variables for the publisher deployment.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
@@ -1145,7 +1231,17 @@ publisher:
   trustedCalCidrs: ""
 
   jwks:
+    profiles: []
     enabled: true
+    principalKind: human
+    # auto keeps existing URL/global OIDC/local precedence. Explicit url,
+    # inline or secret selects only the corresponding publisher key source.
+    source: auto
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Maximum 10s; Kubernetes Secret projection latency is additional.
+    fileReloadInterval: 10s
     url: ""
     issuer: ""
     # BES/CAL token audience. Defaults to https://<hosts.bepGrpc> or
@@ -1299,7 +1395,16 @@ dashboard:
     provider: oidc
     oidcIssuerUrl: ""
     scope: openid email profile offline_access
-    oidcGroupsClaim: groups
+    # Required browser admission policy, shared by dashboard, Grafana and
+    # Buildbarn Browser. Set your organization domains, e.g. ["example.com"].
+    # ["*"] is accepted only together with a nonempty allowedGroups list.
+    emailDomains: []
+    # Optional additional restriction: a user must belong to at least one
+    # listed IdP group AND pass emailDomains. These groups do not grant roles.
+    allowedGroups: []
+    # Empty uses api.jwt.groupsClaim, then "groups". With JWT profiles, set
+    # this explicitly to the browser identity provider's groups claim.
+    oidcGroupsClaim: ""
     validateUrl: ""
     # IdP logout URL. When `/oauth2/sign_out` is called, oauth2-proxy clears
     # its cookie and then redirects the browser here so the IdP also ends

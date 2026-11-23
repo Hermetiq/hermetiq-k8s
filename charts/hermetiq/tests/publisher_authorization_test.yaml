@@ -1,0 +1,436 @@
+suite: publisher authorization and independent JWT keys
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/secrets.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: always enables publisher membership enforcement
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
+          value: "true"
+
+  - it: rejects the removed publisher enforcement switch
+    template: templates/validate.yaml
+    set:
+      publisher.enforceProjectAuthorization: false
+    asserts:
+      - failedTemplate:
+          errorPattern: publisher.enforceProjectAuthorization is not supported
+
+  - it: rejects a duplicate publisher enforcement environment entry
+    template: templates/validate.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: "false"
+    asserts:
+      - failedTemplate:
+          errorPattern: publisher.env must not set ENFORCE_PUB_AUTHZ; this Helm chart always enforces publisher project authorization
+
+  - it: preserves auto URL precedence over local keys
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.json: '{"keys":[]}'
+      publisher.jwks.existingSecret: ignored-local-keyset
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://oidc.ci.test/.well-known/jwks.json
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "publisher-jwks")]
+
+  - it: selects independent inline keys while preserving dashboard OIDC
+    set:
+      publisher.jwks.source: inline
+      publisher.jwks.json: '{"keys":[{"kty":"RSA","kid":"ci-key","n":"test","e":"AQAB"}]}'
+      publisher.jwks.issuer: https://ci.example.com/hermetiq
+      publisher.jwks.audience: hermetiq-bep
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")]
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_FILE")].value
+          value: /config/jwks/jwks.json
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://ci.example.com/hermetiq
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: hermetiq-bep
+        template: templates/deployment-publisher.yaml
+      - exists:
+          path: spec.template.metadata.annotations["checksum/publisher-jwks-secret"]
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://oidc.ci.test/.well-known/jwks.json
+        template: templates/deployment-api.yaml
+      - equal:
+          path: stringData["jwks.json"]
+          value: '{"keys":[{"kty":"RSA","kid":"ci-key","n":"test","e":"AQAB"}]}'
+        template: templates/secrets.yaml
+        documentSelector:
+          path: metadata.name
+          value: bep-pub-jwks
+
+  - it: selects a projected existing Secret without a subPath mount
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.source: secret
+      publisher.jwks.existingSecret: customer-build-keys
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "publisher-jwks")].secret.secretName
+          value: customer-build-keys
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "publisher-jwks")].mountPath
+          value: /config/jwks
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "publisher-jwks")].subPath
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/publisher-jwks-secret"]
+
+  - it: selects only the explicit publisher URL
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.source: url
+      publisher.jwks.url: https://ci.example.com/keys.json
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://ci.example.com/keys.json
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "publisher-jwks")]
+
+  - it: refuses to inherit the global URL in explicit URL mode
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.source: url
+    asserts:
+      - failedTemplate:
+          errorPattern: source=url requires a non-empty publisher.jwks.url
+
+  - it: requires inline public keys in explicit inline mode
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.source: inline
+    asserts:
+      - failedTemplate:
+          errorPattern: source=inline requires a non-empty publisher.jwks.json
+
+  - it: requires a Secret name in explicit Secret mode
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.source: secret
+    asserts:
+      - failedTemplate:
+          errorPattern: source=secret requires a non-empty publisher.jwks.existingSecret
+
+  - it: rejects conflicting explicit publisher sources
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.source: inline
+      publisher.jwks.json: '{"keys":[]}'
+      publisher.jwks.url: https://other.example.com/keys.json
+    asserts:
+      - failedTemplate:
+          errorPattern: explicit publisher.jwks.source cannot be combined
+
+  - it: rejects explicit source selection while chart JWKS wiring is disabled
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.enabled: false
+      publisher.jwks.source: inline
+      publisher.jwks.json: '{"keys":[]}'
+    asserts:
+      - failedTemplate:
+          errorPattern: explicit publisher.jwks.source requires publisher.jwks.enabled=true
+
+  - it: renders configured publisher refresh settings
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.refreshInterval: 30m
+      publisher.jwks.refreshRateLimit: 2m
+      publisher.jwks.refreshTimeout: 3s
+      publisher.jwks.fileReloadInterval: 5s
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_INTERVAL")].value
+          value: 30m
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT")].value
+          value: 2m
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_TIMEOUT")].value
+          value: 3s
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL")].value
+          value: 5s
+
+  - it: renders configured API refresh settings
+    template: templates/deployment-api.yaml
+    set:
+      api.jwt.refreshInterval: 20m
+      api.jwt.refreshRateLimit: 1m
+      api.jwt.refreshTimeout: 4s
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_INTERVAL")].value
+          value: 20m
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT")].value
+          value: 1m
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_REFRESH_TIMEOUT")].value
+          value: 4s
+
+  - it: classifies publisher credentials without changing dashboard identities
+    set:
+      publisher.jwks.principalKind: service
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_PRINCIPAL_KIND")].value
+          value: service
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_PRINCIPAL_KIND")].value
+          value: human
+        template: templates/deployment-api.yaml
+
+  - it: preserves API verifier env overrides ahead of chart settings without duplicates
+    template: templates/deployment-api.yaml
+    set:
+      api.jwt.principalKind: human
+      api.jwt.refreshInterval: 20m
+      api.jwt.refreshRateLimit: 2m
+      api.jwt.refreshTimeout: 4s
+      api.jwt.fileReloadInterval: 8s
+      api.env.GRPC_AUTH_PRINCIPAL_KIND: service
+      api.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: '{{ printf "%dm" 12 }}'
+      api.env.GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT: 1m
+      api.env.GRPC_AUTH_JWKS_REFRESH_TIMEOUT: 3s
+      api.env.GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL: 5s
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: service}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 1m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 3s}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 5s}
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: human}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 20m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 2m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 4s}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 8s}
+
+  - it: preserves publisher verifier env overrides ahead of chart settings without duplicates
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.principalKind: human
+      publisher.jwks.refreshInterval: 20m
+      publisher.jwks.refreshRateLimit: 2m
+      publisher.jwks.refreshTimeout: 4s
+      publisher.jwks.fileReloadInterval: 8s
+      publisher.env.GRPC_AUTH_PRINCIPAL_KIND: service
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: '{{ printf "%dm" 12 }}'
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT: 1m
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_TIMEOUT: 3s
+      publisher.env.GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL: 5s
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: service}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 1m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 3s}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 5s}
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: human}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 20m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 2m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 4s}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 8s}
+
+  - it: preserves existing verifier env overrides when project authorization is enforced
+    set:
+      dashboard.oauth2Proxy.enabled: true
+      api.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 12m
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 15m
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+        template: templates/deployment-api.yaml
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 15m}
+          count: 1
+        template: templates/deployment-publisher.yaml
+
+  - it: rejects legacy verifier env overrides with independent API profiles
+    template: templates/validate.yaml
+    set:
+      api.jwt.profiles:
+        - name: human
+          issuer: https://oidc.ci.test/
+          audiences: [dashboard-client]
+          jwksUrl: https://oidc.ci.test/keys
+          principalKind: human
+          credentialUse: browser
+      api.env.GRPC_AUTH_PRINCIPAL_KIND: service
+    asserts:
+      - failedTemplate:
+          errorPattern: api.jwt.profiles requires api.jwt.enabled=true and no legacy custom auth env
+
+  - it: rejects legacy verifier env overrides with independent publisher profiles
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.profiles:
+        - name: ci
+          issuer: https://ci.example.test/
+          audiences: [hermetiq-bep]
+          jwksUrl: https://ci.example.test/keys
+          principalKind: service
+          credentialUse: build
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 1m
+    asserts:
+      - failedTemplate:
+          errorPattern: publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env
+
+  - it: retains the explicit shared MCP identity under enforced project policy
+    template: templates/deployment-api.yaml
+    set:
+      dashboard.oauth2Proxy.enabled: true
+      dashboard.oauth2Proxy.client.existingSecret: test-oidc
+      gateway.routes.grafanaEnabled: false
+      api.mcpAuthDisabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "MCP_AUTH_DISABLED")].value
+          value: "true"
+
+  - it: gives both cores the same complete policy
+    set:
+      dashboard.oauth2Proxy.enabled: true
+      dashboard.oauth2Proxy.client.existingSecret: test-oidc
+      gateway.routes.grafanaEnabled: false
+      authorization.defaultAccess: none
+      authorization.groupBindings:
+        - projectId: project-a
+          issuer: https://oidc.ci.test/
+          group: engineering
+          roles: [builder]
+      authorization.serviceAccounts:
+        - issuer: https://ci.example.com/hermetiq
+          subject: buildkite-ci
+          projectRoles:
+            project-a: [builder]
+      authorization.instanceBindings:
+        - namespace: build-system
+          instancePrefix: ""
+          projectId: project-a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"none","groupBindings":[{"group":"engineering","issuer":"https://oidc.ci.test/","projectId":"project-a","roles":["builder"]}],"instanceBindings":[{"instancePrefix":"","namespace":"build-system","projectId":"project-a"}],"mode":"enforced","serviceAccounts":[{"issuer":"https://ci.example.com/hermetiq","projectRoles":{"project-a":["builder"]},"subject":"buildkite-ci"}]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"none","groupBindings":[{"group":"engineering","issuer":"https://oidc.ci.test/","projectId":"project-a","roles":["builder"]}],"instanceBindings":[{"instancePrefix":"","namespace":"build-system","projectId":"project-a"}],"mode":"enforced","serviceAccounts":[{"issuer":"https://ci.example.com/hermetiq","projectRoles":{"project-a":["builder"]},"subject":"buildkite-ci"}]}'
+        template: templates/deployment-publisher.yaml
+
+  - it: carries an explicit Auth0 application builder grant to both cores without widening the human baseline
+    set:
+      oidc.issuerUrl: https://idp.example.com/
+      publisher.jwks.audience: https://bep.example.com
+      authorization.serviceAccounts:
+        - issuer: https://idp.example.com/
+          subject: example-build-client@clients
+          projectRoles:
+            "0": [builder]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://idp.example.com/","projectRoles":{"0":["builder"]},"subject":"example-build-client@clients"}]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://idp.example.com/","projectRoles":{"0":["builder"]},"subject":"example-build-client@clients"}]}'
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
+          value: "true"
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_PRINCIPAL_KIND")].value
+          value: human
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://idp.example.com/
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_AUDIENCE")].value
+          value: https://bep.example.com
+        template: templates/deployment-publisher.yaml
+
+  - it: rejects a per-workload policy override
+    template: templates/validate.yaml
+    set:
+      api.env.PROJECT_AUTHORIZATION_CONFIG: '{}'
+    asserts:
+      - failedTemplate:
+          errorPattern: use authorization so both workloads share the same policy

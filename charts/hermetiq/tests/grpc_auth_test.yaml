@@ -410,16 +410,6 @@ tests:
       - failedTemplate:
           errorPattern: "requires a non-empty GRPC_AUTH_AUDIENCE in api.env"
 
-  - it: rejects api JWT auth with no gRPC API audience to fall back on
-    template: templates/validate.yaml
-    set:
-      api.jwt.enabled: true
-      api.jwt.audience: ""
-      dashboard.oauth2Proxy.enabled: false
-    asserts:
-      - failedTemplate:
-          errorPattern: "api.jwt.audience is required"
-
   - it: rejects publisher JWKS auth with no audience or BEP host
     template: templates/validate.yaml
     set:
