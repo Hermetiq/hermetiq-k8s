@@ -96,10 +96,6 @@ app:
   # before a large rollout (e.g. 8-16 for high-volume 5-10 shard RBE clusters);
   # must equal frontend.grpcCacheProxy.cacheEvents.numShards in buildbarn-values.yaml.
   streamPartitionCount: 4
-  # Grant the Hermetiq admin role on sign-in so initial admins can open
-  # Project Settings and manage users:
-  adminEmails: []
-  #   - admin@your-company.com
   # Enable Action Cache Hit Tracker queries and MCP cache-event tools:
   cacheEventsEnabled: true
   normalizeRepoUrls: true
@@ -112,6 +108,23 @@ oidc:
   # Shared OIDC issuer for API, publisher, and dashboard. Use the exact issuer
   # URL in your tokens (including its trailing slash, if present).
   issuerUrl: https://issuer.example.com/
+
+# Enforced authorization, publisher enforcement and browser authorization are
+# enabled by default. Use matching authorization-capable images (including
+# auth-proxy for JWT profiles); see the chart README's image requirements and
+# legacy migration section before upgrading an existing deployment.
+authorization:
+  # Replace this immutable, issuer-qualified group with your administrator group.
+  administratorGroups:
+    - issuer: https://issuer.example.com/
+      group: hermetiq-admins
+      source: jwt
+  # Give build uploaders builder access to the actual project before activation.
+  groupBindings:
+    - projectId: "0"
+      issuer: https://issuer.example.com/
+      group: build-engineers
+      roles: [builder]
 
 api:
   # Example capacity for grpc-api; size requests and replica counts to load.

@@ -1,15 +1,30 @@
-suite: browser authorization activation
+suite: enforced authorization defaults and legacy migration
 templates:
   - templates/deployment-dashboard.yaml
   - templates/deployment-grafana-oauth2-proxy.yaml
   - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
   - templates/networkpolicy.yaml
   - templates/validate.yaml
 values:
   - ../ci-values/ci.yaml
-  - ../ci-values/authorization.yaml
 tests:
-  - it: activates the same-origin BFF and authoritative /auth/me together
+  - it: enables enforced policy on both cores and publisher enforcement by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+        template: templates/deployment-api.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
+          value: "true"
+        template: templates/deployment-publisher.yaml
+
+  - it: activates the same-origin BFF and authoritative /auth/me by default
     template: templates/deployment-dashboard.yaml
     asserts:
       - equal:
@@ -86,7 +101,7 @@ tests:
       - notExists:
           path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "BROWSER_SESSION_COOKIES_JSON")]
 
-  - it: retains all legacy dashboard settings until explicit activation
+  - it: restores the cross-origin dashboard with the documented legacy overrides
     template: templates/deployment-dashboard.yaml
     set:
       authorization.mode: legacy
@@ -99,6 +114,29 @@ tests:
           path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "GRPC_API_HOST")]
       - notExists:
           path: spec.template.spec.containers[?(@.name == "web-ui")].volumeMounts[?(@.name == "dashboard-bff")]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_API_URL")].value
+          value: https://api-web.ci.hermetiq.test
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_PROJECT_AUTHORIZATION_MODE")].value
+          value: legacy
+
+  - it: restores legacy policy and publisher behavior with the migration fixture
+    values:
+      - ../ci-values/legacy.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"legacy"'
+        template: templates/deployment-api.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"legacy"'
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "ENFORCE_PUB_AUTHZ")].value
+          value: "false"
+        template: templates/deployment-publisher.yaml
 
   - it: requires browser authorization for enforced mode
     template: templates/validate.yaml

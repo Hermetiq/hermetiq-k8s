@@ -1402,6 +1402,14 @@
                 "type": "string",
                 "minLength": 1
               },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "jwt",
+                  "scim"
+                ],
+                "description": "Authoritative group membership source; omitted uses signed JWT groups."
+              },
               "roles": {
                 "type": "array",
                 "items": {

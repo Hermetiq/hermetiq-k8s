@@ -93,7 +93,7 @@ tests:
 
   # grpc-api's REST API (Service port 80) and its /metrics share 8008, so
   # setting metricsFrom must not cut off ingress callers.
-  - it: admits ingress callers and scrapers on grpc-api's shared 8008 port
+  - it: admits ingress callers scrapers and the default dashboard BFF on grpc-api's shared 8008 port
     set:
       networkPolicy.enabled: true
       networkPolicy.ingressFrom:
@@ -110,6 +110,8 @@ tests:
                 matchLabels: {kubernetes.io/metadata.name: envoy-gateway-system}
             - namespaceSelector:
                 matchLabels: {kubernetes.io/metadata.name: monitoring}
+            - podSelector:
+                matchLabels: {app: web-ui}
         documentSelector:
           path: metadata.name
           value: grpc-api

@@ -1,3 +1,5 @@
+# Explicit activation fixture for migrating a legacy values overlay. For a new
+# installation these three switches already default to the values below.
 authorization:
   mode: enforced
 publisher:

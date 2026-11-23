@@ -244,7 +244,7 @@ spec:
             - name: GRPC_AUTH_JWT_PROFILES
               value: {{ include "hermetiq-core.jwtProfilesJSON" .Values.api.jwt.profiles | quote }}
             {{- else if .Values.api.jwt.enabled }}
-            {{- include "hermetiq-core.jwksRefreshEnv" .Values.api.jwt | nindent 12 }}
+            {{- include "hermetiq-core.jwksRefreshEnv" (dict "settings" .Values.api.jwt "env" .Values.api.env) | nindent 12 }}
             # Issuer/JWKS/groups come from api.jwt.* (shared with the sidecar).
             {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
             - name: GRPC_AUTH_JWKS_URL

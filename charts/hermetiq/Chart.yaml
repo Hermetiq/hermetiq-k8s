@@ -24,9 +24,9 @@ annotations:
     - kind: fixed
       description: "Correct the Buildbarn object-size panel descriptions: on CDC storage the panels show the size named in the request digest (the whole blob for CMS, the action message for AC, ISCC, and FSAC, the uncompressed chunk for CS), not the stored entry"
     - kind: added
-      description: "Add opt-in enforced project authorization (viewer, builder and admin roles), optional SCIM deprovisioning, independent JWT trust profiles, and browser authorization through a same-origin dashboard BFF"
+      description: "Enable project authorization by default with viewer, builder and admin roles, optional SCIM provisioning, independent JWT trust profiles, and a same-origin dashboard BFF"
     - kind: fixed
-      description: "Allow independent publisher signing keys and configurable JWKS rotation while preserving legacy access defaults"
+      description: "Allow independent publisher signing keys and configurable JWKS rotation; document image and access migration with explicit legacy-mode overrides"
 keywords:
   - hermetiq
   - MCP

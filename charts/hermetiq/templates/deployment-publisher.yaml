@@ -244,7 +244,7 @@ spec:
             - name: GRPC_AUTH_JWT_PROFILES
               value: {{ include "hermetiq-core.jwtProfilesJSON" .Values.publisher.jwks.profiles | quote }}
             {{- else if .Values.publisher.jwks.enabled }}
-            {{- include "hermetiq-core.jwksRefreshEnv" .Values.publisher.jwks | nindent 12 }}
+            {{- include "hermetiq-core.jwksRefreshEnv" (dict "settings" .Values.publisher.jwks "env" .Values.publisher.env) | nindent 12 }}
             {{- $jwksUrl := include "hermetiq-core.publisherJwksUrl" . }}
             {{- if $jwksUrl }}
             - name: GRPC_AUTH_JWKS_URL

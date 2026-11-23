@@ -27,6 +27,11 @@ standardLabels:
 buildbarnCdcCompatible: false
 
 images:
+  # Enforced authorization requires matching authorization-capable API,
+  # publisher, bootstrap and dashboard images; JWT profiles also require the
+  # matching auth-proxy image. The v0.9.8 pins below support legacy mode only.
+  # Upgrade tags AND digests together (or clear a digest to use its tag).
+  # See README: Upgrading project authorization.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
@@ -121,8 +126,9 @@ app:
   # and CrashLoopBackOffs.
   grpcAuthUserProvider: jwks
   environment: prod
-  # Emails that should receive the Hermetiq admin role. Rendered as the
-  # comma-delimited ADMIN_EMAIL_ALLOWLIST env var for the API and publisher workloads.
+  # Legacy-mode installation administrators. Enforced mode requires trusted
+  # administrator groups instead; email allowlists do not grant admin authority.
+  # Rendered as ADMIN_EMAIL_ALLOWLIST for the API and publisher workloads.
   adminEmails: []
   # How invocation rows are driven. "build_tool" (the chart default) creates
   # invocations from BEP build-tool events and provisions NO BEP_LIFECYCLE
@@ -1133,11 +1139,11 @@ api:
     enabled: true
     maxUnavailable: 1
 
-# Shared project authorization policy for API and publisher. Legacy preserves
-# existing membership/read-all behavior; activate enforced deliberately after
-# configuring project grants and publisher.enforceProjectAuthorization=true.
+# Shared project authorization policy for API and publisher. Enforced is the
+# default; configure builder grants before sending builds. Existing installs
+# can explicitly select legacy while migrating (see README).
 authorization:
-  mode: legacy
+  mode: enforced
   # Authenticated humans may retain automatic Viewer access to every project.
   # Service accounts receive only their explicit projectRoles.
   # Roles: viewer, builder, admin (each includes the previous one).
@@ -1163,9 +1169,10 @@ authorization:
 
 publisher:
   replicas: 4
-  # Require write:bep membership for BEP ingestion. False preserves legacy
-  # on-prem behavior; JWT verification and signed project restrictions still apply.
-  enforceProjectAuthorization: false
+  # Require write:bep membership for BEP ingestion. Set false together with
+  # authorization.mode=legacy only while migrating an existing installation.
+  # JWT verification and signed project restrictions still apply in legacy mode.
+  enforceProjectAuthorization: true
   # Additional environment variables for the publisher deployment.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
@@ -1458,8 +1465,8 @@ promqlQueries:
   rolloutChecksum: ""
 
 # Browser authorization: the dashboard calls the API same-origin through its
-# nginx BFF and /auth/me is answered by the API. Off by default; legacy
-# cross-origin settings are unchanged until it is enabled. Required by
-# authorization.mode=enforced. Grafana stays behind its oauth2-proxy.
+# nginx BFF and /auth/me is answered by the API. Enabled by default and required
+# by authorization.mode=enforced. Set false with legacy mode to retain the
+# previous cross-origin flow. Grafana stays behind its oauth2-proxy.
 browserAuthorization:
-  enabled: false
+  enabled: true

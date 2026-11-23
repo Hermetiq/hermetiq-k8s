@@ -7,6 +7,15 @@ set -euo pipefail
 chart_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output=$(mktemp)
 trap 'rm -f "$output"' EXIT
+expect_schema_success() {
+  local setting=$1
+  if ! helm template schema-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
+    --set-json "$setting" >"$output" 2>&1; then
+    echo "Expected schema acceptance for $setting:" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
 expect_schema_failure() {
   local setting=$1 expected=$2
   if helm template schema-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
@@ -20,6 +29,7 @@ expect_schema_failure() {
     exit 1
   fi
 }
+expect_schema_success 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"directory-builders","source":"scim","roles":["builder"]},{"projectId":"p","issuer":"https://issuer.example","group":"jwt-builders","source":"jwt","roles":["builder"]},{"projectId":"p","issuer":"https://issuer.example","group":"legacy-builders","roles":["builder"]}]'
 expect_schema_failure 'rbe.accessPolicy.projects={"":{"enabled":true,"minimum_role":"viewer"}}' \
   "Property name of \"\" does not match|invalid propertyName ''"
 expect_schema_failure 'rbe.accessPolicy.projects={"0":{"enabled":true,"minimum_role":"owner"}}' \
@@ -46,6 +56,8 @@ expect_schema_failure 'authorization.defaultAccess="admin"' \
   "defaultAccess.*(one of|enum)"
 expect_schema_failure 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"engineers","roles":["owner"]}]' \
   "roles.*(one of|enum)"
+expect_schema_failure 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"engineers","source":"directory","roles":["builder"]}]' \
+  "source.*(one of|enum)"
 expect_schema_failure 'authorization.serviceAccounts=[{"issuer":"https://issuer.example","subject":"ci"}]' \
   "projectRoles.*required|missing property 'projectRoles'"
 expect_schema_failure 'api.scim.token="never-store-provisioning-tokens-in-values"' \

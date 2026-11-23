@@ -115,17 +115,25 @@
      override because they are the custom environment the chart can inspect and
      prove it will render. */}}
 {{- if eq (default "" .Values.app.grpcAuthUserProvider) "jwks" -}}
-  {{- $requiredAuthKeys := list "GRPC_AUTH_JWT_PROFILES" "GRPC_AUTH_JWKS_URL" "GRPC_AUTH_JWKS_FILE" "GRPC_AUTH_JWKS_INLINE" "GRPC_AUTH_ISSUER" "GRPC_AUTH_AUDIENCE" "GRPC_AUTH_PRINCIPAL_KIND" "GRPC_AUTH_JWKS_REFRESH_INTERVAL" "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT" "GRPC_AUTH_JWKS_REFRESH_TIMEOUT" "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL" -}}
+  {{- $requiredAuthKeys := list "GRPC_AUTH_JWT_PROFILES" "GRPC_AUTH_JWKS_URL" "GRPC_AUTH_JWKS_FILE" "GRPC_AUTH_JWKS_INLINE" "GRPC_AUTH_ISSUER" "GRPC_AUTH_AUDIENCE" -}}
   {{- $apiHasCustomAuth := false -}}
   {{- $publisherHasCustomAuth := false -}}
   {{- range $requiredAuthKeys -}}
     {{- if hasKey $apiEnv . -}}{{- $apiHasCustomAuth = true -}}{{- end -}}
     {{- if hasKey $publisherEnv . -}}{{- $publisherHasCustomAuth = true -}}{{- end -}}
   {{- end -}}
+  {{- /* Single-profile deployments historically allowed these env overrides.
+       Independent profiles must configure each verifier entirely in its profile. */ -}}
+  {{- $apiHasCustomTuning := false -}}
+  {{- $publisherHasCustomTuning := false -}}
+  {{- range list "GRPC_AUTH_PRINCIPAL_KIND" "GRPC_AUTH_JWKS_REFRESH_INTERVAL" "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT" "GRPC_AUTH_JWKS_REFRESH_TIMEOUT" "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL" -}}
+    {{- if hasKey $apiEnv . -}}{{- $apiHasCustomTuning = true -}}{{- end -}}
+    {{- if hasKey $publisherEnv . -}}{{- $publisherHasCustomTuning = true -}}{{- end -}}
+  {{- end -}}
 
   {{- if .Values.api.jwt.profiles -}}
     {{- include "hermetiq-core.validateJWTProfiles" .Values.api.jwt.profiles -}}
-    {{- if or (not .Values.api.jwt.enabled) $apiHasCustomAuth -}}{{- fail "api.jwt.profiles requires api.jwt.enabled=true and no legacy custom auth env" -}}{{- end -}}
+    {{- if or (not .Values.api.jwt.enabled) $apiHasCustomAuth $apiHasCustomTuning -}}{{- fail "api.jwt.profiles requires api.jwt.enabled=true and no legacy custom auth env" -}}{{- end -}}
   {{- else if .Values.api.jwt.enabled -}}
     {{- if $apiHasCustomAuth -}}
     {{- fail "api.jwt.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in api.env; configure JWKS through api.jwt or set api.jwt.enabled=false" -}}
@@ -156,7 +164,7 @@
 
   {{- if .Values.publisher.jwks.profiles -}}
     {{- include "hermetiq-core.validateJWTProfiles" .Values.publisher.jwks.profiles -}}
-    {{- if or (not .Values.publisher.jwks.enabled) $publisherHasCustomAuth -}}{{- fail "publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env" -}}{{- end -}}
+    {{- if or (not .Values.publisher.jwks.enabled) $publisherHasCustomAuth $publisherHasCustomTuning -}}{{- fail "publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env" -}}{{- end -}}
   {{- else if .Values.publisher.jwks.enabled -}}
     {{- if $publisherHasCustomAuth -}}
     {{- fail "publisher.jwks.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in publisher.env; configure JWKS through publisher.jwks or set publisher.jwks.enabled=false" -}}
@@ -309,3 +317,4 @@
 {{- if and .Values.browserAuthorization.enabled (not .Values.dashboard.oauth2Proxy.enabled) -}}
 {{- fail "browserAuthorization requires dashboard.oauth2Proxy.enabled=true" -}}
 {{- end -}}
+{{- include "hermetiq-core.validateAuthorizationImages" . -}}

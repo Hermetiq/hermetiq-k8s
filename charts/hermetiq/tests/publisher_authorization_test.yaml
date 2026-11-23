@@ -6,8 +6,9 @@ templates:
   - templates/validate.yaml
 values:
   - ../ci-values/ci.yaml
+  - ../ci-values/legacy.yaml
 tests:
-  - it: preserves legacy publisher membership enforcement by default
+  - it: preserves legacy publisher membership enforcement when explicitly disabled
     template: templates/deployment-publisher.yaml
     asserts:
       - equal:
@@ -204,13 +205,155 @@ tests:
           value: human
         template: templates/deployment-api.yaml
 
-  - it: rejects duplicate managed refresh environment entries
+  - it: preserves API verifier env overrides ahead of chart settings without duplicates
+    template: templates/deployment-api.yaml
+    set:
+      api.jwt.principalKind: human
+      api.jwt.refreshInterval: 20m
+      api.jwt.refreshRateLimit: 2m
+      api.jwt.refreshTimeout: 4s
+      api.jwt.fileReloadInterval: 8s
+      api.env.GRPC_AUTH_PRINCIPAL_KIND: service
+      api.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: '{{ printf "%dm" 12 }}'
+      api.env.GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT: 1m
+      api.env.GRPC_AUTH_JWKS_REFRESH_TIMEOUT: 3s
+      api.env.GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL: 5s
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: service}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 1m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 3s}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 5s}
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: human}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 20m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 2m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 4s}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 8s}
+
+  - it: preserves publisher verifier env overrides ahead of chart settings without duplicates
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.jwks.principalKind: human
+      publisher.jwks.refreshInterval: 20m
+      publisher.jwks.refreshRateLimit: 2m
+      publisher.jwks.refreshTimeout: 4s
+      publisher.jwks.fileReloadInterval: 8s
+      publisher.env.GRPC_AUTH_PRINCIPAL_KIND: service
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: '{{ printf "%dm" 12 }}'
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT: 1m
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_TIMEOUT: 3s
+      publisher.env.GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL: 5s
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: service}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 1m}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 3s}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 5s}
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_PRINCIPAL_KIND, value: human}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 20m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT, value: 2m}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT, value: 4s}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL, value: 8s}
+
+  - it: preserves existing verifier env overrides when project authorization is enforced
+    set:
+      authorization.mode: enforced
+      publisher.enforceProjectAuthorization: true
+      browserAuthorization.enabled: true
+      dashboard.oauth2Proxy.enabled: true
+      api.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 12m
+      publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 15m
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "api")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 12m}
+          count: 1
+        template: templates/deployment-api.yaml
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: GRPC_AUTH_JWKS_REFRESH_INTERVAL, value: 15m}
+          count: 1
+        template: templates/deployment-publisher.yaml
+
+  - it: rejects legacy verifier env overrides with independent API profiles
     template: templates/validate.yaml
     set:
+      api.jwt.profiles:
+        - name: human
+          issuer: https://oidc.ci.test/
+          audiences: [dashboard-client]
+          jwksUrl: https://oidc.ci.test/keys
+          principalKind: human
+          credentialUse: browser
+      api.env.GRPC_AUTH_PRINCIPAL_KIND: service
+    asserts:
+      - failedTemplate:
+          errorPattern: api.jwt.profiles requires api.jwt.enabled=true and no legacy custom auth env
+
+  - it: rejects legacy verifier env overrides with independent publisher profiles
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.profiles:
+        - name: ci
+          issuer: https://ci.example.test/
+          audiences: [hermetiq-bep]
+          jwksUrl: https://ci.example.test/keys
+          principalKind: service
+          credentialUse: build
       publisher.env.GRPC_AUTH_JWKS_REFRESH_INTERVAL: 1m
     asserts:
       - failedTemplate:
-          errorPattern: publisher.jwks.enabled=true cannot be combined
+          errorPattern: publisher.jwks.profiles requires publisher.jwks.enabled=true and no legacy custom auth env
 
   - it: requires publisher enforcement before activating the shared policy
     template: templates/validate.yaml

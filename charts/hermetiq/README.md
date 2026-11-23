@@ -43,7 +43,8 @@ How this README is organized:
 - [Workload identity](#workload-identity)
 - [Application settings](#application-settings)
 - [Authentication and SSO](#authentication-and-sso): OIDC, gRPC and MCP
-  authentication, CAL trust, sign-in
+  authentication, project access, [authorization upgrades](#upgrading-project-authorization),
+  CAL trust, sign-in
 - [Workload sizing, scheduling, and availability](#workload-sizing-scheduling-and-availability)
 - [Dashboard](#dashboard): feature flags, Quickstart
 - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
@@ -131,6 +132,8 @@ Required for every install:
   chart's [hosts](#hosts).
 - [ ] An OIDC identity provider.
   [Authentication and SSO](#authentication-and-sso) lists what to register.
+- [ ] Authorization-capable application images and project grants for build
+  callers; see [Upgrading project authorization](#upgrading-project-authorization).
 - [ ] [PostgreSQL](#postgresql) 16 or newer with `pg_partman`.
 - [ ] [NATS JetStream](#nats-jetstream) with at least three servers, or a
   one-replica stream configuration for a single-server test cluster.
@@ -331,7 +334,8 @@ links to the section that explains the block.
 | `otel` | `endpoint`, with scheme and port | Rendering fails. | [OpenTelemetry](#opentelemetry) |
 | `victoriaMetrics` | `baseUrl` to your vmselect read endpoint | Metrics-backed MCP tools and the RBE Infrastructure page have no data. | [Observability](#observability) |
 | `gcpWorkloadIdentity` | On GKE with an object-storage feature, the Google service account. Otherwise remove the block; the chart default is off. | Rendering fails when it is enabled without a service account. | [Workload identity](#workload-identity) |
-| `app` | `streamPartitionCount`, `adminEmails` | Without an admin email or admin group claim, nobody can open Project Settings. | [Stream partitions](#stream-partitions), [Admin access](#admin-access), [Application settings](#application-settings) |
+| `app` | `streamPartitionCount` | The chart partition count applies. | [Stream partitions](#stream-partitions), [Application settings](#application-settings) |
+| `authorization` | Trusted administrator groups and project grants for users and CI | Authenticated humans receive Viewer access by default; publishing requires Builder or Admin access. Email allowlists do not grant installation administration in enforced mode. | [Project access policy](#project-access-policy), [Admin access](#admin-access) |
 | `oidc` | `issuerUrl`, exactly as it appears in your tokens; keep a trailing slash only if the tokens have one | Rendering fails. | [OIDC provider](#oidc-provider) |
 | `api` | `replicas`, `resources` | The starter's small sizing applies. | [Replicas and resources](#replicas-and-resources) |
 | `publisher` | `trustedCalCidrs` when Buildbarn workers report here; `replicas`, `resources` | Every completed-action call is rejected with `UNAUTHENTICATED` and remote-execution action telemetry stops arriving. | [Completed Action Logger trust](#completed-action-logger-trust) |
@@ -1382,13 +1386,14 @@ access.
 
 ## Application settings
 
-**Values:** `app`. The starter sets the partition count, the admin emails,
-cache-event queries, and repository URL normalization.
+**Values:** `app`. The starter sets the partition count, cache-event queries,
+and repository URL normalization. Configure administrator groups under
+`authorization`; email-based administration is a legacy-mode option.
 
 | Value | Chart default | Starter | Purpose |
 |---|---|---|---|
 | `app.streamPartitionCount` | `9` | `4` | Number of ingest partitions; see [Stream partitions](#stream-partitions) |
-| `app.adminEmails` | `[]` | `[]` | Users granted the admin role; see [Admin access](#admin-access) |
+| `app.adminEmails` | `[]` | `[]` | Legacy-mode email allowlist; does not grant installation administration in enforced mode. See [Admin access](#admin-access). |
 | `app.cacheEventsEnabled` | `false` | `true` | Cache-event queries and MCP tools; see [Cache-event analytics](#cache-event-analytics) |
 | `app.normalizeRepoUrls` | `false` | `true` | Stores the SSH, HTTPS, and scp-style forms of one git remote under a single host/owner/repo key, so per-repository analytics group together |
 | `app.grpcAuthUserProvider` | `jwks` | | Identity provider type for the API and publisher; see [gRPC authentication](#grpc-authentication) |
@@ -1405,8 +1410,9 @@ their chart defaults in the starter.
 ## Authentication and SSO
 
 **Values:** `oidc`, `api.jwt`, `publisher.jwks`, `publisher.trustedCalCidrs`,
-`app.adminEmails`, `dashboard.oauth2Proxy`, `grafana.oauth2Proxy`. The starter
-sets the issuer and the OAuth client Secret.
+`authorization`, `browserAuthorization`, `api.scim`, `dashboard.oauth2Proxy`,
+`grafana.oauth2Proxy`. The starter sets the issuer and the OAuth client Secret;
+configure project grants and administrator groups for your installation.
 
 Three kinds of caller reach Hermetiq: browsers, which sign in through
 oauth2-proxy; clients of the gRPC API, BEP ingest, and MCP endpoints, which
@@ -1531,6 +1537,13 @@ Mounted file reload starts once Kubernetes projects the update; projection laten
 is additional. Inline updates roll Pods; existing-Secret updates do not require a
 chart upgrade. Run a matching application version with these reload controls.
 
+Existing `api.env` and `publisher.env` overrides for `GRPC_AUTH_PRINCIPAL_KIND`
+and the four `GRPC_AUTH_JWKS_*` refresh/reload settings remain supported with
+single-issuer authentication. Each explicit environment override takes precedence
+over the corresponding `api.jwt` or `publisher.jwks` field and is rendered once.
+Remove an override when moving that setting into the typed values. Independent
+JWT profiles require these settings inside each profile instead.
+
 Publish overlapping old/new keys before switching signing keys, then replace
 credentials and retire the old key deliberately. Multi-key overlap requires JWTs
 to carry `kid`. Removing a key invalidates new requests using it, including requests
@@ -1545,15 +1558,16 @@ share a profile with humans.
 
 ### Project access policy
 
-`publisher.enforceProjectAuthorization` defaults to `false` to preserve existing
-on-prem installations. JWT verification and signed project restrictions still apply.
-Set it to `true` to require the publisher's `write:bep` project permission. Do not
-set `ENFORCE_PUB_AUTHZ` through `publisher.env`; the chart renders exactly one entry.
+`authorization.mode: enforced`, `publisher.enforceProjectAuthorization: true`,
+and `browserAuthorization.enabled: true` are the defaults. The API and publisher
+share the `authorization` policy through `PROJECT_AUTHORIZATION_CONFIG`, and the
+publisher requires `write:bep` permission for the selected project. JWT verification
+and signed project restrictions also apply. Configure policy through the typed
+values rather than `PROJECT_AUTHORIZATION_CONFIG` or `ENFORCE_PUB_AUTHZ` in workload
+environment maps.
 
-The shared `authorization` block configures the API and publisher together through
-`PROJECT_AUTHORIZATION_CONFIG`. Its default `mode: legacy` keeps existing behavior.
-Prepare memberships and issuer-qualified group/service grants before deliberately
-activating `mode: enforced`, which requires publisher enforcement enabled:
+Before installing or upgrading, prepare memberships and issuer-qualified group
+and service-account grants. For example:
 
 ```yaml
 authorization:
@@ -1575,17 +1589,23 @@ authorization:
       projectId: my-project
 publisher:
   enforceProjectAuthorization: true
+browserAuthorization:
+  enabled: true
 ```
 
-`defaultAccess: viewer` preserves optional automatic access to all projects for
-authenticated humans. Select `none` when access must come from explicit membership
-or group grants. Service accounts receive their explicit project roles instead of
-the human baseline. Roles are `viewer` (read builds and the cache, run remote
+`defaultAccess: viewer` is the default and grants automatic Viewer access to all
+projects for authenticated humans. Select `none` when access must come from
+explicit membership or group grants. Service accounts receive their explicit
+project roles instead of the human baseline. Roles are `viewer` (read builds and the cache, run remote
 execution), `builder` (also publish builds, write the cache, edit ConfigSets and
 issue build credentials) and `admin` (everything, including project
 administration); each includes the one before it. In enforced mode the API and
 publisher cache access decisions for 30 seconds, so membership changes and
 suspensions take effect within that window.
+
+Issuing Hermetiq build credentials requires direct membership or SCIM-backed
+grants. A Builder role obtained only through JWT groups can publish builds with
+an issuer-provided credential helper, but cannot issue Hermetiq build credentials.
 
 Use the project's actual saved managed namespace and instance mapping; an empty
 `instancePrefix` is an explicit mapping choice, not an inferred default. Defining
@@ -1593,11 +1613,128 @@ these mappings does not automatically configure Buildbarn's listeners or trust.
 `api.mcpAuthDisabled=true` remains supported: those MCP callers share its synthetic
 administrator identity and cannot receive individual user revocation semantics.
 
+### Upgrading project authorization
+
+Enforced authorization changes the upgrade default. Prepare access and images
+before applying the new chart to an existing installation:
+
+1. Use application images that support project authorization, browser authorization,
+   and, when configured, SCIM and JWT profiles. Update the API, publisher, schema
+   bootstrap job, dashboard, and `grpc-auth-proxy` together; keep subscribers on
+   the corresponding core release. The schema bootstrap image must apply the
+   authorization migrations before the new API and publisher start.
+2. Preserve existing stable user IDs, issuer strings, and identity prefixes.
+   Grant existing Bazel and CI principals Builder or Admin access to their
+   projects through direct memberships, group bindings, or `serviceAccounts`.
+   A valid JWT alone no longer permits BEP publication, and Viewer access cannot
+   publish builds.
+3. Move administrators who rely on `app.adminEmails` to a trusted administrator
+   group; see [Admin access](#admin-access). Confirm an administrator can still
+   sign in and manage access.
+4. Classify machine-only JWT profiles with `principalKind: service`. When humans
+   and machines share a profile, register machine issuer/subject pairs explicitly
+   in `authorization.serviceAccounts`. The default `principalKind: human` does
+   not infer machine identity from optional provider claims.
+5. Choose `authorization.defaultAccess` deliberately: `viewer` retains read
+   access across projects for authenticated humans; `none` requires explicit
+   membership or group grants. Service accounts receive only explicit grants.
+   Keep the dashboard oauth2-proxy enabled and verify dashboard sign-in, API/MCP
+   access, and a build published by each CI identity after the rollout.
+
+The image settings are:
+
+| Workload | Tag setting | Digest setting |
+|---|---|---|
+| API | `images.bepNats.apiTag` | `images.bepNats.apiDigest` |
+| Publisher | `images.bepNats.pubTag` | `images.bepNats.pubDigest` |
+| Subscribers | `images.bepNats.subTag` | `images.bepNats.subDigest` |
+| Schema bootstrap and maintenance | `images.bepNats.bootstrapTag` | `images.bepNats.bootstrapDigest` |
+| Dashboard and its init container | `images.dashboard.tag` | `images.dashboard.digest` |
+| API auth proxy | `images.authProxy.tag` | `images.authProxy.digest` |
+
+A nonempty digest takes precedence over the tag. When selecting an updated tag,
+set its matching digest from that release or explicitly clear the previous digest
+with `""`; changing only the tag keeps running the old pinned image. In particular,
+JWT profile mode needs an auth-proxy image that supports
+`GRPC_AUTH_PROXY_FORWARD_ONLY`; updating only the API and dashboard is insufficient.
+
+The currently pinned v0.9.8 images do not implement these authorization features.
+The chart rejects known incompatible images when the corresponding authorization
+features are enabled. A release with enforced defaults must include compatible
+image pins. For development or a staged rollout, supply compatible images
+explicitly; custom tags and digests still need verification against the required
+application capabilities.
+
+To retain the previous behavior while preparing an upgrade, set all three legacy
+overrides and leave SCIM disabled:
+
+```yaml
+authorization:
+  mode: legacy
+publisher:
+  enforceProjectAuthorization: false
+browserAuthorization:
+  enabled: false
+api:
+  scim:
+    enabled: false
+```
+
+Save those overrides as `legacy-migration.yaml`. Upgrade using a complete copy
+of your installation values plus that overlay, for example from this checkout:
+
+```bash
+helm upgrade hermetiq ./charts/hermetiq --namespace hermetiq \
+  --reset-values -f installation-values.yaml -f legacy-migration.yaml
+```
+
+`installation-values.yaml` must contain all installation-specific settings you
+intend to retain. `--reset-values` loads the new chart defaults before applying
+those files; avoid `--reuse-values` with pre-authorization releases, whose saved
+defaults omit the new configuration blocks. After preparing images and grants,
+remove the legacy overrides from your values and repeat the upgrade to use the
+enforced defaults. For packaged installs, use the intended chart reference and
+version in place of `./charts/hermetiq`.
+
+This retains the legacy dashboard authentication flow and publisher authorization
+behavior. If you configured `api.jwt.profiles` or `publisher.jwks.profiles`, restore
+the corresponding single-issuer settings before returning to images that predate
+profile support. Before returning to enforced mode, complete the image and grant
+migration above. `api.mcpAuthDisabled: true` remains an explicit shared-administrator
+option; it does not provide individual user authorization or revocation.
+
+### Browser authorization and independent JWT profiles
+
+`browserAuthorization.enabled` defaults to `true` and is required by enforced
+project authorization. The dashboard uses a same-origin BFF (`/grpc`, `/api/v1`,
+authoritative `/auth/me`) that forwards the ID token oauth2-proxy already passes
+upstream; the oauth2-proxy configuration is otherwise unchanged. Legacy settings, shared
+cookies, default Viewer access, and `api.mcpAuthDisabled=true` remain available.
+Use compatible API, publisher, dashboard, and auth-proxy images as described in
+[Upgrading project authorization](#upgrading-project-authorization).
+
+Grafana is not covered by project authorization: it stays behind its own
+oauth2-proxy, so every user who can sign in through the identity provider can
+open it, as before.
+
+`api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the legacy
+single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,
+`principalKind: human|service`, `credentialUse: browser|build`, and exactly one
+of `jwksUrl`, `jwksInline` (JSON string), or `existingSecret` with optional
+`existingSecretKey` (default `jwks.json`). Optional `userIdClaim`, `userIdPrefix`,
+`groupsClaim`, `allowedAlgs` and refresh durations apply independently. Preserve
+existing IDs; reserve separate nonempty prefixes for distinct issuers. Project
+and groups claims are optional for CI credentials; current project grants still
+control authorization. The API sidecar delegates verification to the core in
+profile mode and strips asserted identity/XFCC. Secret directory mounts permit
+key rotation; inline keys require a rollout. See `ci-values/authorization.yaml`
+for a render-only browser fixture, not production credentials/images.
+
 ### Optional SCIM provisioning
 
-SCIM is disabled by default. After activating enforced authorization and
-browser authorization, configure only the API workload. Setting a SCIM user
-`active: false`, or deleting it, suspends that person in every project:
+SCIM is disabled by default and requires enforced authorization and browser
+authorization. Configure provisioning only on the API workload. Setting a SCIM
+user `active: false`, or deleting it, suspends that person in every project:
 
 ```yaml
 api:
@@ -1685,21 +1822,28 @@ is a worked IdP example.
 
 ### Admin access
 
-A user has the Hermetiq admin role, which opens Project Settings and user
-management, in either of two ways:
-
-- Their email is listed in `app.adminEmails`. The chart joins the list into
-  the comma-delimited `ADMIN_EMAIL_ALLOWLIST` variable.
-- Their token's groups claim (`api.jwt.groupsClaim`, default
-  `hermetiq/roles`) contains `publisher.hermetiqAdminGroup` (default
-  `hermetiq-admin`).
+In enforced mode, configure installation administrators through trusted groups:
 
 ```yaml
-app:
-  adminEmails:
-    - admin@example.com
-    - ops@example.com
+authorization:
+  administratorGroups:
+    - issuer: https://idp.example.com/
+      group: hermetiq-admin
+      source: jwt
 ```
+
+The issuer and group must match verified token claims. `api.jwt.groupsClaim` and
+`publisher.jwks.groupsClaim` default to `hermetiq/roles`; independent JWT profiles
+set their own `groupsClaim`. Use `source: scim` for an authoritative provisioned
+group when SCIM is enabled. Explicit `administratorGroups` replace the default
+verified admin-group trust. When omitted, the verified admin group remains
+available (`publisher.hermetiqAdminGroup`, default `hermetiq-admin` for the
+single-issuer configuration).
+
+`app.adminEmails` grants installation administration only in legacy mode. Move
+email-allowlisted administrators into a trusted group before switching to enforced
+mode. Existing direct project Admin memberships continue to grant administration
+of those projects; they do not grant installation-wide administration.
 
 ### Dashboard sign-in
 
@@ -2889,7 +3033,8 @@ shares with the Buildbarn chart, such as `global.imageRegistry`,
 ### Upgrade and uninstall
 
 An upgrade is the [install command](#run-the-install) with the new chart
-version. The repository guide's
+version. Review [Upgrading project authorization](#upgrading-project-authorization)
+before adopting enforced defaults. The repository guide's
 [Upgrading](https://github.com/Hermetiq/hermetiq-k8s#upgrading) section gives
 the order across charts and shows how to compare defaults between versions,
 and [Uninstalling](https://github.com/Hermetiq/hermetiq-k8s#uninstalling)
@@ -2993,29 +3138,3 @@ packaged with this chart as `SOFTWARE-LICENSE-AGREEMENT.md`. Setting
 `license.agreement.accepted: true` confirms acceptance, and running Hermetiq
 requires a trial or purchased license key, as described in
 [Licensing and trials](#licensing-and-trials).
-
-### Browser authorization and independent JWT profiles
-
-`authorization.mode=enforced` requires `browserAuthorization.enabled=true`.
-This opts the dashboard into a same-origin BFF (`/grpc`, `/api/v1`, authoritative
-`/auth/me`) that forwards the ID token oauth2-proxy already passes upstream; the
-oauth2-proxy configuration is otherwise unchanged. Legacy settings, shared
-cookies, default Viewer access, and `api.mcpAuthDisabled=true` remain available.
-Use API and dashboard images from the authorization release before activation.
-
-Grafana is not covered by project authorization: it stays behind its own
-oauth2-proxy, so every user who can sign in through the identity provider can
-open it, as before.
-
-`api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the legacy
-single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,
-`principalKind: human|service`, `credentialUse: browser|build`, and exactly one
-of `jwksUrl`, `jwksInline` (JSON string), or `existingSecret` with optional
-`existingSecretKey` (default `jwks.json`). Optional `userIdClaim`, `userIdPrefix`,
-`groupsClaim`, `allowedAlgs` and refresh durations apply independently. Preserve
-existing IDs; reserve separate nonempty prefixes for distinct issuers. Project
-and groups claims are optional for CI credentials; current project grants still
-control authorization. The API sidecar delegates verification to the core in
-profile mode and strips asserted identity/XFCC. Secret directory mounts permit
-key rotation; inline keys require a rollout. See `ci-values/authorization.yaml`
-for a render-only browser fixture, not production credentials/images.

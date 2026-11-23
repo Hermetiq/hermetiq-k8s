@@ -86,6 +86,7 @@ after=$(publisher_checksum '{"keys":[{"kid":"rotated"}]}')
 }
 for enabled in false true; do
   count=$(helm template checksum-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
+    -f "$chart_dir/ci-values/legacy.yaml" \
     --set "publisher.enforceProjectAuthorization=$enabled" \
     --show-only templates/deployment-publisher.yaml |
     grep -c 'name: ENFORCE_PUB_AUTHZ')

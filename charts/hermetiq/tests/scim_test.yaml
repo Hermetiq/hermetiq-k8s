@@ -18,6 +18,32 @@ set:
     groups:
       - {id: engineering, displayName: Engineering}
 tests:
+  - it: preserves SCIM and explicit or implicit JWT group sources in both policy consumers
+    set:
+      authorization.groupBindings:
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: engineering
+          source: scim
+          roles: [builder]
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: reviewers
+          source: jwt
+          roles: [viewer]
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: administrators
+          roles: [admin]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[{"group":"engineering","issuer":"https://directory.example.test/","projectId":"my-project","roles":["builder"],"source":"scim"},{"group":"reviewers","issuer":"https://directory.example.test/","projectId":"my-project","roles":["viewer"],"source":"jwt"},{"group":"administrators","issuer":"https://directory.example.test/","projectId":"my-project","roles":["admin"]}],"instanceBindings":[],"mode":"enforced","serviceAccounts":[]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"viewer","groupBindings":[{"group":"engineering","issuer":"https://directory.example.test/","projectId":"my-project","roles":["builder"],"source":"scim"},{"group":"reviewers","issuer":"https://directory.example.test/","projectId":"my-project","roles":["viewer"],"source":"jwt"},{"group":"administrators","issuer":"https://directory.example.test/","projectId":"my-project","roles":["admin"]}],"instanceBindings":[],"mode":"enforced","serviceAccounts":[]}'
+        template: templates/deployment-publisher.yaml
   - it: mounts only the API token and renders a nonsecret explicit identity mapping
     template: templates/deployment-api.yaml
     asserts:

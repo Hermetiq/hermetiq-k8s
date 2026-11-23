@@ -334,18 +334,30 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/* Shared verifier timing settings. Only called for chart-managed JWKS. */}}
+{{/* Shared verifier settings for chart-managed JWKS. Historical workload env
+     overrides take precedence and are rendered once by extraEnv. */}}
 {{- define "hermetiq-core.jwksRefreshEnv" -}}
+{{- $env := default (dict) .env -}}
+{{- if not (hasKey $env "GRPC_AUTH_PRINCIPAL_KIND") }}
 - name: GRPC_AUTH_PRINCIPAL_KIND
-  value: {{ .principalKind | quote }}
+  value: {{ .settings.principalKind | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_INTERVAL") }}
 - name: GRPC_AUTH_JWKS_REFRESH_INTERVAL
-  value: {{ .refreshInterval | quote }}
+  value: {{ .settings.refreshInterval | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT") }}
 - name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT
-  value: {{ .refreshRateLimit | quote }}
+  value: {{ .settings.refreshRateLimit | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_TIMEOUT") }}
 - name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT
-  value: {{ .refreshTimeout | quote }}
+  value: {{ .settings.refreshTimeout | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL") }}
 - name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL
-  value: {{ .fileReloadInterval | quote }}
+  value: {{ .settings.fileReloadInterval | quote }}
+{{- end }}
 {{- end -}}
 
 {{/* publisher.jwks.audience defaults to the public BEP gRPC origin. */}}
