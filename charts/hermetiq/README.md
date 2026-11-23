@@ -2066,7 +2066,12 @@ grafana:
 These settings belong to the **VictoriaMetrics/Grafana release**, not the
 Hermetiq release. Apply them by upgrading that release with its complete values
 and waiting for Grafana's rollout; upgrading Hermetiq alone does not change
-Grafana's configuration. The [starter VictoriaMetrics values](../../custom-values/victoriametrics-values.yaml)
+Grafana's configuration. Before rolling Grafana, verify that its database uses
+persistent storage or an external database. Restarting a pod whose database is
+on `emptyDir` discards its users, role assignments, and locally saved dashboards;
+preserve that data before applying configuration changes.
+
+The [starter VictoriaMetrics values](../../custom-values/victoriametrics-values.yaml)
 also create a Grafana backend NetworkPolicy through the Grafana chart's
 `extraObjects`. It permits only the same-namespace Hermetiq Grafana proxy and
 the VictoriaMetrics agent belonging to that metrics release. The metrics agent
