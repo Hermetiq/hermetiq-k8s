@@ -90,6 +90,9 @@ spec:
 {{- with $root.Values.subscriber.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $root "env" .) | trim | nindent 12 }}
 {{- end }}
+{{- with include "hermetiq-core.s3StorageEnv" (dict "root" $root "env" $root.Values.subscriber.env) | trim }}
+{{- . | nindent 12 }}
+{{- end }}
             - name: K8S_POD_UID
               valueFrom:
                 fieldRef:

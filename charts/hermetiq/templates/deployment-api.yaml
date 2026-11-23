@@ -152,6 +152,9 @@ spec:
 {{- with .Values.api.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+{{- with include "hermetiq-core.s3StorageEnv" (dict "root" $ "env" .Values.api.env) | trim }}
+{{- . | nindent 12 }}
+{{- end }}
             {{- if not (hasKey .Values.api.env "MCP_EXPOSE_USER_IDENTITIES") }}
             - name: MCP_EXPOSE_USER_IDENTITIES
               value: {{ .Values.api.mcpExposeUserIdentities | quote }}

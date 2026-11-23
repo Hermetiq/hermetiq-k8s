@@ -597,6 +597,36 @@
     "serviceAccount": {
       "type": "object"
     },
+    "artifactStorage": {
+      "type": "object",
+      "description": "S3-compatible storage settings for progress logs.",
+      "properties": {
+        "s3": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "description": "Secret holding an S3 access key pair, read by the api, publisher and subscriber pods. Empty sets no keys; use IRSA or EKS Pod Identity on AWS instead."
+            },
+            "accessKeyIdKey": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Key in existingSecret holding the access key ID."
+            },
+            "secretAccessKeyKey": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Key in existingSecret holding the secret access key."
+            },
+            "region": {
+              "type": "string",
+              "description": "AWS_REGION for projects whose S3 settings leave the region empty."
+            }
+          }
+        }
+      }
+    },
     "rbac": {
       "type": "object",
       "properties": {

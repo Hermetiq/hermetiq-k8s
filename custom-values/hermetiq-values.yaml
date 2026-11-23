@@ -86,7 +86,8 @@ victoriaMetrics:
 
 gcpWorkloadIdentity:
   # GKE only. Remove this block outside GKE and configure the cloud identity
-  # method for your cluster in the full chart values instead.
+  # method for your cluster in the full chart values instead (on EKS, IRSA via
+  # serviceAccount.annotations or an EKS Pod Identity association).
   enabled: true
   # Google service account bound to the chart's bep-nats ServiceAccount.
   serviceAccount: "hermetiq-bep@<gcp-project>.iam.gserviceaccount.com"
@@ -104,9 +105,11 @@ app:
   cacheEventsEnabled: true
   normalizeRepoUrls: true
   # Recommended for production scale: store build stdout/stderr (progress logs)
-  # in Google Cloud Storage or Azure Blob. This is enabled per project in
-  # Project Settings, not by a chart value; see "Progress log storage" in the
-  # Hermetiq chart README for the identity and bucket lifecycle requirements.
+  # in Google Cloud Storage, Azure Blob, or an S3-compatible store (AWS S3, OCI
+  # Object Storage, MinIO). This is enabled per project in Project Settings, not
+  # by a chart value; see "Progress log storage" in the Hermetiq chart README
+  # for the identity, access-key Secret (artifactStorage.s3) and bucket
+  # lifecycle requirements.
 
 oidc:
   # Shared OIDC issuer for API, publisher, and dashboard. Use the exact issuer

@@ -118,6 +118,9 @@ spec:
 {{- with .Values.publisher.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+{{- with include "hermetiq-core.s3StorageEnv" (dict "root" $ "env" .Values.publisher.env) | trim }}
+{{- . | nindent 12 }}
+{{- end }}
             {{- /* MCP is served only by the api Deployment (Service port
             mcp-http). The publisher sets no MCP variables, so bep-nats keeps
             MCP disabled, its default. */}}

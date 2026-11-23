@@ -148,8 +148,9 @@ Required for some installs:
 - [ ] With Buildbarn in the cluster: its workers' pod CIDR and the
   VictoriaMetrics query URL; see
   [Co-installing with Buildbarn](#co-installing-with-buildbarn).
-- [ ] At high build volume: an object-storage bucket and workload identity for
-  build logs; see [Progress log storage](#progress-log-storage).
+- [ ] At high build volume: an object-storage bucket and workload identity, or
+  S3 access keys in a Secret, for build logs; see
+  [Progress log storage](#progress-log-storage).
 
 ### Shared services and routing
 
@@ -1317,7 +1318,8 @@ chart default is off.
 Workload identity gives the Hermetiq Pods a cloud identity without stored
 keys. Only the features that read or write object storage need it:
 [progress log storage](#progress-log-storage), trace profiles, and output
-files. Those features support Google Cloud Storage and Azure Blob Storage.
+files. All three support Google Cloud Storage and Azure Blob Storage; progress
+log storage also supports [S3-compatible stores](#s3-compatible-storage).
 Remove the starter's block outside GKE, and on GKE if you use none of them.
 
 ```yaml
@@ -1353,10 +1355,19 @@ ServiceAccount and to the API, publisher, subscriber, bootstrap, and
 maintenance Pods, but not to the dashboard or the Grafana proxy, and it adds
 the `azure.workload.identity/client-id` annotation to the ServiceAccount.
 
-For another identity mechanism, set `serviceAccount.annotations`. Grant the
-resulting identity only the object-storage permissions that the enabled
-features need: progress-log storage needs read and write access for the
-subscribers, and trace and output-file features may need additional read
+For another identity mechanism, set `serviceAccount.annotations`. On EKS, for
+example, IRSA is the role annotation below; EKS Pod Identity needs no chart
+value, only a Pod Identity association for the `bep-nats` ServiceAccount.
+
+```yaml
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+```
+
+Grant the resulting identity only the object-storage permissions that the
+enabled features need: progress-log storage needs read and write access for
+the subscribers, and trace and output-file features may need additional read
 access.
 
 ## Application settings
@@ -1969,7 +1980,7 @@ The choice is made per project in Project Settings, not by a chart value.
 | Mode | Where the logs live | How long a completed build's logs stay readable |
 |---|---|---|
 | PostgreSQL, the default | The partitioned `public.progresses` table: hourly partitions, maintained by `progressesPartitionMaintenance` | 2 days |
-| Cloud object storage | Compressed chunk objects in a Google Cloud Storage bucket or an Azure Blob container | Whatever age your bucket lifecycle rule sets |
+| Cloud object storage | Compressed chunk objects in a Google Cloud Storage bucket, an Azure Blob container, or an [S3-compatible](#s3-compatible-storage) bucket | Whatever age your bucket lifecycle rule sets |
 
 The default needs no configuration. To use object storage, enable *Store
 compressed invocation logs in cloud object storage* on the project and set its
@@ -1982,7 +1993,8 @@ Object storage has two requirements on the cluster side:
 1. Bucket access for the subscriber Pods. Subscribers use the shared chart
    ServiceAccount, so enabling [workload identity](#workload-identity) and
    granting that identity read and write access to the bucket is all the
-   wiring needed. The subscriber Pods also need network egress to the storage
+   wiring needed. S3-compatible stores without workload identity use access
+   keys from a Secret instead; see [S3-compatible storage](#s3-compatible-storage). The subscriber Pods also need network egress to the storage
    endpoint, which the PostgreSQL mode does not.
 2. A lifecycle rule on the `progress/` prefix. Hermetiq never deletes these
    objects, so without a rule they accumulate indefinitely. Scope the rule to
@@ -2001,6 +2013,62 @@ setting was enabled stay readable. If the bucket is unreachable, subscribers
 keep ingesting by writing progress rows to PostgreSQL instead of dropping
 events. Watch `hermetiq_progress_chunk_flush_total{outcome="spilled"}` and
 treat a sustained rate as a storage problem to fix.
+
+### S3-compatible storage
+
+**Values:** `artifactStorage.s3`.
+
+The *S3-compatible* provider in Project Settings stores progress logs in AWS
+S3 or any S3-compatible store, such as OCI Object Storage or MinIO. Besides
+the bucket and prefix, each project sets:
+
+- **Endpoint**: the store's base URL, for example
+  `https://<namespace>.compat.objectstorage.<region>.oraclecloud.com`. Leave it
+  empty for AWS.
+- **Region**: the region requests are signed for, for example `eu-central-1`
+  or `us-ashburn-1`. Empty uses the Pods' `AWS_REGION`.
+- **Path-style addressing**: `endpoint/bucket` instead of `bucket.endpoint`.
+  OCI, MinIO and most S3-compatible stores need it.
+
+Credentials come from the Pods, never from Project Settings:
+
+- On EKS, use IRSA or EKS Pod Identity (see [workload identity](#workload-identity)).
+- For stores that only accept access keys, such as OCI Customer Secret Keys or
+  MinIO, put the key pair in a Secret and name it here. The API, publisher and
+  subscriber Pods then read `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+  from it.
+
+```bash
+kubectl -n hermetiq create secret generic hermetiq-s3-keys \
+  --from-literal=AWS_ACCESS_KEY_ID=<access-key> \
+  --from-literal=AWS_SECRET_ACCESS_KEY=<secret-key>
+```
+
+```yaml
+artifactStorage:
+  s3:
+    existingSecret: hermetiq-s3-keys
+    # Defaults; change them if the Secret uses other key names.
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+    # Optional AWS_REGION for projects that leave the region empty.
+    # EKS Pod Identity does not set one.
+    region: eu-central-1
+```
+
+A variable already set in `api.env`, `publisher.env` or `subscriber.env`
+takes precedence over these values.
+
+The identity or key needs `s3:ListBucket` on the bucket and `s3:GetObject`,
+`s3:PutObject` and `s3:DeleteObject` on its objects. Delete is only used by
+the Project Settings connectivity test.
+
+Two limits apply to S3-compatible projects:
+
+- Only progress logs are stored. Trace profiles are not kept, and change
+  impact snapshots cannot be enabled.
+- OCI does not offer lifecycle rules through its S3 API. Create the
+  `<prefix>/progress/` expiry as an OCI Object Storage lifecycle policy.
 
 ### Retention and sizing
 
