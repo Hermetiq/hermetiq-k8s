@@ -1,8 +1,8 @@
-{{- if .Values.storage.podDisruptionBudget.enabled }}
+{{- if and .Values.storage.enabled .Values.storage.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: storage
+  name: {{ include "buildbarn.storageName" . }}
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
@@ -12,9 +12,10 @@ spec:
   maxUnavailable: {{ .Values.storage.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
-      app: storage
+      app: {{ include "buildbarn.storageName" . }}
 ---
 {{- end }}
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.frontend.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -100,4 +101,6 @@ spec:
     matchLabels:
       app: bb-portal
 ---
+{{- end }}
+
 {{- end }}

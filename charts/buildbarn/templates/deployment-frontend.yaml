@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -217,3 +218,5 @@ spec:
                 path: common.libsonnet
               - key: frontend.jsonnet
                 path: frontend.jsonnet
+
+{{- end }}

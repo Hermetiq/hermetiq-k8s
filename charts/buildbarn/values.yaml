@@ -1,3 +1,7 @@
+# full deploys the application. storage-only stages an independent storage ring
+# in an existing namespace, with its own <storage.name>-config ConfigMap.
+deploymentMode: full
+
 # Namespace for every namespaced resource. Empty follows the release namespace
 # (`helm --namespace`).
 namespaceOverride: ""
@@ -303,7 +307,7 @@ security:
     #
     # The certificate must carry a SAN for every in-cluster name the chart
     # dials, or the peer rejects it by name rather than by CA:
-    #   storage-<i>.storage.<namespace>   for i in 0..storage.replicas-1
+    #   <storage.name>-<i>.<storage.name>.<namespace>   for i in 0..storage.replicas-1
     #   scheduler
     # A dnsNames list covering those, plus `scheduler.<namespace>.svc` style
     # aliases if you dial them elsewhere, is enough.
@@ -400,6 +404,14 @@ k8sNodeScheduling:
   tolerations: []
 
 storage:
+  # False leaves storage ownership with another release, but clients still use
+  # name and replicas below. The old StatefulSet is removed on Helm upgrade;
+  # its PVCs are retained by Kubernetes and must be cleaned up manually.
+  enabled: true
+  # StatefulSet + headless Service name, and the target for every cache client.
+  name: storage
+  # Optional Kubernetes constraints, with selectors matching app: <name>.
+  topologySpreadConstraints: []
   replicas: 3
   # Set to true/false to override serviceAccount.automountServiceAccountToken.
   automountServiceAccountToken: null

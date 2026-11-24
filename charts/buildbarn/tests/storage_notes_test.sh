@@ -158,5 +158,16 @@ empty_volatile = notes({'configOverrides': {'storage.jsonnet': ''}, 'storage': {
 }})
 assert 'VOLATILE STORAGE STORES: AC.' in empty_volatile, empty_volatile
 
+green = notes({'deploymentMode': 'storage-only', 'storage': {'name': 'storage-cdc'}})
+assert 'Storage target: storage-cdc' in green, green
+assert 'Storage-only release:' in green, green
+assert 'EXTERNAL ENDPOINTS' not in green, green
+external = notes({'storage': {'enabled': False, 'name': 'storage-cdc',
+                              'persistence': {'mode': 'unused'}}})
+assert 'Storage is managed by another release.' in external, external
+assert 'retains its PVCs' in external, external
+assert 'All enabled storage stores use persistent indexes' not in external, external
+assert 'STORAGE INDEX CAPACITY' not in external, external
+
 print('Storage NOTES report actual volatile selections, actionable file-index capacity warnings, and StorageClass mismatches.')
 PY

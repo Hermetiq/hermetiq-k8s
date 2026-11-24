@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -169,3 +170,5 @@ spec:
                 path: common.libsonnet
               - key: browser.jsonnet
                 path: browser.jsonnet
+
+{{- end }}

@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.portal.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -104,4 +105,6 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.portal.tmpDirSizeLimit }}
+{{- end }}
+
 {{- end }}

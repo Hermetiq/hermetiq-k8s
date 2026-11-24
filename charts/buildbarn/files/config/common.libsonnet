@@ -2,6 +2,7 @@
 {{- $are := .Values.config.actionCache.actionResultExpiring }}
 {{- $deadlineTimeout := .Values.config.blobstore.deadlineEnforcing.timeout }}
 {{- $cdc := .Values.config.contentAddressableStorage.cdcParameterCache }}
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.security.grpcMtls.enabled }}
 // Dialling half of the in-cluster mTLS hop to storage, shared by every shard
 // client below. The listening half is storage.jsonnet's grpcServers `tls` plus
@@ -18,7 +19,7 @@ local shardedStorage = {
     shards: {
 {{- range $i, $_ := until (int .Values.storage.replicas) }}
       "{{ $i }}": {
-        backend: { grpc: { client: { address: 'storage-{{ $i }}.storage.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
+        backend: { grpc: { client: { address: '{{ include "buildbarn.storageName" $ }}-{{ $i }}.{{ include "buildbarn.storageName" $ }}.{{ $namespace }}:8981' }{{ if $.Values.security.grpcMtls.enabled }} + storageClientTls{{ end }} } },
         weight: 1,
       },
 {{- end }}
@@ -35,8 +36,10 @@ local completenessCheckedActionCache = {
     maximumTotalTreeSizeBytes: 256 * 1024 * 1024,
   },
 };
+{{- end }}
 
 {
+{{- if include "buildbarn.fullDeployment" . }}
   blobstore: {
     contentAddressableStorage: {
 {{- if $deadlineTimeout }}
@@ -109,6 +112,7 @@ local completenessCheckedActionCache = {
 {{- end }}
 
   portalUrl: 'https://{{ include "buildbarn.browserHost" . }}',
+{{- end }}
   maximumMessageSizeBytes: {{ int64 .Values.config.maximumMessageSizeBytes }},
   global: {
     {{- if .Values.tracing.enabled }}

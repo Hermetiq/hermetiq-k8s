@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -149,10 +150,12 @@ spec:
       targetPort: metrics
       protocol: TCP
 ---
+{{- end }}
+{{- if .Values.storage.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: storage
+  name: {{ include "buildbarn.storageName" . }}
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
@@ -170,7 +173,7 @@ spec:
   # immediately and gRPC clients reconnect without NXDOMAIN backoff.
   publishNotReadyAddresses: true
   selector:
-    app: storage
+    app: {{ include "buildbarn.storageName" . }}
   ports:
     - name: grpc
       port: 8981
@@ -180,6 +183,10 @@ spec:
       port: 9980
       targetPort: metrics
       protocol: TCP
+
+---
+{{- end }}
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.portal.enabled }}
 ---
 apiVersion: v1
@@ -214,4 +221,6 @@ spec:
       port: 9980
       targetPort: metrics
       protocol: TCP
+{{- end }}
+
 {{- end }}

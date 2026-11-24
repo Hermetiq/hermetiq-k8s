@@ -788,6 +788,66 @@ exist, the Certificate stays pending and the routes serve no usable TLS.
 Storage is a sharded StatefulSet. The number of shards is `storage.replicas`;
 `common.libsonnet` generates one CAS and Action Cache shard entry per replica.
 
+### Stage a replacement storage release
+
+Chart 1.0.1 adds three values for a separate storage release in the same
+namespace:
+
+| Value | Default | Effect |
+|---|---|---|
+| `deploymentMode` | `full` | `storage-only` creates storage and its supporting resources. |
+| `storage.name` | `storage` | Names the StatefulSet and headless Service, and supplies the storage target in generated client configuration. |
+| `storage.enabled` | `true` | `false` leaves storage resources to another release while keeping clients configured for `storage.name` and `storage.replicas`. |
+
+To prepare a fresh storage ring without changing the current application, install
+a separate release with the desired storage sizing and scheduling settings:
+
+```yaml
+# storage-green.yaml
+deploymentMode: storage-only
+storage:
+  enabled: true
+  name: storage-cdc
+  replicas: 3
+```
+
+Use an existing namespace. This release creates `storage-cdc`, its headless
+Service, and `storage-cdc-config`, plus storage's enabled disruption budget,
+network policy and metrics scrape. It does not create the namespace, application
+workloads, worker configuration, public routes, certificates or `extraObjects`.
+The default `app: storage-cdc` selectors keep both storage rings separate;
+`kubernetes_service: storage` preserves the metrics conventions. Optional
+`storage.topologySpreadConstraints` are passed to the Pod spec; use
+`labelSelector.matchLabels.app: storage-cdc` when spreading this ring across zones.
+
+Once the new shards are ready, upgrade the original full release using its
+application values and these overrides:
+
+```yaml
+deploymentMode: full
+storage:
+  enabled: false
+  name: storage-cdc
+  replicas: 3
+```
+
+Keep `storage.replicas`, the enabled ISCC/FSAC stores, and in-cluster mTLS settings
+consistent between both releases. Generated clients dial
+`storage-cdc-<ordinal>.storage-cdc.<namespace>:8981`. Certificates must cover those
+names. An external-storage release rejects a `common.libsonnet` override because
+it would bypass the generated target; update custom worker configuration separately.
+
+This upgrade removes the original storage StatefulSet and supporting resources.
+Kubernetes retains its PVCs by default; remove them manually after validating the
+cutover and deciding rollback is no longer needed. Application ConfigMap checksums
+roll the chart's client workloads, but worker restarts and any image/operator
+upgrade need a coordinated maintenance window. There is no automatic cache copy,
+fallback or zero-downtime guarantee. Rollback to the previous Helm revision
+recreates the old StatefulSet against its retained PVCs; coordinate worker images
+and configuration with that rollback too.
+
+### Storage sizing
+
 Use the focused repository runbooks for planning and live operations:
 
 - [storage model and sizing](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md)

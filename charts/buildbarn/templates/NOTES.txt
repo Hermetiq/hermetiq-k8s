@@ -1,15 +1,6 @@
-{{- $provider := include "buildbarn.routingProvider" . -}}
-{{- $gatewayRoutes := and (has $provider (list "gateway" "gateway-httproute-only")) .Values.gateway.enabled -}}
-{{- $ingressRoutes := and (eq $provider "ingress") .Values.ingress.enabled -}}
-{{- $contourRoutes := eq $provider "contour" -}}
-{{- $browserExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.browser.enabled) (and $ingressRoutes .Values.ingress.browser.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.browser.enabled) -}}
-{{- $rbeWebExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.rbeWeb.enabled) (and $ingressRoutes .Values.ingress.rbeWeb.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.rbeWeb.enabled) -}}
-{{- $frontendGrpcExposed := or (and $gatewayRoutes .Values.gateway.grpcRoutes.frontend.enabled) (and $ingressRoutes .Values.ingress.frontendGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled) -}}
-{{- $remoteAssetExposed := and .Values.remoteAsset.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.remoteAsset.enabled) (and $ingressRoutes .Values.ingress.remoteAssetGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled .Values.ingress.remoteAssetGrpc.enabled)) -}}
-{{- $portalExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.httpRoutes.portal.enabled) (and $ingressRoutes .Values.ingress.portal.enabled) (and $contourRoutes .Values.ingress.portal.enabled)) -}}
-{{- $besExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.bes.enabled) (and $ingressRoutes .Values.ingress.besGrpc.enabled) (and $contourRoutes .Values.ingress.besGrpc.enabled)) -}}
-{{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
+Storage target: {{ include "buildbarn.storageName" . }} ({{ .Values.storage.replicas }} shards).
+{{- if .Values.storage.enabled }}
 
 {{- if (index (default (dict) .Values.configOverrides) "storage.jsonnet" | default "") }}
 STORAGE CONFIG OVERRIDE: configOverrides["storage.jsonnet"] replaces the generated
@@ -47,6 +38,23 @@ Storage recovery requires matching blocks, indexes, and state to survive togethe
 For volume-lifetime limits:
 https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#what-survives-a-restart
 
+{{- else }}
+Storage is managed by another release. This release updates clients only.
+Removing the old StatefulSet retains its PVCs; clean them up manually after validation.
+{{- end }}
+
+{{- if include "buildbarn.fullDeployment" . }}
+{{- $provider := include "buildbarn.routingProvider" . -}}
+{{- $gatewayRoutes := and (has $provider (list "gateway" "gateway-httproute-only")) .Values.gateway.enabled -}}
+{{- $ingressRoutes := and (eq $provider "ingress") .Values.ingress.enabled -}}
+{{- $contourRoutes := eq $provider "contour" -}}
+{{- $browserExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.browser.enabled) (and $ingressRoutes .Values.ingress.browser.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.browser.enabled) -}}
+{{- $rbeWebExposed := or (and $gatewayRoutes .Values.gateway.httpRoutes.rbeWeb.enabled) (and $ingressRoutes .Values.ingress.rbeWeb.enabled) (and $contourRoutes .Values.ingress.enabled .Values.ingress.rbeWeb.enabled) -}}
+{{- $frontendGrpcExposed := or (and $gatewayRoutes .Values.gateway.grpcRoutes.frontend.enabled) (and $ingressRoutes .Values.ingress.frontendGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled) -}}
+{{- $remoteAssetExposed := and .Values.remoteAsset.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.remoteAsset.enabled) (and $ingressRoutes .Values.ingress.remoteAssetGrpc.enabled) (and $contourRoutes .Values.httpProxy.enabled .Values.ingress.remoteAssetGrpc.enabled)) -}}
+{{- $portalExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.httpRoutes.portal.enabled) (and $ingressRoutes .Values.ingress.portal.enabled) (and $contourRoutes .Values.ingress.portal.enabled)) -}}
+{{- $besExposed := and .Values.portal.enabled (or (and $gatewayRoutes .Values.gateway.grpcRoutes.bes.enabled) (and $ingressRoutes .Values.ingress.besGrpc.enabled) (and $contourRoutes .Values.ingress.besGrpc.enabled)) -}}
+{{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}
 {{- if $browserExposed }}
@@ -76,7 +84,7 @@ EXTERNAL ENDPOINTS — none (no {{ $provider }} routes are enabled).
 {{- if and .Values.configOverrides (hasKey .Values.configOverrides "common.libsonnet") }}
 WARNING: configOverrides["common.libsonnet"] replaces the chart-generated
 client config wholesale. The storage shard map and namespace are then no
-longer derived from storage.replicas — keep the override's shard list in
+longer derived from storage.name and storage.replicas — keep the override's shard list in
 lockstep with storage.replicas, or added/removed storage pods silently
 receive no traffic.
 {{- end }}
@@ -95,4 +103,8 @@ WARNING: portal.bes.enableGraphqlPlayground=false is ignored. The pinned
 bb-portal serves the GraphQL playground (/graphiql) whenever the GraphQL API is
 configured, and this chart always configures it. Control who can reach the
 portal host at the route or network layer.
+{{- end }}
+
+{{- else }}
+Storage-only release: no frontend, scheduler, workers or public routes are managed.
 {{- end }}

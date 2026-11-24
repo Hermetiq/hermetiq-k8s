@@ -10,9 +10,12 @@ Hermetiq, BB Worker Operator and Buildbarn charts.
 Chart `1.0.0` moves Buildbarn to content-defined chunking (CDC, RepMaxCDC)
 storage. The new storage encoding cannot read the old CAS files, and AC, ISCC
 and FSAC objects change encoding too. There is no in-place conversion and no
-rolling upgrade: plan a maintenance window, a snapshot if you need a rollback,
-and an explicit cold-cache reset. The chart refuses legacy files rather than
-rewriting or deleting them.
+rolling upgrade: plan a maintenance window and fresh CDC storage, or an explicit
+cold-cache reset of the existing storage. Chart `1.0.1` adds an optional
+[blue-green storage procedure](#optional-blue-green-storage-with-chart-101)
+that stages fresh claims before switching clients. Keep the old claims or a
+consistent snapshot if you need a rollback. The chart refuses legacy files
+rather than rewriting or deleting them.
 
 The same release makes persistent indexes the default for CAS, CMS, AC, ISCC
 and FSAC in both filesystem and raw-block backends, and enables ISCC and FSAC
@@ -26,6 +29,7 @@ The new encoding invalidates old contents even for an already-persistent ISCC.
   - [What the upgrade checks cover](#what-the-upgrade-checks-cover)
 - [Migrate to persistent indexes](#migrate-to-persistent-indexes)
 - [Raw block stores](#raw-block-stores)
+- [Optional blue-green storage with chart 1.0.1](#optional-blue-green-storage-with-chart-101)
 - [Storage format cutover and rollback](#storage-format-cutover-and-rollback)
   - [What build clients see](#what-build-clients-see)
 - [Cut-over procedure for an existing Local SSD pool](#cut-over-procedure-for-an-existing-local-ssd-pool)
@@ -200,7 +204,14 @@ upgrading, using this table:
 
 Keep a backup of your values and custom configs before editing. Include the worker ConfigMaps that pools mount: an `RbeWorker` references them by name and does not contain their files. In custom storage configuration, put every store path (CAS, shared CMS, AC, ISCC, FSAC) under `cdc-v1/` on its parent mount, and follow the explicit reset below so legacy files are retired before CDC storage starts. To check the result, run the upgrade with `--dry-run=server`: it runs the chart's checks, including the ones that read the cluster, and applies nothing. Those checks read configuration as text; they do not prove that a component starts.
 
-The CDC cutover starts cold. An earlier lab run reused legacy files and observed 0/2571 hits on the first build and 2571/2571 on the repeat, with a data-integrity error logged once per node. That experiment does not establish a safe in-place upgrade: the chart now refuses legacy files and requires the explicit [storage cutover](#storage-format-cutover-and-rollback) below. Budget for cache refill; do not bypass the guard based on those lab results.
+Fresh CDC storage starts empty. The optional blue-green procedure can prewarm
+selected objects through the APIs before cutover. An earlier lab run reused
+legacy files and observed 0/2571 hits on the first build and 2571/2571 on the
+repeat, with a data-integrity error logged once per node. That experiment does
+not establish a safe in-place upgrade: the chart refuses legacy files and
+requires fresh storage or the explicit
+[storage cutover](#storage-format-cutover-and-rollback) below. Budget for cache
+refill; do not bypass the guard based on those lab results.
 
 The worker in `RbeWorker` and the image pins also move together. A pinned pre-CDC `bb-worker` or `bb-runner-installer` image rejects the CDC worker config, so remove the pin (the operator then uses the images the chart publishes) or update it to the CDC release in the same change. The same applies to the release's own `images.*` values: remove `tag` and `digest` overrides carried over from the old release.
 
@@ -531,9 +542,141 @@ contents stay consistent; there `volume-init` refuses to start until the files
 the pre-CDC binary recreated are retired again. The rollback procedure itself
 is under [Storage format cutover and rollback](#storage-format-cutover-and-rollback).
 
+## Optional blue-green storage with chart 1.0.1
+
+Use this procedure when you can run a second storage fleet temporarily and want
+to prepare its disks before the maintenance window. It creates two permanent
+Helm releases in the **same namespace**: the main application release and an
+independent storage-only release. The original in-place procedure below remains
+available. This approach reduces cutover work; it does not promise zero downtime
+or preserve in-flight builds across the CDC client/worker upgrade.
+
+### Stage the green storage release
+
+Prepare the target node capacity and StorageClasses first. Review all enabled
+stores' block, index and PVC sizes together with pod memory. With zonal disks,
+use `WaitForFirstConsumer` and place shards across the intended nodes/zones
+before claims bind. A new VM family may require a different disk class and
+boot disk; that infrastructure belongs in your cluster's provisioning system.
+
+Create a small identity overlay, `storage-green.yaml`, and combine it with your
+reviewed storage sizing/scheduling values:
+
+```yaml
+namespaceOverride: hermetiq # your existing namespace
+createNamespace: false
+deploymentMode: storage-only
+storage:
+  enabled: true
+  name: storage-cdc
+  replicas: 3
+```
+
+```bash
+helm upgrade --install buildbarn-storage-cdc oci://ghcr.io/hermetiq/buildbarn \
+  --version 1.0.1 --namespace hermetiq \
+  -f reviewed-storage-values.yaml -f storage-green.yaml --wait --timeout 30m
+```
+
+Use a reviewed local `charts/buildbarn` path while preparing an unreleased
+chart. Storage-only mode emits the storage StatefulSet, headless Service,
+`storage-cdc-config` ConfigMap and enabled storage monitoring/disruption/network
+resources. It does not render application Deployments or worker ConfigMaps and
+does not require the namespace's existing workers to have been upgraded first.
+Choose a name not already owned by another release. Default claim names include
+the StatefulSet name, so the green claims are distinct from the old claims.
+
+Validate all green shards, PVC binding, disk performance, persistence after a
+pod restart and storage logs before changing any production client. Clients
+use per-shard DNS; changing a headless Service selector alone is not a cutover.
+
+### Optionally prewarm a bounded working set through APIs
+
+Never copy old blocks, indexes or checkpoints into the CDC claims. For useful
+remote cache hits, copy selected ActionResults **and their complete referenced
+CAS output data**. Fetch output files, stdout/stderr, output Trees and every
+referenced file; include recursive Directory objects when `rootDirectoryDigest`
+is present. Verify destination presence before publishing each ActionResult,
+then read it through completeness checking. Missing/evicted source data should
+skip that result and let a later build recreate it.
+
+An empty AC is recoverable: Bazel executes uncached actions again. CAS data alone
+does not reconstruct the action-to-output mapping. AC preservation is therefore
+optional performance work, not a migration prerequisite. Preserve original
+timestamps and result metadata rather than making old results appear new.
+
+Choose known action digests from a bounded recent successful-build history;
+standard REAPI has no whole-cache enumeration operation. Preserve the exact
+REv2 instance name on every request. Selecting one instance's action roots
+limits the working set even when the CAS shares physical data between instances.
+Bound elapsed time, action count, bytes and concurrency, and distinguish copied,
+skipped and failed results. Copying can run while old storage serves builds.
+
+A temporary CDC-aware gateway configured with the **entire green shard ring**
+can accept standard ByteStream uploads and produce chunks and mappings. Retain
+`chunkMappingValidating` and avoid existence caching on the verification path.
+Read legacy whole blobs using standard REAPI/ByteStream, not CDC chunk RPCs.
+The current CDC `bb_copy` requires CDC source capabilities; pointing it directly
+at a legacy server is not a conversion. Do not pair old/new shard ordinals:
+chunk and mapping digests determine placement on the new ring.
+
+Test the cross-version transfer in a staging environment, including missing
+source data and a cached build/output download with the source unavailable.
+Remove temporary copying resources afterward. ISCC/FSAC history can start fresh;
+it need not expand this optional AC/CAS migration into an additional project.
+
+### Cut over during the quiet window
+
+1. Stop new builds and let important queued/executing actions finish. Pause
+   **every** old worker pool at zero through its owner (for the operator, use
+   `spec.autoscaling.scaledObjectAnnotations.autoscaling.keda.sh/paused-replicas:
+   "0"`) and verify the worker pods have stopped. Preserve the previous pause
+   settings so they can be restored after validation.
+2. Upgrade the worker CRD/operator and prepare the CDC worker configuration and
+   image changes described earlier in this guide. Apply worker changes while
+   preserving the pause. Update explicit init-container storage addresses to
+   the new shard DNS. A worker with `rolloutOnChange: false` may retain its
+   configuration until recreated; image changes also trigger a rollout. Starting
+   from zero ensures the new workers load the new configuration and images.
+3. Verify the old StatefulSet's PVC retention policy is `Retain` for deletion
+   and scaling (the Kubernetes default). Preserve old values, images and worker
+   configuration for deliberate recovery. The main upgrade removes the old
+   StatefulSet and its pods; PVC deletion is a separate manual cleanup task.
+4. Upgrade the **main** release to `1.0.1` with the complete reviewed application
+   values plus this overlay:
+
+   ```yaml
+   deploymentMode: full
+   storage:
+     enabled: false
+     name: storage-cdc
+     replicas: 3 # must match the independent storage release
+   ```
+
+   `storage.enabled: false` stops management of storage resources while retaining
+   the client configuration. Frontend, scheduler, browser and generated worker
+   configuration target `storage-cdc-0.storage-cdc.<namespace>:8981` and the other
+   green shards. The independent release continues owning its StatefulSet and
+   claims. Do not run a deployment wrapper that reapplies unpaused worker CRs.
+   Avoid automatic rollback during this coordinated cross-version cutover.
+5. Check application readiness and the rendered client/worker addresses. Restore
+   the worker pause settings, verify both custom and standard worker families,
+   run a real remote build and repeat it to verify AC hits and output downloads.
+   Check storage logs for checksum/decompression errors. A partially warmed
+   working set will still have ordinary cache misses.
+6. Delete the old PVCs manually only when satisfied with the upgrade. Continue
+   managing green storage through its own release; do not reinstall it into the
+   main release or attempt an implicit Helm ownership transfer.
+
+For rollback, stop builds/workers again and restore the matching old main
+release, worker operator/configuration/images and old storage claims together.
+Old clients cannot use the CDC storage. Retained old claims make this deliberate
+rollback possible without mounting old binaries over green data. Writes made
+only to the green cache are not backfilled to the old cache.
+
 ## Storage format cutover and rollback
 
-The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for AC, ISCC, and FSAC. The CDC image (`06739f2`) stores compressed CAS chunks and wraps AC, ISCC, and FSAC objects with `SHA256SuffixCoder` (a 32-byte SHA-256 suffix). Reopening old persistent indices causes decode/checksum failures that invalidate entire blocks (including newly written CDC data), and rolling back after CDC writes corrupts pre-CDC reads. This chart does not perform an in-place conversion. The supported cutover is an explicit **cold-cache reset during a maintenance window**: every store on every shard starts empty, and builds refill the cache.
+The pre-CDC image (`db62041`) stores raw CAS bytes and unsuffixed protobufs for AC, ISCC, and FSAC. The CDC image (`06739f2`) stores compressed CAS chunks and wraps AC, ISCC, and FSAC objects with `SHA256SuffixCoder` (a 32-byte SHA-256 suffix). Reopening old persistent indices causes decode/checksum failures that invalidate entire blocks (including newly written CDC data), and rolling back after CDC writes corrupts pre-CDC reads. This chart does not perform an in-place conversion. For deployments reusing the existing storage rather than the blue-green procedure above, the supported cutover is an explicit **cold-cache reset during a maintenance window**: every store on every shard starts empty, and builds refill the cache.
 Adopt the persistent defaults in that same window, so CDC conversion and index
 placement cause one cold start rather than two. ISCC and FSAC are now enabled
 by default. In `mode: pvc` that adds two claim templates to every release that

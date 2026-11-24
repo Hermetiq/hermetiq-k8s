@@ -125,7 +125,16 @@ affinity:
 {{- include "buildbarn.rewriteImageRepository" (dict "repository" $image "registry" $global.imageRegistry) -}}
 {{- end -}}
 
-{{- define "buildbarn.configName" -}}buildbarn-config{{- end -}}
+{{- define "buildbarn.fullDeployment" -}}
+{{- if eq (default "full" .Values.deploymentMode) "full" -}}true{{- end -}}
+{{- end -}}
+
+{{- define "buildbarn.storageName" -}}{{ default "storage" .Values.storage.name }}{{- end -}}
+
+{{- define "buildbarn.configName" -}}
+{{- if include "buildbarn.fullDeployment" . -}}buildbarn-config
+{{- else -}}{{ include "buildbarn.storageName" . }}-config{{- end -}}
+{{- end -}}
 {{- define "buildbarn.workerConfigName" -}}buildbarn-worker-config{{- end -}}
 
 {{/* Shared source for the standard worker ConfigMap and custom worker wrappers.

@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- $httpRouteOnly := eq $provider "gateway-httproute-only" -}}
 {{- if and .Values.gateway.enabled (has $provider (list "gateway" "gateway-httproute-only")) }}
@@ -293,4 +294,6 @@ spec:
     allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
     maxAge: {{ .Values.gateway.cors.maxAge | quote }}
 {{- end }}
+{{- end }}
+
 {{- end }}

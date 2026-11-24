@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- if and .Values.httpProxy.enabled (eq $provider "contour") }}
 apiVersion: projectcontour.io/v1
@@ -152,4 +153,6 @@ spec:
     fqdn: {{ include "buildbarn.besHost" . }}
     tls:
       secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+
 {{- end }}

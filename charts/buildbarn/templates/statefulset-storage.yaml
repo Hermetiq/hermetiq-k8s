@@ -1,22 +1,23 @@
+{{- if .Values.storage.enabled }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: storage
+  name: {{ include "buildbarn.storageName" . }}
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
     {{- include "buildbarn.componentLabel" (dict "component" "storage") | nindent 4 }}
 spec:
   replicas: {{ .Values.storage.replicas }}
-  serviceName: storage
+  serviceName: {{ include "buildbarn.storageName" . }}
   selector:
     matchLabels:
-      app: storage
+      app: {{ include "buildbarn.storageName" . }}
   template:
     metadata:
       labels:
         {{- include "buildbarn.podLabels" (dict "root" . "component" "storage") | nindent 8 }}
-        app: storage
+        app: {{ include "buildbarn.storageName" . }}
         kubernetes_service: storage
       annotations:
         {{- if or .Values.commonAnnotations .Values.podAnnotations }}
@@ -30,7 +31,11 @@ spec:
       terminationGracePeriodSeconds: {{ . }}
       {{- end }}
       {{- if .Values.storage.podAntiAffinity.enabled }}
-      {{- include "buildbarn.requiredPodAntiAffinity" (dict "app" "storage") | nindent 6 }}
+      {{- include "buildbarn.requiredPodAntiAffinity" (dict "app" (include "buildbarn.storageName" .)) | nindent 6 }}
+      {{- end }}
+      {{- with .Values.storage.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- include "buildbarn.storage.podSecurityContext" . | nindent 6 }}
       {{- if or (include "buildbarn.storage.anyFsPrep" .) (and (include "buildbarn.storage.anyBlock" .) (eq .Values.storage.persistence.blockDevice.deviceAccess "chownInit")) }}
@@ -156,3 +161,4 @@ spec:
   volumeClaimTemplates:
     {{- include "buildbarn.storage.volumeClaimTemplates" . | nindent 4 }}
   {{- end }}
+{{- end }}
