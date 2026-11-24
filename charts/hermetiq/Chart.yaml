@@ -32,6 +32,20 @@ annotations:
       description: "Dashboard API calls and assistant streams get the API route timeout on every routing provider and are no longer cut at the oauth2-proxy 30-second upstream default"
     - kind: fixed
       description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
+    - kind: fixed
+      description: "Preserve security defaults on upgrades reusing pre-hardening values, and validate custom ingress snippets only when generated header stripping would conflict"
+    - kind: security
+      description: "Breaking: Admit only grafana-oauth2-proxy and vmagent to the Grafana pod with a new grafana-from-oauth2-proxy NetworkPolicy, retained when the public Grafana route is disabled (opt out with grafana.networkPolicy.enabled=false), because Grafana's auth.proxy trusts X-Forwarded-User from any caller; other in-cluster Grafana clients must be added to grafana.networkPolicy.scrapersFrom"
+    - kind: security
+      description: "Breaking: Forward only gateway.routes.bepGrpcServices (default google.devtools.build.v1.PublishBuildEvent) on the public BEP route for every routing provider, so a gateway or ingress proxy can no longer relay internet CompletedActionLogger calls into the publisher's trustedCalCidrs exemption"
+    - kind: security
+      description: "Breaking: Remove caller-supplied X-Forwarded-User, X-Forwarded-Email, X-Forwarded-Groups, X-Forwarded-Preferred-Username and X-Hermetiq-Project-Id on the public api-web route (gateway.routes.apiWebRemoveRequestHeaders; opt in on Ingress with ingress.apiWeb.stripIdentityHeaders)"
+    - kind: changed
+      description: "Document that publisher.trustedCalCidrs must name only the Buildbarn worker range and exclude gateway and ingress proxy pods"
+    - kind: added
+      description: "Install notes describe the Grafana NetworkPolicy, warn when it renders while grafana-oauth2-proxy is not deployed, warn that the BEP Ingress path is a prefix only on ingress-nginx, and remind Ingress installs that api-web identity headers pass through until stripIdentityHeaders or the controller removes them"
+    - kind: fixed
+      description: "grafana.networkPolicy.podSelector: {} is refused like a selector without matchLabels or matchExpressions instead of falling back to the default"
 keywords:
   - hermetiq
   - MCP

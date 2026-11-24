@@ -67,3 +67,11 @@ tests:
         documentSelector:
           path: kind
           value: Deployment
+
+  - it: removes the Grafana proxy when its public route is disabled
+    template: templates/deployment-grafana-oauth2-proxy.yaml
+    set:
+      gateway.routes.grafanaEnabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

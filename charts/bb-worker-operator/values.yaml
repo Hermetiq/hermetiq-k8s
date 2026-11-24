@@ -99,7 +99,13 @@ rbac:
   # namespace creates only Roles/RoleBindings and automatically scopes the
   # manager watch to the release namespace. Disable secure metrics or the
   # metrics endpoint in this mode; Kubernetes TokenReview needs cluster RBAC.
-  # cluster preserves the existing multi-namespace behavior.
+  # The repository's starter values (custom-values/bb-worker-operator-values.yaml)
+  # use this mode.
+  # cluster, the chart default for existing installs, binds the manager
+  # ClusterRole with a ClusterRoleBinding: the operator ServiceAccount can
+  # create, update and delete Deployments, ConfigMaps and KEDA ScaledObjects in
+  # every namespace. A Deployment can run any ServiceAccount of its namespace,
+  # so treat that token as cluster-admin equivalent.
   mode: cluster
   # How the manager ClusterRole is bound to the operator ServiceAccount.
   # Legacy setting for cluster mode; use mode=namespace for a fully namespaced
@@ -109,6 +115,14 @@ rbac:
   managerBindingMode: cluster
   # Create unbound RbeWorker admin/editor/viewer roles for humans or CI.
   # They are ClusterRoles in cluster mode and Roles in namespace mode.
+  #
+  # The editor and admin roles control worker pod commands, containers and
+  # volumes in each namespace where they are bound, subject to specPolicy.
+  # Privileged worker and runner containers and namespaced Secret/ConfigMap
+  # mounts remain allowed, so bind these roles only to subjects trusted to
+  # create privileged pods there. Operator v0.3.13 and newer refuse the
+  # operator's own ServiceAccount; other ServiceAccounts and token mounts
+  # need explicit policy allowlists. The viewer role is read-only.
   rbeWorkerRoles:
     create: true
   metricsReader:

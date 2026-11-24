@@ -338,8 +338,62 @@
 {{- end -}}
 {{- end -}}
 {{- $adminMode := $.Values.scheduler.adminHttpServers.authenticationPolicy.mode -}}
+{{/* Legacy --reuse-values releases can lack new keys. Missing opt-outs remain
+     false; supplied values must have the correct type even without the schema. */}}
+{{- if and (hasKey $.Values.scheduler.adminHttpServers "allowUnauthenticatedRoute") (not (kindIs "bool" $.Values.scheduler.adminHttpServers.allowUnauthenticatedRoute)) -}}
+{{- fail "scheduler.adminHttpServers.allowUnauthenticatedRoute must be a boolean, not a string or other value" -}}
+{{- end -}}
 {{- if not (has $adminMode (list "" "allow" "deny" "custom")) -}}
 {{- fail (printf "scheduler.adminHttpServers.authenticationPolicy.mode is %q; must be one of: allow, deny, custom. It is an HTTP server, and http.server.AuthenticationPolicy has no tlsClientCertificate arm — mutual TLS is not available on this port at all" $adminMode) -}}
+{{- end -}}
+{{/* The scheduler admin UI kills operations and adds or removes worker drains
+     on a plain GET, so publishing it through a route with an allow policy
+     hands that to anyone who can reach the host. The conditions mirror
+     gateway-routes.yaml, httpproxy.yaml and certificate-ingress.yaml. */}}
+{{- $routeProvider := include "buildbarn.routingProvider" $ -}}
+{{- $rbeWebGateway := and $.Values.gateway.enabled (has $routeProvider (list "gateway" "gateway-httproute-only")) $.Values.gateway.httpRoutes.rbeWeb.enabled -}}
+{{- $rbeWebIngress := and $.Values.ingress.enabled (has $routeProvider (list "contour" "ingress")) $.Values.ingress.rbeWeb.enabled -}}
+{{- if and (or $rbeWebGateway $rbeWebIngress) (has $adminMode (list "" "allow")) (not $.Values.scheduler.adminHttpServers.allowUnauthenticatedRoute) -}}
+{{- fail (printf "an rbeWeb route would publish the scheduler admin UI (:7982) at %s with no authentication, and that UI can kill operations and drain workers. Disable gateway.httpRoutes.rbeWeb and ingress.rbeWeb, authenticate the port with scheduler.adminHttpServers.authenticationPolicy.mode=custom (for example an oidc policy), or, if something in front of the route already authenticates every request, set scheduler.adminHttpServers.allowUnauthenticatedRoute=true" (include "buildbarn.rbeWebHost" $)) -}}
+{{- end -}}
+{{- if and (or $rbeWebGateway $rbeWebIngress) $.Values.scheduler.networkPolicy.enabled (not $.Values.scheduler.networkPolicy.adminPeers) -}}
+{{- fail "an rbeWeb route is enabled, but scheduler.networkPolicy admits no pod to the admin UI (:7982) while scheduler.networkPolicy.adminPeers is empty, so the route could not reach the scheduler. List your ingress controller or Gateway namespace in adminPeers, or disable the route" -}}
+{{- end -}}
+{{/* frontend.jwks client binding: the IDs are spliced into a JMESPath JSON
+     literal and the claim name into a (possibly quoted) identifier, so keep
+     both free of quotes, backslashes and control characters. */}}
+{{- $jwks := $.Values.frontend.jwks -}}
+{{- if and (hasKey $jwks "allowedClientIds") (not (kindIs "slice" $jwks.allowedClientIds)) -}}
+{{- fail "frontend.jwks.allowedClientIds must be a list of client ID strings (use [] to disable binding)" -}}
+{{- end -}}
+{{- if and $jwks.allowedClientIds (not $jwks.enabled) -}}
+{{- fail "frontend.jwks.allowedClientIds is set but frontend.jwks.enabled=false, so the frontend checks no JWT and binds no client. Enable frontend.jwks or clear allowedClientIds" -}}
+{{- end -}}
+{{- if $jwks.allowedClientIds -}}
+{{- if index (default dict $.Values.configOverrides) "frontend.jsonnet" -}}
+{{- fail "frontend.jwks.allowedClientIds cannot be combined with configOverrides[\"frontend.jsonnet\"]: the override replaces the generated JWT policy, so client binding would not be applied. Remove the override, or implement the binding in it and clear allowedClientIds" -}}
+{{- end -}}
+{{- range $id := $jwks.allowedClientIds -}}
+{{- if not (and (kindIs "string" $id) $id) -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entries must be non-empty strings; got %v" $id) -}}
+{{- end -}}
+{{- if regexMatch "^<.*>$" $id -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entry %q is a placeholder from the starter values. Replace it with the client ID of every Bazel client that writes or executes (CI and developer credential helpers often differ): decode a token from each and copy its %s claim, the claim frontend.jwks.clientIdClaim names" $id (default "azp" $jwks.clientIdClaim)) -}}
+{{- end -}}
+{{- if or (contains "`" $id) (contains "\\" $id) (contains "\"" $id) (regexMatch "[[:cntrl:]]" $id) -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entry %q contains a quote, backtick, backslash or control character" $id) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (hasKey $jwks "clientIdClaim") (not (kindIs "string" $jwks.clientIdClaim)) -}}
+{{- fail "frontend.jwks.clientIdClaim must be a string containing a top-level claim name" -}}
+{{- end -}}
+{{- $claim := "azp" -}}
+{{- if hasKey $jwks "clientIdClaim" -}}
+{{- $claim = $jwks.clientIdClaim -}}
+{{- end -}}
+{{- if or (not $claim) (contains "\"" $claim) (contains "\\" $claim) (regexMatch "[[:cntrl:]]" $claim) -}}
+{{- fail (printf "frontend.jwks.clientIdClaim is %q; it must be a top-level claim name (for example azp, cid, appid, client_id or https://example.com/client_id) with no quote, backslash or control character" $claim) -}}
+{{- end -}}
 {{- end -}}
 {{- if $mtls.enabled -}}
 {{- if and $mtls.certificateAuthorities $mtls.certificateAuthoritiesFile -}}

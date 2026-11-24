@@ -455,12 +455,16 @@ render_and_validate(
 # 9. Every custom-values/buildbarn-values*.yaml file (standalone + documented overlay)
 custom_files = sorted((repo_root / "custom-values").glob("buildbarn-values*.yaml"))
 assert custom_files, "expected at least one custom-values/buildbarn-values*.yaml file"
+# The starter's client ID placeholder is refused by the chart; fill it in.
+fill_client_id = {"frontend": {"jwks": {"allowedClientIds": ["bazel-ci"]}}}
 for cf in custom_files:
-    render_and_validate(cf.name, value_files=[cf])
+    placeholder = "<bazel-m2m-client-id>" in cf.read_text()
+    render_and_validate(cf.name, value_files=[cf], inline_overrides=fill_client_id if placeholder else None)
 base_values = repo_root / "custom-values" / "buildbarn-values.yaml"
 ssd_overlay = repo_root / "custom-values" / "buildbarn-values-local-ssd-block.yaml"
 if base_values.exists() and ssd_overlay.exists():
-    render_and_validate("overlay-buildbarn-values+local-ssd-block", value_files=[base_values, ssd_overlay])
+    render_and_validate("overlay-buildbarn-values+local-ssd-block", value_files=[base_values, ssd_overlay],
+                        inline_overrides=fill_client_id)
 
 # 10. Validate all supported combinations against the pinned CDC fork schema.
 # Parsing against the upstream descriptor would reject the fork-only fields;

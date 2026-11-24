@@ -9,3 +9,16 @@ List RbeWorker custom resources:
 {{- if .Values.metrics.service.enabled }}
 The metrics Service is {{ include "bb-worker-operator.metricsServiceName" . }} on port {{ .Values.metrics.service.port }}.
 {{- end }}
+
+{{- if and .Values.rbac.create (eq .Values.rbac.mode "cluster") (eq .Values.rbac.managerBindingMode "cluster") }}
+
+WARNING: rbac.mode=cluster binds the operator ServiceAccount with a ClusterRoleBinding.
+It can create Deployments in every namespace, so its token is cluster-admin equivalent.
+{{- if .Values.rbac.rbeWorkerRoles.create }}
+Anyone bound to the RbeWorker editor or admin role can create privileged worker pods in the
+namespaces where it is bound. Operator images without the RbeWorker spec policy also let
+them run those pods as this ServiceAccount. Bind those roles only to subjects you trust to
+create privileged pods.
+{{- end }}
+For a single-namespace install, set rbac.mode=namespace and metrics.secure=false.
+{{- end }}

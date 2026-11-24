@@ -42,7 +42,10 @@ grafana:
       enabled: true
       # oauth2-proxy with PASS_USER_HEADERS=true sets X-Forwarded-User
       # (sub/preferred_username) and X-Forwarded-Email on the upstream
-      # request. Grafana keys the account on the User header.
+      # request. Grafana keys the account on the User header and believes it
+      # from any caller in the whitelist, so the hermetiq chart's
+      # grafana-from-oauth2-proxy NetworkPolicy (grafana.networkPolicy) must
+      # keep every other pod away from Grafana.
       header_name: X-Forwarded-User
       header_property: username
       # Pass email and groups through as additional Grafana fields.
