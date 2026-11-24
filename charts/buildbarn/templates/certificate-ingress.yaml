@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- if and .Values.certificate.enabled (not .Values.tls.secretName) (has $provider (list "contour" "ingress")) }}
 {{- $dnsNames := .Values.certificate.dnsNames -}}
@@ -231,4 +232,6 @@ spec:
     - hosts:
         - {{ include "buildbarn.besHost" . }}
       secretName: {{ include "buildbarn.tlsSecretName" . }}
+{{- end }}
+
 {{- end }}

@@ -1,10 +1,19 @@
 {{- if .Values.vmPodScrapes.enabled }}
 {{- $root := . -}}
-{{- $scrapes := list (dict "name" "browser-vmpodscrape" "app" "browser") (dict "name" "frontend-vmpodscrape" "app" "frontend") (dict "name" "scheduler-vmpodscrape" "app" "scheduler") (dict "name" "storage-vmpodscrape" "app" "storage") (dict "name" "worker-vmpodscrape" "app" "worker") -}}
-{{- if .Values.remoteAsset.enabled -}}
+{{- $scrapes := list (dict "name" "browser-vmpodscrape" "app" "browser") (dict "name" "frontend-vmpodscrape" "app" "frontend") (dict "name" "scheduler-vmpodscrape" "app" "scheduler") -}}
+{{- if not (include "buildbarn.fullDeployment" .) -}}
+{{- $scrapes = list -}}
+{{- end -}}
+{{- if include "buildbarn.manageStorage" . -}}
+{{- $scrapes = append $scrapes (dict "name" (printf "%s-vmpodscrape" (include "buildbarn.storageName" .)) "app" (include "buildbarn.storageName" .) "component" "storage") -}}
+{{- end -}}
+{{- if include "buildbarn.fullDeployment" . -}}
+{{- $scrapes = append $scrapes (dict "name" "worker-vmpodscrape" "app" "worker") -}}
+{{- end -}}
+{{- if and (include "buildbarn.fullDeployment" .) .Values.remoteAsset.enabled -}}
 {{- $scrapes = append $scrapes (dict "name" "remote-asset-vmpodscrape" "app" "remote-asset") -}}
 {{- end -}}
-{{- if .Values.portal.enabled -}}
+{{- if and (include "buildbarn.fullDeployment" .) .Values.portal.enabled -}}
 {{- $scrapes = append $scrapes (dict "name" "bb-portal-vmpodscrape" "app" "bb-portal") -}}
 {{- end -}}
 {{- range $scrape := $scrapes }}
@@ -15,7 +24,7 @@ metadata:
   namespace: {{ include "buildbarn.namespace" $root }}
   labels:
     {{- include "buildbarn.labels" $root | nindent 4 }}
-    {{- include "buildbarn.componentLabel" (dict "component" $scrape.app) | nindent 4 }}
+    {{- include "buildbarn.componentLabel" (dict "component" (default $scrape.app $scrape.component)) | nindent 4 }}
 spec:
   namespaceSelector:
     matchNames:
@@ -24,7 +33,7 @@ spec:
     - port: metrics
       path: /metrics
       interval: {{ $root.Values.vmPodScrapes.interval }}
-      {{- if eq $scrape.app "storage" }}
+      {{- if eq (default $scrape.app $scrape.component) "storage" }}
       # The packaged VMRules and the bb-storage dashboards aggregate the
       # blob-map eviction-age series by kubernetes_shard and
       # kubernetes_replica. Nothing else emits those labels, so without this

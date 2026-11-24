@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if and .Values.gateway.enabled (eq (include "buildbarn.routingProvider" .) "gateway-httproute-only") }}
 {{- if .Values.gateway.gke.healthCheckPolicy.enabled }}
 {{- $services := list -}}
@@ -66,4 +67,6 @@ spec:
 ---
 {{- end }}
 {{- end }}
+{{- end }}
+
 {{- end }}

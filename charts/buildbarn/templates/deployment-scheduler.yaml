@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -201,3 +202,5 @@ spec:
               - key: scheduler-coordinator-ca.pem
                 path: scheduler-coordinator-ca.pem
               {{- end }}
+
+{{- end }}

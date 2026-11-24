@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if and .Values.keda.enabled .Values.keda.frontend.enabled }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -84,4 +85,6 @@ spec:
       metadata:
         value: {{ .Values.keda.frontend.memory.targetUtilization | quote }}
     {{- end }}
+{{- end }}
+
 {{- end }}

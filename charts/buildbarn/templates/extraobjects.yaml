@@ -1,4 +1,7 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- range .Values.extraObjects }}
 ---
 {{ include "buildbarn.tplvalues.render" (dict "value" . "context" $) }}
+{{- end }}
+
 {{- end }}

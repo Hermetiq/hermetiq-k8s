@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.scheduler.handover.enabled }}
 {{- $ns := include "buildbarn.namespace" . -}}
 {{- $saName := "scheduler" -}}
@@ -54,4 +55,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $saName }}
+{{- end }}
+
 {{- end }}

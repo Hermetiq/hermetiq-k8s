@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if and .Values.frontend.jwks.enabled .Values.frontend.jwks.sync.enabled }}
 {{- $url := required "frontend.jwks.sync.url is required when frontend.jwks.sync.enabled=true" .Values.frontend.jwks.sync.url -}}
 {{- $ns := include "buildbarn.namespace" . -}}
@@ -244,4 +245,6 @@ spec:
           configMap:
             name: {{ $configCMName }}
 {{- end }}
+{{- end }}
+
 {{- end }}

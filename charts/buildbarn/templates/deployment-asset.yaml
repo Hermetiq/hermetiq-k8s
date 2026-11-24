@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.remoteAsset.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -84,4 +85,6 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.remoteAsset.tmpDirSizeLimit }}
+{{- end }}
+
 {{- end }}

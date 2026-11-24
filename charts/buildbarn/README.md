@@ -356,8 +356,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 1.0.1
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 1.0.1
 ```
 
 ## Install
@@ -388,7 +388,7 @@ values where they differ from the starter.
 
    ```bash
    helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-     --version 1.0.0 \
+     --version 1.0.1 \
      --namespace hermetiq \
      --values buildbarn-values.yaml > /tmp/buildbarn.yaml
    ```
@@ -400,7 +400,7 @@ values where they differ from the starter.
    ```bash
    helm upgrade --install --namespace hermetiq buildbarn \
      oci://ghcr.io/hermetiq/buildbarn \
-     --version 1.0.0 \
+     --version 1.0.1 \
      --values buildbarn-values.yaml \
      --dry-run=server > /dev/null
    ```
@@ -412,7 +412,7 @@ After the Hermetiq chart and worker operator are installed, install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --values buildbarn-values.yaml
 ```
 
@@ -580,7 +580,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -787,6 +787,75 @@ exist, the Certificate stays pending and the routes serve no usable TLS.
 
 Storage is a sharded StatefulSet. The number of shards is `storage.replicas`;
 `common.libsonnet` generates one CAS and Action Cache shard entry per replica.
+
+### Stage a replacement storage release
+
+Chart 1.0.1 adds three values for a separate storage release in the same
+namespace:
+
+| Value | Default | Effect |
+|---|---|---|
+| `deploymentMode` | `full` | `storage-only` creates storage and its supporting resources. |
+| `storage.name` | `storage` | Names the StatefulSet and headless Service, and supplies the storage target in generated client configuration. |
+| `storage.enabled` | `true` | `false` leaves storage resources to another release while keeping clients configured for `storage.name` and `storage.replicas`. |
+
+To prepare a fresh storage ring without changing the current application, install
+a separate release with the desired storage sizing and scheduling settings:
+
+```yaml
+# storage-green.yaml
+deploymentMode: storage-only
+storage:
+  enabled: true
+  name: storage-cdc
+  replicas: 3
+```
+
+Use an existing namespace. This release creates `storage-cdc`, its headless
+Service, and `storage-cdc-config`, plus storage's enabled disruption budget,
+network policy and metrics scrape. It does not create the namespace, application
+workloads, worker configuration, public routes, certificates or `extraObjects`.
+The default `app: storage-cdc` selectors keep both storage rings separate;
+`kubernetes_service: storage` preserves the metrics conventions. Optional
+`storage.topologySpreadConstraints` are passed to the Pod spec; use
+`labelSelector.matchLabels.app: storage-cdc` when spreading this ring across zones.
+Storage-only mode refuses `storage.persistence.mode=hostPath`: hostPath stores use
+fixed node paths and devices, and anti-affinity only separates pods of one ring,
+so the new ring could share a node's disks with the storage already running there.
+
+Once the new shards are ready, upgrade the original full release using its
+application values and these overrides:
+
+```yaml
+deploymentMode: full
+storage:
+  enabled: false
+  name: storage-cdc
+  replicas: 3
+```
+
+Keep `storage.replicas`, the enabled ISCC/FSAC stores, and in-cluster mTLS settings
+consistent between both releases. Generated clients dial
+`storage-cdc-<ordinal>.storage-cdc.<namespace>:8981`. Certificates must cover those
+names. An external-storage release rejects a `common.libsonnet` override because
+it would bypass the generated target; update custom worker configuration separately.
+
+Before anything is applied, the upgrade looks up StatefulSet `storage.name` in the
+namespace and refuses to continue if it does not exist, if this release still owns
+it (the upgrade would delete it), or if its replica count differs from
+`storage.replicas`. An offline render skips the check, and
+`upgradeChecks.skipExternalStorageCheck=true` turns it off.
+
+This upgrade removes the original storage StatefulSet and supporting resources.
+Kubernetes retains its PVCs by default; remove them manually after validating the
+cutover and deciding rollback is no longer needed. Application ConfigMap checksums
+roll the chart's client workloads, but worker restarts and any image/operator
+upgrade need a coordinated maintenance window. There is no automatic cache copy,
+fallback or zero-downtime guarantee. Rollback to the previous Helm revision
+recreates the old StatefulSet against its retained PVCs; coordinate worker images
+and configuration with that rollback too.
+
+### Storage sizing
 
 Use the focused repository runbooks for planning and live operations:
 
@@ -1310,6 +1379,7 @@ serve. `values.yaml` says what to verify by hand before setting one:
 | Value | Skips | Use it when |
 |---|---|---|
 | `upgradeChecks.skipStorageClaimTemplateCheck` | The claim-template comparison | Leave it `false`: without the check Helm applies every other object of the release and then fails on the StatefulSet. |
+| `upgradeChecks.skipExternalStorageCheck` | The `storage.enabled=false` target check: StatefulSet `storage.name` exists, is not owned by this release and runs `storage.replicas` pods | Leave it `false`: a missing, self-owned or differently sized target leaves clients without working storage. |
 | `upgradeChecks.skipWorkerChecks` | Every check that reads `RbeWorker` objects and worker ConfigMaps | The account running Helm may not list `RbeWorker` objects or ConfigMaps, and Helm stops with a `forbidden` error. |
 | `upgradeChecks.skipConfigTextCheck` | The text scan of `configOverrides`, `scheduler.actionRouter.custom` and worker ConfigMaps | The scan refuses configuration that is valid for the deployed binaries, such as a field name inside a string. |
 

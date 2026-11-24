@@ -1,8 +1,8 @@
-{{- if .Values.storage.networkPolicy.enabled }}
+{{- if and (include "buildbarn.manageStorage" .) .Values.storage.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: storage
+  name: {{ include "buildbarn.storageName" . }}
   namespace: {{ include "buildbarn.namespace" . }}
   labels:
     {{- include "buildbarn.labels" . | nindent 4 }}
@@ -14,7 +14,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: storage
+      app: {{ include "buildbarn.storageName" . }}
   policyTypes:
     - Ingress
   ingress:
@@ -33,7 +33,7 @@ spec:
                   - remote-asset
                   - bb-portal
                   - worker
-                  - storage
+                  - {{ include "buildbarn.storageName" . }}
         {{- with .Values.storage.networkPolicy.additionalClientPeers }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- if .Values.vmRules.enabled }}
 {{- $root := . -}}
 {{- range $path, $_ := .Files.Glob "files/vmrules/*.yaml" }}
@@ -25,4 +26,6 @@ metadata:
 spec:
   {{- toYaml $rule.spec | nindent 2 }}
 {{- end }}
+{{- end }}
+
 {{- end }}

@@ -175,7 +175,7 @@ expect_invalid(
 print("PASS protobuf negative controls")
 
 
-def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_registry=None, expected_files=None):
+def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_registry=None, expected_files=None, config_map="buildbarn-config"):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = pathlib.Path(tmpdir)
         cmd = ["helm", "template", "buildbarn", str(chart), "--namespace", "buildbarn"]
@@ -191,7 +191,7 @@ def render_and_validate(label, value_files=(), inline_overrides=None, scheduler_
             for obj in yaml.safe_load_all(output)
             if obj
             and obj.get("kind") == "ConfigMap"
-            and obj.get("metadata", {}).get("name") == "buildbarn-config"
+            and obj.get("metadata", {}).get("name") == config_map
         )
         for name, content in config_data.items():
             (tmpdir / name).write_text(content)
@@ -228,6 +228,22 @@ ci_values = chart / "ci-values" / "ci.yaml"
 defaults = render_and_validate("defaults", value_files=[ci_values])
 for name in ("initialSizeClassCache", "fileSystemAccessCache"):
     assert "persistent" in defaults["storage.jsonnet"][name]["backend"]["local"], name
+
+# The staged release has a deliberately minimal shared config; storage must
+# evaluate without any frontend, scheduler or worker configuration present.
+green = render_and_validate(
+    "storage-only", value_files=[ci_values],
+    inline_overrides={"deploymentMode": "storage-only", "storage": {"name": "storage-cdc"}},
+    expected_files=("storage.jsonnet",), config_map="storage-cdc-config",
+)
+assert set(green) == {"storage.jsonnet"}
+assert green["storage.jsonnet"] == defaults["storage.jsonnet"]
+cutover = render_and_validate(
+    "external-storage", value_files=[ci_values],
+    inline_overrides={"storage": {"enabled": False, "name": "storage-cdc", "replicas": 3}},
+    expected_files=("frontend.jsonnet", "scheduler.jsonnet", "browser.jsonnet"),
+)
+assert "storage.jsonnet" not in cutover
 assert "initialSizeClassCache" not in defaults["scheduler.jsonnet"], "scheduler analysis remains opt-in"
 disabled = render_and_validate(
     "explicitly-disabled-history-stores", value_files=[ci_values],

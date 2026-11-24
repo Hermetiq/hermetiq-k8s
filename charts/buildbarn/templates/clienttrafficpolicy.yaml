@@ -1,3 +1,4 @@
+{{- if include "buildbarn.fullDeployment" . }}
 {{- $provider := include "buildbarn.routingProvider" . -}}
 {{- if and .Values.gateway.enabled (eq $provider "gateway") -}}
 {{- with .Values.gateway.clientTrafficPolicy }}
@@ -61,4 +62,6 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
+{{- end }}
+
 {{- end }}

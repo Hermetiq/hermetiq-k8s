@@ -1,8 +1,34 @@
+{{- $full := eq (default "full" .Values.deploymentMode) "full" -}}
+{{- $manageStorage := include "buildbarn.manageStorage" . -}}
+{{- $storageName := include "buildbarn.storageName" . -}}
+{{- if not (has (default "full" .Values.deploymentMode) (list "full" "storage-only")) -}}
+{{- fail "deploymentMode must be full or storage-only" -}}
+{{- end -}}
+{{- if and (not $full) (not $manageStorage) -}}
+{{- fail "deploymentMode=storage-only requires storage.enabled=true" -}}
+{{- end -}}
+{{/* hostPath stores live at fixed node paths and devices that do not depend
+     on storage.name, and pod anti-affinity only separates pods of one ring. A
+     second ring could land on a node running the current storage and open the
+     same block devices and index files. */}}
+{{- if and (not $full) (eq (toString .Values.storage.persistence.mode) "hostPath") -}}
+{{- fail "deploymentMode=storage-only does not support storage.persistence.mode=hostPath: hostPath stores use fixed node paths and devices, and pod anti-affinity only separates pods of the same ring, so the new ring could share a node and its disks with the storage already running there. Stage the new ring with storage.persistence.mode=pvc" -}}
+{{- end -}}
+{{- if or (gt (len $storageName) 63) (not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $storageName)) -}}
+{{- fail "storage.name must be a DNS service label: 1-63 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit" -}}
+{{- end -}}
+{{- if lt (int .Values.storage.replicas) 1 -}}
+{{- fail "storage.replicas must be at least 1, including when storage.enabled=false" -}}
+{{- end -}}
+{{- if and (not $manageStorage) (index (default (dict) .Values.configOverrides) "common.libsonnet") -}}
+{{- fail "storage.enabled=false requires the generated common.libsonnet so storage.name and storage.replicas select the external ring; remove configOverrides[\"common.libsonnet\"]" -}}
+{{- end -}}
 {{/* Scheduler action router. The scheduler REJECTS an unsorted platform with
      InvalidArgument rather than sorting it (platform.NewKey), so a misordered
      list here is not a style problem — it stops the scheduler starting. Fail
      the install instead, where the message can say which list and what order. */}}
 {{- $router := $.Values.scheduler.actionRouter -}}
+{{- if $full -}}
 {{- if not (has $router.mode (list "simple" "demultiplexing" "custom")) -}}
 {{- fail (printf "scheduler.actionRouter.mode is %q; must be one of: simple, demultiplexing, custom" $router.mode) -}}
 {{- end -}}
@@ -79,17 +105,24 @@
 {{- if not (has $provider $validRoutingProviders) -}}
 {{- fail "routing.provider must be one of: contour, gateway, gateway-httproute-only, ingress, none" -}}
 {{- end -}}
+{{- end -}}
+{{- if $manageStorage -}}
 {{- if not (has .Values.storage.persistence.mode (list "pvc" "emptyDir" "hostPath")) -}}
 {{- fail "storage.persistence.mode must be one of: pvc, emptyDir, hostPath" -}}
 {{- end -}}
+{{- end -}}
+{{- if $full -}}
 {{- if not (has .Values.frontend.actionCache.putAuthorizer.mode (list "allow" "deny" "requireCanWriteToCache" "custom")) -}}
 {{- fail "frontend.actionCache.putAuthorizer.mode must be one of: allow, deny, requireCanWriteToCache, custom" -}}
 {{- end -}}
 {{- if and (eq .Values.frontend.actionCache.putAuthorizer.mode "custom") (not .Values.frontend.actionCache.putAuthorizer.custom) -}}
 {{- fail "frontend.actionCache.putAuthorizer.custom is required when frontend.actionCache.putAuthorizer.mode=custom" -}}
 {{- end -}}
+{{- end -}}
+{{- if $manageStorage -}}
 {{- if not (has .Values.storage.persistence.ac.keyLocationMap.type (list "inMemory" "blockDevice")) -}}
 {{- fail "storage.persistence.ac.keyLocationMap.type must be one of: inMemory, blockDevice" -}}
+{{- end -}}
 {{- end -}}
 {{- if and .Values.tracing.enabled (not .Values.tracing.nodeLocal.enabled) (not .Values.tracing.endpoint) -}}
 {{- fail "tracing.endpoint is required when tracing.enabled=true and tracing.nodeLocal.enabled=false" -}}
@@ -97,6 +130,7 @@
 {{- if and .Values.tracing.enabled .Values.tracing.tls.clientCertificate.enabled (not .Values.tracing.tls.enabled) -}}
 {{- fail "tracing.tls.enabled must be true when tracing.tls.clientCertificate.enabled=true" -}}
 {{- end -}}
+{{- if $full -}}
 {{- $authorizerModes := list "allow" "deny" "requireCanWriteToCache" "custom" -}}
 {{- if not (has .Values.frontend.contentAddressableStorage.putAuthorizer.mode $authorizerModes) -}}
 {{- fail "frontend.contentAddressableStorage.putAuthorizer.mode must be one of: allow, deny, requireCanWriteToCache, custom" -}}
@@ -127,6 +161,8 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- if $manageStorage -}}
 {{/* --- Storage backend, sizing, raw block-device, CMS, and ISCC/FSAC validation --- */}}
 {{- $bd := .Values.storage.persistence.blockDevice -}}
 {{- if not (has $bd.deviceAccess (list "group" "chownInit")) -}}
@@ -267,6 +303,8 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- if $full -}}
 {{- if and .Values.scheduler.sizeClassAnalysis.enabled (not .Values.storage.persistence.iscc.enabled) -}}
 {{- fail "scheduler.sizeClassAnalysis.enabled=true requires storage.persistence.iscc.enabled=true" -}}
 {{- end -}}
@@ -290,13 +328,15 @@
 {{- fail "config.actionCache.actionResultExpiring.maximumValidityJitter must be a NONZERO duration when actionResultExpiring.enabled=true (bb-storage takes a modulo by it, so zero panics with an integer divide-by-zero on the first Action Cache hit)" -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
 {{/* Capacity arithmetic and remedies are shared with NOTES so a disabled guard
      still exposes undersized indexes during install/upgrade. */}}
-{{- if .Values.storage.keyLocationMapSizing.validate -}}
+{{- if and $manageStorage .Values.storage.keyLocationMapSizing.validate -}}
 {{- range $diagnostic := (include "buildbarn.storage.indexSizingDiagnostics" . | fromJsonArray) -}}
 {{- fail $diagnostic -}}
 {{- end -}}
 {{- end -}}
+{{- if $full -}}
 {{- if .Values.frontend.grpcCacheProxy.enabled -}}
 {{/* An empty natsUrl is legal: it runs the sidecar as a pure pass-through with
      cache-event capture disabled. The subject prefix only matters when events
@@ -319,16 +359,21 @@
 {{- if and .Values.browser.oauth2Proxy.enabled .Values.browser.service.targetPortOverride -}}
 {{- fail "browser.service.targetPortOverride is mutually exclusive with browser.oauth2Proxy.enabled — both claim the browser Service port" -}}
 {{- end -}}
+{{- end -}}
 {{/* In-cluster mutual TLS. Every failure here is one that only shows up as a
      crash-looping pod or a cluster that has silently stopped talking to
      itself, so the install is the right place to catch it. */}}
 {{- $mtls := $.Values.security.grpcMtls -}}
-{{- $policies := dict
-      "storage.grpcServers" $.Values.storage.grpcServers.authenticationPolicy
-      "scheduler.clientGrpcServers" $.Values.scheduler.clientGrpcServers.authenticationPolicy
-      "scheduler.workerGrpcServers" $.Values.scheduler.workerGrpcServers.authenticationPolicy
-      "scheduler.buildQueueStateGrpcServers" $.Values.scheduler.buildQueueStateGrpcServers.authenticationPolicy
-      "scheduler.handover.handoverGrpcServers" $.Values.scheduler.handover.handoverGrpcServers.authenticationPolicy -}}
+{{- $policies := dict -}}
+{{- if $manageStorage -}}
+{{- $_ := set $policies "storage.grpcServers" $.Values.storage.grpcServers.authenticationPolicy -}}
+{{- end -}}
+{{- if $full -}}
+{{- range $name := list "clientGrpcServers" "workerGrpcServers" "buildQueueStateGrpcServers" -}}
+{{- $_ := set $policies (printf "scheduler.%s" $name) (index $.Values.scheduler $name).authenticationPolicy -}}
+{{- end -}}
+{{- $_ := set $policies "scheduler.handover.handoverGrpcServers" $.Values.scheduler.handover.handoverGrpcServers.authenticationPolicy -}}
+{{- end -}}
 {{- range $path, $policy := $policies -}}
 {{- if not (has $policy.mode (list "" "allow" "deny" "mtls" "custom")) -}}
 {{- fail (printf "%s.authenticationPolicy.mode is %q; must be one of: allow, deny, mtls, custom, or \"\" to follow security.grpcMtls" $path $policy.mode) -}}
@@ -337,9 +382,11 @@
 {{- fail (printf "%s.authenticationPolicy.mode=mtls requires security.grpcMtls.enabled=true: the client CA, and the key pair the callers present, both come from that block" $path) -}}
 {{- end -}}
 {{- end -}}
+{{- if $full -}}
 {{- $adminMode := $.Values.scheduler.adminHttpServers.authenticationPolicy.mode -}}
 {{- if not (has $adminMode (list "" "allow" "deny" "custom")) -}}
 {{- fail (printf "scheduler.adminHttpServers.authenticationPolicy.mode is %q; must be one of: allow, deny, custom. It is an HTTP server, and http.server.AuthenticationPolicy has no tlsClientCertificate arm — mutual TLS is not available on this port at all" $adminMode) -}}
+{{- end -}}
 {{- end -}}
 {{- if $mtls.enabled -}}
 {{- if and $mtls.certificateAuthorities $mtls.certificateAuthoritiesFile -}}
@@ -363,7 +410,7 @@
      talking to itself on upgrade, so name the file rather than let it fail at
      runtime. */}}
 {{- range $name, $_ := $.Values.configOverrides -}}
-{{- if has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "scheduler.jsonnet" "portal.jsonnet") -}}
+{{- if and (or $full (has $name (list "common.libsonnet" "storage.jsonnet"))) (or $manageStorage (ne $name "storage.jsonnet")) (has $name (list "common.libsonnet" "storage.jsonnet" "frontend.jsonnet" "scheduler.jsonnet" "portal.jsonnet")) -}}
 {{- fail (printf "configOverrides[%q] replaces a file that carries one half of an in-cluster mTLS hop, and an override is spliced in verbatim without templating — security.grpcMtls would configure the other half only, leaving that hop broken. Add the tls block to your override and remove this file from the check, or turn security.grpcMtls off" $name) -}}
 {{- end -}}
 {{- end -}}
@@ -375,7 +422,7 @@
        Older fork images only support the pre-CDC configuration, with or
        without these features: turning them off is not enough while
        images.scheduler still points at such a fork. */ -}}
-{{- if not $.Values.scheduler.handover.cdcCompatibleFork -}}
+{{- if and $full (not $.Values.scheduler.handover.cdcCompatibleFork) -}}
 {{- if $.Values.scheduler.handover.enabled -}}
 {{- fail "scheduler.handover.enabled is not supported with the CDC blobstore unless the fork supports CDC: disable scheduler.handover for this upgrade and remove any images.scheduler repository, tag or digest override that pins a fork image built without CDC support (that scheduler rejects the CDC configuration whether or not handover is enabled), or set scheduler.handover.cdcCompatibleFork=true with a fork image that supports CDC" -}}
 {{- end -}}
@@ -387,11 +434,14 @@
        CDC configuration for all of them. images.browser is not checked
        because bb-browser is still a pre-CDC binary and reads through
        frontend-internal. Only upstream date stamps can be classified. */ -}}
-{{- $releaseImages := list "storage" "scheduler" "worker" "runnerInstaller" -}}
-{{- if $.Values.remoteAsset.enabled -}}
+{{- $releaseImages := list "storage" -}}
+{{- if $full -}}
+{{- $releaseImages = concat $releaseImages (list "scheduler" "worker" "runnerInstaller") -}}
+{{- end -}}
+{{- if and $full $.Values.remoteAsset.enabled -}}
 {{- $releaseImages = append $releaseImages "remoteAsset" -}}
 {{- end -}}
-{{- if $.Values.portal.enabled -}}
+{{- if and $full $.Values.portal.enabled -}}
 {{- $releaseImages = append $releaseImages "portal" -}}
 {{- end -}}
 {{- range $imageName := $releaseImages -}}
@@ -432,7 +482,7 @@
        have; each one can be turned off on its own. */ -}}
 {{- $upgradeChecks := default (dict) $.Values.upgradeChecks -}}
 {{- $skipConfigTextCheck := index $upgradeChecks "skipConfigTextCheck" -}}
-{{- $skipWorkerChecks := index $upgradeChecks "skipWorkerChecks" -}}
+{{- $skipWorkerChecks := or (not $full) (index $upgradeChecks "skipWorkerChecks") -}}
 {{- $casKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorage" -}}
 {{- $casServerKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorageServer" -}}
 {{- /* Evidence that a contentAddressableStorage definition is the CDC message:
@@ -441,6 +491,7 @@
 {{- $cdcShape := printf "(%s|common\\.blobstore\\.contentAddressableStorage)" (include "buildbarn.cdc.keyPattern" "(chunkStorage|chunkMappingStorage|chunkMappingCache|cdcParameterCache|chunkCache)") -}}
 {{- if not $skipConfigTextCheck -}}
 {{- range $name, $content := default (dict) $.Values.configOverrides -}}
+{{- if and (or $full (has $name (list "common.libsonnet" "storage.jsonnet"))) (or $manageStorage (ne $name "storage.jsonnet")) -}}
 {{- $text := include "buildbarn.cdc.stripComments" $content -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has $name $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has $name $rule.excludedFiles))) -}}
@@ -461,7 +512,8 @@
 {{- fail (printf "configOverrides[\"browser.jsonnet\"] passes CDC common.blobstore directly to pre-CDC bb-browser; point contentAddressableStorage at frontend-internal:8980 and actionCache at common.blobstore.actionCache; see %s" $cdcGuide) -}}
 {{- end -}}
 {{- end -}}
-{{- if and (eq $router.mode "custom") $router.custom -}}
+{{- end -}}
+{{- if and $full (eq $router.mode "custom") $router.custom -}}
 {{- $routerText := include "buildbarn.cdc.stripComments" $router.custom -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has "scheduler.jsonnet" $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has "scheduler.jsonnet" $rule.excludedFiles))) -}}
@@ -482,16 +534,16 @@
        render and stop here, before anything is applied. Nothing is checked
        when there is no live StatefulSet (first install, offline render, or
        after the StatefulSet was deleted for recreation). */ -}}
-{{- if not (index (default (dict) $.Values.upgradeChecks) "skipStorageClaimTemplateCheck") -}}
+{{- if and $manageStorage (not (index (default (dict) $.Values.upgradeChecks) "skipStorageClaimTemplateCheck")) -}}
 {{- $liveStorage := dict -}}
 {{- if hasKey $mockLookup "statefulSets" -}}
 {{- range $sts := default (list) (index (default (dict) (index $mockLookup "statefulSets")) "items") -}}
-{{- if eq (toString (index (default (dict) (index $sts "metadata")) "name")) "storage" -}}
+{{- if eq (toString (index (default (dict) (index $sts "metadata")) "name")) $storageName -}}
 {{- $liveStorage = $sts -}}
 {{- end -}}
 {{- end -}}
 {{- else -}}
-{{- $liveStorage = default (dict) (lookup "apps/v1" "StatefulSet" $ns "storage") -}}
+{{- $liveStorage = default (dict) (lookup "apps/v1" "StatefulSet" $ns $storageName) -}}
 {{- end -}}
 {{- if $liveStorage -}}
 {{- $renderedClaims := dict "claims" (list) -}}
@@ -502,7 +554,7 @@
 {{- if not (hasKey $renderedClaims "Error") -}}
 {{- $claimDifferences := include "buildbarn.storage.claimTemplateDifferences" (dict "live" (index (default (dict) (index $liveStorage "spec")) "volumeClaimTemplates") "rendered" (index $renderedClaims "claims")) | fromJsonArray -}}
 {{- if $claimDifferences -}}
-{{- fail (printf "live StatefulSet %s/storage has different volumeClaimTemplates than this release renders: %s. Kubernetes forbids changing volumeClaimTemplates in place, and Helm applies every other object of the release before that patch is refused, which leaves the release half-applied on the old StatefulSet. Stop storage first (scale statefulset/storage to 0 and wait for its pods to terminate), run `kubectl delete statefulset storage --namespace %s --cascade=orphan`, then run this upgrade again so the StatefulSet is recreated with the rendered templates. Existing PersistentVolumeClaims are kept as they are: a changed class or size only applies to claims that do not exist yet. The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check. Set upgradeChecks.skipStorageClaimTemplateCheck=true to skip it. See %s" $ns (join "; " $claimDifferences) $ns $recreateGuide) -}}
+{{- fail (printf "live StatefulSet %s/%s has different volumeClaimTemplates than this release renders: %s. Kubernetes forbids changing volumeClaimTemplates in place, and Helm applies every other object of the release before that patch is refused, which leaves the release half-applied on the old StatefulSet. Stop storage first (scale statefulset/%s to 0 and wait for its pods to terminate), run `kubectl delete statefulset %s --namespace %s --cascade=orphan`, then run this upgrade again so the StatefulSet is recreated with the rendered templates. Existing PersistentVolumeClaims are kept as they are: a changed class or size only applies to claims that do not exist yet. The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check. Set upgradeChecks.skipStorageClaimTemplateCheck=true to skip it. See %s" $ns $storageName (join "; " $claimDifferences) $storageName $storageName $ns $recreateGuide) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -643,3 +695,44 @@
        with this chart: an operator older than v1.0.0 generates pre-CDC worker
        configuration, which shows up as crash-looping worker pools, and
        Hermetiq 1.0.0 reads the CDC schema only. */ -}}
+{{- /* External-storage preflight. With storage.enabled=false this upgrade
+       deletes any storage StatefulSet the release still owns and rewrites
+       every client to dial storage.name with storage.replicas shards, so check
+       the target before anything is applied: it must exist, belong to another
+       release (or to none), and run the same number of shards. A missing ring
+       or a wrong name is a full outage; a replica mismatch sends part of the
+       keyspace to shards that do not exist. An offline render (helm template,
+       client-side dry run) has no list result and checks nothing. */ -}}
+{{- if and $full (not $manageStorage) (not (index $upgradeChecks "skipExternalStorageCheck")) -}}
+{{- $statefulSets := dict -}}
+{{- if hasKey $mockLookup "statefulSets" -}}
+{{- $statefulSets = default (dict) (index $mockLookup "statefulSets") -}}
+{{- else -}}
+{{- $statefulSets = default (dict) (lookup "apps/v1" "StatefulSet" $ns "") -}}
+{{- end -}}
+{{- if hasKey $statefulSets "items" -}}
+{{- $target := dict -}}
+{{- range $sts := default (list) (index $statefulSets "items") -}}
+{{- if eq (toString (index (default (dict) (index $sts "metadata")) "name")) $storageName -}}
+{{- $target = $sts -}}
+{{- end -}}
+{{- end -}}
+{{- $skipHint := "Set upgradeChecks.skipExternalStorageCheck=true to skip this check" -}}
+{{- if not $target -}}
+{{- fail (printf "storage.enabled=false points every client at StatefulSet %s/%s, which does not exist. Install the storage-only release first (deploymentMode=storage-only, storage.name=%s) and wait for its pods, or correct storage.name. %s" $ns $storageName $storageName $skipHint) -}}
+{{- end -}}
+{{- $targetMeta := default (dict) (index $target "metadata") -}}
+{{- $annotations := default (dict) (index $targetMeta "annotations") -}}
+{{- if and (eq (toString (index $annotations "meta.helm.sh/release-name")) $.Release.Name) (eq (toString (index $annotations "meta.helm.sh/release-namespace")) $.Release.Namespace) -}}
+{{- fail (printf "storage.enabled=false targets StatefulSet %s/%s, which this release (%s) owns: the upgrade would delete it and leave every client without storage. Set storage.name to the StatefulSet of the storage-only release. %s" $ns $storageName $.Release.Name $skipHint) -}}
+{{- end -}}
+{{- $targetSpec := default (dict) (index $target "spec") -}}
+{{- $liveReplicas := 1 -}}
+{{- if hasKey $targetSpec "replicas" -}}
+{{- $liveReplicas = int (index $targetSpec "replicas") -}}
+{{- end -}}
+{{- if ne $liveReplicas (int $.Values.storage.replicas) -}}
+{{- fail (printf "storage.replicas is %d but StatefulSet %s/%s is set to %d replicas. Clients shard by storage.replicas, so a mismatch sends part of the keyspace to shards that do not exist or leaves shards unused. Set storage.replicas to the storage-only release's value. %s" (int $.Values.storage.replicas) $ns $storageName $liveReplicas $skipHint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
