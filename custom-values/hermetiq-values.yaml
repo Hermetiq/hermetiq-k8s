@@ -110,9 +110,8 @@ oidc:
   issuerUrl: https://issuer.example.com/
 
 # The chart requires project and publisher authorization and the dashboard BFF.
-# Use matching authorization-capable images (including
-# auth-proxy for JWT profiles); see the chart README's image requirements and
-# project authorization upgrade section before upgrading an existing deployment.
+# Use application images from one release (including auth-proxy for JWT
+# profiles); see "Application images" in the chart README.
 authorization:
   # Replace this immutable, issuer-qualified group with your administrator group.
   administratorGroups:

@@ -25,7 +25,7 @@ images:
   # Digests are empty here and are resolved when the chart is published, so
   # the packaged chart pulls by digest. When overriding a tag, set its digest
   # as well or leave the digest empty; a non-empty digest wins over the tag.
-  # See README: Upgrading project authorization.
+  # See README: Application images.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent

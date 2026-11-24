@@ -7,8 +7,9 @@ and a separate namespace in the target cluster; never run loss/reset tests on
 an occupied storage node.
 
 It validates a node image, provisioning script or disk layout. It does not
-migrate anything. To move an existing storage pool to this layout, follow the
-[cut-over procedure for an existing Local SSD pool](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool).
+move an existing storage pool to this layout; a pool provisioned before chart
+1.0.0 follows the
+[cut-over procedure for an existing Local SSD pool](migrate-to-1.0.0-buildbarn.md#cut-over-procedure-for-an-existing-local-ssd-pool).
 To get a node out of a state the provisioner refuses, follow
 [Resetting a Local SSD node](buildbarn-block-storage.md#resetting-a-local-ssd-node).
 
@@ -179,9 +180,9 @@ uv run --no-project --with protobuf --with grpcio python3 "$PROBE" \
 
 Collect logs **before** removing each storage container/pod. Check every lifetime
 for integrity, checksum, and decompression failures. This isolated RPC probe
-bypasses the frontends and their existence caches; a deployed release's cold
-cut-over has to deal with them, as its
-[own procedure](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool)
+bypasses the frontends and their existence caches; a deployed release has to
+deal with them after a reset, as
+[Resetting a Local SSD node](buildbarn-block-storage.md#resetting-a-local-ssd-node)
 describes.
 
 ## Limits and cleanup
@@ -283,4 +284,4 @@ cluster-scoped RBAC, both temporary node pools (including the alternate-zone
 capacity retry), their nodes, and their VMs were removed. The existing deployment
 and its three Ready storage shards were left unchanged; adopting this layout
 there still requires the
-[cut-over procedure for an existing Local SSD pool](buildbarn-block-storage.md#cut-over-procedure-for-an-existing-local-ssd-pool).
+[cut-over procedure for an existing Local SSD pool](migrate-to-1.0.0-buildbarn.md#cut-over-procedure-for-an-existing-local-ssd-pool).

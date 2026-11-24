@@ -13,10 +13,11 @@ The ISCC key is a reduced action digest: command digest plus platform. It intent
 ISCC is a bb-storage store served by the storage pod. It is enabled by default
 and uses a persistent index for both filesystem storage
 (`keyLocationMap.type: blockDevice`) and raw blocks (`blockDevice.keyLocationMap: file`).
-Remove any old explicit `inMemory` override, or apply the
-[persistent profile](buildbarn-storage-operations.md#migrate-to-persistent-indexes)
-after deployment values. Both profiles preserve explicit ISCC and FSAC enable
-flags. Set `storage.persistence.iscc.enabled: false` if unused. The
+An explicit `inMemory` override discards the learned history on every
+storage-process restart; the
+[persistent profile](../custom-values/buildbarn-values-persistent.yaml),
+applied after deployment values, selects the default again. Both profiles
+preserve explicit ISCC and FSAC enable flags. Set `storage.persistence.iscc.enabled: false` if unused. The
 [ephemeral opt-out](buildbarn-storage-operations.md#explicit-ephemeral-opt-out)
 deliberately discards learned history on storage-process restart.
 
@@ -47,9 +48,7 @@ Because the store is on by default, each persistence mode asks something of it:
 On a PVC-backed release, enabling a previously disabled ISCC or FSAC adds a
 claim to the storage StatefulSet's `volumeClaimTemplates`. Kubernetes cannot update that in place,
 and the chart refuses the upgrade before anything is applied, naming the added
-claim template. Upgrading a chart 0.9.9 release that never set
-`iscc.enabled` or `fsac.enabled` is the same change, because both were
-disabled by default there. An added claim name is not a rolling change. Follow
+claim template. An added claim name is not a rolling change. Follow
 [Recreate the Storage StatefulSet](buildbarn-storage-operations.md#recreate-the-storage-statefulset):
 its stopped recreation scales storage to zero, so every cache request fails
 until storage is back, and it describes what to do when storage cannot be
@@ -66,12 +65,6 @@ claim, which is again an added claim name; follow the same
 That claim's class is `storage.persistence.iscc.blockDevice.metadata.storageClassName`
 (default `premium-rwo`). Set it to a class whose volumes are lost together
 with the blocks class, or the index can outlive its blocks.
-
-This persistence-only change assumes the existing release already uses CDC.
-Upgrading a pre-CDC release also changes the ISCC object encoding and requires
-the coordinated [storage format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback),
-including a cold reset of any persistent ISCC history. The profile cannot
-convert that old history in place.
 
 The bundled [raw Local SSD overlay](../custom-values/buildbarn-values-local-ssd-block.yaml)
 persists all five stores on its provisioner's same-SSD metadata LV. These are the
@@ -106,7 +99,7 @@ The metadata mount must live on the same Local SSD storage as the blocks,
 with a readiness gate verifying the actual mount and a paired reset when the
 LVs/VG are replaced. `blockDevice.metadata.hostPath.path` has no default: the
 render fails without it. `type: Directory` is the chart default for every raw
-store's metadata directory (it was `DirectoryOrCreate` before chart 1.0.0).
+store's metadata directory.
 The kubelet does not create the directory, so a missing metadata mount fails
 the volume mount and the storage pod does not start, instead of an empty index
 being created on the boot disk. Pre-create the directory inside the mounted

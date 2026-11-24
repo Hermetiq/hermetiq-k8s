@@ -369,8 +369,8 @@
 {{- end -}}
 {{- end -}}
 {{/* --- CDC schema upgrade guardrails (render-time values & cluster lookup) --- */}}
-{{- $cdcGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#upgrading-configurations-to-cdc" -}}
-{{- $cutoverGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback" -}}
+{{- $cdcGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-buildbarn.md#upgrading-configurations-to-cdc" -}}
+{{- $recreateGuide := "https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset" -}}
 {{- /* Handover and reload require a fork built with the CDC CAS schema.
        Older fork images only support the pre-CDC configuration, with or
        without these features: turning them off is not enough while
@@ -502,7 +502,7 @@
 {{- if not (hasKey $renderedClaims "Error") -}}
 {{- $claimDifferences := include "buildbarn.storage.claimTemplateDifferences" (dict "live" (index (default (dict) (index $liveStorage "spec")) "volumeClaimTemplates") "rendered" (index $renderedClaims "claims")) | fromJsonArray -}}
 {{- if $claimDifferences -}}
-{{- fail (printf "live StatefulSet %s/storage has different volumeClaimTemplates than this release renders: %s. Kubernetes forbids changing volumeClaimTemplates in place, and Helm applies every other object of the release before that patch is refused, which leaves the release half-applied on the old StatefulSet. Stop storage first (scale statefulset/storage to 0 and wait for its pods to terminate), run `kubectl delete statefulset storage --namespace %s --cascade=orphan`, then run this upgrade again so the StatefulSet is recreated with the rendered templates. Existing PersistentVolumeClaims are kept as they are: a changed class or size only applies to claims that do not exist yet. The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check. Set upgradeChecks.skipStorageClaimTemplateCheck=true to skip it. See %s" $ns (join "; " $claimDifferences) $ns $cutoverGuide) -}}
+{{- fail (printf "live StatefulSet %s/storage has different volumeClaimTemplates than this release renders: %s. Kubernetes forbids changing volumeClaimTemplates in place, and Helm applies every other object of the release before that patch is refused, which leaves the release half-applied on the old StatefulSet. Stop storage first (scale statefulset/storage to 0 and wait for its pods to terminate), run `kubectl delete statefulset storage --namespace %s --cascade=orphan`, then run this upgrade again so the StatefulSet is recreated with the rendered templates. Existing PersistentVolumeClaims are kept as they are: a changed class or size only applies to claims that do not exist yet. The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check. Set upgradeChecks.skipStorageClaimTemplateCheck=true to skip it. See %s" $ns (join "; " $claimDifferences) $ns $recreateGuide) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

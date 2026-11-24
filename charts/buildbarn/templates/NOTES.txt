@@ -44,8 +44,8 @@ even when their indexes and checkpoint state are file-backed.
 WARNING: STORAGE CLASS MISMATCH: {{ $diagnostic }}
 {{- end }}
 Storage recovery requires matching blocks, indexes, and state to survive together.
-For the CDC cutover and volume-lifetime limits:
-https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#migrate-to-persistent-indexes
+For volume-lifetime limits:
+https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#what-survives-a-restart
 
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}

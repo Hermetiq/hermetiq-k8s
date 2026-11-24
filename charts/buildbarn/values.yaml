@@ -584,9 +584,9 @@ storage:
       # Size of the CAS blocks file in GiB. Must be smaller than `size` to leave
       # headroom for cdc-v1/keys.db, persistent state, and the shared CMS blocks
       # and index (2304 MiB by default) — typically ~10% smaller.
-      # CDC uses a separate cdc-v1 directory. volume-init refuses to start while
-      # legacy cas-keys.db, cas-blocks.db or persistent_state still exist; follow
-      # docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback.
+      # Stores live in a cdc-v1 directory. volume-init refuses to start while
+      # cas-keys.db, cas-blocks.db or persistent_state from a chart older than
+      # 1.0.0 still exist; follow docs/migrate-to-1.0.0-buildbarn.md.
       blocksSizeGi: 950
       # 7168 MiB / 66 B = ~114M indexable objects, ~2.1x the ~54.6M objects that
       # 885 GiB usable holds at keyLocationMapSizing.averageObjectSizeBytes.cas.

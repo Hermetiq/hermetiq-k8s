@@ -299,7 +299,7 @@ tests:
       - failedTemplate:
           errorPattern: 'The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check\.'
       - failedTemplate:
-          errorPattern: 'Set upgradeChecks\.skipStorageClaimTemplateCheck=true to skip it\. See https://github\.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model\.md#storage-format-cutover-and-rollback'
+          errorPattern: 'Set upgradeChecks\.skipStorageClaimTemplateCheck=true to skip it\. See https://github\.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations\.md#recreate-the-storage-statefulset'
 
   - it: accepts the 0.9.9 claim set when ISCC and FSAC stay disabled
     set:

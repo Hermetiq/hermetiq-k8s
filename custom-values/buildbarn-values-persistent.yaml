@@ -24,8 +24,8 @@
 # directory fails the volume mount instead of being created on the boot disk.
 # Do not override it with DirectoryOrCreate.
 #
-# Pre-CDC upgrades also require the explicit storage-format cutover; this
-# profile cannot preserve data encoded by an older Buildbarn version.
+# This profile cannot preserve data written by a release on a chart older
+# than 1.0.0; see docs/migrate-to-1.0.0-buildbarn.md.
 #
 # Only index modes change here. Existing enable flags (including optional
 # ISCC/FSAC), backends, volume modes, sizes, StorageClasses, paths, and resource
