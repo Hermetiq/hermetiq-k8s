@@ -1,3 +1,4 @@
+{{- $enforcePubAuthz := include "hermetiq-core.publisherEnforceProjectAuthorization" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -121,7 +122,7 @@ spec:
           env:
             - name: PROJECT_AUTHORIZATION_CONFIG
               value: {{ include "hermetiq-core.projectAuthorizationJSON" . | quote }}
-{{- with .Values.publisher.env }}
+{{- with omit (default (dict) .Values.publisher.env) "ENFORCE_PUB_AUTHZ" }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
 {{- with include "hermetiq-core.s3StorageEnv" (dict "root" $ "env" .Values.publisher.env) | trim }}
@@ -131,7 +132,7 @@ spec:
             mcp-http). The publisher sets no MCP variables, so bep-nats keeps
             MCP disabled, its default. */}}
             - name: ENFORCE_PUB_AUTHZ
-              value: "true"
+              value: {{ $enforcePubAuthz | quote }}
             - name: APP_MODE
               value: pub
             - name: HTTP_PORT

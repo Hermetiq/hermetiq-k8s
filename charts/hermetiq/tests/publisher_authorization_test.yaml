@@ -7,7 +7,7 @@ templates:
 values:
   - ../ci-values/ci.yaml
 tests:
-  - it: always enables publisher membership enforcement
+  - it: enables publisher membership enforcement by default
     template: templates/deployment-publisher.yaml
     asserts:
       - equal:
@@ -22,13 +22,96 @@ tests:
       - failedTemplate:
           errorPattern: publisher.enforceProjectAuthorization is not supported
 
-  - it: rejects a duplicate publisher enforcement environment entry
-    template: templates/validate.yaml
+  - it: accepts a string false override once without relaxing the publisher policy
     set:
       publisher.env.ENFORCE_PUB_AUTHZ: "false"
+      authorization.defaultAccess: none
+      authorization.serviceAccounts:
+        - issuer: https://ci.example.test/
+          subject: build-client
+          projectRoles:
+            project-a: [builder]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: ENFORCE_PUB_AUTHZ, value: "false"}
+          count: 1
+        template: templates/deployment-publisher.yaml
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: ENFORCE_PUB_AUTHZ, value: "true"}
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"none","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://ci.example.test/","projectRoles":{"project-a":["builder"]},"subject":"build-client"}]}'
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          value: '{"defaultAccess":"none","groupBindings":[],"instanceBindings":[],"mode":"enforced","serviceAccounts":[{"issuer":"https://ci.example.test/","projectRoles":{"project-a":["builder"]},"subject":"build-client"}]}'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")].value
+          value: https://oidc.ci.test/.well-known/jwks.json
+        template: templates/deployment-publisher.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_ISSUER")].value
+          value: https://oidc.ci.test/
+        template: templates/deployment-publisher.yaml
+
+  - it: preserves an explicit YAML boolean false instead of applying the true default
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: ENFORCE_PUB_AUTHZ, value: "false"}
+          count: 1
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+
+  - it: accepts an explicit true override without duplicate entries
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: ENFORCE_PUB_AUTHZ, value: "true"}
+          count: 1
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+
+  - it: resolves templated overrides consistently for the flag and publisher policy
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: '{{ printf "%s" "false" }}'
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: ENFORCE_PUB_AUTHZ, value: "false"}
+          count: 1
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+
+  - it: rejects an invalid enforcement value instead of silently disabling authorization
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: disabled
     asserts:
       - failedTemplate:
-          errorPattern: publisher.env must not set ENFORCE_PUB_AUTHZ; this Helm chart always enforces publisher project authorization
+          errorPattern: publisher.env.ENFORCE_PUB_AUTHZ must resolve to true or false
+
+  - it: rejects an empty enforcement value
+    template: templates/deployment-publisher.yaml
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: publisher.env.ENFORCE_PUB_AUTHZ must resolve to true or false
 
   - it: preserves auto URL precedence over local keys
     template: templates/deployment-publisher.yaml

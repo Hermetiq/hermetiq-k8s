@@ -24,6 +24,23 @@ tests:
           value: "true"
         template: templates/deployment-publisher.yaml
 
+  - it: keeps API and browser authorization enforced when publisher enforcement is disabled
+    set:
+      publisher.env.ENFORCE_PUB_AUTHZ: false
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "PROJECT_AUTHORIZATION_CONFIG")].value
+          pattern: '"mode":"enforced"'
+        template: templates/deployment-api.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "BROWSER_AUTHORIZATION")].value
+          value: "true"
+        template: templates/deployment-dashboard.yaml
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_PROJECT_AUTHORIZATION_MODE")].value
+          value: enforced
+        template: templates/deployment-dashboard.yaml
+
   - it: activates the same-origin BFF and authoritative /auth/me by default
     template: templates/deployment-dashboard.yaml
     asserts:
