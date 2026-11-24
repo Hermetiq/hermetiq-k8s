@@ -14,6 +14,12 @@ Hermetiq, BB Worker Operator and Buildbarn charts.
   maps cannot disable or replace it. A valid JWT alone no longer permits BEP
   publication: the publisher requires `write:bep` on the selected project, and
   Viewer access cannot publish builds.
+  Starting with chart `1.0.1`, operators can set
+  `publisher.env.ENFORCE_PUB_AUTHZ: "false"` to allow authenticated BEP callers
+  to publish without project-role or credential-scope grants. Authentication
+  and signed project restrictions still apply, and API/dashboard authorization
+  stays enforced. This requires a publisher image newer than `v1.0.0` that
+  supports disabling publishing enforcement independently; see the [publisher override](../charts/hermetiq/README.md#project-access-policy).
 - **The dashboard backend-for-frontend and oauth2-proxy are required.** Browser
   API requests go through the dashboard's own origin and session.
 - **`app.adminEmails` no longer grants installation administration.**

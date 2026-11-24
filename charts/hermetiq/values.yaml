@@ -1185,8 +1185,8 @@ api:
     enabled: true
     maxUnavailable: 1
 
-# Shared project authorization policy for API and publisher. This chart always
-# enforces the policy; configure builder grants before sending builds.
+# Project authorization policy for API and publisher. Enforcement is enabled
+# by default; publisher.env.ENFORCE_PUB_AUTHZ controls publisher enforcement only.
 authorization:
   # Authenticated humans may retain automatic Viewer access to every project.
   # Service accounts receive only their explicit projectRoles.
@@ -1213,8 +1213,12 @@ authorization:
 
 publisher:
   replicas: 4
-  # BEP ingestion always requires write:bep membership for the selected project.
   # Additional environment variables for the publisher deployment.
+  # ENFORCE_PUB_AUTHZ defaults to "true". Set it to "false" to skip publisher
+  # project-role and credential-scope checks; authentication and signed project
+  # restrictions still apply. API and browser authorization remain enforced.
+  # env:
+  #   ENFORCE_PUB_AUTHZ: "false"
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
   # for the publisher pod. null preserves the ServiceAccount default.

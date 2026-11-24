@@ -984,7 +984,13 @@
       "properties": {
         "env": {
           "type": "object",
-          "description": "Additional scalar environment variables for the publisher core. With app.grpcAuthUserProvider=jwks and publisher.jwks.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here."
+          "description": "Additional scalar environment variables for the publisher core. ENFORCE_PUB_AUTHZ defaults to true and may be overridden with false without disabling API/browser authorization. With app.grpcAuthUserProvider=jwks and publisher.jwks.enabled=false, validation requires exactly one GRPC_AUTH_JWKS source plus GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE here.",
+          "properties": {
+            "ENFORCE_PUB_AUTHZ": {
+              "type": ["boolean", "string"],
+              "description": "Publisher project-role and credential-scope enforcement. Defaults to true; strings may use Helm templates but must resolve to true or false."
+            }
+          }
         },
         "automountServiceAccountToken": {
           "type": [

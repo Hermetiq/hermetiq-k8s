@@ -14,8 +14,10 @@ annotations:
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Restore publisher.env.ENFORCE_PUB_AUTHZ overrides for authenticated BEP publishing without project-role grants, defaulting to true while keeping project authorization enforced; disabling requires a compatible publisher image"
     - kind: changed
-      description: "Breaking: project authorization is always enforced. Access comes from viewer, builder and admin roles granted through authorization.groupBindings, authorization.serviceAccounts and project memberships; publishing builds needs the builder role, and app.adminEmails no longer grants admin"
+      description: "Breaking: API and dashboard project authorization is always enforced. Access comes from viewer, builder and admin roles granted through authorization.groupBindings, authorization.serviceAccounts and project memberships; publisher enforcement defaults to enabled, and app.adminEmails no longer grants admin"
     - kind: changed
       description: "Breaking: the dashboard calls the API through its own host behind oauth2-proxy, which must stay enabled, and dashboard.oauth2Proxy.emailDomains is required"
     - kind: changed
