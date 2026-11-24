@@ -35,15 +35,15 @@ annotations:
     - kind: fixed
       description: "Key-location-map recording rules and alerts cover the storage pods only and read both the CDC and the legacy metric names"
     - kind: security
-      description: "Turn the scheduler admin UI routes (ingress.rbeWeb, gateway.httpRoutes.rbeWeb) off by default, and fail the render when one would publish :7982 while scheduler.adminHttpServers.authenticationPolicy is allow; set scheduler.adminHttpServers.allowUnauthenticatedRoute=true to keep such a route"
+      description: "Breaking: Turn the scheduler admin UI routes (ingress.rbeWeb, gateway.httpRoutes.rbeWeb) off by default, and fail the render when one would publish :7982 while scheduler.adminHttpServers.authenticationPolicy is allow; set scheduler.adminHttpServers.allowUnauthenticatedRoute=true to keep such a route. A --reuse-values upgrade from a release that still carries the old enabled default is refused until the route is disabled; the starter values disable both routes"
     - kind: security
       description: "Starter values enable the storage and scheduler NetworkPolicies, and the chart README documents security.grpcMtls as the step that also keeps build actions in worker pods off :8981 and :8983; the chart defaults stay off"
     - kind: added
-      description: "frontend.jwks.allowedClientIds and clientIdClaim bind frontend JWTs to named clients, ANDed onto the claims expression; the starter values bind to the Bazel machine-to-machine client"
+      description: "frontend.jwks.allowedClientIds and clientIdClaim bind frontend JWTs to named clients, ANDed onto the claims expression; the starter values bind to the Bazel machine-to-machine client; the render refuses the starter's <bazel-m2m-client-id> placeholder until it is replaced"
     - kind: fixed
       description: "Reject mistyped scheduler admin opt-outs and client binding settings, and refuse frontend.jsonnet overrides that would silently discard allowedClientIds; document the write authorizers needed to enforce the binding"
     - kind: changed
-      description: "With scheduler.networkPolicy enabled, the admin UI :7982 admits only scheduler.networkPolicy.adminPeers (none by default); the render fails when an rbeWeb route is enabled with no adminPeers"
+      description: "Breaking: With scheduler.networkPolicy enabled, the admin UI :7982 admits only scheduler.networkPolicy.adminPeers (none by default); the render fails when an rbeWeb route is enabled with no adminPeers"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

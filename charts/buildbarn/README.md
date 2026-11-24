@@ -1404,6 +1404,15 @@ frontend:
     mode: requireCanWriteToCache
 ```
 
+Before you enable it, find every client that writes or executes, CI and
+developer workstations alike: decode a token from each Bazel credential helper
+and read its client claim
+([command](../../docs/upgrade-security-defaults.md#buildbarn)). List every ID,
+and set `clientIdClaim` if the claim is not `azp`. A missing ID does not fail
+the render: the frontend starts, reads keep working, and that client's uploads
+and `Execute` calls are denied. The render does refuse the starter values'
+`<bazel-m2m-client-id>` placeholder.
+
 Keep your `issuer`, `audience`, and JWKS configuration alongside this block.
 Client binding controls which tokens receive `canWriteToCache`; the three
 authorizers enforce it. Any authorizer left at its chart default, `allow`,
@@ -3440,7 +3449,10 @@ the order across charts. Before applying one:
 
 A release on a chart older than `1.0.0` follows the
 [Buildbarn migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-buildbarn.md)
-instead.
+instead. Before upgrading an existing `1.0.0` release, read
+[Upgrading to the hardened security defaults](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/upgrade-security-defaults.md#buildbarn):
+`--reuse-values` keeps the old scheduler admin route default, which the render
+now refuses.
 
 The repository's
 [Uninstalling](https://github.com/Hermetiq/hermetiq-k8s#uninstalling) section

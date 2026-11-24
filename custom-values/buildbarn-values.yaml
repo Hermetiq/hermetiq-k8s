@@ -239,3 +239,10 @@ gateway:
       # workers, and the render refuses to publish it while
       # scheduler.adminHttpServers.authenticationPolicy is allow.
       enabled: false
+
+ingress:
+  rbeWeb:
+    # Also off for the Contour and Ingress providers. Stating it here lets
+    # `helm upgrade --reuse-values -f buildbarn-values.yaml` from a release
+    # that still has the old enabled default pass the same render check.
+    enabled: false

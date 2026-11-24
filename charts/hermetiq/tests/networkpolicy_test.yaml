@@ -51,6 +51,13 @@ tests:
       - failedTemplate:
           errorPattern: "grafana.networkPolicy.podSelector must set matchLabels or matchExpressions"
 
+  - it: refuses an empty Grafana podSelector map instead of using the default
+    set:
+      grafana.networkPolicy.podSelector: {}
+    asserts:
+      - failedTemplate:
+          errorPattern: "grafana.networkPolicy.podSelector must set matchLabels or matchExpressions"
+
   - it: renders no Grafana NetworkPolicy without the Grafana oauth2-proxy
     set:
       grafana.oauth2Proxy.enabled: false

@@ -20,6 +20,44 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
 EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
 {{- end }}
 
+{{ $grafanaPolicy := .Values.grafana.networkPolicy | default dict -}}
+{{ if and (eq (include "hermetiq-core.grafanaOauth2ProxyEnabled" .) "true") (dig "enabled" true $grafanaPolicy) -}}
+GRAFANA NETWORKPOLICY — grafana-from-oauth2-proxy selects the Grafana pods in
+{{ $ns }} and admits only grafana-oauth2-proxy and grafana.networkPolicy.scrapersFrom
+(default: vmagent in this namespace). Add any other in-cluster Grafana client,
+such as another Prometheus scraper or a provisioning job, to scrapersFrom, or
+set grafana.networkPolicy.enabled=false if something else restricts who can
+reach Grafana.
+{{- if not .Values.gateway.routes.grafanaEnabled }}
+
+WARNING: gateway.routes.grafanaEnabled=false, so grafana-oauth2-proxy is not
+deployed and the policy admits only the scrapers. A Grafana in {{ $ns }} that
+users reach without the proxy is now unreachable. If you run Grafana without
+auth.proxy, set grafana.oauth2Proxy.enabled=false (or
+grafana.networkPolicy.enabled=false) to drop the policy.
+{{- end }}
+
+{{ end -}}
+{{ if eq $provider "ingress" -}}
+{{- if ne (toString .Values.ingress.className) "nginx" }}
+WARNING: BEP INGRESS — ingress.className is "{{ .Values.ingress.className }}". The BEP route
+matches the Build Event Service path with pathType ImplementationSpecific,
+which ingress-nginx treats as a prefix. GCE and AWS ALB ingress controllers
+treat it as an exact path and answer Bazel's build-event calls with 404. Use
+ingress-nginx under this class name, or routing.provider=gateway.
+
+{{ end -}}
+{{- if not .Values.ingress.apiWeb.stripIdentityHeaders }}
+API-WEB HEADERS — ingress.apiWeb.stripIdentityHeaders is false, so the api-web
+Ingress forwards caller-supplied identity headers (X-Forwarded-User,
+X-Hermetiq-Project-Id and the others in gateway.routes.apiWebRemoveRequestHeaders).
+Clear them in the ingress-nginx controller's proxy-set-headers ConfigMap, or
+set stripIdentityHeaders=true after the controller sets
+allow-snippet-annotations: "true" and annotations-risk-level: Critical;
+without those settings its admission webhook rejects the upgrade.
+
+{{ end -}}
+{{ end -}}
 {{ if and (eq $provider "gateway") .Values.gateway.dashboardGrpcWeb.enabled -}}
 DASHBOARD gRPC-WEB — dashboard queries depend on the EnvoyPatchPolicy in this
 release. Envoy Gateway ignores it unless extensionApis.enableEnvoyPatchPolicy is

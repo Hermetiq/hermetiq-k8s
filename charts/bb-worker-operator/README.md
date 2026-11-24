@@ -176,7 +176,9 @@ configuration up when its Pods next restart.
 
 An installation on a chart older than 1.0.0 follows the
 [operator migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-bb-worker-operator.md)
-instead.
+instead. Adopting the starter values' namespace mode and plain-HTTP metrics on
+an existing installation is covered in
+[Upgrading to the hardened security defaults](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/upgrade-security-defaults.md#bb-worker-operator).
 
 For a rendered install bundle, pass `--include-crds` to `helm template` as shown
 in [Local chart development](#local-chart-development); Helm omits CRDs from

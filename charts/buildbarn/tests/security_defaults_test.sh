@@ -20,7 +20,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 chart="$(cd "${here}/.." && pwd)"
 repo="$(cd "${chart}/../.." && pwd)"
 ci_values="${chart}/ci-values/ci.yaml"
-starter="${repo}/custom-values/buildbarn-values.yaml"
+starter_shipped="${repo}/custom-values/buildbarn-values.yaml"
+# The shipped starter carries a client ID placeholder the chart refuses; the
+# other checks render it with that placeholder filled in.
+starter="$(mktemp)"
+trap 'rm -f "${starter}"' EXIT
+sed 's/<bazel-m2m-client-id>/bazel-ci/' "${starter_shipped}" > "${starter}"
 providers=(gateway gateway-httproute-only contour ingress none)
 
 failures=0
@@ -107,6 +112,8 @@ expect_render_failure "gateway rbeWeb with allow" "${guard}" \
 expect_render_failure "httproute-only rbeWeb with empty mode" "${guard}" \
   --set routing.provider=gateway-httproute-only --set gateway.httpRoutes.rbeWeb.enabled=true \
   --set scheduler.adminHttpServers.authenticationPolicy.mode=
+expect_render_failure "starter with its client ID placeholder unfilled" \
+  "is a placeholder from the starter values" -f "${starter_shipped}"
 expect_render_failure "starter with gateway rbeWeb" "${guard}" \
   -f "${starter}" --set gateway.httpRoutes.rbeWeb.enabled=true
 
@@ -190,7 +197,7 @@ expect_rule "adminPeers admits only the listed peer to :7982" "${rules}" \
 
 # --- frontend JWT client binding ---------------------------------------------
 expect_output "starter binds the Bazel client" \
-  '== `true`) && contains(`[\"<bazel-m2m-client-id>\"]`, payload.azp)' -f "${starter}"
+  '== `true`) && contains(`[\"bazel-ci\"]`, payload.azp)' -f "${starter}"
 expect_output "issuer and audience without a binding render unchanged" \
   "\"payload.iss == 'https://i/' && contains(to_array(payload.aud), 'aud')\"" \
   --set frontend.jwks.enabled=true --set frontend.jwks.issuer=https://i/ --set frontend.jwks.audience=aud

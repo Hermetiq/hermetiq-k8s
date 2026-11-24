@@ -3265,7 +3265,10 @@ and [Uninstalling](https://github.com/Hermetiq/hermetiq-k8s#uninstalling)
 lists what Helm leaves behind. An installation on a chart older than `1.0.0`
 follows the
 [Hermetiq migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-hermetiq.md)
-instead. Two points are specific to this chart:
+instead. Read
+[Upgrading to the hardened security defaults](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/upgrade-security-defaults.md#hermetiq)
+before upgrading an existing `1.0.0` installation: the BEP route, api-web
+headers and Grafana NetworkPolicy change what reaches the cluster. Two points are specific to this chart:
 
 - The schema bootstrap hook runs on every upgrade and applies migrations
   before the workloads roll. Back up PostgreSQL first.

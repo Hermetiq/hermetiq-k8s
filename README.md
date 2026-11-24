@@ -508,6 +508,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 | [`docs/image-integrity.md`](docs/image-integrity.md) | Public signing keys and Cosign verification for charts and container images |
 | [`docs/migrate-to-1.0.0.md`](docs/migrate-to-1.0.0.md) | Moving an installation from an earlier release to the `1.0.0` chart bundle |
+| [`docs/upgrade-security-defaults.md`](docs/upgrade-security-defaults.md) | What the hardened security defaults after `1.0.0` change for an existing installation, and what to set before upgrading |
 
 ## Shared chart conventions
 
@@ -547,7 +548,10 @@ assume `global.imageRegistry` covers the entire stack.
 ## Upgrading
 
 An installation on a release older than `1.0.0` follows
-[Migrating to 1.0.0](docs/migrate-to-1.0.0.md) instead of this section.
+[Migrating to 1.0.0](docs/migrate-to-1.0.0.md) instead of this section. An
+installation on `1.0.0` reads
+[Upgrading to the hardened security defaults](docs/upgrade-security-defaults.md)
+before its next upgrade.
 
 When a new chart version is released:
 

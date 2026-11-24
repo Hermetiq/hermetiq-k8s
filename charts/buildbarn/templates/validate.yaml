@@ -377,6 +377,9 @@
 {{- if not (and (kindIs "string" $id) $id) -}}
 {{- fail (printf "frontend.jwks.allowedClientIds entries must be non-empty strings; got %v" $id) -}}
 {{- end -}}
+{{- if regexMatch "^<.*>$" $id -}}
+{{- fail (printf "frontend.jwks.allowedClientIds entry %q is a placeholder from the starter values. Replace it with the client ID of every Bazel client that writes or executes (CI and developer credential helpers often differ): decode a token from each and copy its %s claim, the claim frontend.jwks.clientIdClaim names" $id (default "azp" $jwks.clientIdClaim)) -}}
+{{- end -}}
 {{- if or (contains "`" $id) (contains "\\" $id) (contains "\"" $id) (regexMatch "[[:cntrl:]]" $id) -}}
 {{- fail (printf "frontend.jwks.allowedClientIds entry %q contains a quote, backtick, backslash or control character" $id) -}}
 {{- end -}}

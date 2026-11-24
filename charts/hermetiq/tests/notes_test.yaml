@@ -60,3 +60,65 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: 'DASHBOARD gRPC-WEB'
+
+  # The Grafana NetworkPolicy renders whenever grafana.oauth2Proxy.enabled is
+  # true, even without the public route, so the notes say who it admits.
+  - it: describes the Grafana NetworkPolicy and how to admit other clients
+    asserts:
+      - matchRegexRaw:
+          pattern: 'GRAFANA NETWORKPOLICY'
+      - matchRegexRaw:
+          pattern: 'grafana\.networkPolicy\.scrapersFrom'
+      - notMatchRegexRaw:
+          pattern: 'grafana-oauth2-proxy is not\s+deployed'
+
+  - it: warns that the Grafana policy admits only scrapers when the proxy is not deployed
+    set:
+      gateway.routes.grafanaEnabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: gateway\.routes\.grafanaEnabled=false'
+      - matchRegexRaw:
+          pattern: 'grafana\.oauth2Proxy\.enabled=false'
+
+  - it: says nothing about the Grafana policy when it is not rendered
+    set:
+      grafana.networkPolicy.enabled: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'GRAFANA NETWORKPOLICY'
+
+  # The BEP Ingress path is a prefix only on ingress-nginx.
+  - it: warns when the BEP Ingress uses a class other than nginx
+    set:
+      routing.provider: ingress
+      ingress.className: gce
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: BEP INGRESS'
+      - matchRegexRaw:
+          pattern: 'ingress\.className is "gce"'
+
+  - it: does not warn about the BEP Ingress path on ingress-nginx
+    set:
+      routing.provider: ingress
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'BEP INGRESS'
+
+  - it: reminds Ingress installs that api-web identity headers pass through
+    set:
+      routing.provider: ingress
+    asserts:
+      - matchRegexRaw:
+          pattern: 'API-WEB HEADERS'
+      - matchRegexRaw:
+          pattern: 'annotations-risk-level: Critical'
+
+  - it: drops the api-web header reminder once Ingress strips them
+    set:
+      routing.provider: ingress
+      ingress.apiWeb.stripIdentityHeaders: true
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'API-WEB HEADERS'
