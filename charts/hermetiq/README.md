@@ -1015,9 +1015,14 @@ Envoy-specific policies above.
 `gateway.timeouts` sets Envoy Gateway timeouts on the chart's gRPC, web API,
 dashboard, and MCP routes. It applies to `routing.provider: gateway` only and is on by
 default. Without it, Envoy applies its 15-second default route timeout. The
-other providers already bound the same backends: Contour through
-`contour.httpProxy.responseTimeout` and GKE through
-`gateway.gke.backendPolicy.timeoutSec`, both 300 seconds.
+other providers bound the gRPC routes and the dashboard route with one
+setting each, 300 seconds by default: Contour through
+`contour.httpProxy.responseTimeout`, nginx Ingress through
+`ingress.grpc.proxyReadTimeoutSeconds` and `proxySendTimeoutSeconds`, and GKE
+through `gateway.gke.backendPolicy.timeoutSec`. The dashboard route is
+included because the dashboard's own API calls arrive on it. With the
+assistant enabled, the API and dashboard bounds are raised to at least
+`assistant.streamTimeoutSeconds` on every provider.
 
 | Route | `requestTimeout` | `maxStreamDuration` |
 |---|---|---|

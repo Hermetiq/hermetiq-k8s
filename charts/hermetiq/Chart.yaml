@@ -27,7 +27,7 @@ annotations:
     - kind: added
       description: "With routing.provider=gateway an EnvoyPatchPolicy keeps dashboard gRPC-web intact. Envoy Gateway needs extensionApis.enableEnvoyPatchPolicy; set gateway.dashboardGrpcWeb.enabled=false for other Gateway controllers"
     - kind: fixed
-      description: "Dashboard API calls and assistant streams get the configured Envoy Gateway route timeout and are no longer cut at the oauth2-proxy 30-second upstream default"
+      description: "Dashboard API calls and assistant streams get the API route timeout on every routing provider and are no longer cut at the oauth2-proxy 30-second upstream default"
     - kind: fixed
       description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
 keywords:

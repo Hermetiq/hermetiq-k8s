@@ -475,7 +475,8 @@ gateway:
     backendPolicy:
       enabled: true
       namePrefix: bp
-      # Backend service timeout in seconds for gRPC backends.
+      # Backend service timeout in seconds for the gRPC backends and the
+      # dashboard Service, which carries the dashboard's own API calls.
       timeoutSec: 300
   healthChecks:
     # Render Envoy Gateway BackendTrafficPolicy resources in gateway mode so
@@ -664,6 +665,8 @@ contour:
   ingressClassName: contour
   httpProxy:
     loadBalancerPolicy: Cookie
+    # Response timeout of the gRPC routes and of the dashboard route, which
+    # carries the dashboard's own API calls.
     responseTimeout: "300s"
   ingress:
     proxyBodySize: "50m"
@@ -734,6 +737,8 @@ ingress:
   enabled: true
   className: nginx
   proxyBodySize: "50m"
+  # Read and send timeouts of the gRPC routes and of the dashboard route,
+  # which carries the dashboard's own API calls.
   grpc:
     proxyReadTimeoutSeconds: "300"
     proxySendTimeoutSeconds: "300"

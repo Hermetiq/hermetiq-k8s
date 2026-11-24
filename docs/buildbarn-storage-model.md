@@ -510,9 +510,8 @@ custom common libraries, `scheduler.actionRouter.custom`, and the ConfigMaps
 referenced by `RbeWorker.spec.config.files` or `config.generated`. The chart
 refuses the upgrade when it finds pre-CDC configuration in any of them;
 [What the upgrade checks cover](#what-the-upgrade-checks-cover) lists what it
-reads and what it cannot detect. Migrate custom files before upgrading. This
-table is the manual path; the migration tool described after it makes the same
-edits where you have a `bep-nats` build that includes it:
+reads and what it cannot detect. Migrate custom files by hand before
+upgrading, using this table:
 
 | Old (pre-CDC) | New (CDC) |
 | --- | --- |
@@ -529,17 +528,7 @@ edits where you have a `bep-nats` build that includes it:
 | `adminRoutePrefix` (scheduler) | `deprecatedAdminRoutePrefix` (or remove it) |
 | `zstdPool` (scheduler, worker, noop worker, remote asset) | Remove it (still supported by `bb-storage` and `bb-portal`). |
 
-The migration command is `bep-nats buildbarn-config migrate`. It edits local files, not a live namespace. The `v0.9.8` `bep-nats` image does not have the `buildbarn-config` subcommand. Ask Hermetiq for a build that includes it, with `--storage-cms=shared-cas` and automatic `cdc-v1/` path isolation, and check the one you have: `bep-nats buildbarn-config migrate --help` prints the usage text and exits 0 on a build that has the subcommand, while an older build ignores the arguments and tries to start the `bep-nats` service. Without such a build, make the edits by hand from the table above. Keep a backup of your values and custom configs, and render the target chart with your actual values into a local `target-chart` directory. Copy mounted worker ConfigMaps into the input set too; an `RbeWorker` references their names rather than containing their file contents.
-
-For example, with the compatible binary on `PATH` and custom files in `custom-configs`:
-
-```sh
-bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
-bep-nats buildbarn-config migrate --storage-cms=shared-cas --chart-dir target-chart custom-configs
-bep-nats buildbarn-config migrate --check --storage-cms=shared-cas --chart-dir target-chart custom-configs
-```
-
-The first check exits 1 when changes are needed; the write and final check must exit 0. Exit 2 needs manual attention. Inspect the diff and apply the migrated files to your values/ConfigMaps before `helm upgrade`. Confirm all store paths (CAS, shared CMS, AC, ISCC, FSAC) use `cdc-v1/` on their parent mounts and follow the explicit reset below so legacy files are retired before starting CDC storage. Verification checks configuration, not available disk space or live startup. No Docker connection to Kubernetes is needed: if using Docker, mount these local input and rendered-chart directories into the container and invoke the same command there.
+Keep a backup of your values and custom configs before editing. Include the worker ConfigMaps that pools mount: an `RbeWorker` references them by name and does not contain their files. In custom storage configuration, put every store path (CAS, shared CMS, AC, ISCC, FSAC) under `cdc-v1/` on its parent mount, and follow the explicit reset below so legacy files are retired before CDC storage starts. To check the result, run the upgrade with `--dry-run=server`: it runs the chart's checks, including the ones that read the cluster, and applies nothing. Those checks read configuration as text; they do not prove that a component starts.
 
 The CDC cutover starts cold. An earlier lab run reused legacy files and observed 0/2571 hits on the first build and 2571/2571 on the repeat, with a data-integrity error logged once per node. That experiment does not establish a safe in-place upgrade: the chart now refuses legacy files and requires the explicit [storage cutover](#storage-format-cutover-and-rollback) below. Budget for cache refill; do not bypass the guard based on those lab results.
 
