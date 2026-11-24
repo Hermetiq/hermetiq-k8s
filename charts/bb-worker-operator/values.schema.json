@@ -81,10 +81,6 @@
         }
       }
     },
-    "buildbarnCdcCompatible": {
-      "type": "boolean",
-      "description": "Declare CDC compatibility for a verified custom operator image; the default pinned digest is recognized automatically."
-    },
     "imagePullSecrets": {
       "type": "array"
     },

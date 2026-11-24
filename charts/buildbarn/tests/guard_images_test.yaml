@@ -164,12 +164,6 @@ tests:
   - it: accepts an RbeWorker worker pin stamped 20261102
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -229,12 +223,6 @@ tests:
   - it: accepts digest-only and undated RbeWorker pins because they cannot be classified
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -291,12 +279,6 @@ tests:
   - it: ignores a pre-CDC spec.images.runnerInstaller when the pool turns the installer off
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:

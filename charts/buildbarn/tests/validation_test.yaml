@@ -717,12 +717,6 @@ tests:
   - it: does not scan unrelated keys omitted from the worker projection
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -793,12 +787,6 @@ tests:
             workerImage: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
             common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -888,12 +876,6 @@ tests:
           data:
             common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -934,12 +916,6 @@ tests:
   - it: ignores legacy chart ConfigMap data that this upgrade replaces
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -980,12 +956,6 @@ tests:
   - it: ignores an inherited runner installer image when the installer is disabled
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -1005,80 +975,6 @@ tests:
               data:
                 common.libsonnet: "{}"
                 runnerInstallerImage: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
-    asserts:
-      - notFailedTemplate: {}
-
-  # Operator: one per cluster. upgradeChecks.operatorNamespace points at it;
-  # the mock lookup stands in for that namespace's Deployments.
-  - it: rejects the bb-worker-operator release that runs today (v0.3.13)
-    set:
-      upgradeChecks.operatorNamespace: hermetiq
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                labels:
-                  helm.sh/chart: bb-worker-operator-0.3.12
-                  app.kubernetes.io/version: v0.3.13
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment hermetiq/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
-
-  - it: rejects operator chart version labels without image compatibility evidence
-    set:
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                labels:
-                  helm.sh/chart: bb-worker-operator-1.0.0
-                  app.kubernetes.io/version: v0.3.14
-            - metadata:
-                name: bb-worker-operator-controller-manager
-                labels:
-                  app.kubernetes.io/version: v0.4.0
-    asserts:
-      - failedTemplate:
-          errorPattern: 'has no hermetiq.com/cdc-compatible=true declaration for its operator image'
-
-  - it: accepts an operator annotated as CDC-compatible regardless of version
-    set:
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
-                labels:
-                  app.kubernetes.io/version: bb-upgrade-22b7d82
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: fails closed when the operator version cannot be read
-    set:
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                labels:
-                  helm.sh/chart: bb-worker-operator-0.3.12
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment .*/bb-worker-operator has no hermetiq.com/cdc-compatible=true declaration for its operator image'
-
-  - it: ignores unrelated Deployments in the operator namespace
-    set:
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: keda-operator
-                labels:
-                  app.kubernetes.io/version: 2.19.0
     asserts:
       - notFailedTemplate: {}
 
@@ -1219,36 +1115,9 @@ tests:
       - failedTemplate:
           errorPattern: 'storage\.persistence\.cms: key-location map is too small .* 264 MiB usable \(33 of 33 blocks\)'
 
-  # upgradeChecks.operatorNamespace is left empty here, so the operator is
-  # looked for in the release namespace; upgrade_lookup_test.yaml covers a
-  # configured operator namespace through the real lookup path.
-  - it: rejects live RbeWorkers when no bb-worker-operator is found in the release namespace
+  - it: accepts live RbeWorker with CDC-era pinned images
     set:
       _testLookup:
-        rbeWorkers:
-          items:
-            - metadata:
-                name: worker-default
-              spec:
-                images:
-                  runner: example.com/runner:latest
-                  worker: ghcr.io/buildbarn/bb-worker:20261113T075319Z-f22e022
-                  runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20261113T075319Z-f22e022
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live RbeWorker resources exist in namespace .*, but no bb-worker-operator Deployment was found'
-
-  - it: accepts live RbeWorker with CDC-era pinned images and compatible operator
-    set:
-      _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: custom-operator-name
-                labels:
-                  helm.sh/chart: bb-worker-operator-1.0.0
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:

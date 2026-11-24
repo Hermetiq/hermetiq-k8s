@@ -7,20 +7,16 @@ icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
 version: 1.0.0
-appVersion: "v0.3.14"
+appVersion: "v1.0.0"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts. It follows 0.3.12 and deploys operator v0.3.14"
-    - kind: added
-      description: "Generated worker configuration follows the Buildbarn chart: the CDC chunkStorage and chunkMappingStorage blobstore when common.libsonnet uses it, and the pre-CDC blobstore otherwise"
+      description: "Breaking: operator v1.0.0 generates worker configuration for Buildbarn's CDC storage only. Run it with the Buildbarn 1.0.0 chart and upgrade the two in one maintenance window; against a pre-CDC Buildbarn, workers stop at startup with an error naming the cause"
     - kind: changed
       description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap. Apply the updated CRD before upgrading"
-    - kind: added
-      description: "The Deployment declares hermetiq.com/cdc-compatible for the pinned image digest, which the Buildbarn 1.0.0 chart requires; custom images need buildbarnCdcCompatible=true"
     - kind: changed
-      description: "Upgrading restarts every generated-config worker pool once"
+      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts and follows 0.3.12. The default image is referenced by tag; its digest is resolved when the chart is published"
 keywords:
   - buildbarn
   - bazel

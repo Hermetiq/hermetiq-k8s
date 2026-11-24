@@ -168,12 +168,6 @@ tests:
   - it: accepts a copy of the chart worker common.libsonnet with its chunkCache overlay
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -218,12 +212,6 @@ tests:
   - it: accepts an overlay that only merges a CDC field into contentAddressableStorage
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -267,22 +255,14 @@ tests:
       - failedTemplate:
           errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
 
-  # --- Dual-schema files ----------------------------------------------------------
-  # Excerpt of the worker-common.libsonnet that bb-worker-operator embeds
+  # --- The operator's worker-common.libsonnet -----------------------------------
+  # Excerpt of the worker-common.libsonnet that bb-worker-operator 1.0.0 embeds
   # (internal/controller/rbeworker_controller.go, generatedWorkerCommonLibsonnet).
-  # It tests common.libsonnet for chunkStorage and emits the CDC blobstore
-  # when it is there and the pre-CDC one otherwise, so its else branch names
-  # removed fields without being pre-CDC configuration. A pool that projects
-  # its own copy through commonItems must pass.
-  - it: accepts the operator's dual-schema worker-common.libsonnet projected by a pool
+  # It generates the CDC blobstore only and names no removed field, so a pool
+  # that projects its own copy through commonItems must pass.
+  - it: accepts the operator's built-in worker-common.libsonnet projected by a pool
     set:
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -306,11 +286,11 @@ tests:
                   {
                     workerConfig(config):: (
                       local casMountPath = if std.objectHas(config, 'casMountPath') && config.casMountPath != '' then config.casMountPath else '/storage-worker-cas';
-                      local isCDC = std.objectHas(common.blobstore.contentAddressableStorage, 'chunkStorage');
-                      local casConfig = if isCDC then {
+                      local commonCAS = common.blobstore.contentAddressableStorage;
+                      local casConfig = {
                         chunkStorage: {
                           readCaching: {
-                            slow: common.blobstore.contentAddressableStorage.chunkStorage,
+                            slow: commonCAS.chunkStorage,
                             fast: {
                               'local': {
                                 keyLocationMap: {
@@ -344,60 +324,28 @@ tests:
                             replicator: { deduplicating: { 'local': {} } },
                           },
                         },
-                        chunkMappingStorage: common.blobstore.contentAddressableStorage.chunkMappingStorage,
-                        cdcParameterCache: if std.objectHas(common.blobstore.contentAddressableStorage, 'cdcParameterCache') then
-                          common.blobstore.contentAddressableStorage.cdcParameterCache
+                        chunkMappingStorage: commonCAS.chunkMappingStorage,
+                        cdcParameterCache: if std.objectHas(commonCAS, 'cdcParameterCache') then
+                          commonCAS.cdcParameterCache
                         else {
                           cacheSize: 1000,
                           cacheDuration: '60s',
                           cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
                         },
-                        [if std.objectHas(common.blobstore.contentAddressableStorage, 'chunkCache') then 'chunkCache']: common.blobstore.contentAddressableStorage.chunkCache,
-                      } else {
-                        readCaching: {
-                          slow: common.blobstore.contentAddressableStorage,
-                          fast: {
-                            'local': {
-                              keyLocationMapOnBlockDevice: {
-                                file: {
-                                  path: casMountPath + '/key_location_map',
-                                  sizeBytes: 200 * 1024 * 1024,
-                                },
-                              },
-                              keyLocationMapMaximumGetAttempts: 8,
-                              keyLocationMapMaximumPutAttempts: 32,
-                              oldBlocks: 2,
-                              currentBlocks: 12,
-                              newBlocks: 1,
-                              blocksOnBlockDevice: {
-                                source: {
-                                  file: {
-                                    path: casMountPath + '/blocks',
-                                    sizeBytes: 16 * 1024 * 1024 * 1024,
-                                  },
-                                },
-                                spareBlocks: 1,
-                                dataIntegrityValidationCache: {
-                                  cacheSize: 10000,
-                                  cacheDuration: '14400s',
-                                  cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
-                                },
-                              },
-                              persistent: {
-                                stateDirectoryPath: casMountPath + '/persistent_state',
-                                minimumEpochInterval: '300s',
-                              },
-                            },
-                          },
-                          replicator: { deduplicating: { 'local': {} } },
-                        },
+                        [if std.objectHas(commonCAS, 'chunkCache') then 'chunkCache']: commonCAS.chunkCache,
                       };
+                      // Buildbarn's content-defined chunking (CDC) schema is the only one this
+                      // operator generates.
+                      assert std.objectHas(commonCAS, 'chunkStorage') && std.objectHas(commonCAS, 'chunkMappingStorage') :
+                             'common.libsonnet is not a CDC Buildbarn configuration: blobstore.contentAddressableStorage needs chunkStorage and chunkMappingStorage. This operator generates CDC worker configuration only; upgrade the Buildbarn chart to 1.0.0 or later.';
+                      assert std.objectHas(common, 'portalUrl') :
+                             'common.libsonnet has no portalUrl, which CDC Buildbarn workers require. Upgrade the Buildbarn chart to 1.0.0 or later, or add portalUrl to a custom common.libsonnet.';
                       {
                         blobstore: {
                           actionCache: common.blobstore.actionCache,
                           contentAddressableStorage: casConfig,
                         },
-                        [if isCDC then 'portalUrl' else 'browserUrl']: if isCDC && std.objectHas(common, 'portalUrl') then common.portalUrl else common.browserUrl,
+                        portalUrl: common.portalUrl,
                         maximumMessageSizeBytes: common.maximumMessageSizeBytes,
                       }
                     ),
@@ -405,9 +353,8 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
-  # The same pre-CDC branch without the test for chunkStorage is plain pre-CDC
-  # configuration and is still refused.
-  - it: rejects the pre-CDC worker branch when the file does not test for the CDC shape
+  # A pre-CDC worker library is refused, whatever else it contains.
+  - it: rejects a pre-CDC worker-common.libsonnet projected by a pool
     set:
       _testLookup:
         rbeWorkers:
@@ -446,11 +393,12 @@ tests:
       - failedTemplate:
           errorPattern: 'live worker ConfigMap buildbarn/custom-libraries data\["worker-common\.libsonnet"\] contains pre-CDC field "keyLocationMapOnBlockDevice"'
 
-  # std.objectHas alone, used for something else, is not a test for the CDC shape.
-  - it: does not treat a file as dual-schema for std.objectHas without chunkStorage
+  # A file that branches on the CDC shape and still carries a pre-CDC branch,
+  # as the operator's library did before 1.0.0, is refused like any other.
+  - it: rejects pre-CDC fields in a file that also tests for chunkStorage
     set:
       configOverrides:
-        scheduler.jsonnet: "{ zstdPool: if std.objectHas(common, 'zstdPool') then common.zstdPool else {} }"
+        scheduler.jsonnet: "{ a: if std.objectHas(common.blobstore.contentAddressableStorage, 'chunkStorage') then {} else { zstdPool: {} } }"
     asserts:
       - failedTemplate:
           errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
@@ -543,12 +491,6 @@ tests:
           data:
             common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:
@@ -617,12 +559,6 @@ tests:
               data:
                 common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
       _testLookup:
-        operatorDeployments:
-          items:
-            - metadata:
-                name: bb-worker-operator
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
           items:
             - metadata:

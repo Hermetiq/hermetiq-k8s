@@ -202,7 +202,7 @@ The following versions are released and tested together:
 |---|--------------:|--------------------:|
 | Hermetiq |       `1.0.0` |             `1.0.0` |
 | Buildbarn |       `1.0.0` |  `20261118T120531Z` |
-| BB Worker Operator |       `1.0.0` |           `v0.3.14` |
+| BB Worker Operator |       `1.0.0` |            `v1.0.0` |
 
 > **`1.0.0` is a cut-over, not a rolling upgrade.** Buildbarn `1.0.0` stores
 > data in the CDC (RepMaxCDC) format and renders CDC configuration. Hermetiq

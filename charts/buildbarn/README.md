@@ -177,10 +177,7 @@ Images and configuration text:
   are read as text for fields the CDC binaries reject; nothing is evaluated.
   A field is recognised bare or quoted and followed by `:`, `::` or `+:`.
   Block comments, `//` comments and whole-line `#` comments are removed
-  first. A file that tests for the CDC shape itself (it contains
-  `std.objectHas` and the word `chunkStorage`, as the operator's built-in
-  `worker-common.libsonnet` does) serves both schemas and is not refused for
-  the pre-CDC branch it carries.
+  first.
 - Workers using custom ConfigMaps are checked through their actual CRD
   references and projected keys. A ConfigMap in the release namespace that no
   `RbeWorker` references is still read when its name ends in `-worker-config`
@@ -198,24 +195,19 @@ Images and configuration text:
 
 Other components:
 
-- The bb-worker-operator Deployment must declare
-  `hermetiq.com/cdc-compatible: "true"` for the binary it actually runs.
-  The check runs on `helm install` as well as `helm upgrade`, on purpose: a
-  first install next to an operator without the declaration is refused too.
-  It reads the cluster through Helm's `lookup`, so `helm template` and other
-  client-side renders skip it. The operator chart recognizes its pinned CDC
-  image digest; custom operator images require its `buildbarnCdcCompatible`
-  setting. Set `upgradeChecks.operatorNamespace` when the operator runs in
-  another namespace.
-- Hermetiq is not checked. Hermetiq `1.0.0` reads and validates Buildbarn
-  configuration in the CDC schema only, so run this chart with Hermetiq
-  `1.0.0` and upgrade the two together; see the
+- The worker operator and Hermetiq are not checked. Upgrade both to `1.0.0`
+  in the same window as this chart. bb-worker-operator `1.0.0` generates CDC
+  worker configuration only, and an older operator generates pre-CDC
+  configuration that the CDC `bb-worker` rejects, so worker pools crash-loop
+  until the operator matches. Hermetiq `1.0.0` reads and validates Buildbarn
+  configuration in the CDC schema only. See the
   [supported chart bundle](../../README.md#supported-chart-bundle).
-- Each live check has a switch under `upgradeChecks` for installs it cannot
-  serve: `skipOperatorCheck` and `skipWorkerChecks` when the account running
-  Helm may not list the objects (Helm then stops with a `forbidden` error),
-  and `skipConfigTextCheck` when the text scan refuses configuration that is
-  valid CDC. `values.yaml` says what to verify by hand before setting one.
+- The checks that read the cluster have a switch under `upgradeChecks` for
+  installs they cannot serve: `skipWorkerChecks` when the account running
+  Helm may not list `RbeWorker` objects or ConfigMaps (Helm then stops with a
+  `forbidden` error), and `skipConfigTextCheck` when the text scan refuses
+  configuration that is valid CDC. `values.yaml` says what to verify by hand
+  before setting one.
 - `bb-browser` is still a pre-CDC binary and now reads CAS through the
   frontend on port `8980`, which reassembles multi-chunk blobs for it. It
   dials `frontend-internal:8980` by default and `frontend-grpc:8980` when

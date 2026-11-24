@@ -18,8 +18,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "operatorNamespace": { "type": "string" },
-        "skipOperatorCheck": { "type": "boolean" },
         "skipWorkerChecks": { "type": "boolean" },
         "skipConfigTextCheck": { "type": "boolean" },
         "skipStorageClaimTemplateCheck": { "type": "boolean" }

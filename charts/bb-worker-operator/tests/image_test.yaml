@@ -1,0 +1,39 @@
+suite: operator image reference
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: follows the chart appVersion by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bb-worker-operator:v1.0.0
+
+  - it: pulls by digest when one is set, whatever the tag says
+    set:
+      image.tag: v0.3.13
+      image.digest: sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ':v0\.3\.13@sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819$'
+
+  - it: accepts a digest written with a leading @
+    set:
+      image.digest: "@sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ':v1\.0\.0@sha256:e28ea58fe1e1bc35ec2db940f7e69a353480a32e03d385bd4d9906a6e6d55819$'
+
+  - it: rewrites the registry for a mirror
+    set:
+      global.imageRegistry: mirror.example.com
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^mirror\.example\.com/.*bb-worker-operator:v1\.0\.0$'
+
+  - it: carries no capability annotation
+    asserts:
+      - notExists:
+          path: metadata.annotations

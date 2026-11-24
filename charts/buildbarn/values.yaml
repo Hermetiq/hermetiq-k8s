@@ -48,11 +48,9 @@ configOverrides: {}
 # install` as well as `helm upgrade`, and are skipped by offline `helm template`
 # and other client-side renders, where lookup returns nothing.
 #
-# CDC capability: the chart requires hermetiq.com/cdc-compatible=true on the
-# bb-worker-operator Deployment. The declaration must match the selected
-# binary; chart version labels alone do not prove support. The operator chart
-# recognizes its pinned CDC digest. Because the check also runs on install,
-# installing Buildbarn next to an operator without the declaration fails.
+# Worker configuration: live RbeWorker objects and the ConfigMaps they mount
+# are read for pre-CDC image pins and pre-CDC configuration. The worker
+# operator itself is not checked; upgrade it to v1.0.0 in the same window.
 #
 # Storage claim templates: when a StatefulSet named storage already exists in
 # the release namespace and its volumeClaimTemplates differ from the rendered
@@ -61,29 +59,19 @@ configOverrides: {}
 # `kubectl delete statefulset storage --cascade=orphan` step to run first, with
 # storage stopped.
 upgradeChecks:
-  # Namespace of the bb-worker-operator Deployment. Empty means this release's
-  # namespace. One operator serves the whole cluster, so set this when it runs
-  # elsewhere (for example "hermetiq"). Listing Deployments there needs read
-  # access to that namespace.
-  operatorNamespace: ""
   # Skip the storage claim-template comparison. Leave this false: with the
   # check skipped, a claim-template change makes Helm apply every other object
   # of the release and then fail on the StatefulSet.
   skipStorageClaimTemplateCheck: false
-  # The three switches below exist for installs the checks cannot serve. Leave
+  # The two switches below exist for installs the checks cannot serve. Leave
   # them false unless you hit one of the cases named, and verify by hand what
   # the check would have verified.
   #
-  # Skip the bb-worker-operator capability check. Use it when the account
-  # running Helm may not list Deployments in the operator's namespace (Helm
-  # then stops with "deployments is forbidden"), after confirming the operator
-  # runs v0.3.14 or newer. An older operator generates pre-CDC worker
-  # configuration and its workers do not start.
-  skipOperatorCheck: false
   # Skip every check that reads RbeWorker objects and worker ConfigMaps in the
   # release namespace: pre-CDC worker image pins, missing ConfigMaps and the
   # text scan of worker configuration. Use it when the account running Helm
-  # may not list rbeworkers or ConfigMaps.
+  # may not list rbeworkers or ConfigMaps (Helm then stops with a "forbidden"
+  # error).
   skipWorkerChecks: false
   # Skip the text scan for pre-CDC fields in configOverrides,
   # scheduler.actionRouter.custom and worker ConfigMaps. The scan matches

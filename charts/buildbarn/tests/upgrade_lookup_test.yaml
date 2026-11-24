@@ -44,73 +44,6 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
-  # --- Operator Deployment: upgradeChecks.operatorNamespace ------------------
-  - it: finds the operator in upgradeChecks.operatorNamespace and requires its declaration
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.operatorNamespace: operators
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            labels:
-              helm.sh/chart: bb-worker-operator-0.3.12
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment operators/bb-worker-operator has no hermetiq\.com/cdc-compatible=true declaration for its operator image'
-
-  # Same cluster, value left empty: the operator namespace is not read.
-  - it: does not read another namespace's operator when upgradeChecks.operatorNamespace is empty
-    release:
-      upgrade: true
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            labels:
-              helm.sh/chart: bb-worker-operator-0.3.12
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: rejects an operator whose declaration is false
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.operatorNamespace: operators
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            annotations:
-              hermetiq.com/cdc-compatible: "false"
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment operators/bb-worker-operator has no hermetiq\.com/cdc-compatible=true declaration for its operator image'
-
-  # The capability checks are not limited to upgrades: a first install next to
-  # an operator without the declaration is refused too. That is intended.
-  - it: runs the operator check on install as well as upgrade
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: buildbarn
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment buildbarn/bb-worker-operator has no hermetiq\.com/cdc-compatible=true declaration for its operator image'
-
   # --- RbeWorker: read only when the API is in Capabilities -------------------
   - it: reads RbeWorkers through lookup when the cluster serves the API
     release:
@@ -163,57 +96,6 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
-  - it: requires an operator when live RbeWorkers exist and names the namespace it searched
-    release:
-      upgrade: true
-    capabilities:
-      apiVersions:
-        - bb.hermetiq.com/v1/RbeWorker
-    kubernetesProvider:
-      objects:
-        - apiVersion: bb.hermetiq.com/v1
-          kind: RbeWorker
-          metadata: {name: pool, namespace: buildbarn}
-          spec:
-            images:
-              runner: example.com/runner:latest
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live RbeWorker resources exist in namespace buildbarn, but no bb-worker-operator Deployment was found in namespace buildbarn; set upgradeChecks\.operatorNamespace'
-
-  - it: accepts live RbeWorkers with a declared operator in upgradeChecks.operatorNamespace
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.operatorNamespace: operators
-    capabilities:
-      apiVersions:
-        - bb.hermetiq.com/v1/RbeWorker
-    kubernetesProvider:
-      objects:
-        - apiVersion: bb.hermetiq.com/v1
-          kind: RbeWorker
-          metadata: {name: pool, namespace: buildbarn}
-          spec:
-            images:
-              runner: example.com/runner:latest
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-    asserts:
-      - notFailedTemplate: {}
-
   # --- Worker ConfigMaps: read from the release namespace ---------------------
   - it: reads the ConfigMap a live RbeWorker references through lookup
     release:
@@ -261,12 +143,20 @@ tests:
       - failedTemplate:
           errorPattern: 'live RbeWorker buildbarn/pool references missing ConfigMap "custom-libraries"'
 
-  # --- Hermetiq api and publisher are not inspected ----------------------------
-  # Hermetiq 1.0.0 reads the CDC schema only and has no capability
-  # declaration, so its Deployments must never block a Buildbarn release.
-  - it: does not inspect Hermetiq Deployments on install
+  # --- Operator and Hermetiq Deployments are not inspected ---------------------
+  # Both are upgraded together with this chart and carry no capability
+  # declaration, so no Deployment may block a Buildbarn release: not an old
+  # operator, not a missing one, and not Hermetiq.
+  - it: does not inspect operator or Hermetiq Deployments on install
     kubernetesProvider:
       objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: bb-worker-operator-0.3.12
         - apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -286,6 +176,23 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  - it: accepts live RbeWorkers without looking for an operator
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              runner: example.com/runner:latest
+    asserts:
+      - notFailedTemplate: {}
+
   - it: does not inspect Hermetiq Deployments on upgrade
     release:
       upgrade: true
@@ -301,71 +208,6 @@ tests:
               app.kubernetes.io/component: api
     asserts:
       - notFailedTemplate: {}
-
-  # --- Opt-outs ----------------------------------------------------------------
-  # Each switch turns off one check and nothing else. The default-on behaviour
-  # is covered above; these prove the same cluster is accepted once skipped.
-  - it: skips the operator declaration with upgradeChecks.skipOperatorCheck
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.operatorNamespace: operators
-      upgradeChecks.skipOperatorCheck: true
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: operators
-            labels:
-              helm.sh/chart: bb-worker-operator-0.3.12
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: does not require an operator for live RbeWorkers with upgradeChecks.skipOperatorCheck
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.skipOperatorCheck: true
-    capabilities:
-      apiVersions:
-        - bb.hermetiq.com/v1/RbeWorker
-    kubernetesProvider:
-      objects:
-        - apiVersion: bb.hermetiq.com/v1
-          kind: RbeWorker
-          metadata: {name: pool, namespace: buildbarn}
-          spec:
-            images:
-              runner: example.com/runner:latest
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: still checks worker configuration when only the operator check is skipped
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.skipOperatorCheck: true
-    capabilities:
-      apiVersions:
-        - bb.hermetiq.com/v1/RbeWorker
-    kubernetesProvider:
-      objects:
-        - apiVersion: bb.hermetiq.com/v1
-          kind: RbeWorker
-          metadata: {name: pool, namespace: buildbarn}
-          spec:
-            config:
-              generated: {commonConfigMapName: custom-libraries}
-        - apiVersion: v1
-          kind: ConfigMap
-          metadata: {name: custom-libraries, namespace: buildbarn}
-          data:
-            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live worker ConfigMap buildbarn/custom-libraries data\["common\.libsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage'
 
   - it: skips RbeWorker and worker ConfigMap checks with upgradeChecks.skipWorkerChecks
     release:
@@ -393,22 +235,6 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
-  - it: still requires the operator declaration when only worker checks are skipped
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.skipWorkerChecks: true
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: buildbarn
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment buildbarn/bb-worker-operator has no hermetiq\.com/cdc-compatible=true declaration for its operator image'
-
   - it: skips the worker ConfigMap text scan with upgradeChecks.skipConfigTextCheck
     release:
       upgrade: true
@@ -430,13 +256,6 @@ tests:
           metadata: {name: custom-libraries, namespace: buildbarn}
           data:
             common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: buildbarn
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
     asserts:
       - notFailedTemplate: {}
 
@@ -456,13 +275,6 @@ tests:
           spec:
             images:
               worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bb-worker-operator
-            namespace: buildbarn
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
     asserts:
       - failedTemplate:
           errorPattern: 'live RbeWorker buildbarn/pool pins pre-CDC image'

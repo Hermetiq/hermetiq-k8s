@@ -23,9 +23,9 @@ annotations:
     - kind: changed
       description: "Scheduler handover and configurationReloadInterval require a CDC-capable fork image and scheduler.handover.cdcCompatibleFork=true"
     - kind: added
-      description: "Install and upgrade are refused before anything is applied when the storage StatefulSet volumeClaimTemplates would change, when a pre-CDC Buildbarn image is pinned, or when the bb-worker-operator is not CDC-capable. upgradeChecks holds the operator namespace and a skip switch for each check"
+      description: "Install and upgrade are refused before anything is applied when the storage StatefulSet volumeClaimTemplates would change or when a pre-CDC Buildbarn image is pinned, on the release or on a live RbeWorker. upgradeChecks holds a skip switch for each check that reads the cluster"
     - kind: added
-      description: "buildbarn-worker-config publishes workerImage and runnerInstallerImage for RbeWorkers that set no images, and config.contentAddressableStorage.chunkCache gives worker pods a cache of decoded chunks"
+      description: "Requires bb-worker-operator 1.0.0, upgraded in the same window. buildbarn-worker-config publishes workerImage and runnerInstallerImage for RbeWorkers that set no images, and config.contentAddressableStorage.chunkCache gives worker pods a cache of decoded chunks"
     - kind: fixed
       description: "Key-location-map recording rules and alerts cover the storage pods only and read both the CDC and the legacy metric names"
 keywords:

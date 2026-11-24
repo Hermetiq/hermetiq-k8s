@@ -7,7 +7,7 @@ them in the Buildbarn release namespace after the Buildbarn release and
 `buildbarn-worker-config` are ready. The example release namespace is
 `hermetiq`.
 
-These manifests require bb-worker-operator v0.3.14 or later and its matching
+These manifests require bb-worker-operator v1.0.0 or later and its matching
 CRD (operator chart 1.0.0 or later), which support Buildbarn image inheritance,
 the FUSE kernel tunables, and Envoy's `spec.autoscaling.idleReplicas`.
 Upgrade the CRD and controller together following the
@@ -23,20 +23,19 @@ kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
 
 The manifests do not set `spec.images.worker` or `spec.images.runnerInstaller`.
-Operator v0.3.14 and later (chart 1.0.0) then use the `workerImage` and
+The operator then uses the `workerImage` and
 `runnerInstallerImage` that the Buildbarn chart publishes in
 `buildbarn-worker-config`, so each pool's `bb-worker` always matches the
 Buildbarn release and its worker configuration. Set them only to run a
 different build, and update them in the same change as every Buildbarn
 upgrade.
 
-For an existing pre-CDC installation, upgrade the CRD and operator first while
-keeping the existing image pins. Its older `buildbarn-worker-config` lacks the
-two image keys: populate them with the exact current worker and runner-installer
-images before applying these unpinned examples. Verify the pools reconcile,
-then upgrade Buildbarn so the shared Jsonnet and inherited images switch to
-CDC together. Otherwise the operator reports `SpecInvalid` during the gap.
-See the [operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-100).
+For an existing pre-CDC installation, apply these manifests inside the
+Buildbarn cut-over window, with the worker pools paused: upgrade the CRD and
+the operator, apply the unpinned manifests, then upgrade Buildbarn. Until
+Buildbarn 1.0.0 has published the two image keys, a pool without pins reports
+`SpecInvalid`. See the
+[operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-100).
 
 Custom pools using `spec.config.files` reference a ConfigMap through
 `configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.

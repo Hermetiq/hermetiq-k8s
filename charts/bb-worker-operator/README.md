@@ -201,38 +201,34 @@ Then re-apply your `RbeWorker` manifests.
 
 Chart 1.0.0 follows 0.3.12; the chart version now moves together with the
 Hermetiq and Buildbarn charts, and no chart was published in between. It
-deploys operator v0.3.14, which supports the Buildbarn chart's
-content-defined chunking (CDC) storage. The operator reads the shape of
-`blobstore.contentAddressableStorage` in the Buildbarn chart's
-`common.libsonnet`: with `chunkStorage` it generates the CDC worker blobstore
-(`chunkStorage`, `chunkMappingStorage`, the CDC caches and `portalUrl`), and
-otherwise the same pre-CDC config as before. Install this operator **before**
-installing or upgrading the Buildbarn chart to 1.0.0, whose checks require it
-on `helm install` as well as `helm upgrade`.
+deploys operator v1.0.0, which generates worker configuration for Buildbarn's
+content-defined chunking (CDC) storage and nothing else. Run it only with the
+Buildbarn 1.0.0 chart. Against an older Buildbarn release a worker stops at
+startup with `common.libsonnet is not a CDC Buildbarn configuration`.
 
-This upgrade rolls worker pools, so schedule it: run it inside the Buildbarn
+Upgrade the operator inside the Buildbarn
 [cut-over window](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
-or in a separate window that you announce.
+after the worker pools are paused and before the Buildbarn upgrade. Nothing
+enforces the order. The Buildbarn chart does not check which operator is
+running: an operator older than v1.0.0 generates pre-CDC worker
+configuration, the CDC `bb-worker` rejects it, and the pools crash-loop until
+the operator is upgraded.
 
 - Apply the 1.0.0 CRD first. `spec.images.worker` and
   `spec.images.runnerInstaller` become optional: when unset, the operator uses
   the `workerImage` and `runnerInstallerImage` keys of the referenced config
   ConfigMap, which the Buildbarn chart publishes, so worker images follow the
   Buildbarn release.
-- Keep existing image pins while upgrading the operator. Before removing them
-  on a pre-CDC Buildbarn installation, populate those two ConfigMap keys with
-  the exact **currently running pre-CDC images**, including their digests.
-  The older Buildbarn chart does not publish the keys itself. Removing pins
-  without this staging step makes the operator report `SpecInvalid` until the
-  Buildbarn upgrade supplies the keys. After staging, remove the pins and
-  verify the pools reconcile; the CDC Buildbarn upgrade then changes the
-  shared configuration and inherited images together. Do not update worker
-  images to CDC while their shared configuration is still pre-CDC.
-- Every generated-config worker pool restarts once, because the embedded
-  `worker-common.libsonnet` changed. Pre-CDC worker configs evaluate unchanged.
-  The restart is a rolling update of each pool's Deployment as soon as the new
-  operator reconciles it, on every pool at once; actions that outlast the
-  pod's termination grace period are killed (see
+- Before the Buildbarn upgrade, remove pre-CDC image pins from each
+  `RbeWorker` or update them to the CDC images. The Buildbarn chart refuses
+  to upgrade while a live `RbeWorker` pins a pre-CDC image. A pool without
+  pins reports `SpecInvalid` until Buildbarn 1.0.0 has published the two
+  keys; with the pools paused that has no effect.
+- The embedded `worker-common.libsonnet` changed, so every generated-config
+  worker pool is rolled as soon as the new operator reconciles it, on every
+  pool at once. A pool that is not paused restarts its workers into the new
+  configuration; actions that outlast the pod's termination grace period are
+  killed (see
   [Draining actions on termination](#draining-actions-on-termination)). A pool
   with `spec.config.rolloutOnChange: false` is not rolled and picks the new
   file up when its Pods next restart.
@@ -254,28 +250,17 @@ or in a separate window that you announce.
   A pool without autoscaling stops with `spec.replicas: 0`. With
   `spec.manageReplicas: false` the operator sets neither, and you scale the
   Deployment or its external scaler yourself.
-- After a Buildbarn rollback to a pre-CDC chart, the `workerImage` and
-  `runnerInstallerImage` keys are gone again: the older chart does not render
-  them. Pools without image pins then report `SpecInvalid`, and the operator
-  leaves their Deployments on the CDC images. As part of the rollback, set
-  `spec.images.worker` and `spec.images.runnerInstaller` back to the pre-CDC
-  images on each `RbeWorker`, or populate the two keys again after the
-  rollback has replaced the ConfigMap.
+- Rolling Buildbarn back to a pre-CDC chart means rolling this chart back to
+  0.3.12 as well, because operator v1.0.0 cannot generate pre-CDC worker
+  configuration. The pre-CDC Buildbarn chart does not publish `workerImage`
+  and `runnerInstallerImage`, so set `spec.images.worker` and
+  `spec.images.runnerInstaller` back to the pre-CDC images on each
+  `RbeWorker` as part of the rollback.
 - A pool that projects its own copy of `worker-common.libsonnet` through
   `commonItems` is read by the Buildbarn chart's configuration text check like
-  any other worker configuration. A copy based on this operator's built-in
-  file passes it: the check accepts a file that tests for the CDC shape itself
-  (it contains `std.objectHas` and the word `chunkStorage`) and does not
-  refuse it for the pre-CDC branch it carries. A copy without that test must
-  contain no pre-CDC fields before the Buildbarn upgrade.
-- The operator Deployment carries `hermetiq.com/cdc-compatible: "true"` when
-  its effective image digest matches the chart's known CDC-capable default.
-  Registry mirrors and tag changes that retain that digest preserve the
-  declaration. Other digests and tag-only images do not automatically receive
-  it: set `buildbarnCdcCompatible: true` only after verifying that your custom
-  operator handles both configuration schemas. The Buildbarn chart requires
-  this declaration on install and on upgrade; chart and app-version labels
-  alone do not prove that an overridden image supports CDC.
+  any other worker configuration, and is refused if it contains pre-CDC
+  fields. Replace a copy taken from an older operator with one based on this
+  operator's built-in file.
 
 When upgrading from 0.3.11 or earlier, also follow
 [Upgrading to 0.3.12](#upgrading-to-0312).

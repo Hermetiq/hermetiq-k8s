@@ -1424,13 +1424,3 @@ non-blank character is #.
 {{- define "buildbarn.cdc.stripComments" -}}
 {{- regexReplaceAll "(?m)^[ \\t]*#.*$" (regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" (toString .) "") "") "" -}}
 {{- end -}}
-
-{{/*
-"true" when configuration text tests for the CDC shape itself: it calls
-std.objectHas and names chunkStorage. Such a file serves both schemas (the
-operator's built-in worker-common.libsonnet does), so the pre-CDC branch it
-carries is not a reason to refuse it. Pass text with comments already removed.
-*/}}
-{{- define "buildbarn.cdc.dualSchema" -}}
-{{- if and (regexMatch "std\\.objectHas" .) (regexMatch "(^|[^a-zA-Z0-9_])chunkStorage([^a-zA-Z0-9_]|$)" .) -}}true{{- end -}}
-{{- end -}}
