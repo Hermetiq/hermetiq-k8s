@@ -356,8 +356,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 1.0.1
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 1.0.1
 ```
 
 ## Install
@@ -388,7 +388,7 @@ values where they differ from the starter.
 
    ```bash
    helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-     --version 1.0.0 \
+     --version 1.0.1 \
      --namespace hermetiq \
      --values buildbarn-values.yaml > /tmp/buildbarn.yaml
    ```
@@ -400,7 +400,7 @@ values where they differ from the starter.
    ```bash
    helm upgrade --install --namespace hermetiq buildbarn \
      oci://ghcr.io/hermetiq/buildbarn \
-     --version 1.0.0 \
+     --version 1.0.1 \
      --values buildbarn-values.yaml \
      --dry-run=server > /dev/null
    ```
@@ -412,7 +412,7 @@ After the Hermetiq chart and worker operator are installed, install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --values buildbarn-values.yaml
 ```
 
@@ -580,7 +580,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
