@@ -43,8 +43,7 @@ How this README is organized:
 - [Workload identity](#workload-identity)
 - [Application settings](#application-settings)
 - [Authentication and SSO](#authentication-and-sso): OIDC, gRPC and MCP
-  authentication, project access, [authorization upgrades](#upgrading-project-authorization),
-  CAL trust, sign-in
+  authentication, project access, CAL trust, sign-in
 - [Workload sizing, scheduling, and availability](#workload-sizing-scheduling-and-availability)
 - [Dashboard](#dashboard): feature flags, Quickstart
 - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
@@ -132,8 +131,8 @@ Required for every install:
   chart's [hosts](#hosts).
 - [ ] An OIDC identity provider.
   [Authentication and SSO](#authentication-and-sso) lists what to register.
-- [ ] Authorization-capable application images and project grants for build
-  callers; see [Upgrading project authorization](#upgrading-project-authorization).
+- [ ] Project grants for the Bazel and CI identities that publish builds; see
+  [Project access policy](#project-access-policy).
 - [ ] [PostgreSQL](#postgresql) 16 or newer with `pg_partman`.
 - [ ] [NATS JetStream](#nats-jetstream) with at least three servers, or a
   one-replica stream configuration for a single-server test cluster.
@@ -393,11 +392,10 @@ When the Buildbarn chart runs in the same cluster:
 - If FUSE-based workers share the Hermetiq namespace, that namespace needs the
   `privileged` Pod Security level; see
   [Pod and container security context](#pod-and-container-security-context).
-- Run Hermetiq `1.0.0` with the Buildbarn `1.0.0` chart. Hermetiq `1.0.0`
-  reads and validates Buildbarn configuration in the CDC (RepMaxCDC) schema
-  only; it has no mode for the pre-CDC schema that Buildbarn `0.9.9` and
-  older use. Upgrade the two together, following the repository's
-  [upgrade order](https://github.com/Hermetiq/hermetiq-k8s#upgrading).
+- Run Hermetiq with the Buildbarn chart from the same
+  [supported chart bundle](https://github.com/Hermetiq/hermetiq-k8s#supported-chart-bundle).
+  Hermetiq reads and validates the Buildbarn configuration that chart
+  renders, and the two are upgraded together.
 
 ### Inspect the packaged defaults
 
@@ -1333,11 +1331,9 @@ through their ReplicaSet and Deployment owners, excluding pods created before
 the current Deployment. The ownership selection is fixed at the requested
 window end; query length does not grow with pod churn. Custom overrides of
 `rbeContainerCpuRequestPercent` and `rbeContainerMemoryRequestPercent` must
-use the `${poolPods}` expression in both usage and request sums, replacing
-the former `${pods}` name-list matcher. Exact prior packaged defaults are
-upgraded automatically by the API; refresh customized legacy keys from the
-packaged file when upgrading an external ConfigMap. Override `rbePoolPods` too if your
-installation renames the Kubernetes ownership metrics or labels.
+use the `${poolPods}` expression in both usage and request sums. Override
+`rbePoolPods` too if your installation renames the Kubernetes ownership
+metrics or labels.
 
 The templates load at API startup. After changing an external ConfigMap,
 change `promqlQueries.rolloutChecksum` or restart the API; see
@@ -1582,15 +1578,15 @@ dashboard/API OIDC configuration intact:
 
 | Source | Required publisher value | Behavior |
 |---|---|---|
-| `auto` (default) | Existing configuration | Preserve publisher URL, then inherited OIDC URL, then existing Secret/inline JSON precedence. Helm notes identify local keys shadowed by the inherited URL. |
+| `auto` (default) | Any of the values below | Use the publisher URL, then the inherited OIDC URL, then the Secret or inline JSON. Helm notes identify local keys shadowed by the inherited URL. |
 | `url` | `publisher.jwks.url` | Fetch only this URL; do not inherit the global OIDC URL. |
 | `inline` | `publisher.jwks.json` | Render a Secret containing this public JWK set and mount it as a file. A keyset change rolls the publisher Pods. |
 | `secret` | `publisher.jwks.existingSecret` | Mount this Secret, which must contain `jwks.json`, as a projected directory without `subPath`. |
 
 Explicit modes require `publisher.jwks.enabled=true` and reject other nonempty
-publisher key-source values. Global `oidc` values may remain set. `auto` preserves
-previously accepted combinations; upgrading must not start trusting a formerly
-ignored keyset. `enabled=false` still means the custom-environment configuration
+publisher key-source values. Global `oidc` values may remain set. In `auto`, a
+local keyset shadowed by a URL is not trusted; select `inline` or `secret` to
+use it. `enabled=false` still means the custom-environment configuration
 mode above, not disabled token validation.
 
 For CI signing its own RS256 JWTs while dashboard users log in through Okta:
@@ -1618,14 +1614,13 @@ positive durations and limits the file reload interval to ten seconds. URL-backe
 verification also refreshes on an unknown `kid`, subject to the refresh rate limit.
 Mounted file reload starts once Kubernetes projects the update; projection latency
 is additional. Inline updates roll Pods; existing-Secret updates do not require a
-chart upgrade. Run a matching application version with these reload controls.
+chart upgrade.
 
-Existing `api.env` and `publisher.env` overrides for `GRPC_AUTH_PRINCIPAL_KIND`
-and the four `GRPC_AUTH_JWKS_*` refresh/reload settings remain supported with
-single-issuer authentication. Each explicit environment override takes precedence
-over the corresponding `api.jwt` or `publisher.jwks` field and is rendered once.
-Remove an override when moving that setting into the typed values. Independent
-JWT profiles require these settings inside each profile instead.
+With single-issuer authentication, `api.env` and `publisher.env` can also set
+`GRPC_AUTH_PRINCIPAL_KIND` and the four `GRPC_AUTH_JWKS_*` refresh/reload
+settings. Each explicit environment override takes precedence over the
+corresponding `api.jwt` or `publisher.jwks` field and is rendered once.
+Independent JWT profiles require these settings inside each profile instead.
 
 Publish overlapping old/new keys before switching signing keys, then replace
 credentials and retire the old key deliberately. Multi-key overlap requires JWTs
@@ -1633,7 +1628,7 @@ to carry `kid`. Removing a key invalidates new requests using it, including requ
 with still-unexpired long-lived JWTs. A credential helper forwards the JWT and does
 not perform key rotation itself.
 
-`principalKind` defaults to `human` for compatibility and can be `service` for a
+`principalKind` defaults to `human` and can be `service` for a
 machine-only credential profile. It renders `GRPC_AUTH_PRINCIPAL_KIND`; the verifier
 does not assume a provider's optional `idtyp` claim is present. Explicit service
 registrations in the project policy identify registered machines even when they
@@ -1648,8 +1643,8 @@ for the selected project. JWT verification and signed project restrictions also
 apply. Configure grants and access defaults through the typed `authorization`
 values; workload environment maps cannot disable or replace the chart's policy.
 
-Before installing or upgrading, prepare memberships and issuer-qualified group
-and service-account grants. For example:
+Before installing, prepare memberships and issuer-qualified group and
+service-account grants. For example:
 
 ```yaml
 authorization:
@@ -1696,39 +1691,14 @@ an issuer-provided credential helper, but cannot issue Hermetiq build credential
 Use the project's actual saved managed namespace and instance mapping; an empty
 `instancePrefix` is an explicit mapping choice, not an inferred default. Defining
 these mappings does not automatically configure Buildbarn's listeners or trust.
-`api.mcpAuthDisabled=true` remains supported: those MCP callers share its synthetic
-administrator identity and cannot receive individual user revocation semantics.
+With `api.mcpAuthDisabled=true`, MCP callers share its synthetic administrator
+identity and cannot receive individual user revocation semantics.
 
-### Upgrading project authorization
+### Application images
 
-Project authorization is required by this chart. Prepare access and compatible
-images before upgrading an existing installation:
-
-1. Use application images that support project authorization, browser authorization,
-   and, when configured, SCIM and JWT profiles. Update the API, publisher, schema
-   bootstrap job, dashboard, and `grpc-auth-proxy` together; keep subscribers on
-   the corresponding core release. The schema bootstrap image must apply the
-   authorization migrations before the new API and publisher start.
-2. Preserve existing stable user IDs, issuer strings, and identity prefixes.
-   Grant existing Bazel and CI principals Builder or Admin access to their
-   projects through direct memberships, group bindings, or `serviceAccounts`.
-   A valid JWT alone no longer permits BEP publication, and Viewer access cannot
-   publish builds. For external client-credentials helpers, follow
-   [External Auth0 credential helpers](#external-auth0-credential-helpers).
-3. Move administrators who rely on `app.adminEmails` to a trusted administrator
-   group; see [Admin access](#admin-access). Confirm an administrator can still
-   sign in and manage access.
-4. Classify machine-only JWT profiles with `principalKind: service`. When humans
-   and machines share a profile, register machine issuer/subject pairs explicitly
-   in `authorization.serviceAccounts`. The default `principalKind: human` does
-   not infer machine identity from optional provider claims.
-5. Choose `authorization.defaultAccess` deliberately: `viewer` retains read
-   access across projects for authenticated humans; `none` requires explicit
-   membership or group grants. Service accounts receive only explicit grants.
-   Keep the dashboard oauth2-proxy enabled and verify dashboard sign-in, API/MCP
-   access, and a build published by each CI identity after the rollout.
-
-The image settings are:
+The API, publisher, schema bootstrap job, dashboard, and `grpc-auth-proxy`
+enforce the policy together, so their images must come from the same
+application release. The chart's default images are the `v1.0.0` release.
 
 | Workload | Tag setting | Digest setting |
 |---|---|---|
@@ -1739,34 +1709,16 @@ The image settings are:
 | Dashboard and its init container | `images.dashboard.tag` | `images.dashboard.digest` |
 | API auth proxy | `images.authProxy.tag` | `images.authProxy.digest` |
 
-A nonempty digest takes precedence over the tag. When selecting an updated tag,
-set its matching digest from that release or explicitly clear the previous digest
-with `""`; changing only the tag keeps running the old pinned image. In particular,
-JWT profile mode needs an auth-proxy image that supports
-`GRPC_AUTH_PROXY_FORWARD_ONLY`; updating only the API and dashboard is insufficient.
+A nonempty digest takes precedence over the tag. When selecting another tag,
+set its matching digest from that release or explicitly clear the digest with
+`""`; changing only the tag keeps running the pinned image. JWT profile mode
+needs an auth-proxy image that supports `GRPC_AUTH_PROXY_FORWARD_ONLY`, so
+override the auth proxy together with the API and dashboard.
 
-The chart's default images are the `v1.0.0` release, which implements these
-features. Images from `v0.9.8` and earlier do not, and the chart refuses to
-render with them because they cannot enforce the authorization policy or the
-browser flow. Custom tags and digests are not recognised by that check; verify
-them against the same application release before a staged rollout.
-
-Once images and grants are ready, upgrade using a complete copy of your
-installation values, for example from this checkout:
-
-```bash
-helm upgrade hermetiq ./charts/hermetiq --namespace hermetiq \
-  --reset-values -f installation-values.yaml
-```
-
-`installation-values.yaml` must contain all installation-specific settings you
-intend to retain. `--reset-values` loads the new chart defaults before applying
-those files; avoid `--reuse-values` with pre-authorization releases, whose saved
-defaults omit the new configuration blocks. For packaged installs, use the
-intended chart reference and version in place of `./charts/hermetiq`.
-
-`api.mcpAuthDisabled: true` remains an explicit shared-administrator option;
-it does not provide individual user authorization or revocation.
+The chart refuses to render with images older than `v1.0.0`, which cannot
+enforce the authorization policy or the browser flow. Custom tags and digests
+are not recognised by that check; verify them against the same application
+release before a staged rollout.
 
 ### External Auth0 credential helpers
 
@@ -1776,8 +1728,8 @@ not inherit the user identity or installation-admin groups of the person who
 created the application, owns its secret, or is signed in to the dashboard.
 Browser email-domain admission does not apply to the BEP endpoint.
 
-Before upgrading a helper that previously published with a valid token alone,
-grant its exact verified `iss` and `sub` Builder access to each required project.
+Grant the helper's exact verified `iss` and `sub` Builder access to each
+required project.
 For a token with issuer `https://idp.example.com/` and subject
 `example-build-client@clients`:
 
@@ -1793,15 +1745,15 @@ authorization:
 Replace these example values with the token's issuer and subject and the project
 selected by Bazel's `--bes_instance_name`. Preserve the issuer's trailing slash
 and quote numeric project IDs as YAML keys, for example `"0": [builder]`.
-Merge the entry with existing grants, then upgrade the chart and wait for the
-API and publisher rollouts. This registers that application as a service
+Merge the entry with existing grants, then apply the values with
+`helm upgrade` and wait for the API and publisher rollouts. This registers that application as a service
 principal even when humans share the same JWT trust profile; changing the whole
 profile to `principalKind: service` is unnecessary in that case.
 
-Verify the helper still sends its JWT in `Authorization: Bearer <token>` for the
+Verify the helper sends its JWT in `Authorization: Bearer <token>` for the
 BEP hostname, with the audience accepted by `publisher.jwks.audience`, then run
 a build with the matching project selected. Auth0 token scopes alone do not
-create a Hermetiq project grant. Keep project authorization enforced.
+create a Hermetiq project grant.
 
 For diagnosis, gRPC `Unauthenticated` (code 16) means authentication failed;
 check the credential, signature, issuer, audience, and expiry. A verified token
@@ -1828,8 +1780,8 @@ chain; see [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding).
 HTTP 505 on `/grpc/` while `/auth/me` succeeds indicates the transport problem
 described there, not evidence that an administrator lost their group grant.
 
-Use compatible API, publisher, dashboard, and auth-proxy images as described in
-[Upgrading project authorization](#upgrading-project-authorization).
+Use API, publisher, dashboard, and auth-proxy images from one release, as
+described in [Application images](#application-images).
 
 Grafana uses its own oauth2-proxy with the shared login-admission settings, then
 applies its own organization roles. It does not use Hermetiq project
@@ -1975,11 +1927,9 @@ verified admin-group trust. When omitted, the verified admin group remains
 available (`publisher.hermetiqAdminGroup`, default `hermetiq-admin` for the
 single-issuer configuration).
 
-`app.adminEmails` has no effect on installation administration under the chart's
-enforced authorization policy.
-Move email-allowlisted administrators into a trusted group before upgrading.
-Existing direct project Admin memberships continue to grant administration
-of those projects; they do not grant installation-wide administration.
+`app.adminEmails` has no effect on installation administration; grant it
+through a trusted group as above. Direct project Admin memberships grant
+administration of those projects, not installation-wide administration.
 
 ### Dashboard sign-in
 
@@ -2018,7 +1968,7 @@ can reuse the ConfigMap and the Secret and share one sign-in session.
 | `cookieDomains` | `[]` | Share a session across subdomains, for example `[".example.com"]` |
 | `env` | `{}` | Any other oauth2-proxy variable |
 
-Configure admission explicitly before upgrading. For one organization, set
+Configure admission explicitly. For one organization, set
 `dashboard.oauth2Proxy.emailDomains: [example.com]` to your permitted email
 domains. For an identity provider serving multiple organizations, use an
 explicit group gate:
@@ -2034,8 +1984,8 @@ dashboard:
 With both domain and group restrictions, users must satisfy both. The settings
 are shared by the dashboard, Grafana and Buildbarn Browser; overriding
 `OAUTH2_PROXY_EMAIL_DOMAINS`, `OAUTH2_PROXY_ALLOWED_GROUPS` or
-`OAUTH2_PROXY_OIDC_GROUPS_CLAIM` in a workload's `env` is rejected. Move existing
-overrides into these shared values. Keep email verification enabled. Hermetiq
+`OAUTH2_PROXY_OIDC_GROUPS_CLAIM` in a workload's `env` is rejected; set them
+through these shared values. Keep email verification enabled. Hermetiq
 project roles and installation administrator groups remain separate from this
 sign-in gate, as do Grafana roles.
 
@@ -3236,12 +3186,14 @@ shares with the Buildbarn chart, such as `global.imageRegistry`,
 ### Upgrade and uninstall
 
 An upgrade is the [install command](#run-the-install) with the new chart
-version. Review [Upgrading project authorization](#upgrading-project-authorization)
-before upgrading an existing installation. The repository guide's
+version. The repository guide's
 [Upgrading](https://github.com/Hermetiq/hermetiq-k8s#upgrading) section gives
 the order across charts and shows how to compare defaults between versions,
 and [Uninstalling](https://github.com/Hermetiq/hermetiq-k8s#uninstalling)
-lists what Helm leaves behind. Two points are specific to this chart:
+lists what Helm leaves behind. An installation on a chart older than `1.0.0`
+follows the
+[Hermetiq migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-hermetiq.md)
+instead. Two points are specific to this chart:
 
 - The schema bootstrap hook runs on every upgrade and applies migrations
   before the workloads roll. Back up PostgreSQL first.

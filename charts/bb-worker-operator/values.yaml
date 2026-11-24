@@ -22,11 +22,9 @@ watchNamespace: ""
 # Privileged worker and runner containers, FUSE at /dev/fuse, and the
 # operator's own volume-init, fuse-cleanup and dind containers are always
 # allowed. RbeWorker pods may never use the operator's own ServiceAccount.
-# See "RbeWorker spec policy" in the chart README, including the settings that
-# restore the behavior of operators older than v0.3.13.
+# See "RbeWorker spec policy" in the chart README.
 #
-# The settings reach the manager as environment variables, which older
-# operator images ignore.
+# The settings reach the manager as environment variables.
 specPolicy:
   # Before rendering an install or upgrade against a cluster, list the
   # RbeWorkers the operator watches and fail if any would be SpecInvalid under

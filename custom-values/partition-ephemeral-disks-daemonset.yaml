@@ -7,10 +7,10 @@
 # generation marker and directory permissions have been verified.
 #
 # This manifest is not part of the Buildbarn Helm release: apply it by hand
-# before installing or upgrading the chart. On a pool that already runs the
-# 0.9.9 layout, apply it only after storage has been stopped, and follow
+# before installing or upgrading the chart. On a pool provisioned before
+# chart 1.0.0, apply it only after storage has been stopped, and follow
 # "Cut-over procedure for an existing Local SSD pool" in
-# docs/buildbarn-block-storage.md.
+# docs/migrate-to-1.0.0-buildbarn.md.
 #
 # How it works, and why it is shaped this way, is documented in
 # docs/buildbarn-block-storage.md ("GKE Example B"). In short:

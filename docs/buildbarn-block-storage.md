@@ -1,6 +1,6 @@
 # Buildbarn Raw Block-Device Storage on GKE
 
-By default, each Buildbarn storage shard keeps CAS and Action Cache blocks in files on a filesystem volume. CAS remains the logical content-addressable store: CDC changes its physical chunk layout, and CMS records how chunks compose a blob. Filesystem-backed storage is the simplest mode and suits many deployments.
+By default, each Buildbarn storage shard keeps CAS and Action Cache blocks in files on a filesystem volume. CAS is the logical content-addressable store: its blobs are stored as chunks, and CMS records how chunks compose a blob. Filesystem-backed storage is the simplest mode and suits many deployments.
 
 Raw block-device storage is the lower-overhead option. Instead of writing a large blocks file on a mounted filesystem, a store writes directly to a Kubernetes `volumeMode: Block` device. In chart values, set the store's `backend: blockDevice`.
 
@@ -57,8 +57,8 @@ In `mode: hostPath` there are no claims. Supply each store's
 `blockDevice.metadata.hostPath.path`; Helm rejects a missing path rather than
 choosing a filesystem for you. The directory must already exist on the node, on
 the same storage as the blocks: `blockDevice.metadata.hostPath.type` defaults
-to `Directory` (it was `DirectoryOrCreate` before chart 1.0.0), so a missing
-directory fails the volume mount and the pod does not start. Do not override it
+to `Directory`, so a missing directory fails the volume mount and the pod does
+not start. Do not override it
 with `DirectoryOrCreate`, which lets the kubelet create the directory on the
 boot disk when the metadata filesystem is not mounted. Point the path at a
 directory inside the mounted filesystem, not at the mountpoint itself: the
@@ -67,7 +67,7 @@ mountpoint exists on the boot disk whether or not anything is mounted.
 For intentionally volatile storage, set `keyLocationMap: inMemory` or apply the
 [ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out).
 That removes metadata volumes for raw stores and starts them empty after every
-storage-process restart. Review the migration before removing metadata claims
+storage-process restart. Read that runbook before removing metadata claims
 from an existing PVC deployment. The profile sets no RAM entry counts: a raw
 store larger than the chart default device (200Gi for CAS) needs an explicit
 `blockDevice.keyLocationMapInMemoryEntries`, and the profile's header gives the
@@ -104,20 +104,11 @@ There is no non-privileged hostPath-block path in this chart. Plan for a baselin
 
 ## Switching an Existing Release
 
-Switching a live release from filesystem storage to raw block storage creates new empty volumes. There is no data migration.
+Switching a live release from filesystem storage to raw block storage creates new empty volumes. No data is carried over.
 
 StatefulSet `volumeClaimTemplates` are effectively immutable, and Kubernetes retains StatefulSet PVCs. Raw block mode also uses different claim names (`<store>-blocks` and `<store>-meta` instead of the old filesystem claims). After the new storage pods are healthy, delete the old `cas` and `ac` claims manually so they stop billing.
 
 Helm cannot patch the volume claim templates in place. Plan a reviewed StatefulSet recreate. On `helm install` or `helm upgrade` the chart compares the live `storage` StatefulSet's claim templates with the rendered ones and, when they differ, fails before anything is applied and lists the differences; follow [Recreate the Storage StatefulSet](buildbarn-storage-operations.md#recreate-the-storage-statefulset). `helm template`, GitOps renders and `helm rollback` do not run that check.
-
-A release whose raw PVC stores ran in-memory indexes on 0.9.9 (the raw default then) has no `<store>-meta` claims. Chart 1.0.0 defaults those stores to file indexes and adds a `<store>-meta` template for each, on `premium-rwo` unless you set `blockDevice.metadata.storageClassName`. Either set that class for every raw store and recreate the StatefulSet, or keep the indexes volatile by applying the [ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out) last: with it the raw stores render the same claim templates as on 0.9.9. ISCC and FSAC are now enabled by default and add their own claims unless the release already had them or sets `enabled: false`.
-
-If this change also upgrades a pre-CDC release, follow the
-[storage-format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback)
-before starting the new storage image. That migration stops clients and storage
-and resets all pre-CDC stores, including persisted ISCC/FSAC. Adding disk-backed
-indexes does not convert the old encoding or preserve the old history through
-that format change.
 
 ## GKE Example A: Persistent Disk or Hyperdisk
 
@@ -186,8 +177,6 @@ kubectl apply -f custom-values/partition-ephemeral-disks-daemonset.yaml
 kubectl get nodes -l node-type=ssd-block -L hermetiq/ephemeral-lvm
 ```
 
-On a pool that already runs the 0.9.9 layout, do not apply it while storage is
-serving: follow the [cut-over procedure](#cut-over-procedure-for-an-existing-local-ssd-pool).
 Both the provisioner and hostPath storage containers require a namespace that
 permits privileged pods. Run the [GKE validation](buildbarn-gke-storage-validation.md)
 on a disposable pool when changing the node image, provisioning script, or disk
@@ -285,7 +274,7 @@ label the node ready. The same checks run periodically and in its readiness prob
 a detected mismatch removes the scheduling label and fails the provisioner.
 
 The storage overlay requires the ready label and uses `type: Directory` for
-metadata hostPaths. That is the chart default since 1.0.0; the overlay sets it
+metadata hostPaths. That is the chart default; the overlay sets it
 explicitly, and values files of your own must not override it. A missing
 per-store directory therefore fails mounting
 instead of being silently created on the boot disk. Staging before publication
@@ -299,7 +288,7 @@ or corruption of an LV.
 The script formats metadata only when creating a completely new VG. Restarting
 the provisioner remounts existing metadata and verifies its marker; it never
 formats an existing metadata LV or changes data-LV sizes. A partially created
-layout, missing marker, or old full VG without `meta` fails closed. The
+layout, missing marker, or full VG without `meta` fails closed. The
 provisioner does not complete or repair such a layout; the way out is
 [Resetting a Local SSD node](#resetting-a-local-ssd-node). Changing size values
 does not resize existing LVs.
@@ -311,15 +300,7 @@ Implementation details:
 - Its `terminationMessagePath` is outside `/dev` because it bind-mounts the host's `/dev`.
 - Its ServiceAccount can `get` and `patch` Nodes to manage the scheduling label.
 
-### Cold cut-over and failure recovery
-
-Existing layouts that allocated the entire VG to four data LVs cannot gain the
-16 GiB metadata LV in place: the group has no free extent, and the provisioner
-refuses to shrink a data LV. Every node needs a new layout, on replacement VMs
-or by resetting the **whole** VG in place. Do not shrink CAS or recreate one
-data LV while retaining its old metadata. The CDC upgrade already requires a
-cold format cut-over; do both in one outage with the
-[cut-over procedure](#cut-over-procedure-for-an-existing-local-ssd-pool) below.
+### Failure recovery
 
 Whenever devices are replaced or a VG is reset, drain builds and stop the
 affected storage processes first. Recreate blocks and metadata together, wait
@@ -352,8 +333,9 @@ kubectl -n hermetiq logs "$POD" -c partition --previous
 `--previous` prints the last failed start of a container that is restarting in
 a loop; the reason is its `ERROR:` line. No raw SSDs usually means the node pool
 was created without `--local-nvme-ssd-block`, or used
-`--ephemeral-storage-local-ssd` instead. A legacy VG, missing metadata mount,
-wrong filesystem, or generation mismatch is an intentional refusal to serve.
+`--ephemeral-storage-local-ssd` instead. A VG without the metadata LV, a
+missing metadata mount, a wrong filesystem, or a generation mismatch is an
+intentional refusal to serve.
 Never add the ready label by hand. [Resetting a Local SSD node](#resetting-a-local-ssd-node)
 lists each message, what it means, and the way out.
 
@@ -369,174 +351,6 @@ a filesystem hostPath outside the metadata mount can otherwise use the boot disk
 The chart fails the render when an enabled filesystem ISCC or FSAC store is
 left on the chart default `hostPath.path` while CAS is a raw device.
 
-### Cut-over procedure for an existing Local SSD pool
-
-This is the cut-over for a pool that the 0.9.9 DaemonSet provisioned (four data
-LVs filling the volume group, no `meta`) and that moves to chart 1.0.0 with
-the Local SSD overlay. It discards the cache. Every shard starts empty, and
-nothing of the pre-CDC stores is kept.
-
-It runs inside the
-[storage-format cutover runbook](buildbarn-storage-model.md#storage-format-cutover-and-rollback).
-That runbook's step 1 (prerequisites), steps 2 and 3 (stop clients, then
-storage), step 5 (upgrade, storage first) and step 6 (verify) apply as written.
-Steps 4 to 6 below take the place of its step 4: there are no legacy files to
-retire, because every node gets a new volume group and a new metadata
-filesystem.
-
-1. **Before the window: fix the size of the pool.** Keep the storage pool at a
-   fixed node count with autoscaling off, during the cut-over and afterwards.
-   While storage is stopped its nodes run only DaemonSet pods, which the
-   cluster autoscaler is free to remove. Scaling a node away deletes its VM and
-   its SSD contents; scaling up adds nodes, not shards.
-
-   ```bash
-   gcloud container node-pools describe POOL --cluster CLUSTER --location LOCATION \
-     --format='value(autoscaling.enabled)'
-   gcloud container clusters update CLUSTER --location LOCATION \
-     --node-pool POOL --no-enable-autoscaling
-   ```
-
-   The first command prints `True` while autoscaling is on. If infrastructure
-   code manages the pool, make the change there, or its next run turns
-   autoscaling back on.
-
-2. **Before the window: confirm the old layout and choose how to replace it.**
-   The 0.9.9 provisioner pods have the LVM tools:
-
-   ```bash
-   POD=$(kubectl -n hermetiq get pods -l app=partition-ephemeral-disks -o name | head -n 1)
-   kubectl -n hermetiq exec "$POD" -c partition -- vgs -o vg_name,vg_size,vg_free ephemeral
-   kubectl -n hermetiq exec "$POD" -c partition -- lvs -o lv_name,lv_size ephemeral
-   ```
-
-   A `VFree` of `0` and no `meta` LV is the old layout. It cannot be converted
-   in place, so each node needs one of:
-
-   - **Replacement VMs** (step 5a). This needs Local SSD capacity for a second
-     set of nodes while both pools exist.
-   - **A reset of its SSDs in place** (step 5b). This needs no new capacity,
-     and a privileged pod on each node.
-
-   `kubectl delete node` does neither. It removes the Node object only: the VM
-   keeps running with its disks untouched, the kubelet registers the node
-   again, and the provisioner finds the same legacy volume group.
-
-   In the target values, set `cas.blockDevice.size` to the CAS LV the new
-   layout produces (`718Gi` on two 375 GiB SSDs with the script as shipped)
-   and `storage.replicas` to the number of storage nodes.
-
-3. **Stop clients, then storage.** Follow steps 2 and 3 of the runbook. There
-   is nothing to snapshot on this path. Do not continue while a storage pod
-   exists:
-
-   ```bash
-   kubectl -n hermetiq get pods -l app=storage -o wide
-   ```
-
-4. **Apply the new provisioner by hand.** `helm upgrade` does not apply it.
-
-   ```bash
-   kubectl apply -f custom-values/partition-ephemeral-disks-daemonset.yaml
-   ```
-
-   On a node that still has the old layout, the new pod clears the ready label
-   and fails with `ERROR: legacy VG has no metadata LV; cold cut-over on fresh
-   SSDs is required (no data was resized or erased)`, then restarts in a loop.
-   That is expected until the node is replaced or reset. The DaemonSet's
-   rolling update (`maxUnavailable: 1` by default) stops at the first node
-   that fails this way, so the other old nodes keep their 0.9.9 pod and its
-   `ready` label. Do not wait for `kubectl rollout status`.
-
-5. **Give every storage node the new layout.** Never carry an old index or
-   checkpoint directory over to the new metadata filesystem.
-
-   - **5a. Replace the VMs.** Create the replacement pool before deleting
-     anything. Local SSD capacity can be out of stock in a zone, and a VM
-     deleted first may not come back. Use the old pool's machine type, Local
-     SSD count, zones, image type and service account, the same label and
-     taint, and neither autoscaling nor Spot:
-
-     ```bash
-     gcloud container node-pools create NEW_POOL --cluster CLUSTER --location LOCATION \
-       --machine-type MACHINE_TYPE --local-nvme-ssd-block count=SSD_COUNT \
-       --image-type IMAGE_TYPE --service-account SERVICE_ACCOUNT \
-       --num-nodes NODES_PER_ZONE --node-locations ZONES \
-       --node-labels node-type=ssd-block \
-       --node-taints hermetiq/ssd-block=true:NoSchedule
-     ```
-
-     If the pool cannot be created or comes up short, the old pool is still
-     there: retry, or reset in place instead. Once step 6 passes on every new
-     node, delete the old pool, and do it before storage starts. An old node
-     can still carry `hermetiq/ephemeral-lvm=ready` from the 0.9.9
-     provisioner, which never revoked it, and a storage pod scheduled there
-     cannot mount its metadata directories.
-
-     ```bash
-     gcloud container node-pools delete OLD_POOL --cluster CLUSTER --location LOCATION
-     ```
-
-   - **5b. Reset in place.** Follow
-     [Resetting a Local SSD node](#resetting-a-local-ssd-node) for each node.
-     Reset one node, pass step 6 on it, then do the others.
-
-6. **Verify every node before starting storage.** A ready label or a
-   successful provisioning log line is not enough.
-
-   ```bash
-   kubectl get nodes -l node-type=ssd-block -L hermetiq/ephemeral-lvm
-   kubectl -n hermetiq get pods -l app=partition-ephemeral-disks -o wide
-   ```
-
-   Every storage node must show `ready` and a provisioner pod in state
-   `Running` with `1/1` containers ready, and there must be at least
-   `storage.replicas` such nodes: the overlay's anti-affinity puts one shard
-   on each. Then check each node from its provisioner pod:
-
-   ```bash
-   META=/mnt/stateful_partition/buildbarn-local-ssd/metadata
-   for POD in $(kubectl -n hermetiq get pods -l app=partition-ephemeral-disks -o name); do
-     echo "== $POD"
-     kubectl -n hermetiq exec "$POD" -c partition -- /tmp/check-metadata-ready
-     kubectl -n hermetiq exec "$POD" -c partition -- \
-       awk -v m="$META" '$5 == m' /proc/1/mountinfo
-     kubectl -n hermetiq exec "$POD" -c partition -- \
-       lvs --units g -o lv_name,lv_size ephemeral
-     kubectl -n hermetiq exec "$POD" -c partition -- \
-       stat -c '%n %u:%g:%a' "$META/cas" "$META/ac" "$META/iscc" "$META/fsac"
-   done
-   ```
-
-   | Check | Required result |
-   |---|---|
-   | `/tmp/check-metadata-ready` | Prints nothing and exits 0. This is the provisioner's own check of the filesystem type, mount, generation marker and directory ownership. |
-   | `awk` on `/proc/1/mountinfo` | A line naming `ext4` and `/dev/mapper/ephemeral-meta`. This is the mount as the host sees it, not only the provisioner container. No output means the host does not have it. |
-   | `lvs` | `meta` 16.00g, `ac` 8.00g, `iscc` 2.00g, `fsac` 6.00g, and `cas` with the rest: 717.99g on two 375 GiB SSDs. `cas.blockDevice.size` in the values must be this size rounded up to a whole GiB. |
-   | `stat` | `65534:65534:770` for each of the four directories. |
-
-   While the old pool of step 5a still exists, its pods are in that loop too
-   and fail these checks. Judge the new nodes, then delete the old pool.
-
-7. **Upgrade.** Continue with step 5 of the runbook, with the Local SSD
-   overlay after your base values, then step 6. On this path:
-
-   - The storage StatefulSet has no volume claim templates in hostPath mode,
-     before or after, so that step's StatefulSet deletion does not apply.
-   - A storage pod stays Pending until a node carries
-     `hermetiq/ephemeral-lvm=ready`, and it cannot start on a node whose
-     metadata directories or LVs are absent.
-   - The old devices and indexes are gone, so the first builds upload
-     everything again.
-
-**Rollback is another cold reset.** Local SSD contents cannot be kept across VM
-replacement, and the in-place reset discards them, so no copy of the pre-CDC
-stores exists to restore. To go back, stop clients and storage again, return
-every node to the layout the old release expects (replace or reset the nodes
-again and apply that release's DaemonSet), and deploy the old chart and values
-as the runbook's rollback paragraph describes. Both directions start with an
-empty cache.
-
 ### Resetting a Local SSD node
 
 The provisioner fails closed and repairs nothing. In each of these states it
@@ -545,7 +359,7 @@ restart:
 
 | `ERROR:` line in the provisioner log | State |
 |---|---|
-| `legacy VG has no metadata LV; cold cut-over on fresh SSDs is required (no data was resized or erased)` | A 0.9.9 layout, or a first provisioning that stopped before `meta` was created. |
+| `legacy VG has no metadata LV; cold cut-over on fresh SSDs is required (no data was resized or erased)` | A volume group laid out without `meta` by an earlier version of the DaemonSet, or a first provisioning that stopped before `meta` was created. |
 | `existing VG is missing <lv>; reset blocks and metadata together` | A partial layout: a first provisioning that stopped while the LVs were being created, or an LV that was removed. |
 | `metadata generation marker missing; cold cut-over is required` | A first provisioning that stopped after `meta` was formatted and before the marker was written, or a deleted marker. |
 | `data/metadata generation mismatch; stop storage and reset blocks and metadata together` | An LV or the metadata filesystem was recreated after the marker was written. |
@@ -669,7 +483,7 @@ result before repeating them on the others.
    ```
 
    `umount` or `ls` reporting that the path is not mounted or does not exist
-   is fine: a legacy or partial layout never published it. Otherwise the three
+   is fine: a layout without `meta`, or a partial one, never published it. Otherwise the three
    checks must print nothing.
    A line from the first `grep` means the path is still mounted on the host.
    A file name from the second is a process that still has the filesystem
@@ -719,12 +533,48 @@ result before repeating them on the others.
 
    The DaemonSet starts a provisioner on the node. It finds no volume group
    and no published mount, creates the layout from scratch, and labels the
-   node ready. Run the checks of
-   [cut-over step 6](#cut-over-procedure-for-an-existing-local-ssd-pool) on
-   the node. Storage then schedules there and starts empty (scale
-   `statefulset/storage` back up if you scaled it down). Outside a cut-over,
-   restart the frontends before resuming clients so their positive
-   existence-cache entries for the discarded shard are dropped.
+   node ready. Run the checks under
+   [Verifying a Local SSD node](#verifying-a-local-ssd-node) on the node.
+   Storage then schedules there and starts empty (scale
+   `statefulset/storage` back up if you scaled it down). Restart the
+   frontends before resuming clients so their positive existence-cache
+   entries for the discarded shard are dropped.
+
+### Verifying a Local SSD node
+
+A ready label or a successful provisioning log line is not enough. Verify a
+node before storage starts on it:
+
+```bash
+kubectl get nodes -l node-type=ssd-block -L hermetiq/ephemeral-lvm
+kubectl -n hermetiq get pods -l app=partition-ephemeral-disks -o wide
+```
+
+Every storage node must show `ready` and a provisioner pod in state
+`Running` with `1/1` containers ready, and there must be at least
+`storage.replicas` such nodes: the overlay's anti-affinity puts one shard
+on each. Then check each node from its provisioner pod:
+
+```bash
+META=/mnt/stateful_partition/buildbarn-local-ssd/metadata
+for POD in $(kubectl -n hermetiq get pods -l app=partition-ephemeral-disks -o name); do
+  echo "== $POD"
+  kubectl -n hermetiq exec "$POD" -c partition -- /tmp/check-metadata-ready
+  kubectl -n hermetiq exec "$POD" -c partition -- \
+    awk -v m="$META" '$5 == m' /proc/1/mountinfo
+  kubectl -n hermetiq exec "$POD" -c partition -- \
+    lvs --units g -o lv_name,lv_size ephemeral
+  kubectl -n hermetiq exec "$POD" -c partition -- \
+    stat -c '%n %u:%g:%a' "$META/cas" "$META/ac" "$META/iscc" "$META/fsac"
+done
+```
+
+| Check | Required result |
+|---|---|
+| `/tmp/check-metadata-ready` | Prints nothing and exits 0. This is the provisioner's own check of the filesystem type, mount, generation marker and directory ownership. |
+| `awk` on `/proc/1/mountinfo` | A line naming `ext4` and `/dev/mapper/ephemeral-meta`. This is the mount as the host sees it, not only the provisioner container. No output means the host does not have it. |
+| `lvs` | `meta` 16.00g, `ac` 8.00g, `iscc` 2.00g, `fsac` 6.00g, and `cas` with the rest: 717.99g on two 375 GiB SSDs. `cas.blockDevice.size` in the values must be this size rounded up to a whole GiB. |
+| `stat` | `65534:65534:770` for each of the four directories. |
 
 ## GKE Example C: TopoLVM CSI
 
@@ -803,26 +653,6 @@ the surviving index reports blobs that no longer exist. With metadata on
 cold. On install or upgrade the Helm notes print
 `WARNING: STORAGE CLASS MISMATCH` for each store whose two classes differ; the
 render does not fail.
-
-A 0.9.9 install of this example ran in-memory indexes: four `<store>-blocks`
-claim templates and no metadata claims. Upgraded with its values unchanged,
-AC, ISCC and FSAC gain `<store>-meta` claims on `premium-rwo`, and CAS does too
-once its explicit `keyLocationMap: inMemory` is removed. Choose one of:
-
-- **Keep the indexes volatile.** Apply the
-  [ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out)
-  last. The StatefulSet then renders the same four claim templates as on
-  0.9.9, so nothing is recreated.
-- **Adopt persistent indexes.** Set `blockDevice.metadata.storageClassName`
-  for all four stores (and for a dedicated raw CMS), then follow
-  [Recreate the Storage StatefulSet](buildbarn-storage-operations.md#recreate-the-storage-statefulset).
-
-Either way an existing release keeps the device sizes it was created with, and
-its index sizes must follow them. The 0.9.9 example used `8Gi` for ISCC and
-FSAC. With `storage.keyLocationMapSizing.validate: true`, an `8Gi` ISCC device
-needs `blockDevice.keyLocationMapInMemoryEntries: 30758230` or more in memory,
-or a `1936` MiB file index with `blockDevice.metadata.size: 3Gi`, and a
-volatile `700Gi` CAS needs at least `80465592` in-memory entries.
 
 Unlike hostPath mode, `blockDevice.size` matters here because it is the PVC request and therefore the logical volume size TopoLVM carves for each replica.
 

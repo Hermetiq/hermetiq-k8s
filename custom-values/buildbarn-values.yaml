@@ -42,9 +42,9 @@ storage:
     # Keep the default-enabled ISCC and FSAC when using mode=pvc: StatefulSet
     # volumeClaimTemplates are immutable after creation, and the starter
     # RbeWorker manifests in custom-values/rbeworkers/ require FSAC for
-    # FUSE input prefetching. If you first installed with an older copy of this
-    # file that left them disabled, the live StatefulSet has no iscc and fsac
-    # claim templates. The chart then refuses `helm upgrade` before anything is
+    # FUSE input prefetching. If the live StatefulSet was created with them
+    # disabled, it has no iscc and fsac claim templates. The chart then
+    # refuses `helm upgrade` before anything is
     # applied and lists the differing templates, until you follow "Recreate
     # the Storage StatefulSet" in docs/buildbarn-storage-operations.md (or keep
     # both disabled).

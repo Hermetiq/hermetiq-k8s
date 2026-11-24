@@ -28,10 +28,9 @@
 #
 # Switching from file to RAM discards access to existing data. Removing
 # metadata PVC templates requires StatefulSet recreation. A release whose raw
-# PVC stores already ran in-memory indexes (the 0.9.9 raw default) had no
-# metadata claims, and with this profile it still renders none. ISCC and FSAC
-# are now enabled by default and add their own claims unless the release
-# already had them or sets enabled: false.
+# PVC stores already run in-memory indexes has no metadata claims, and with
+# this profile it renders none. ISCC and FSAC are enabled by default and add
+# their own claims unless the release sets enabled: false.
 # For a cold discard, stop storage and reset/delete the blocks and metadata
 # claims together. Rollback needs a consistent stopped snapshot/copy of both.
 # Do not reuse a stale checkpoint with blocks written by a volatile store:
