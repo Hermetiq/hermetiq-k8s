@@ -1661,12 +1661,43 @@ share a profile with humans.
 
 ### Project access policy
 
-The chart always enforces project authorization for the API, publisher, and
-dashboard. The API and publisher share the `authorization` policy through
-`PROJECT_AUTHORIZATION_CONFIG`, and the publisher requires `write:bep` permission
-for the selected project. JWT verification and signed project restrictions also
-apply. Configure grants and access defaults through the typed `authorization`
-values; workload environment maps cannot disable or replace the chart's policy.
+The chart enforces project authorization for the API and dashboard. Publisher
+authorization is enabled by default (`ENFORCE_PUB_AUTHZ=true`): the publisher
+requires `write:bep` permission for the selected project. By default, the API and
+publisher share the `authorization` policy through `PROJECT_AUTHORIZATION_CONFIG`.
+Configure grants and access defaults through the typed `authorization` values;
+workload environment maps cannot replace that policy.
+
+For on-prem installations where all authenticated users may publish BEP to all
+projects, set this override in your installation values (supported from chart
+`1.0.1`):
+
+```yaml
+publisher:
+  env:
+    ENFORCE_PUB_AUTHZ: "false"
+```
+
+Boolean `false` also works, as does
+`--set publisher.env.ENFORCE_PUB_AUTHZ=false`. The chart emits exactly one entry.
+Remove the override or set it to `"true"` to restore publisher enforcement.
+
+With `false`, the publisher skips project-role and credential-scope permission
+checks, so authenticated callers do not need a Builder grant to publish.
+Authentication, JWT verification, and any signed project restrictions remain in
+effect: a credential bound to one project still cannot publish to another.
+Project authorization remains `enforced` in both the API and publisher, so
+query/project RPCs and dashboard access retain their project checks. Turning
+publisher enforcement back on requires appropriate project grants for publishing
+callers.
+
+**Publisher image compatibility:** the `v1.0.0` application rejects
+`ENFORCE_PUB_AUTHZ=false` with an enforced policy at startup. Disabling publisher
+enforcement requires a publisher image that supports this combination; select
+its tag and matching digest with `images.bepNats.pubTag` and
+`images.bepNats.pubDigest`. The chart keeps the policy enforced rather than
+switching the publisher to legacy authorization, which would also relax its
+query/project RPCs.
 
 Before installing, prepare memberships and issuer-qualified group and
 service-account grants. For example:
@@ -1753,8 +1784,8 @@ not inherit the user identity or installation-admin groups of the person who
 created the application, owns its secret, or is signed in to the dashboard.
 Browser email-domain admission does not apply to the BEP endpoint.
 
-Grant the helper's exact verified `iss` and `sub` Builder access to each
-required project.
+With the default publisher enforcement enabled, grant the helper's exact
+verified `iss` and `sub` Builder access to each required project.
 For a token with issuer `https://idp.example.com/` and subject
 `example-build-client@clients`:
 
@@ -1782,7 +1813,8 @@ create a Hermetiq project grant.
 
 For diagnosis, gRPC `Unauthenticated` (code 16) means authentication failed;
 check the credential, signature, issuer, audience, and expiry. A verified token
-that lacks `write:bep` receives `PermissionDenied` (code 7); check the exact
+that lacks `write:bep` receives `PermissionDenied` (code 7) when publisher
+enforcement is enabled; check the exact
 principal's project grants. Successful token exchange or browser admin access
 does not by itself establish permission for the helper's application token.
 
@@ -1796,8 +1828,10 @@ decision. The BFF forwards the ID token provided by oauth2-proxy, so the IdP mus
 include the configured groups claim in that ID token when using group grants.
 Putting groups only in an access token does not supply them to this browser flow.
 
-The BFF carries credentials; it does not grant permissions. API and publisher
-authorization, the BFF, and dashboard oauth2-proxy are required by this chart.
+The BFF carries credentials; it does not grant permissions. API authorization,
+the BFF, and dashboard oauth2-proxy are required by this chart. Publisher
+enforcement defaults to enabled and can be disabled independently through
+`publisher.env.ENFORCE_PUB_AUTHZ`; see [Project access policy](#project-access-policy).
 Shared cookies and `authorization.defaultAccess` remain configurable. In Gateway
 mode the browser uses the existing dashboard `HTTPRoute`; no dashboard
 `GRPCRoute` is added. Envoy must preserve gRPC-web through the HTTP/1.1 proxy

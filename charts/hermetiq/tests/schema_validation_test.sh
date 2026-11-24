@@ -49,6 +49,12 @@ expect_schema_failure 'authorization.mode="legacy"' \
   "mode.*(not allowed|additionalProperties)|additional properties.*mode"
 expect_schema_failure 'authorization.mode="enforced"' \
   "mode.*(not allowed|additionalProperties)|additional properties.*mode"
+expect_schema_success --set-json 'publisher.env.ENFORCE_PUB_AUTHZ=false'
+expect_schema_success --set-json 'publisher.env.ENFORCE_PUB_AUTHZ="false"'
+expect_schema_failure 'publisher.env.ENFORCE_PUB_AUTHZ=0' \
+  "ENFORCE_PUB_AUTHZ.*(type|boolean|string)"
+expect_schema_failure 'publisher.env.ENFORCE_PUB_AUTHZ={"value":"false"}' \
+  "ENFORCE_PUB_AUTHZ.*(type|boolean|string)"
 expect_schema_failure 'publisher.jwks.source="automatic"' \
   "source.*(one of|enum)"
 expect_schema_failure 'publisher.jwks.refreshInterval="eventually"' \

@@ -336,12 +336,25 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/* The chart always enforces project authorization. Copy the configurable
-     policy before injecting the fixed mode so rendering never mutates Values. */}}
+{{/* API project authorization is always enforced. Copy the configurable
+     policy before injecting the mode so rendering never mutates Values. */}}
 {{- define "hermetiq-core.projectAuthorizationJSON" -}}
 {{- $policy := deepCopy (default (dict) .Values.authorization) -}}
 {{- $_ := set $policy "mode" "enforced" -}}
 {{- mustToJson $policy -}}
+{{- end -}}
+
+{{/* Preserve the publisher env override, including a YAML boolean false.
+     Resolve templates once and reject ambiguous values before rendering. */}}
+{{- define "hermetiq-core.publisherEnforceProjectAuthorization" -}}
+{{- $enforce := "true" -}}
+{{- if hasKey (default (dict) .Values.publisher.env) "ENFORCE_PUB_AUTHZ" -}}
+{{- $enforce = include "hermetiq-core.customEnvValue" (dict "root" . "env" .Values.publisher.env "name" "ENFORCE_PUB_AUTHZ") -}}
+{{- end -}}
+{{- if not (has $enforce (list "true" "false")) -}}
+{{- fail "publisher.env.ENFORCE_PUB_AUTHZ must resolve to true or false" -}}
+{{- end -}}
+{{- $enforce -}}
 {{- end -}}
 
 {{/* Shared verifier settings for chart-managed JWKS. Historical workload env

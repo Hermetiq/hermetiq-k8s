@@ -52,10 +52,10 @@
 {{- $publisherEnv := default (dict) .Values.publisher.env -}}
 {{- $subscriberEnv := default (dict) .Values.subscriber.env -}}
 {{- if hasKey .Values.authorization "mode" -}}
-{{- fail "authorization.mode is not supported; this Helm chart always enforces project authorization" -}}
+{{- fail "authorization.mode is not supported; this Helm chart always enforces API project authorization" -}}
 {{- end -}}
 {{- if hasKey .Values.publisher "enforceProjectAuthorization" -}}
-{{- fail "publisher.enforceProjectAuthorization is not supported; this Helm chart always enforces publisher project authorization" -}}
+{{- fail "publisher.enforceProjectAuthorization is not supported; use publisher.env.ENFORCE_PUB_AUTHZ" -}}
 {{- end -}}
 {{- if hasKey .Values "browserAuthorization" -}}
 {{- fail "browserAuthorization is not supported; this Helm chart always enables browser authorization" -}}
@@ -106,9 +106,6 @@
 
 {{- if or (hasKey $apiEnv "PROJECT_AUTHORIZATION_CONFIG") (hasKey $publisherEnv "PROJECT_AUTHORIZATION_CONFIG") -}}
 {{- fail "api.env and publisher.env must not set PROJECT_AUTHORIZATION_CONFIG; use authorization so both workloads share the same policy" -}}
-{{- end -}}
-{{- if hasKey $publisherEnv "ENFORCE_PUB_AUTHZ" -}}
-{{- fail "publisher.env must not set ENFORCE_PUB_AUTHZ; this Helm chart always enforces publisher project authorization" -}}
 {{- end -}}
 {{- $publisherJwksSource := default "auto" .Values.publisher.jwks.source -}}
 {{- if not (has $publisherJwksSource (list "auto" "url" "inline" "secret")) -}}
