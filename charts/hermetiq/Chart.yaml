@@ -21,7 +21,7 @@ annotations:
     - kind: changed
       description: "Breaking: Buildbarn configuration is read and validated in the CDC (RepMaxCDC) schema only; run with the Buildbarn 1.0.0 chart"
     - kind: changed
-      description: "Default application images are v1.0.0; images from v0.9.8 and earlier are rejected at render time"
+      description: "Default application images are v1.0.0; images earlier than v1.0.0 are rejected at render time"
     - kind: added
       description: "Optional SCIM provisioning (api.scim), independent JWT trust profiles (api.jwt.profiles, publisher.jwks.profiles) and independent publisher signing keys with configurable JWKS refresh"
     - kind: added
@@ -34,6 +34,10 @@ annotations:
       description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
     - kind: added
       description: "Read S3 access keys for S3-compatible progress log storage from a Secret (artifactStorage.s3)"
+    - kind: security
+      description: "Harden auth, CORS, and routing: stop forwarding OIDC tokens to Grafana in grafana-oauth2-proxy, omit external MCP routes when api.mcpAuthDisabled=true, scope Envoy Gateway CORS to chart routes and disable allowCredentials on MCP CORS policies, restrict gateway preflight matching to OPTIONS while stripping x-forwarded-client-cert, and project only jwks.json from publisher-jwks Secret"
+    - kind: fixed
+      description: "Tighten chart schema and render validation: declare boolean schema types for security flags, trim JWT profile values, reject empty profile audiences/roles and TLD-only oauth2Proxy emailDomains, validate source=scim bindings against api.scim, and skip oauth2-proxy secret checksum on grpc-api in profile mode"
 keywords:
   - hermetiq
   - MCP
