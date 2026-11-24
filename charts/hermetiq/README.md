@@ -24,6 +24,7 @@ How this README is organized:
 
 **Install**
 
+- [Migration guides](#migration-guides)
 - [What the chart installs](#what-the-chart-installs)
 - [Install prerequisites](#install-prerequisites): checklist, PostgreSQL, NATS
   JetStream, DragonflyDB, Secrets
@@ -72,6 +73,14 @@ How this README is organized:
 
 - [Local chart development](#local-chart-development)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> For upgrades from a chart version earlier than `1.0.0`, follow the
+> [Hermetiq migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-hermetiq.md)
+> before upgrading. It covers project authorization, dashboard authentication,
+> and the coordinated CDC upgrade with Buildbarn and the worker operator.
 
 ## What the chart installs
 

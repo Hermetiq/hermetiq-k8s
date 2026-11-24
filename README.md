@@ -23,6 +23,7 @@ configuration.
 
 ## Contents
 
+- [Migration guides](#migration-guides)
 - [Key features](#key-features)
   - [Hermetiq chart](#hermetiq-chart)
   - [Buildbarn chart](#buildbarn-chart)
@@ -47,6 +48,19 @@ configuration.
 - [Uninstalling](#uninstalling)
 - [Getting help](#getting-help)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> **Upgrading an existing installation from a chart version earlier than 1.0.0?**
+> Start with the [migration overview](docs/migrate-to-1.0.0.md), then follow the
+> [Hermetiq](docs/migrate-to-1.0.0-hermetiq.md),
+> [Buildbarn](docs/migrate-to-1.0.0-buildbarn.md), and
+> [BB Worker Operator](docs/migrate-to-1.0.0-bb-worker-operator.md) migration guides
+> to coordinate the upgrade in one maintenance window.
+>
+> For staging replacement storage with Buildbarn chart 1.0.1, see the
+> [optional blue-green storage procedure](docs/migrate-to-1.0.0-buildbarn.md#optional-blue-green-storage-with-chart-101).
 
 ## Key features
 
@@ -222,10 +236,11 @@ Install in this order:
 1. Prepare the namespace, routing, DNS, TLS, and shared services below. Follow
    the [Hermetiq prerequisite guide](charts/hermetiq/README.md#install-prerequisites)
    to provision PostgreSQL, NATS JetStream, and DragonflyDB.
-2. Install Hermetiq. It creates the shared dashboard OAuth configuration used
-   by the optional Grafana and Buildbarn Browser proxies.
-3. Install the BB Worker Operator.
-4. Install Buildbarn.
+2. Install [Hermetiq](charts/hermetiq/README.md#contents). It creates the shared
+   dashboard OAuth configuration used by the optional Grafana and Buildbarn
+   Browser proxies.
+3. Install the [BB Worker Operator](charts/bb-worker-operator/README.md#contents).
+4. Install [Buildbarn](charts/buildbarn/README.md#contents).
 5. Apply the `RbeWorker` pools appropriate for the cluster, starting from the
    [sample worker pools](custom-values/rbeworkers/README.md).
 

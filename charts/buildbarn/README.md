@@ -35,6 +35,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 
 **Install**
 
+- [Migration guides](#migration-guides)
 - [What the chart installs](#what-the-chart-installs): workloads, service
   topology
 - [Install prerequisites](#install-prerequisites): checklist
@@ -89,6 +90,18 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 
 - [Local chart development](#local-chart-development)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> For upgrades from a chart version earlier than `1.0.0`, follow the
+> [Buildbarn migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-buildbarn.md)
+> before upgrading. CDC requires fresh storage or an explicit cold-cache reset,
+> coordinated with the worker and operator upgrade.
+>
+> Chart `1.0.1` also offers an optional
+> [blue-green storage procedure](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-buildbarn.md#optional-blue-green-storage-with-chart-101)
+> to stage replacement storage before switching clients.
 
 ## What the chart installs
 
