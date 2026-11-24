@@ -2038,10 +2038,13 @@ Credentials come from the Pods, never from Project Settings:
   subscriber Pods then read `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
   from it.
 
+Create the Secret from files rather than literals, so the key stays out of
+shell history:
+
 ```bash
 kubectl -n hermetiq create secret generic hermetiq-s3-keys \
-  --from-literal=AWS_ACCESS_KEY_ID=<access-key> \
-  --from-literal=AWS_SECRET_ACCESS_KEY=<secret-key>
+  --from-file=AWS_ACCESS_KEY_ID=./access-key-id \
+  --from-file=AWS_SECRET_ACCESS_KEY=./secret-access-key
 ```
 
 ```yaml
@@ -2057,7 +2060,14 @@ artifactStorage:
 ```
 
 A variable already set in `api.env`, `publisher.env` or `subscriber.env`
-takes precedence over these values.
+takes precedence over these values. Don't set `AWS_SECRET_ACCESS_KEY` there:
+those values are stored in plain text in the Pod spec and the Helm release.
+
+Static keys take precedence over IRSA and EKS Pod Identity, so name a key
+Secret only where no workload identity is meant to apply. The chart doesn't
+watch the Secret: after rotating the keys, restart the Pods, for example
+`kubectl -n hermetiq rollout restart deployment grpc-api bep-nats-pub` plus
+each `bep-nats-sub-N`.
 
 The identity or key needs `s3:ListBucket` on the bucket and `s3:GetObject`,
 `s3:PutObject` and `s3:DeleteObject` on its objects. Delete is only used by
