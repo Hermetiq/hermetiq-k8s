@@ -634,25 +634,29 @@
           "properties": {
             "existingSecret": {
               "type": "string",
-              "description": "Secret holding an S3 access key pair, read by the api, publisher and subscriber pods. Empty sets no keys; use IRSA or EKS Pod Identity on AWS instead."
+              "description": "Secret holding an S3 access key pair, read by the api, publisher and subscriber pods. Empty sets no keys; use IRSA or EKS Pod Identity on AWS instead.",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
             },
             "accessKeyIdKey": {
               "type": "string",
-              "minLength": 1,
-              "description": "Key in existingSecret holding the access key ID."
+              "description": "Key in existingSecret holding the access key ID.",
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "secretAccessKeyKey": {
               "type": "string",
-              "minLength": 1,
-              "description": "Key in existingSecret holding the secret access key."
+              "description": "Key in existingSecret holding the secret access key.",
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "region": {
               "type": "string",
-              "description": "AWS_REGION for projects whose S3 settings leave the region empty."
+              "description": "AWS_REGION for projects whose S3 settings leave the region empty.",
+              "pattern": "^([a-z0-9][a-z0-9_-]{0,62})?$"
             }
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "rbac": {
       "type": "object",

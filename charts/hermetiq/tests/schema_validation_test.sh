@@ -76,4 +76,17 @@ expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=[""]' \
   "allowedGroups.*(length|minLength)"
 expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=["users,admins"]' \
   "allowedGroups.*(pattern|match)"
-echo 'Assistant, RBE, publisher, authorization, and OAuth admission values schema checks passed'
+expect_schema_success 'artifactStorage={"s3":{"existingSecret":"hermetiq-s3-keys","accessKeyIdKey":"access-key","secretAccessKeyKey":"secret.key","region":"eu-central-1"}}'
+expect_schema_failure 'artifactStorage={"S3":{"existingSecret":"hermetiq-s3-keys"}}' \
+  "additional propert(y|ies) 'S3'"
+expect_schema_failure 'artifactStorage={"s3":{"existingSecrets":"hermetiq-s3-keys"}}' \
+  "additional propert(y|ies) 'existingSecrets'"
+expect_schema_failure 'artifactStorage.s3.existingSecret="Hermetiq S3 Keys"' \
+  "existingSecret.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.accessKeyIdKey=""' \
+  "accessKeyIdKey.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.secretAccessKeyKey="../key"' \
+  "secretAccessKeyKey.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.region="us east 1"' \
+  "region.*(pattern|match)"
+echo 'Assistant, RBE, publisher, authorization, OAuth admission, and artifact storage values schema checks passed'

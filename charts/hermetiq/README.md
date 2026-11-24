@@ -1454,6 +1454,15 @@ serviceAccount:
     eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
 ```
 
+Pods pick up a new identity only when they start. After adding the
+annotation or a Pod Identity association, restart the API, publisher and
+subscriber Deployments:
+
+```bash
+kubectl -n hermetiq rollout restart deployment \
+  -l 'app.kubernetes.io/component in (api,publisher,subscriber)'
+```
+
 Grant the resulting identity only the object-storage permissions that the
 enabled features need: progress-log storage needs read and write access for
 the subscribers, and trace and output-file features may need additional read
@@ -2457,12 +2466,15 @@ high-volume installs.
 
 Object storage has two requirements on the cluster side:
 
-1. Bucket access for the subscriber Pods. Subscribers use the shared chart
-   ServiceAccount, so enabling [workload identity](#workload-identity) and
-   granting that identity read and write access to the bucket is all the
-   wiring needed. S3-compatible stores without workload identity use access
-   keys from a Secret instead; see [S3-compatible storage](#s3-compatible-storage). The subscriber Pods also need network egress to the storage
-   endpoint, which the PostgreSQL mode does not.
+1. Bucket access for the subscriber and API Pods. Subscribers write the
+   logs; the API Pods read them back and run the Project Settings
+   connectivity test. Both use the shared chart ServiceAccount, so enabling
+   [workload identity](#workload-identity) and granting that identity read
+   and write access to the bucket is all the wiring needed. S3-compatible
+   stores without workload identity use access keys from a Secret instead;
+   see [S3-compatible storage](#s3-compatible-storage). Both sets of Pods
+   also need network egress to the storage endpoint, which the PostgreSQL
+   mode does not.
 2. A lifecycle rule on the `progress/` prefix. Hermetiq never deletes these
    objects, so without a rule they accumulate indefinitely. Scope the rule to
    `<prefix>/progress/` in the bucket's own infrastructure code and choose the
@@ -2506,7 +2518,10 @@ Credentials come from the Pods, never from Project Settings:
   from it.
 
 Create the Secret from files rather than literals, so the key stays out of
-shell history:
+shell history. The files must not end with a newline: `--from-file` keeps it,
+and the AWS SDK sends it as part of the key, so every request fails to sign.
+Write the files with `printf '%s'`, or strip an existing one with
+`tr -d '\r\n' < key > key.clean`.
 
 ```bash
 kubectl -n hermetiq create secret generic hermetiq-s3-keys \
@@ -2532,13 +2547,19 @@ those values are stored in plain text in the Pod spec and the Helm release.
 
 Static keys take precedence over IRSA and EKS Pod Identity, so name a key
 Secret only where no workload identity is meant to apply. The chart doesn't
-watch the Secret: after rotating the keys, restart the Pods, for example
-`kubectl -n hermetiq rollout restart deployment grpc-api bep-nats-pub` plus
-each `bep-nats-sub-N`.
+watch the Secret: after rotating the keys, restart the API, publisher and
+subscriber Deployments with the `rollout restart` command in
+[workload identity](#workload-identity).
 
-The identity or key needs `s3:ListBucket` on the bucket and `s3:GetObject`,
-`s3:PutObject` and `s3:DeleteObject` on its objects. Delete is only used by
-the Project Settings connectivity test.
+The identity or key needs `s3:ListBucket` on the bucket
+(`arn:aws:s3:::<bucket>`) and `s3:GetObject`, `s3:PutObject` and
+`s3:DeleteObject` on its objects (`arn:aws:s3:::<bucket>/<prefix>/*`, or
+`arn:aws:s3:::<bucket>/*` with no prefix). Delete is only used by the Project
+Settings connectivity test. A bucket encrypted with a customer-managed KMS
+key also needs `kms:GenerateDataKey` and `kms:Decrypt` on that key.
+
+With an empty project prefix, the lifecycle rule's prefix is `progress/`, with
+no leading slash.
 
 Two limits apply to S3-compatible projects:
 
