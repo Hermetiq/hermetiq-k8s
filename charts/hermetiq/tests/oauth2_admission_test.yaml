@@ -62,6 +62,34 @@ tests:
       - failedTemplate:
           errorPattern: unrestricted browser admission is not supported
 
+  - it: rejects top-level-domain-only email patterns like .com and *.com
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: [".com"]
+    asserts:
+      - failedTemplate:
+          errorPattern: top-level-domain-only patterns like \.com or \*\.com are not allowed
+
+  - it: rejects wildcard top-level-domain-only email patterns
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: ["*.com"]
+    asserts:
+      - failedTemplate:
+          errorPattern: top-level-domain-only patterns like \.com or \*\.com are not allowed
+
+  - it: accepts subdomain patterns under an explicit organization domain
+    template: templates/configmaps.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: [".example.com", "*.example.org"]
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - equal:
+          path: data.OAUTH2_PROXY_EMAIL_DOMAINS
+          value: .example.com,*.example.org
+
   - it: rejects a blank allowed group as a wildcard bypass
     template: templates/validate.yaml
     set:

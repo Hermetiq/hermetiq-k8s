@@ -60,3 +60,12 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: 'DASHBOARD gRPC-WEB'
+
+  - it: warns and omits external MCP endpoint when api.mcpAuthDisabled is true
+    set:
+      api.mcpAuthDisabled: true
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: MCP AUTHENTICATION DISABLED'
+      - notMatchRegexRaw:
+          pattern: '  MCP: +'

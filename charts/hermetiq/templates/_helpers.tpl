@@ -292,14 +292,15 @@ true
 {{/* Top-level OIDC issuer URL preserved as-is (trailing slash matters for
      OIDC issuer comparison — Auth0 JWTs include it). */}}
 {{- define "hermetiq-core.oidcIssuerUrl" -}}
-{{- default "" .Values.oidc.issuerUrl -}}
+{{- trim (default "" .Values.oidc.issuerUrl) -}}
 {{- end -}}
 
 {{/* JWKS URL: explicit `oidc.jwksUrl` first, else derived from issuer
      (trailing slash trimmed before joining the well-known suffix). */}}
 {{- define "hermetiq-core.oidcJwksUrl" -}}
-{{- if .Values.oidc.jwksUrl -}}
-{{- .Values.oidc.jwksUrl -}}
+{{- $explicit := trim (default "" .Values.oidc.jwksUrl) -}}
+{{- if $explicit -}}
+{{- $explicit -}}
 {{- else -}}
 {{- $issuer := trimSuffix "/" (include "hermetiq-core.oidcIssuerUrl" .) -}}
 {{- if $issuer -}}
@@ -310,27 +311,28 @@ true
 
 {{/* api.jwt.issuer with fallback to oidc.issuerUrl. */}}
 {{- define "hermetiq-core.apiJwtIssuer" -}}
-{{- default (include "hermetiq-core.oidcIssuerUrl" .) .Values.api.jwt.issuer -}}
+{{- default (include "hermetiq-core.oidcIssuerUrl" .) (trim (default "" .Values.api.jwt.issuer)) -}}
 {{- end -}}
 
 {{/* api.jwt.jwksUrl with fallback to derived OIDC JWKS URL. */}}
 {{- define "hermetiq-core.apiJwtJwksUrl" -}}
-{{- default (include "hermetiq-core.oidcJwksUrl" .) .Values.api.jwt.jwksUrl -}}
+{{- default (include "hermetiq-core.oidcJwksUrl" .) (trim (default "" .Values.api.jwt.jwksUrl)) -}}
 {{- end -}}
 
 {{/* publisher.jwks.issuer with fallback to oidc.issuerUrl. */}}
 {{- define "hermetiq-core.publisherJwksIssuer" -}}
-{{- default (include "hermetiq-core.oidcIssuerUrl" .) .Values.publisher.jwks.issuer -}}
+{{- default (include "hermetiq-core.oidcIssuerUrl" .) (trim (default "" .Values.publisher.jwks.issuer)) -}}
 {{- end -}}
 
 {{/* Explicit key sources never inherit the dashboard's OIDC JWKS URL.
      auto retains the existing publisher URL -> global OIDC -> local precedence. */}}
 {{- define "hermetiq-core.publisherJwksUrl" -}}
 {{- $source := default "auto" .Values.publisher.jwks.source -}}
+{{- $url := trim (default "" .Values.publisher.jwks.url) -}}
 {{- if eq $source "auto" -}}
-{{- default (include "hermetiq-core.oidcJwksUrl" .) .Values.publisher.jwks.url -}}
+{{- default (include "hermetiq-core.oidcJwksUrl" .) $url -}}
 {{- else if eq $source "url" -}}
-{{- .Values.publisher.jwks.url -}}
+{{- $url -}}
 {{- end -}}
 {{- end -}}
 
@@ -370,8 +372,9 @@ true
 
 {{/* publisher.jwks.audience defaults to the public BEP gRPC origin. */}}
 {{- define "hermetiq-core.publisherJwksAudience" -}}
-{{- if .Values.publisher.jwks.audience -}}
-{{- .Values.publisher.jwks.audience -}}
+{{- $aud := trim (default "" .Values.publisher.jwks.audience) -}}
+{{- if $aud -}}
+{{- $aud -}}
 {{- else if or .Values.hosts.bepGrpc .Values.hosts.domainBase -}}
 {{- printf "https://%s" (include "hermetiq-core.bepGrpcHost" .) -}}
 {{- end -}}
@@ -405,7 +408,7 @@ true
      takes it as a separate env var and interpolates it into
      GRPC_AUTH_AUDIENCE with $(...) expansion. */}}
 {{- define "hermetiq-core.apiJwtAudienceFromOauth2Secret" -}}
-{{- if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled (not .Values.api.jwt.audience) -}}true{{- end -}}
+{{- if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled (not (trim (default "" .Values.api.jwt.audience))) -}}true{{- end -}}
 {{- end -}}
 
 {{/* Whether bep-nats-pub should be fronted by grpc-auth-proxy. */}}
@@ -856,7 +859,7 @@ nginx.ingress.kubernetes.io/enable-cors: "true"
 nginx.ingress.kubernetes.io/cors-allow-origin: {{ join "," .Values.ingress.cors.mcpAllowOrigins | quote }}
 nginx.ingress.kubernetes.io/cors-allow-headers: {{ printf "mcp-protocol-version,%s" (join "," .Values.ingress.cors.allowHeaders) | quote }}
 nginx.ingress.kubernetes.io/cors-expose-headers: {{ printf "%s,mcp-protocol-version" (join "," .Values.ingress.cors.exposeHeaders) | quote }}
-nginx.ingress.kubernetes.io/cors-allow-credentials: {{ .Values.ingress.cors.allowCredentials | quote }}
+nginx.ingress.kubernetes.io/cors-allow-credentials: "false"
 nginx.ingress.kubernetes.io/cors-max-age: {{ .Values.ingress.cors.maxAgeSeconds | quote }}
 nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors.allowMethods | quote }}
 {{- end -}}
@@ -1058,9 +1061,10 @@ spec:
 - name: JWT_ISSUER
   value: {{ . | quote }}
 {{- end }}
-{{- if .Values.api.jwt.audience }}
+{{- $apiAudience := trim (default "" .Values.api.jwt.audience) }}
+{{- if $apiAudience }}
 - name: JWT_AUDIENCE
-  value: {{ .Values.api.jwt.audience | quote }}
+  value: {{ $apiAudience | quote }}
 {{- else if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled }}
 - name: JWT_AUDIENCE
   valueFrom:

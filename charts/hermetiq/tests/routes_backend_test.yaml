@@ -89,3 +89,54 @@ tests:
         documentSelector:
           path: metadata.name
           value: bbcal-grpc
+
+  - it: omits external MCP routes and policies when api.mcpAuthDisabled is true (gateway)
+    template: templates/gateway-routes.yaml
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      api.mcpAuthDisabled: true
+    asserts:
+      - notExists:
+          path: metadata.name
+        documentSelector:
+          path: metadata.name
+          value: mcp
+          skipEmptyTemplates: true
+      - notExists:
+          path: metadata.name
+        documentSelector:
+          path: metadata.name
+          value: mcp-cors-policy
+          skipEmptyTemplates: true
+      - notExists:
+          path: metadata.name
+        documentSelector:
+          path: metadata.name
+          value: mcp-health-check
+          skipEmptyTemplates: true
+
+  - it: omits external MCP HTTPProxy when api.mcpAuthDisabled is true (contour)
+    template: templates/contour-routes.yaml
+    set:
+      api.mcpAuthDisabled: true
+    asserts:
+      - notExists:
+          path: metadata.name
+        documentSelector:
+          path: metadata.name
+          value: mcp
+          skipEmptyTemplates: true
+
+  - it: omits external MCP Ingress when api.mcpAuthDisabled is true (ingress)
+    template: templates/ingress-routes.yaml
+    set:
+      routing.provider: ingress
+      api.mcpAuthDisabled: true
+    asserts:
+      - notExists:
+          path: metadata.name
+        documentSelector:
+          path: metadata.name
+          value: mcp
+          skipEmptyTemplates: true

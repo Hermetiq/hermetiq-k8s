@@ -355,6 +355,7 @@ spec:
     tls:
       secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.grafanaName) "secretName" .Values.contour.tls.grafana.secretName) }}
 {{- end }}
+{{- if not .Values.api.mcpAuthDisabled }}
 ---
 {{/* ============================================================ */}}
 {{/* HTTPProxy: MCP                                               */}}
@@ -398,7 +399,7 @@ spec:
     fqdn: {{ include "hermetiq-core.mcpHost" . }}
     {{- if .Values.contour.cors.enabled }}
     corsPolicy:
-      allowCredentials: {{ .Values.contour.cors.allowCredentials }}
+      allowCredentials: false
       allowPrivateNetwork: {{ .Values.contour.cors.allowPrivateNetwork }}
       allowOrigin:
         {{- toYaml .Values.contour.cors.mcpAllowOrigins | nindent 8 }}
@@ -414,4 +415,5 @@ spec:
     {{- end }}
     tls:
       secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.mcpName) "secretName" .Values.contour.tls.mcp.secretName) }}
+{{- end }}
 {{- end }}

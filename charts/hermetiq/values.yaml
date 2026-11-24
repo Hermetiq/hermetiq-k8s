@@ -335,13 +335,14 @@ oidc:
 
 # gRPC authentication, performed by the bep-nats core process itself.
 #
-# Authentication moved out of the grpc-auth-proxy sidecar and into the core,
-# which reads the GRPC_AUTH_* environment family. The legacy JWKS_* variables
-# were removed from the application outright — there are no aliases — so these
-# settings, together with api.jwt.* / publisher.jwks.*, are the only thing
-# configuring gRPC and MCP authentication now. The api pods keep the sidecar,
-# but only for gRPC-web framing and CORS; its JWT_* settings no longer decide
-# who gets in.
+# Authentication runs in the core, which reads the GRPC_AUTH_* environment
+# family. The legacy JWKS_* variables were removed from the application
+# outright — there are no aliases — so these settings, together with
+# api.jwt.* / publisher.jwks.*, configure gRPC and MCP authentication. The api
+# pods keep the grpc-auth-proxy sidecar for gRPC-web framing and CORS; in
+# single-issuer mode it still verifies JWTs against JWT_* before forwarding,
+# while in api.jwt.profiles mode it runs in forward-only mode and delegates all
+# verification to the core.
 
 hosts:
   domainBase: ""
@@ -359,7 +360,7 @@ hosts:
 # VictoriaMetrics chart. When enabled, the chart's Grafana route targets this
 # proxy instead of the upstream Grafana service. Reuses the shared
 # oauth2-proxy-config-web-ui ConfigMap and oauth2-proxy-client Secret, so it
-# shares an SSO session with the dashboard and buildbarn browser.
+# shares an SSO session with the dashboard.
 #
 # Requires Grafana to trust the proxy headers — set auth.proxy.enabled=true
 # and the related auth.proxy.* values in the VictoriaMetrics chart's grafana
@@ -1112,13 +1113,16 @@ api:
     # Leave empty when CORS is handled upstream (Envoy Gateway SecurityPolicy
     # via gateway.cors.* or Contour CorsPolicy via contour.cors.*).
     corsAllowedOrigins: ""
-  # JWT/JWKS settings for the api pod. These now feed BOTH the api core
-  # (GRPC_AUTH_*, which authenticates the gRPC API and the MCP endpoint) and
-  # the grpc-auth-proxy sidecar (JWT_*, which only frames gRPC-web and answers
-  # CORS). `enabled` does not switch authentication off — see app.grpcAuthUserProvider.
-  # Keep it true for chart-managed JWKS settings. Set it false only when api.env
-  # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
-  # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
+  # JWT/JWKS settings for the api pod. In single-issuer mode these feed BOTH
+  # the api core (GRPC_AUTH_*, which authenticates the gRPC API and the MCP
+  # endpoint) and the grpc-auth-proxy sidecar (JWT_*, which still verifies
+  # tokens before forwarding alongside gRPC-web framing and CORS). In
+  # api.jwt.profiles mode the sidecar runs in forward-only mode and delegates
+  # all verification to the core. `enabled` does not switch authentication off
+  # — see app.grpcAuthUserProvider. Keep it true for chart-managed JWKS
+  # settings. Set it false only when api.env supplies exactly one
+  # GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus GRPC_AUTH_ISSUER and
+  # GRPC_AUTH_AUDIENCE.
   # Optional directory provisioning for the enforced project authorization policy.
   # userName must match the verified stable subject; never map it from email.
   scim:
@@ -1410,8 +1414,8 @@ dashboard:
     provider: oidc
     oidcIssuerUrl: ""
     scope: openid email profile offline_access
-    # Required browser admission policy, shared by dashboard, Grafana and
-    # Buildbarn Browser. Set your organization domains, e.g. ["example.com"].
+    # Required browser admission policy, shared by the dashboard and Grafana.
+    # Set your organization domains, e.g. ["example.com"].
     # ["*"] is accepted only together with a nonempty allowedGroups list.
     emailDomains: []
     # Optional additional restriction: a user must belong to at least one
@@ -1432,7 +1436,7 @@ dashboard:
     #   https://<tenant>.auth0.com/v2/logout?client_id=<clientId>&returnTo=https://dashboard.<domainBase>
     #
     # This value is rendered into the shared `oauth2-proxy-config-web-ui`
-    # ConfigMap, so the buildbarn browser oauth2-proxy reuses it.
+    # ConfigMap, so the Grafana oauth2-proxy reuses it.
     backendLogoutUrl: ""
     passUserHeaders: true
     # Emit X-Auth-Request-* response headers, including groups, for ingress

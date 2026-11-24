@@ -54,12 +54,27 @@ spec:
 {{- with .Values.grafana.oauth2Proxy.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
-            {{- if not (hasKey (default (dict) .Values.grafana.oauth2Proxy.env) "OAUTH2_PROXY_SKIP_AUTH_ROUTES") }}
+            {{- $grafanaEnv := default (dict) .Values.grafana.oauth2Proxy.env }}
+            {{- if not (hasKey $grafanaEnv "OAUTH2_PROXY_SKIP_AUTH_ROUTES") }}
             # Clear the dashboard-specific skip-auth regexes inherited from
             # oauth2-proxy-config-web-ui (such as GET=^/login$) so Grafana's
             # native login route cannot bypass OAuth2 authentication.
             - name: OAUTH2_PROXY_SKIP_AUTH_ROUTES
               value: ""
+            {{- end }}
+            {{- if not (hasKey $grafanaEnv "OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER") }}
+            # Grafana authenticates via X-Forwarded-User/-Email/-Groups; do not
+            # forward the user's OIDC ID token (which is valid for grpc-api).
+            - name: OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER
+              value: "false"
+            {{- end }}
+            {{- if not (hasKey $grafanaEnv "OAUTH2_PROXY_PASS_ACCESS_TOKEN") }}
+            - name: OAUTH2_PROXY_PASS_ACCESS_TOKEN
+              value: "false"
+            {{- end }}
+            {{- if not (hasKey $grafanaEnv "OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS") }}
+            - name: OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS
+              value: "false"
             {{- end }}
             - name: OAUTH2_PROXY_HTTP_ADDRESS
               value: "0.0.0.0:8888"

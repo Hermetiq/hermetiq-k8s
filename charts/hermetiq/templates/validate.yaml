@@ -63,14 +63,44 @@
 {{- if or (hasKey $apiEnv "SCIM_CONFIG") (hasKey $publisherEnv "SCIM_CONFIG") (hasKey $subscriberEnv "SCIM_CONFIG") -}}
 {{- fail "SCIM_CONFIG must be configured through api.scim with an existing Secret, not workload env" -}}
 {{- end -}}
+{{- $scimGroups := dict -}}
 {{- if .Values.api.scim.enabled -}}
   {{- if not (regexMatch "^https://[^/?#@[:space:]]+(/[^?#[:space:]]*)?$" .Values.api.scim.issuer) -}}{{- fail "api.scim.issuer must be an absolute HTTPS issuer without credentials, query or fragment" -}}{{- end -}}
   {{- if or (not (trim .Values.api.scim.existingSecret)) (not .Values.api.scim.existingSecretKey) -}}{{- fail "api.scim requires existingSecret and existingSecretKey" -}}{{- end -}}
   {{- if ne (trim .Values.api.scim.userIdPrefix) .Values.api.scim.userIdPrefix -}}{{- fail "api.scim.userIdPrefix must not have surrounding whitespace" -}}{{- end -}}
-  {{- $groups := dict -}}
   {{- range .Values.api.scim.groups -}}
-    {{- if or (not (trim .id)) (ne (trim .id) .id) (not (trim .displayName)) (hasKey $groups .id) -}}{{- fail "api.scim.groups require unique nonempty IDs and display names" -}}{{- end -}}
-    {{- $_ := set $groups .id true -}}
+    {{- if or (not (trim .id)) (ne (trim .id) .id) (not (trim .displayName)) (hasKey $scimGroups .id) -}}{{- fail "api.scim.groups require unique nonempty IDs and display names" -}}{{- end -}}
+    {{- $_ := set $scimGroups .id true -}}
+  {{- end -}}
+{{- end -}}
+{{- range .Values.authorization.groupBindings -}}
+  {{- if not .roles -}}
+    {{- fail "authorization.groupBindings entries require at least one role" -}}
+  {{- end -}}
+  {{- if eq (default "" .source) "scim" -}}
+    {{- if not $.Values.api.scim.enabled -}}
+      {{- fail (printf "authorization.groupBindings group %q uses source=scim, which requires api.scim.enabled=true" .group) -}}
+    {{- end -}}
+    {{- if not (hasKey $scimGroups .group) -}}
+      {{- fail (printf "authorization.groupBindings group %q with source=scim must be listed in api.scim.groups" .group) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- range (default list .Values.authorization.administratorGroups) -}}
+  {{- if eq (default "" .source) "scim" -}}
+    {{- if not $.Values.api.scim.enabled -}}
+      {{- fail (printf "authorization.administratorGroups group %q uses source=scim, which requires api.scim.enabled=true" .group) -}}
+    {{- end -}}
+    {{- if not (hasKey $scimGroups .group) -}}
+      {{- fail (printf "authorization.administratorGroups group %q with source=scim must be listed in api.scim.groups" .group) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- range .Values.authorization.serviceAccounts -}}
+  {{- range $projectId, $roles := .projectRoles -}}
+    {{- if not $roles -}}
+      {{- fail (printf "authorization.serviceAccounts projectRoles[%q] requires at least one role" $projectId) -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 
@@ -143,13 +173,13 @@
     {{- if $apiHasCustomAuth -}}
     {{- fail "api.jwt.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in api.env; configure JWKS through api.jwt or set api.jwt.enabled=false" -}}
     {{- end -}}
-    {{- if not (include "hermetiq-core.apiJwtIssuer" .) -}}
+    {{- if not (trim (include "hermetiq-core.apiJwtIssuer" .)) -}}
     {{- fail "api.jwt.issuer or oidc.issuerUrl is required when api.jwt.enabled=true (GRPC_AUTH_ISSUER is mandatory for the jwks provider; an unset issuer used to mean no issuer check)" -}}
     {{- end -}}
-    {{- if not (include "hermetiq-core.apiJwtJwksUrl" .) -}}
+    {{- if not (trim (include "hermetiq-core.apiJwtJwksUrl" .)) -}}
     {{- fail "api.jwt.jwksUrl or oidc.issuerUrl is required when api.jwt.enabled=true (the jwks provider needs exactly one JWKS source)" -}}
     {{- end -}}
-    {{- if and (not .Values.api.jwt.audience) (ne (include "hermetiq-core.apiJwtAudienceFromOauth2Secret" .) "true") -}}
+    {{- if and (not (trim (default "" .Values.api.jwt.audience))) (ne (include "hermetiq-core.apiJwtAudienceFromOauth2Secret" .) "true") -}}
     {{- fail "api.jwt.audience is required when api.jwt.enabled=true and dashboard.oauth2Proxy.enabled=false (GRPC_AUTH_AUDIENCE would list only the MCP resource URL, so every gRPC API token would be rejected)" -}}
     {{- end -}}
   {{- else -}}
@@ -174,13 +204,13 @@
     {{- if $publisherHasCustomAuth -}}
     {{- fail "publisher.jwks.enabled=true cannot be combined with GRPC_AUTH_JWKS_*, GRPC_AUTH_ISSUER, or GRPC_AUTH_AUDIENCE in publisher.env; configure JWKS through publisher.jwks or set publisher.jwks.enabled=false" -}}
     {{- end -}}
-    {{- if not (include "hermetiq-core.publisherJwksIssuer" .) -}}
+    {{- if not (trim (include "hermetiq-core.publisherJwksIssuer" .)) -}}
     {{- fail "publisher.jwks.issuer or oidc.issuerUrl is required when publisher.jwks.enabled=true (GRPC_AUTH_ISSUER is mandatory for the jwks provider; an unset issuer used to mean no issuer check)" -}}
     {{- end -}}
-    {{- if not (include "hermetiq-core.publisherJwksAudience" .) -}}
+    {{- if not (trim (include "hermetiq-core.publisherJwksAudience" .)) -}}
     {{- fail "publisher.jwks.audience, hosts.bepGrpc, or hosts.domainBase is required when publisher.jwks.enabled=true (GRPC_AUTH_AUDIENCE is mandatory for the jwks provider)" -}}
     {{- end -}}
-    {{- if and (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) (not (trim .Values.publisher.jwks.json)) -}}
+    {{- if and (not (trim (include "hermetiq-core.publisherJwksUrl" .))) (not (trim (default "" .Values.publisher.jwks.existingSecret))) (not (trim (default "" .Values.publisher.jwks.json))) -}}
     {{- fail "publisher.jwks.json or publisher.jwks.existingSecret is required when publisher.jwks.enabled=true and no publisher.jwks.url or oidc JWKS URL resolves" -}}
     {{- end -}}
   {{- else -}}

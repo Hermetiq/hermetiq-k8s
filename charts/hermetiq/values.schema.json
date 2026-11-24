@@ -427,6 +427,14 @@
               "$ref": "#/definitions/routeTimeout"
             }
           }
+        },
+        "routes": {
+          "type": "object",
+          "properties": {
+            "grafanaEnabled": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
@@ -743,6 +751,12 @@
         "authProxy": {
           "type": "object"
         },
+        "mcpAuthDisabled": {
+          "type": "boolean"
+        },
+        "mcpExposeUserIdentities": {
+          "type": "boolean"
+        },
         "jwt": {
           "type": "object",
           "description": "Chart-managed JWKS authentication for the API core.",
@@ -863,8 +877,10 @@
                   },
                   "audiences": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     }
                   },
                   "allowedAlgs": {
@@ -1110,8 +1126,10 @@
                   },
                   "audiences": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     }
                   },
                   "allowedAlgs": {
@@ -1237,6 +1255,45 @@
         "oauth2Proxy": {
           "type": "object",
           "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "passUserHeaders": {
+              "type": "boolean"
+            },
+            "setXAuthRequest": {
+              "type": "boolean"
+            },
+            "insecureOidcAllowUnverifiedEmail": {
+              "type": "boolean"
+            },
+            "insecureOidcSkipIssuerVerification": {
+              "type": "boolean"
+            },
+            "skipOidcDiscovery": {
+              "type": "boolean"
+            },
+            "skipProviderButton": {
+              "type": "boolean"
+            },
+            "skipJwtBearerTokens": {
+              "type": "boolean"
+            },
+            "sslInsecureSkipVerify": {
+              "type": "boolean"
+            },
+            "skipAuthPreflight": {
+              "type": "boolean"
+            },
+            "sessionCookieMinimal": {
+              "type": "boolean"
+            },
+            "showDebugOnError": {
+              "type": "boolean"
+            },
+            "cookieSecure": {
+              "type": "boolean"
+            },
             "emailDomains": {
               "type": "array",
               "uniqueItems": true,
@@ -1272,7 +1329,17 @@
       }
     },
     "grafana": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "oauth2Proxy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     },
     "slack": {
       "type": "object"
@@ -1478,6 +1545,7 @@
               },
               "roles": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                   "type": "string",
                   "enum": [
@@ -1518,6 +1586,7 @@
                 },
                 "additionalProperties": {
                   "type": "array",
+                  "minItems": 1,
                   "items": {
                     "type": "string",
                     "enum": [
