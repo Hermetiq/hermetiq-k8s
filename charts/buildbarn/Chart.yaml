@@ -15,11 +15,17 @@ annotations:
     - kind: changed
       description: "Breaking: move to the Buildbarn November 2026 images and the RepMaxCDC chunked storage model. Existing cache data cannot be read: upgrading from 0.9.9 is a cold cut-over with a cache reset, and storage refuses to start on pre-CDC files until they are removed"
     - kind: changed
-      description: "Breaking: CAS, CMS, AC, ISCC and FSAC keep persistent indexes by default, and ISCC and FSAC are enabled by default. PVC releases gain claim templates, so the storage StatefulSet must be recreated; custom-values/buildbarn-values-ephemeral.yaml restores volatile stores"
+      description: "Breaking: CAS, CMS, AC, ISCC and FSAC keep persistent indexes by default, and ISCC and FSAC are enabled by default. PVC releases that ran without ISCC and FSAC, or with in-memory indexes on raw-block stores, gain claim templates and need the storage StatefulSet recreated; the upgrade refuses until then. custom-values/buildbarn-values-ephemeral.yaml restores volatile stores"
     - kind: changed
       description: "Breaking: jsonnet supplied through configOverrides, a custom common.libsonnet or RbeWorker spec.config.files must use the CDC schema; installs and upgrades fail with the field to change"
     - kind: changed
       description: "Breaking: raw-block metadata hostPath type defaults to Directory, so the node directory must exist before storage starts"
+    - kind: changed
+      description: "Breaking: bb-browser reads CAS through the frontend on port 8980 (frontend-internal) instead of the storage shards; a NetworkPolicy on the frontend pods must admit app=browser"
+    - kind: changed
+      description: "helm upgrade --reuse-values cannot upgrade 0.9.9 to 1.0.0; pass complete values files"
+    - kind: changed
+      description: "The grpc-cache-proxy sidecar default moves to the signed v1.0.0 image"
     - kind: changed
       description: "Scheduler handover and configurationReloadInterval require a CDC-capable fork image and scheduler.handover.cdcCompatibleFork=true"
     - kind: added
