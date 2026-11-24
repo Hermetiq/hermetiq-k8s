@@ -196,13 +196,24 @@ change-control policies to every example.
 
 ## Supported chart bundle
 
-The following versions form the first tested bundle in this repository:
+The following versions are released and tested together:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.8` |             `0.9.8` |
-| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
-| BB Worker Operator |      `0.3.12` |           `v0.3.13` |
+| Hermetiq |       `1.0.0` |             `1.0.0` |
+| Buildbarn |       `1.0.0` |  `20261118T120531Z` |
+| BB Worker Operator |       `1.0.0` |            `v1.0.0` |
+
+> **`1.0.0` is a cut-over, not a rolling upgrade.** Buildbarn `1.0.0` stores
+> data in the CDC (RepMaxCDC) format and renders CDC configuration. Hermetiq
+> `1.0.0` reads Buildbarn configuration in that schema only, and BB Worker
+> Operator `1.0.0` generates the matching worker configuration. Upgrade the
+> three in one maintenance window, in the order under [Upgrading](#upgrading),
+> and do not leave them running with earlier chart versions. An existing
+> Buildbarn `0.9.9` cache also needs the
+> [storage format cutover](docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+> and an existing Hermetiq `0.9.8` install needs access grants prepared first;
+> see [Upgrading project authorization](charts/hermetiq/README.md#upgrading-project-authorization).
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -529,13 +540,19 @@ When a new chart version is released:
 1. Read the `Chart.yaml` release metadata and GitHub release notes.
 2. Compare the new defaults with the version currently deployed.
 3. Back up PostgreSQL and assess whether Buildbarn storage changes imply a cold
-   cache. Enabling a new PVC-backed store (`iscc`, `fsac`) or changing a
-   store's `size` or `backend` also requires recreating the storage
-   StatefulSet; see the
+   cache. Buildbarn `0.9.9` to `1.0.0` does: it is a cold cut-over of the
+   storage format with its own
+   [runbook](docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+   not a rolling upgrade. Enabling a new PVC-backed store (`iscc`, `fsac`) or
+   changing a store's `size`, `storageClassName` or `backend` also requires
+   recreating the storage StatefulSet; see the
    [storage operations runbook](docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
-5. Reuse the same custom values files and verify every rollout before continuing.
+5. Reuse the same custom values files, passed with `--values`, and verify
+   every rollout before continuing. Do not use `--reuse-values` to change
+   chart version: Helm then drops the new chart's defaults, and Buildbarn
+   `1.0.0` does not render that way.
 
 Example defaults comparison:
 

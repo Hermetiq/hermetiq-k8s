@@ -49,9 +49,7 @@ spec:
     rolloutOnChange: true
   images:
     runner: gcr.io/envoy-ci/envoy-build@sha256:7d3c99085fa5f1cff6b7293de256cc6c93ce61cd7ccb63432113a1f8fbf12a43
-    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
     volumeInit: busybox:1.31.1-uclibc
-    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
   pod:
     nodeSelector:
       kubernetes.io/arch: amd64

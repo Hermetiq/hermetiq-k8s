@@ -52,6 +52,24 @@ steps:
               image: "debian:bookworm-slim"
               propagate-environment: true
 
+      - label: ":test_tube: Buildbarn storage upgrade and restart"
+        command: "bash .buildkite/scripts/buildbarn-storage-integration.sh"
+        timeout_in_minutes: 15
+        plugins:
+          - docker#v5.13.0:
+              image: "debian:bookworm-slim"
+              volumes:
+                - "/var/run/docker.sock:/var/run/docker.sock"
+
+      - label: ":test_tube: browser gateway and API transport"
+        command: "bash .buildkite/scripts/browser-gateway-integration.sh"
+        timeout_in_minutes: 15
+        plugins:
+          - docker#v5.13.0:
+              image: "debian:bookworm-slim"
+              volumes:
+                - "/var/run/docker.sock:/var/run/docker.sock"
+
   # Weekly Scheduled Build → poll ghcr.io/buildbarn/* for newer upstream images
   # and open a review PR if any moved (never auto-merges). Create the weekly
   # schedule in the pipeline's UI settings (branch main). See buildbarn-upstream.sh.

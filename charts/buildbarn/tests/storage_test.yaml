@@ -55,9 +55,10 @@ tests:
           path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
           content: ALL
 
-  # --- block-device backend, in-memory KLM (default), deviceAccess=group ---
+  # --- block-device backend, explicit in-memory KLM, deviceAccess=group ---
   - it: block backend renders Block PVCs, volumeDevices, and pod securityContext
     set:
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.storageClassName: bb-block
     asserts:
@@ -117,13 +118,221 @@ tests:
           path: spec.template.spec.containers[?(@.name == "storage")].volumeMounts[?(@.name == "cas-meta")].mountPath
           value: /storage-cas-meta
 
-  # --- hostPath mode with a raw block device (node-local NVMe LV) ---
-  - it: hostPath block mode bind-mounts the device node and goes privileged
+  - it: prepares separate CDC and shared CMS state on the four default data PVCs
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 4
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas/cdc-v1/cms_persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-ac/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'Pre-CDC CAS files detected'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'Pre-CDC AC files detected'
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'rm |truncate |dd '
+
+  - it: prepares CDC and CMS state on the existing raw CAS metadata volume
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas-meta/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cas-meta/cdc-v1/cms_persistent_state'
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  # --- pre-CDC file guard in volume-init ---
+  # Each guarded directory gets one `if ...; then echo ...; exit 1; fi` block
+  # naming the legacy index, blocks file and state directory. CMS has no
+  # pre-CDC format and therefore no guard. storage_migration_test.sh runs the
+  # same scripts against real files.
+  - it: volume-init refuses pre-CDC files in raw ISCC and FSAC metadata directories
+    set:
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.storageClassName: bb-block
+      storage.persistence.fsac.backend: blockDevice
+      storage.persistence.fsac.blockDevice.storageClassName: bb-block
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-iscc-meta/iscc-keys\.db \] \|\| \[ -L /storage-iscc-meta/iscc-keys\.db \]
+            \|\| \[ -e /storage-iscc-meta/iscc-blocks\.db \] \|\| \[ -L /storage-iscc-meta/iscc-blocks\.db \]
+            \|\| \[ -e /storage-iscc-meta/persistent_state \] \|\| \[ -L /storage-iscc-meta/persistent_state \];
+            then\n  echo 'Pre-CDC ISCC files detected in /storage-iscc-meta\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-fsac-meta/fsac-keys\.db \] \|\| \[ -L /storage-fsac-meta/fsac-keys\.db \]
+            \|\| \[ -e /storage-fsac-meta/fsac-blocks\.db \] \|\| \[ -L /storage-fsac-meta/fsac-blocks\.db \]
+            \|\| \[ -e /storage-fsac-meta/persistent_state \] \|\| \[ -L /storage-fsac-meta/persistent_state \];
+            then\n  echo 'Pre-CDC FSAC files detected in /storage-fsac-meta\. [^\n]*' >&2\n  exit 1\nfi
+      # The filesystem CAS and AC beside them keep their own guards.
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "Pre-CDC CAS files detected in /storage-cas\\. "
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "Pre-CDC AC files detected in /storage-ac\\. "
+      # Every guard runs before anything is created.
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)(mkdir|chmod|chown) .*Pre-CDC"
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "mkdir -p /storage-iscc-meta/cdc-v1/persistent_state\\n(?s:.*)mkdir -p /storage-fsac-meta/cdc-v1/persistent_state\\n"
+
+  - it: a raw ISCC with an in-memory index has no metadata directory to guard
+    set:
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.storageClassName: bb-block
+      storage.persistence.iscc.blockDevice.keyLocationMap: inMemory
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "Pre-CDC ISCC|storage-iscc"
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "Pre-CDC FSAC files detected in /storage-fsac\\. "
+
+  - it: volume-init refuses pre-CDC files for every filesystem store in hostPath mode
+    set:
+      storage.persistence.mode: hostPath
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-cas/cas-keys\.db \] \|\| \[ -L /storage-cas/cas-keys\.db \]
+            \|\| \[ -e /storage-cas/cas-blocks\.db \] \|\| \[ -L /storage-cas/cas-blocks\.db \]
+            \|\| \[ -e /storage-cas/persistent_state \] \|\| \[ -L /storage-cas/persistent_state \];
+            then\n  echo 'Pre-CDC CAS files detected in /storage-cas\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-ac/ac-keys\.db \] \|\| \[ -L /storage-ac/ac-keys\.db \]
+            \|\| \[ -e /storage-ac/ac-blocks\.db \] \|\| \[ -L /storage-ac/ac-blocks\.db \]
+            \|\| \[ -e /storage-ac/persistent_state \] \|\| \[ -L /storage-ac/persistent_state \];
+            then\n  echo 'Pre-CDC AC files detected in /storage-ac\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-iscc/iscc-keys\.db \] \|\| \[ -L /storage-iscc/iscc-keys\.db \]
+            \|\| \[ -e /storage-iscc/iscc-blocks\.db \] \|\| \[ -L /storage-iscc/iscc-blocks\.db \]
+            \|\| \[ -e /storage-iscc/persistent_state \] \|\| \[ -L /storage-iscc/persistent_state \];
+            then\n  echo 'Pre-CDC ISCC files detected in /storage-iscc\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-fsac/fsac-keys\.db \] \|\| \[ -L /storage-fsac/fsac-keys\.db \]
+            \|\| \[ -e /storage-fsac/fsac-blocks\.db \] \|\| \[ -L /storage-fsac/fsac-blocks\.db \]
+            \|\| \[ -e /storage-fsac/persistent_state \] \|\| \[ -L /storage-fsac/persistent_state \];
+            then\n  echo 'Pre-CDC FSAC files detected in /storage-fsac\. [^\n]*' >&2\n  exit 1\nfi
+      # hostPath mode chowns the mounted directories as root. That, like every
+      # mkdir, comes after the last guard: a refused start changes nothing.
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)(mkdir|chmod|chown) .*Pre-CDC"
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)Pre-CDC FSAC files detected.*chown 65534:65534 /storage-cas\\n"
+
+  - it: volume-init refuses pre-CDC files in every raw metadata directory in hostPath mode
     set:
       storage.persistence.mode: hostPath
       storage.persistence.blockDevice.allowHostPath: true
       storage.persistence.cas.backend: blockDevice
       storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/buildbarn/cas-meta
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.ac.blockDevice.hostPath.devicePath: /dev/ephemeral/ac
+      storage.persistence.ac.blockDevice.metadata.hostPath.path: /mnt/buildbarn/ac-meta
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.iscc.blockDevice.hostPath.devicePath: /dev/ephemeral/iscc
+      storage.persistence.iscc.blockDevice.metadata.hostPath.path: /mnt/buildbarn/iscc-meta
+      storage.persistence.fsac.backend: blockDevice
+      storage.persistence.fsac.blockDevice.hostPath.devicePath: /dev/ephemeral/fsac
+      storage.persistence.fsac.blockDevice.metadata.hostPath.path: /mnt/buildbarn/fsac-meta
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-cas-meta/cas-keys\.db \] \|\| \[ -L /storage-cas-meta/cas-keys\.db \]
+            \|\| \[ -e /storage-cas-meta/cas-blocks\.db \] \|\| \[ -L /storage-cas-meta/cas-blocks\.db \]
+            \|\| \[ -e /storage-cas-meta/persistent_state \] \|\| \[ -L /storage-cas-meta/persistent_state \];
+            then\n  echo 'Pre-CDC CAS files detected in /storage-cas-meta\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-ac-meta/ac-keys\.db \] \|\| \[ -L /storage-ac-meta/ac-keys\.db \]
+            \|\| \[ -e /storage-ac-meta/ac-blocks\.db \] \|\| \[ -L /storage-ac-meta/ac-blocks\.db \]
+            \|\| \[ -e /storage-ac-meta/persistent_state \] \|\| \[ -L /storage-ac-meta/persistent_state \];
+            then\n  echo 'Pre-CDC AC files detected in /storage-ac-meta\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-iscc-meta/iscc-keys\.db \] \|\| \[ -L /storage-iscc-meta/iscc-keys\.db \]
+            \|\| \[ -e /storage-iscc-meta/iscc-blocks\.db \] \|\| \[ -L /storage-iscc-meta/iscc-blocks\.db \]
+            \|\| \[ -e /storage-iscc-meta/persistent_state \] \|\| \[ -L /storage-iscc-meta/persistent_state \];
+            then\n  echo 'Pre-CDC ISCC files detected in /storage-iscc-meta\. [^\n]*' >&2\n  exit 1\nfi
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: >-
+            if \[ -e /storage-fsac-meta/fsac-keys\.db \] \|\| \[ -L /storage-fsac-meta/fsac-keys\.db \]
+            \|\| \[ -e /storage-fsac-meta/fsac-blocks\.db \] \|\| \[ -L /storage-fsac-meta/fsac-blocks\.db \]
+            \|\| \[ -e /storage-fsac-meta/persistent_state \] \|\| \[ -L /storage-fsac-meta/persistent_state \];
+            then\n  echo 'Pre-CDC FSAC files detected in /storage-fsac-meta\. [^\n]*' >&2\n  exit 1\nfi
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)(mkdir|chmod|chown) .*Pre-CDC"
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: "(?s)Pre-CDC FSAC files detected.*chown 65534:65534 /storage-cas-meta\\n"
+
+  - it: retains explicit ephemeral CMS without creating persistent mapping state
+    set:
+      storage.persistence.cms.keyLocationMap.type: inMemory
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'cms_persistent_state'
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  # --- hostPath mode with a raw block device (node-local NVMe LV) ---
+  - it: hostPath block mode bind-mounts the device node and goes privileged
+    set:
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      # With a raw CAS, validate.yaml refuses filesystem ISCC and FSAC stores
+      # left on the chart default hostPath.
+      storage.persistence.iscc.hostPath.path: /mnt/buildbarn/iscc
+      storage.persistence.fsac.hostPath.path: /mnt/buildbarn/fsac
     asserts:
       - equal:
           path: spec.template.spec.containers[?(@.name == "storage")].securityContext.privileged
@@ -145,18 +354,26 @@ tests:
           path: spec.volumeClaimTemplates
 
   # --- terminationGracePeriodSeconds passthrough ---
-  - it: terminationGracePeriodSeconds is unset by default
+  - it: persistent stores get a two-minute termination grace period by default
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
+
+  - it: an explicit null grace period uses the Kubernetes default
+    set:
+      storage.terminationGracePeriodSeconds: null
     asserts:
       - notExists:
           path: spec.template.spec.terminationGracePeriodSeconds
 
   - it: terminationGracePeriodSeconds passes through when set
     set:
-      storage.terminationGracePeriodSeconds: 120
+      storage.terminationGracePeriodSeconds: 180
     asserts:
       - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
-          value: 120
+          value: 180
 
   # The kubelet creates a DirectoryOrCreate hostPath as root:root 0755, and
   # fsGroup is not applied to hostPath volumes, so an unprivileged volume-init
@@ -202,6 +419,9 @@ tests:
       storage.persistence.mode: emptyDir
       storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
       storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      # ISCC and FSAC are enabled by default and need a limit too.
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
     asserts:
       - equal:
           path: spec.template.spec.initContainers[0].securityContext.runAsUser
@@ -209,3 +429,85 @@ tests:
       - notMatchRegex:
           path: spec.template.spec.initContainers[0].command[2]
           pattern: chown
+
+  - it: CMS placement for raw memory index
+    set:
+      storage.persistence.cas.blockDevice.keyLocationMap: inMemory
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "cms_persistent_state"
+      - notContains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: cms
+          any: true
+
+  - it: provisions dedicated CMS filesystem PVC and state dir when cms.backend=filesystem
+    set:
+      storage.persistence.cms.backend: filesystem
+      storage.persistence.cms.size: 4Gi
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms")].spec.resources.requests.storage
+          value: 4Gi
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mkdir -p /storage-cms/persistent_state'
+
+  - it: provisions dedicated CMS raw block + metadata PVCs and device-chown when cms.backend=blockDevice
+    set:
+      storage.persistence.cms.backend: blockDevice
+      storage.persistence.cms.blockDevice.storageClassName: bb-block
+      storage.persistence.cms.blockDevice.keyLocationMap: file
+      storage.persistence.blockDevice.deviceAccess: chownInit
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-blocks")].spec.volumeMode
+          value: Block
+      - isNotNull:
+          path: spec.volumeClaimTemplates[?(@.metadata.name == "cms-meta")].metadata.name
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "storage")].volumeDevices[?(@.name == "cms-blocks")].devicePath
+          value: /dev/bb/cms
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: 'mkdir -p /storage-cms-meta/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].command[2]
+          pattern: '/dev/bb/cms'
+
+  - it: honors custom security.pod UID and GID for hostPath volume-init and device-chown
+    set:
+      storage.persistence.mode: hostPath
+      storage.persistence.blockDevice.allowHostPath: true
+      storage.persistence.blockDevice.deviceAccess: chownInit
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.hostPath.devicePath: /dev/ephemeral/cas
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+      storage.persistence.cas.blockDevice.metadata.hostPath.path: /mnt/cas-meta
+      # With a raw CAS, validate.yaml refuses filesystem ISCC and FSAC stores
+      # left on the chart default hostPath.
+      storage.persistence.iscc.hostPath.path: /mnt/buildbarn/iscc
+      storage.persistence.fsac.hostPath.path: /mnt/buildbarn/fsac
+      security.pod.runAsUser: 1000
+      security.pod.runAsGroup: 2000
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: 'chown 1000:2000 /storage-cas-meta/cdc-v1'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: 'chown 1000:2000 /storage-cas-meta/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: 'chown 1000:2000 /storage-cas-meta/cdc-v1/cms_persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "volume-init")].command[2]
+          pattern: 'chown 1000:2000 /storage-ac/cdc-v1/persistent_state'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "device-chown")].command[2]
+          pattern: 'chown 1000:2000 "\$dev"'

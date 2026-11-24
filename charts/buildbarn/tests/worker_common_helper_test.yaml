@@ -1,0 +1,27 @@
+suite: buildbarn worker common helper
+# Kept apart from config_test.yaml: listing a second template in that suite makes
+# helm-unittest 0.8.2 (the CI version) run every test without an explicit
+# template against both, and their document selectors then find nothing.
+templates:
+  - templates/extraobjects.yaml
+tests:
+  - it: lets custom worker ConfigMaps inherit the worker cache through the shared helper
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: custom-worker-config
+          data:
+            common-base.libsonnet: {{ include "buildbarn.workerCommon" . | toJson }}
+    documentSelector:
+      path: metadata.name
+      value: custom-worker-config
+    asserts:
+      - matchRegex:
+          path: data["common-base.libsonnet"]
+          pattern: 'chunkCache: \{\n *cacheSize: 2048,'
+      - matchRegex:
+          path: data["common-base.libsonnet"]
+          pattern: 'chunkMappingStorage:'

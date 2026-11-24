@@ -43,3 +43,16 @@ tests:
       - equal:
           path: spec.template.spec.containers[?(@.name == "web-ui")].env[?(@.name == "REACT_APP_HMQ_REMOTE_CACHE")].value
           value: grpcs://bbcal.example.com
+  - it: lets slow dashboard API calls outlive the oauth2-proxy default upstream timeout
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env[?(@.name == "OAUTH2_PROXY_UPSTREAM_TIMEOUT")].value
+          value: 3600s
+  - it: renders one upstream timeout when dashboard.oauth2Proxy.env sets it
+    set:
+      dashboard.oauth2Proxy.env.OAUTH2_PROXY_UPSTREAM_TIMEOUT: 120s
+    asserts:
+      # A second entry would turn this path into a list and fail the match.
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].env[?(@.name == "OAUTH2_PROXY_UPSTREAM_TIMEOUT")].value
+          value: 120s

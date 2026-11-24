@@ -11,6 +11,7 @@ render() {
     -f "${chart_dir}/ci-values/ci.yaml" \
     --set-string images.scheduler.repository=example.com/bb-scheduler \
     --set-string "scheduler.configurationReloadInterval=$1" \
+    --set scheduler.handover.cdcCompatibleFork=true \
     --show-only templates/deployment-scheduler.yaml > /dev/null 2> "${error_output}"
 }
 

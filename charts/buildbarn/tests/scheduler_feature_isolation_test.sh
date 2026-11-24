@@ -59,6 +59,7 @@ for reload_enabled, handover_enabled in [(True, False), (False, True), (True, Tr
             "configurationReloadInterval": "30s" if reload_enabled else "",
             "handover": {
                 "enabled": handover_enabled,
+                "cdcCompatibleFork": True,
                 "coordinator": {"image": {
                     "repository": "example.com/bb-scheduler-coordinator",
                     "tag": "v0.1.0",

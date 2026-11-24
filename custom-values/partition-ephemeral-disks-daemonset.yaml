@@ -2,17 +2,68 @@
 #
 # This DaemonSet targets nodes created with --local-nvme-ssd-block, creates an
 # LVM volume group named "ephemeral", carves the logical volumes
-# /dev/ephemeral/{cas,ac,iscc,fsac}, and labels the node
-# hermetiq/ephemeral-lvm=ready after all devices exist.
+# /dev/ephemeral/{cas,ac,iscc,fsac}, and a 16Gi ext4 metadata LV on those same
+# SSDs. The node is labelled hermetiq/ephemeral-lvm=ready only after the mount,
+# generation marker and directory permissions have been verified.
+#
+# This manifest is not part of the Buildbarn Helm release: apply it by hand
+# before installing or upgrading the chart. On a pool that already runs the
+# 0.9.9 layout, apply it only after storage has been stopped, and follow
+# "Cut-over procedure for an existing Local SSD pool" in
+# docs/buildbarn-block-storage.md.
 #
 # How it works, and why it is shaped this way, is documented in
 # docs/buildbarn-block-storage.md ("GKE Example B"). In short:
 #
+# - Layout on a fresh volume group, in this order: meta 16G, ac 8G, iscc 2G,
+#   fsac 6G, then cas with every remaining extent (--extents 100%FREE). The
+#   volume group is therefore full: the metadata LV cannot be extended later,
+#   and a different size for any LV means a new layout and a cold reset of the
+#   node. The first deployment of this layout changed the cas line to a fixed
+#   size (--size 700G on two 375 GiB SSDs, about 18 GiB left free) to keep
+#   slack; make that edit before the first provisioning if you want it, and
+#   keep cas.blockDevice.size in the storage values equal to the real LV.
+# - The 16G metadata LV is fixed whatever the number of SSDs. It must hold
+#   every store's index file plus the shared CMS blocks file. With
+#   buildbarn-values-local-ssd-block.yaml that is 11008 MiB of indexes plus
+#   1024 MiB of CMS blocks, 12032 MiB of 16384 MiB. A 2 TiB CAS LV with a
+#   15360 MiB index needs 20032 MiB and does not fit: change the meta size
+#   below before provisioning such nodes. Nothing checks this sum; the
+#   per-store metadata.size values in the chart are not enforced in hostPath
+#   mode.
+# - Metadata is mounted at /mnt/stateful_partition/buildbarn-local-ssd/metadata.
+#   Its parent is on the writable COS stateful partition; metadata itself lives
+#   on /dev/ephemeral/meta, never on the boot disk. Bidirectional propagation
+#   makes that submount visible to hostPath volumes in storage pods. The LV is
+#   first mounted privately in the container and verified, then bind-mounted at
+#   the public host path. Consumer per-store hostPaths must use type: Directory
+#   so already-bound pods cannot restart into boot-disk directories on reboot.
+# - COS mounts its stateful partition privately. A privileged host-PID init
+#   container first self-binds and marks ONLY the dedicated parent rshared in
+#   the host mount namespace. It has no Bidirectional volume, so it can start
+#   before that prerequisite exists; the main container then publishes safely.
+# - Existing legacy VGs without meta require a deliberate cold cut-over. This
+#   provisioner never shrinks data LVs or formats an existing metadata LV.
+#   It also never completes a partial layout: a first provisioning that is
+#   interrupted between vgcreate and the marker write leaves a node that fails
+#   on every restart. The only exit from that, a missing marker, a legacy VG
+#   or a generation mismatch is "Resetting a Local SSD node" in
+#   docs/buildbarn-block-storage.md.
+# - A metadata generation marker binds checkpoints to the VG/data-LV UUIDs.
+#   Recreating one data LV fails closed; reset blocks and metadata together.
+#   UUIDs cannot detect in-place corruption/zeroing of an otherwise intact LV.
+#   Drain/stop every storage consumer before any disk/LV reset; labels do not
+#   evict running pods, and an existing pod can retain its own old bind mount.
 # - Node-readiness gate: storage.nodeSelector in
 #   buildbarn-values-local-ssd-block.yaml requires hermetiq/ephemeral-lvm=ready,
-#   so a storage pod stays cleanly Pending until the devices exist instead of
-#   FailedMount-looping on a fresh node. The label is cleared at pod start and
-#   re-applied after provisioning, so a rebooted node with wiped SSDs re-gates.
+#   so a storage pod stays Pending until data and metadata are ready. The label
+#   is cleared on graceful shutdown, on detected mount or generation failure,
+#   and at container start once the tools are installed: `apk add` runs before
+#   the first label change, so when the package mirror cannot be reached the
+#   container exits with the label left as it was, and a stale "ready" stays
+#   with nothing verifying it. The Directory and BlockDevice hostPath types
+#   still stop a storage pod from starting on a node whose LVs or metadata
+#   mount are absent. Readiness also checks the real mount every five seconds.
 # - Why not ghcr.io/buildbarn/bb-partition-ephemeral-disks: that image is built
 #   on distroless_static and shells out to vgcreate/lvcreate, which are absent
 #   there. This runs the same LVM2 commands from an image that has them.
@@ -27,8 +78,14 @@
 # - A non-preemptible node pool created with `--local-nvme-ssd-block count=N`
 #   (raw block SSDs), NOT `--ephemeral-storage-local-ssd`, labeled
 #   node-type=ssd-block and tainted hermetiq/ssd-block:NoSchedule.
-# - Node egress for `apk add lvm2 curl`, or bake an image with lvm2 and curl
-#   for air-gapped clusters and set `image:` below.
+# - Node egress to the Alpine package mirror for `apk add lvm2 curl e2fsprogs
+#   util-linux` (main container) and `apk add util-linux` (init container).
+#   Both run on every container start, not only on first provisioning, and the
+#   main container exits on any failed check, so every restart and every node
+#   reboot depends on the mirror. For air-gapped or restricted-egress clusters
+#   bake the packages into an image, set both `image:` fields below and remove
+#   the two `apk add` lines, which otherwise still run.
+# - Storage containers use UID/GID 65534; metadata store directories use 0770.
 # - A namespace that permits privileged pods.
 #
 # Use with buildbarn-values-local-ssd-block.yaml. Do not use on GKE Autopilot or
@@ -85,6 +142,7 @@ spec:
         app.kubernetes.io/component: buildbarn-storage-provisioner
     spec:
       serviceAccountName: partition-ephemeral-disks
+      hostPID: true # init enters the host mount namespace to share one dedicated path
       nodeSelector:
         node-type: ssd-block
         kubernetes.io/os: linux
@@ -93,6 +151,32 @@ spec:
           key: hermetiq/ssd-block
           operator: Exists
       terminationGracePeriodSeconds: 5
+      initContainers:
+        - name: prepare-metadata-parent
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              apk add --no-cache util-linux >/dev/null
+              nsenter --target 1 --mount --root --wd -- /bin/sh -ec '
+                parent=/mnt/stateful_partition/buildbarn-local-ssd
+                mkdir -p "$parent"
+                if ! mountpoint -q "$parent"; then
+                  mount --bind "$parent" "$parent"
+                fi
+                mount --make-rshared "$parent"
+              '
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
       containers:
         - name: partition
           image: alpine:3.20
@@ -112,67 +196,161 @@ spec:
               export DM_DISABLE_UDEV=y
               VG=ephemeral
               LABEL=hermetiq/ephemeral-lvm
-              apk add --no-cache lvm2 curl >/dev/null
+              META_DIR=/mnt/stateful_partition/buildbarn-local-ssd/metadata
+              STAGING_DIR=/tmp/buildbarn-metadata-staging
+              apk add --no-cache lvm2 curl e2fsprogs util-linux >/dev/null
 
               SA=/var/run/secrets/kubernetes.io/serviceaccount
               label_node() {
-                curl -sS --fail --cacert "$SA/ca.crt" \
+                curl -sS --fail --connect-timeout 10 --max-time 20 --cacert "$SA/ca.crt" \
                   -H "Authorization: Bearer $(cat "$SA/token")" \
                   -H "Content-Type: application/strategic-merge-patch+json" \
                   -X PATCH "https://kubernetes.default.svc/api/v1/nodes/$NODE_NAME" \
                   -d "{\"metadata\":{\"labels\":{\"$LABEL\":$1}}}" >/dev/null
               }
+              fail() { echo "ERROR: $*" >&2; exit 1; }
 
-              # Clear stale readiness before provisioning. A reboot can wipe
-              # local SSD state while leaving Kubernetes node labels behind.
-              label_node null || true
+              # Failure to clear a retained readiness label must stop provisioning.
+              # Leave the host mount in place across pod replacement; only revoke readiness.
+              trap 'label_node null || true' EXIT
+              trap 'exit 0' TERM INT
+              label_node null
+
+              # The readiness probe and lifetime monitor use the same checks as startup.
+              # --identity is used only to initialize a freshly created generation.
+              cat > /tmp/check-metadata-ready <<'CHECK'
+              #!/bin/sh
+              set -eu
+              VG=ephemeral
+              META_DIR=${2:-/mnt/stateful_partition/buildbarn-local-ssd/metadata}
+              fail() { echo "ERROR: $*" >&2; exit 1; }
+              identity() {
+                vg_uuid=$(vgs --noheadings -o vg_uuid "$VG" | tr -d '[:space:]')
+                [ -n "$vg_uuid" ] || fail "missing VG UUID"
+                printf 'buildbarn-local-ssd-layout-v1\nvg=%s\n' "$vg_uuid"
+                for name in meta cas ac iscc fsac; do
+                  [ -b "/dev/$VG/$name" ] || fail "missing /dev/$VG/$name"
+                  lv_uuid=$(lvs --noheadings -o lv_uuid "$VG/$name" | tr -d '[:space:]')
+                  [ -n "$lv_uuid" ] || fail "missing UUID for $VG/$name"
+                  printf '%s=%s\n' "$name" "$lv_uuid"
+                done
+              }
+              [ "$(blkid -s TYPE -o value "/dev/$VG/meta")" = ext4 ] || fail "metadata LV is not ext4; refusing to format an existing LV"
+              fs_uuid=$(blkid -s UUID -o value "/dev/$VG/meta")
+              [ -n "$fs_uuid" ] || fail "metadata filesystem has no UUID"
+              # --mountpoint must match this exact directory, not its boot-disk parent.
+              [ "$(findmnt -rn --mountpoint "$META_DIR" -o FSTYPE)" = ext4 ] || fail "metadata is not mounted as ext4 at $META_DIR"
+              [ "$(findmnt -rn --mountpoint "$META_DIR" -o UUID)" = "$fs_uuid" ] || fail "metadata mount UUID does not match /dev/$VG/meta"
+              case ",$(findmnt -rn --mountpoint "$META_DIR" -o OPTIONS)," in
+                *,rw,*) ;;
+                *) fail "metadata mount is not writable" ;;
+              esac
+              expected=$(identity)
+              if [ "${1:-}" = --identity ]; then
+                printf '%s\nfilesystem=%s\n' "$expected" "$fs_uuid"
+                exit 0
+              fi
+              [ -f "$META_DIR/.buildbarn-layout-v1" ] || fail "metadata generation marker missing; cold cut-over is required"
+              actual=$(cat "$META_DIR/.buildbarn-layout-v1")
+              expected=$(printf '%s\nfilesystem=%s' "$expected" "$fs_uuid")
+              [ "$actual" = "$expected" ] || fail "data/metadata generation mismatch; stop storage and reset blocks and metadata together"
+              for name in cas ac iscc fsac; do
+                [ "$(stat -c '%u:%g:%a' "$META_DIR/$name")" = 65534:65534:770 ] || fail "metadata directory $name must be owned by 65534:65534 with mode 0770"
+              done
+              CHECK
+              chmod 0755 /tmp/check-metadata-ready
 
               set -- $(ls /dev/disk/by-id/google-local-nvme-ssd-* 2>/dev/null || true)
-              if [ "$#" -eq 0 ]; then
-                echo "ERROR: no /dev/disk/by-id/google-local-nvme-ssd-* devices."
-                echo "This node is not a --local-nvme-ssd-block pool."
-                exit 1
-              fi
-
+              [ "$#" -gt 0 ] || fail "no raw Local SSDs; this node must use --local-nvme-ssd-block"
               devs=""
-              for l in "$@"; do devs="$devs $(readlink -f "$l")"; done
+              for link in "$@"; do devs="$devs $(readlink -f "$link")"; done
               devs=$(echo $devs | tr ' ' '\n' | sort -u | tr '\n' ' ')
               n=$(echo $devs | wc -w)
               echo "Local NVMe SSDs ($n):$devs"
 
-              if ! vgs "$VG" >/dev/null 2>&1; then
+              fresh=false
+              if vgs "$VG" >/dev/null 2>&1; then
+                # Never resize an old full VG or reconstruct individual missing LVs. Either
+                # operation can leave persistent indexes pointing at another generation.
+                lvs "$VG/meta" >/dev/null 2>&1 || fail "legacy VG has no metadata LV; cold cut-over on fresh SSDs is required (no data was resized or erased)"
+                for name in cas ac iscc fsac; do
+                  lvs "$VG/$name" >/dev/null 2>&1 || fail "existing VG is missing $name; reset blocks and metadata together"
+                done
+                # COS has no host LVM activation service. After a node reboot,
+                # VG metadata survives but device-mapper mappings do not.
+                vgchange --activate y --activationmode complete "$VG" || fail "could not activate all existing LVs; inspect missing SSDs before retrying"
+              else
+                # A published mount without its VG can be an old generation
+                # still held by running consumers. Never format through it.
+                if findmnt -rn --mountpoint "$META_DIR" >/dev/null; then
+                  fail "VG missing while metadata remains published; stop consumers and inspect the old mount before any reset"
+                fi
+                fresh=true
                 vgcreate --force "$VG" $devs
+                stripe=""
+                if [ "$n" -gt 1 ]; then stripe="--stripes $n --stripesize 2048"; fi
+                # Metadata and the small stores are fixed-size; CAS gets the remainder.
+                # The metadata LV shares every striped SSD with the raw data LVs.
+                lvcreate $stripe --size 16G --name meta --wipesignatures n --yes "$VG"
+                lvcreate $stripe --size 8G --name ac --wipesignatures n --yes "$VG"
+                lvcreate $stripe --size 2G --name iscc --wipesignatures n --yes "$VG"
+                lvcreate $stripe --size 6G --name fsac --wipesignatures n --yes "$VG"
+                lvcreate $stripe --extents 100%FREE --name cas --wipesignatures n --yes "$VG"
+                # This is the only formatting path, and it is unreachable for an existing VG.
+                mkfs.ext4 -F -m 0 -L buildbarn-meta "/dev/$VG/meta"
               fi
 
-              stripe=""
-              if [ "$n" -gt 1 ]; then
-                stripe="--stripes $n --stripesize 2048"
-              fi
-
-              # Small stores first (ABSOLUTE sizes); CAS gets all remaining extents.
-              #
-              # Fixed sizes rather than 1%VG: the AC/ISCC/FSAC hold tiny objects
-              # (~1.1 KiB ActionResults, ~0.5 KiB ISCC protos, ~2 KiB FSAC bloom
-              # filters), so their capacity in OBJECTS — and hence the
-              # key-location map they need to stay indexable — grows with the
-              # device. A percentage hands a multi-SSD node tens of GiB and
-              # millions of extra slots the values file would then have to cover.
-              # See storage.keyLocationMapSizing in the buildbarn chart values.
-              #
-              # lvcreate is guarded by `lvs ... ||`, so editing a size here never
-              # resizes an existing LV; only fresh or wiped nodes pick it up.
-              lvs "$VG/ac" >/dev/null 2>&1 || lvcreate $stripe --size 8G --name ac --wipesignatures n --yes "$VG"
-              lvs "$VG/iscc" >/dev/null 2>&1 || lvcreate $stripe --size 2G --name iscc --wipesignatures n --yes "$VG"
-              lvs "$VG/fsac" >/dev/null 2>&1 || lvcreate $stripe --size 6G --name fsac --wipesignatures n --yes "$VG"
-              lvs "$VG/cas" >/dev/null 2>&1 || lvcreate $stripe --extents 100%FREE --name cas --wipesignatures n --yes "$VG"
-
-              for d in cas ac iscc fsac; do
-                [ -b "/dev/$VG/$d" ] || { echo "ERROR: /dev/$VG/$d missing"; exit 1; }
+              for name in meta cas ac iscc fsac; do
+                [ -b "/dev/$VG/$name" ] || fail "missing /dev/$VG/$name"
               done
-
+              if findmnt -rn --mountpoint "$META_DIR" >/dev/null; then
+                [ "$fresh" = false ] || fail "fresh VG found an existing published mount; refusing to replace it"
+                WORK_DIR=$META_DIR
+              else
+                # This mount is private to this container, outside every hostPath.
+                # Already-bound storage pods can restart before the node label is
+                # cleared after reboot. Their Directory hostPaths must remain
+                # absent until filesystem, generation and permissions all pass.
+                mkdir -p "$STAGING_DIR"
+                mount -t ext4 -o noatime "/dev/$VG/meta" "$STAGING_DIR"
+                WORK_DIR=$STAGING_DIR
+              fi
+              if [ "$fresh" = true ]; then
+                /tmp/check-metadata-ready --identity "$WORK_DIR" > /tmp/buildbarn-layout-v1
+                for name in cas ac iscc fsac; do
+                  mkdir -p "$WORK_DIR/$name"
+                  chown 65534:65534 "$WORK_DIR/$name"
+                  chmod 0770 "$WORK_DIR/$name"
+                done
+                cp /tmp/buildbarn-layout-v1 "$WORK_DIR/.buildbarn-layout-v1.tmp"
+                mv "$WORK_DIR/.buildbarn-layout-v1.tmp" "$WORK_DIR/.buildbarn-layout-v1"
+                sync
+              fi
+              /tmp/check-metadata-ready --verify "$WORK_DIR"
+              if [ "$WORK_DIR" != "$META_DIR" ]; then
+                mkdir -p "$META_DIR"
+                [ -z "$(ls -A "$META_DIR")" ] || fail "unmounted metadata publication directory is not empty; inspect boot-disk leftovers before retrying"
+                # Only this verified mount is published to the host. Consumers
+                # must use type: Directory for the per-store paths, never
+                # DirectoryOrCreate (which could bypass the reboot interlock).
+                mount --bind "$WORK_DIR" "$META_DIR"
+              fi
+              /tmp/check-metadata-ready
               label_node '"ready"'
-              echo "Provisioned node $NODE_NAME with $LABEL=ready"
-              exec sleep infinity
+              echo "Provisioned node $NODE_NAME with $LABEL=ready and same-SSD metadata"
+              # Readiness alone does not remove a node scheduling label. Revoke it and exit
+              # on mount/identity loss; Kubernetes restarts us and runs all startup checks.
+              while :; do
+                sleep 5 &
+                wait $!
+                /tmp/check-metadata-ready
+              done
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "/tmp/check-metadata-ready"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 1
           resources:
             requests:
               cpu: 10m
@@ -181,6 +359,9 @@ spec:
               cpu: 100m
               memory: 128Mi
           volumeMounts:
+            - name: metadata-parent
+              mountPath: /mnt/stateful_partition/buildbarn-local-ssd
+              mountPropagation: Bidirectional
             - name: dev
               mountPath: /dev
               mountPropagation: Bidirectional
@@ -188,6 +369,10 @@ spec:
               mountPath: /lib/modules
               readOnly: true
       volumes:
+        - name: metadata-parent
+          hostPath:
+            path: /mnt/stateful_partition/buildbarn-local-ssd
+            type: DirectoryOrCreate
         - name: dev
           hostPath:
             path: /dev

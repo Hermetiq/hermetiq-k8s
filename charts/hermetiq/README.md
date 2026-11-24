@@ -43,7 +43,8 @@ How this README is organized:
 - [Workload identity](#workload-identity)
 - [Application settings](#application-settings)
 - [Authentication and SSO](#authentication-and-sso): OIDC, gRPC and MCP
-  authentication, CAL trust, sign-in
+  authentication, project access, [authorization upgrades](#upgrading-project-authorization),
+  CAL trust, sign-in
 - [Workload sizing, scheduling, and availability](#workload-sizing-scheduling-and-availability)
 - [Dashboard](#dashboard): feature flags, Quickstart
 - [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac)
@@ -131,6 +132,8 @@ Required for every install:
   chart's [hosts](#hosts).
 - [ ] An OIDC identity provider.
   [Authentication and SSO](#authentication-and-sso) lists what to register.
+- [ ] Authorization-capable application images and project grants for build
+  callers; see [Upgrading project authorization](#upgrading-project-authorization).
 - [ ] [PostgreSQL](#postgresql) 16 or newer with `pg_partman`.
 - [ ] [NATS JetStream](#nats-jetstream) with at least three servers, or a
   one-replica stream configuration for a single-server test cluster.
@@ -331,7 +334,8 @@ links to the section that explains the block.
 | `otel` | `endpoint`, with scheme and port | Rendering fails. | [OpenTelemetry](#opentelemetry) |
 | `victoriaMetrics` | `baseUrl` to your vmselect read endpoint | Metrics-backed MCP tools and the RBE Infrastructure page have no data. | [Observability](#observability) |
 | `gcpWorkloadIdentity` | On GKE with an object-storage feature, the Google service account. Otherwise remove the block; the chart default is off. | Rendering fails when it is enabled without a service account. | [Workload identity](#workload-identity) |
-| `app` | `streamPartitionCount`, `adminEmails` | Without an admin email or admin group claim, nobody can open Project Settings. | [Stream partitions](#stream-partitions), [Admin access](#admin-access), [Application settings](#application-settings) |
+| `app` | `streamPartitionCount` | The chart partition count applies. | [Stream partitions](#stream-partitions), [Application settings](#application-settings) |
+| `authorization` | Trusted administrator groups and project grants for users and CI | Authenticated humans receive Viewer access by default; publishing requires Builder or Admin access. Email allowlists do not grant installation administration. | [Project access policy](#project-access-policy), [Admin access](#admin-access) |
 | `oidc` | `issuerUrl`, exactly as it appears in your tokens; keep a trailing slash only if the tokens have one | Rendering fails. | [OIDC provider](#oidc-provider) |
 | `api` | `replicas`, `resources` | The starter's small sizing applies. | [Replicas and resources](#replicas-and-resources) |
 | `publisher` | `trustedCalCidrs` when Buildbarn workers report here; `replicas`, `resources` | Every completed-action call is rejected with `UNAUTHENTICATED` and remote-execution action telemetry stops arriving. | [Completed Action Logger trust](#completed-action-logger-trust) |
@@ -389,6 +393,11 @@ When the Buildbarn chart runs in the same cluster:
 - If FUSE-based workers share the Hermetiq namespace, that namespace needs the
   `privileged` Pod Security level; see
   [Pod and container security context](#pod-and-container-security-context).
+- Run Hermetiq `1.0.0` with the Buildbarn `1.0.0` chart. Hermetiq `1.0.0`
+  reads and validates Buildbarn configuration in the CDC (RepMaxCDC) schema
+  only; it has no mode for the pre-CDC schema that Buildbarn `0.9.9` and
+  older use. Upgrade the two together, following the repository's
+  [upgrade order](https://github.com/Hermetiq/hermetiq-k8s#upgrading).
 
 ### Inspect the packaged defaults
 
@@ -396,8 +405,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
 ```
 
 ## Install
@@ -437,7 +446,8 @@ values where they differ from the starter.
    should list `vmpodscrapes`; if it prints nothing, install the metrics stack
    or disable the [pod scrapes](#dashboards-and-scrape-objects). The second
    matters for `routing.provider: gateway` and should list
-   `backendtrafficpolicies`, `securitypolicies`, and `clienttrafficpolicies`;
+   `backendtrafficpolicies`, `securitypolicies`, `clienttrafficpolicies`, and
+   `envoypatchpolicies`;
    if it prints nothing, your controller is not Envoy Gateway, so disable the
    [Envoy Gateway policies](#envoy-gateway-policies):
 
@@ -445,6 +455,10 @@ values where they differ from the starter.
    kubectl api-resources --api-group=operator.victoriametrics.com
    kubectl api-resources --api-group=gateway.envoyproxy.io
    ```
+
+   Envoy Gateway must also enable its patch-policy extension and use the
+   configured dashboard listener names; see
+   [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding).
 
 5. Confirm the external pieces: the OIDC issuer's discovery document is
    reachable, the dashboard callback URL and BEP audience are registered, and
@@ -457,7 +471,7 @@ values where they differ from the starter.
 
    ```bash
    helm template hmq oci://ghcr.io/hermetiq/hermetiq \
-     --version 0.9.8 \
+     --version 1.0.0 \
      --namespace hermetiq \
      --values hermetiq-values.yaml > /dev/null
    ```
@@ -469,7 +483,7 @@ Install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.8 \
+  --version 1.0.0 \
   --values hermetiq-values.yaml
 ```
 
@@ -899,14 +913,16 @@ With `routing.provider: gateway`, the chart renders Envoy Gateway
 
 | Kind | Purpose | Toggle |
 |---|---|---|
-| `BackendTrafficPolicy` | Active health checks and route timeouts for the BEP, gRPC API, `bbcal`, web API, and MCP routes, one policy each | `gateway.healthChecks.enabled`, `gateway.timeouts.enabled` |
+| `BackendTrafficPolicy` | Active health checks and route timeouts for the BEP, gRPC API, `bbcal`, web API, and MCP routes; timeouts for the dashboard BFF | `gateway.healthChecks.enabled`, `gateway.timeouts.enabled` |
 | `SecurityPolicy` | CORS for the Gateway and for the MCP route | `gateway.cors.enabled` |
 | `ClientTrafficPolicy` | [Client connection tuning](#client-connection-tuning-for-high-rtt-clients) | `gateway.clientTrafficPolicy.enabled`, off by default |
+| `EnvoyPatchPolicy` | Preserve gRPC-web on the dashboard's same-origin API path | `gateway.dashboardGrpcWeb.enabled`, on by default |
 
 Health checks probe gRPC routes over TCP and HTTP routes on unauthenticated
-readiness or metadata endpoints. The dashboard and Grafana routes get no
+readiness or metadata endpoints. The dashboard gets a timeout-only policy,
+`<dashboard-route>-timeouts`, without active health checks. Grafana gets no
 `BackendTrafficPolicy`. The Gateway-wide CORS policy (`gateway-cors-policy`)
-and the `ClientTrafficPolicy` are created in the Gateway's namespace, because
+and the `ClientTrafficPolicy` and `EnvoyPatchPolicy` are created in the Gateway's namespace, because
 a policy must live beside the Gateway it targets.
 
 Health checks and timeouts for a route share one `BackendTrafficPolicy`, named
@@ -928,22 +944,94 @@ gateway:
     enabled: false
   clientTrafficPolicy:
     enabled: false
+  dashboardGrpcWeb:
+    enabled: false
 ```
 
 Two caveats apply. With `assistant.enabled: true` the chart still renders the
-API gRPC route's `BackendTrafficPolicy`, because it carries the assistant's
-streaming timeout. And without the timeout policies, whatever default route
+API gRPC and dashboard routes' `BackendTrafficPolicy` resources, because they
+carry the assistant's streaming timeout. And without the timeout policies, whatever default route
 timeout your controller applies governs long-lived gRPC streams; check that it
 does not truncate BES uploads.
+
+### Dashboard gRPC-web forwarding
+
+The dashboard's `/grpc/` calls pass through oauth2-proxy and nginx before reaching
+the API's gRPC-web adapter. They must keep their gRPC-web framing along this
+HTTP/1.1 path. Envoy Gateway's shared gRPC-web filter otherwise translates them
+to native gRPC too early, producing HTTP 505 even though `/auth/me` succeeds.
+
+With `routing.provider: gateway`, the chart's `EnvoyPatchPolicy` disables that
+translation only for the configured dashboard hostname. The API and Buildbarn
+hosts keep their existing translation, and other virtual-host filters are
+preserved. The policy is not rendered for Contour, ingress-nginx, or GKE's
+`gateway-httproute-only` provider.
+
+> **Contour is not verified for the dashboard in this release.** Contour's
+> Envoy enables the same gRPC-web translation on every route and has no
+> per-route setting to turn it off, so dashboard queries under
+> `routing.provider: contour` are expected to return HTTP 505 while sign-in
+> works. The API, MCP and BEP hosts are not affected. The install notes repeat
+> this warning. Verify a dashboard query after installing, or use
+> `routing.provider: gateway` with Envoy Gateway, or `ingress`. ingress-nginx
+> and GKE's load balancer do not translate gRPC-web and need no exception.
+
+Enable patch policies in the Envoy Gateway controller before installing Hermetiq.
+For the controller's Helm chart, merge this into its existing values:
+
+```yaml
+config:
+  envoyGateway:
+    extensionApis:
+      enableEnvoyPatchPolicy: true
+```
+
+Restart the controller after updating its configuration. See the
+[Envoy Gateway patch-policy guide](https://gateway.envoyproxy.io/v1.7/tasks/extensibility/envoy-patch-policy/)
+for the controller setup. This controller setting is separate from the Hermetiq
+chart's values:
+
+```yaml
+gateway:
+  dashboardGrpcWeb:
+    enabled: true
+    listenerNames: [https]
+```
+
+Set `listenerNames` to every HTTPS listener serving the dashboard. The default
+is `https`; the chart supports per-Gateway HTTPS listeners and derives each
+route-configuration name as `<Gateway namespace>/<Gateway name>/<listener>`.
+This HTTPS format is unchanged by Envoy Gateway's `XDSNameSchemeV2`; the policy
+has been verified with v1.7.2. See the
+[xDS naming reference](https://gateway.envoyproxy.io/v1.8/tasks/extensibility/envoy-patch-policy/#xds-name-scheme-v2).
+
+For plaintext HTTP listeners with `XDSNameSchemeV2`, route-configuration names
+use `http-<port>`. With `mergeGateways`, Envoy Gateway requires the patch policy
+to target the GatewayClass. For either layout, install an operator-managed
+dashboard exception using the actual xDS names and target, then set
+`gateway.dashboardGrpcWeb.enabled: false` to avoid rendering this chart's
+per-Gateway policy. The exception must preserve gRPC-web on the dashboard host;
+disabling the chart policy alone does not correct the transport.
+
+Confirm the applicable `EnvoyPatchPolicy` reports `Programmed=True` after the
+upgrade, and verify a dashboard gRPC call as well as sign-in. A policy that
+names a missing listener cannot protect that route. For another Gateway
+implementation, disable `gateway.dashboardGrpcWeb.enabled` with the other
+Envoy-specific policies above.
 
 ### Route timeouts
 
 `gateway.timeouts` sets Envoy Gateway timeouts on the chart's gRPC, web API,
-and MCP routes. It applies to `routing.provider: gateway` only and is on by
+dashboard, and MCP routes. It applies to `routing.provider: gateway` only and is on by
 default. Without it, Envoy applies its 15-second default route timeout. The
-other providers already bound the same backends: Contour through
-`contour.httpProxy.responseTimeout` and GKE through
-`gateway.gke.backendPolicy.timeoutSec`, both 300 seconds.
+other providers bound the gRPC routes and the dashboard route with one
+setting each, 300 seconds by default: Contour through
+`contour.httpProxy.responseTimeout`, nginx Ingress through
+`ingress.grpc.proxyReadTimeoutSeconds` and `proxySendTimeoutSeconds`, and GKE
+through `gateway.gke.backendPolicy.timeoutSec`. The dashboard route is
+included because the dashboard's own API calls arrive on it. With the
+assistant enabled, the API and dashboard bounds are raised to at least
+`assistant.streamTimeoutSeconds` on every provider.
 
 | Route | `requestTimeout` | `maxStreamDuration` |
 |---|---|---|
@@ -951,12 +1039,13 @@ other providers already bound the same backends: Contour through
 | `apiGrpc` | `300s` | not set |
 | `bbcalGrpc` | `0s` | `0s` |
 | `apiWeb` | `300s` | not set |
+| `dashboard` | `300s` | not set |
 | `mcp` | `300s` | `0s` |
 
 `"0s"` disables a timeout; it does not mean "immediate". A value that is not
 set is omitted, which leaves Envoy's own default in place. Each of these
-routes also sets `connectionIdleTimeout: 1h`. The dashboard and Grafana routes
-have no chart-managed timeouts.
+routes also sets `connectionIdleTimeout: 1h`. Grafana has no chart-managed
+timeouts.
 
 Envoy measures a route timeout from the end of the downstream request (the
 client's half-close) to the completed upstream response. It therefore does not
@@ -985,16 +1074,20 @@ clients half-close immediately. That explains the defaults:
   worst case: the client half-closes immediately, so a 15-second cap covers
   the entire blob download. The defaults mirror the Buildbarn chart's frontend
   timeouts.
-- `apiWeb`: the dashboard's REST and gRPC-web traffic. The same analytics
-  queries that reach `apiGrpc` arrive over this route, so it gets the same
-  bound.
+- `apiWeb`: REST and gRPC-web traffic on the external API hostname. Analytics
+  queries receive the same bound as `apiGrpc`.
+- `dashboard`: same-origin browser REST and gRPC-web calls through the
+  authenticated dashboard BFF, with the same bound as the external API.
+  Assistant streams also use this route, so enabling the assistant raises its
+  request and stream limits to at least `assistant.streamTimeoutSeconds`.
 - `mcp`: streamable-HTTP MCP traffic. A tool call can run a wide-time-range
   analytics query while the response stream stays open, so it needs the same
   headroom as `apiGrpc`.
 
 Set `gateway.timeouts.enabled: false` to drop the chart-managed timeouts and
-keep the health checks. With `assistant.enabled: true`, the API gRPC route's
-request and stream limits are raised to at least
+keep the health checks. With `assistant.enabled: true`, the API gRPC and
+dashboard routes retain timeout policies even when ordinary timeouts are
+disabled, and their request and stream limits are raised to at least
 `assistant.streamTimeoutSeconds`; see [Streaming timeout](#streaming-timeout).
 
 ### Client connection tuning for high-RTT clients
@@ -1361,13 +1454,13 @@ access.
 
 ## Application settings
 
-**Values:** `app`. The starter sets the partition count, the admin emails,
-cache-event queries, and repository URL normalization.
+**Values:** `app`. The starter sets the partition count, cache-event queries,
+and repository URL normalization. Configure administrator groups under
+`authorization`; see [Admin access](#admin-access).
 
 | Value | Chart default | Starter | Purpose |
 |---|---|---|---|
 | `app.streamPartitionCount` | `9` | `4` | Number of ingest partitions; see [Stream partitions](#stream-partitions) |
-| `app.adminEmails` | `[]` | `[]` | Users granted the admin role; see [Admin access](#admin-access) |
 | `app.cacheEventsEnabled` | `false` | `true` | Cache-event queries and MCP tools; see [Cache-event analytics](#cache-event-analytics) |
 | `app.normalizeRepoUrls` | `false` | `true` | Stores the SSH, HTTPS, and scp-style forms of one git remote under a single host/owner/repo key, so per-repository analytics group together |
 | `app.grpcAuthUserProvider` | `jwks` | | Identity provider type for the API and publisher; see [gRPC authentication](#grpc-authentication) |
@@ -1384,8 +1477,22 @@ their chart defaults in the starter.
 ## Authentication and SSO
 
 **Values:** `oidc`, `api.jwt`, `publisher.jwks`, `publisher.trustedCalCidrs`,
-`app.adminEmails`, `dashboard.oauth2Proxy`, `grafana.oauth2Proxy`. The starter
-sets the issuer and the OAuth client Secret.
+`authorization`, `api.scim`, `dashboard.oauth2Proxy`,
+`grafana.oauth2Proxy`. The starter sets the issuer and the OAuth client Secret;
+configure project grants and administrator groups for your installation.
+
+These controls answer different questions:
+
+| Control | What it decides |
+|---|---|
+| `dashboard.oauth2Proxy.emailDomains` and `allowedGroups` | Who may sign in through the shared UI proxies. Passing this gate grants no Hermetiq or Grafana role. |
+| `api.jwt.groupsClaim`, `publisher.jwks.groupsClaim` | Which verified JWT claim contains group names. These fields name a claim; they do not grant a role. |
+| `authorization.administratorGroups` or the default verified admin group | Who administers the Hermetiq installation. See [Admin access](#admin-access). |
+| `authorization.defaultAccess`, project memberships, `groupBindings`, and `serviceAccounts` | Which projects a principal may access and whether they have Viewer, Builder, or project Admin permissions. |
+| Grafana's own organization roles | What a signed-in user may do in Grafana. Hermetiq project and installation roles do not assign Grafana roles. |
+
+The [dashboard BFF](#browser-authorization-and-independent-jwt-profiles) transports
+the signed-in user's token to the API; the API makes the permission decisions.
 
 Three kinds of caller reach Hermetiq: browsers, which sign in through
 oauth2-proxy; clients of the gRPC API, BEP ingest, and MCP endpoints, which
@@ -1413,8 +1520,9 @@ oidc:
 The value feeds `api.jwt.issuer`, `api.jwt.jwksUrl`, `publisher.jwks.issuer`,
 `publisher.jwks.url`, and `dashboard.oauth2Proxy.oidcIssuerUrl`. The JWKS URL
 defaults to `/.well-known/jwks.json` under the issuer; set `oidc.jwksUrl` if
-your provider publishes its keys elsewhere. A value set on an individual
-component still wins. Use the exact issuer string that appears in your tokens,
+your provider publishes its keys elsewhere. An issuer or URL set on an individual
+component still wins. Select an explicit `publisher.jwks.source` to use independent
+publisher keys, as described below. Use the exact issuer string that appears in your tokens,
 including a trailing slash if there is one.
 
 The issuer cannot supply the token audiences or the Buildbarn trust boundary.
@@ -1445,7 +1553,10 @@ publisher, choose one configuration mode each.
    | API | `api.jwt.audience` | The dashboard's oauth2-proxy client ID, read from the client Secret. The chart always adds the MCP resource URLs to it. If the dashboard oauth2-proxy is disabled, set this value; the chart refuses to render otherwise. |
 
    Group membership is read from the claim named by `api.jwt.groupsClaim` and
-   `publisher.jwks.groupsClaim`, both `hermetiq/roles` by default.
+   `publisher.jwks.groupsClaim`, both `hermetiq/roles` by default. For example,
+   `groupsClaim: hermetiq/roles` reads the array in `"hermetiq/roles":
+   ["engineering"]`; it does not assign the engineering group any project role.
+   Assign that group's permissions through the policy below.
 
 2. Custom environment. Set the component's `enabled: false` and put a
    complete contract in `api.env` or `publisher.env`: exactly one non-empty
@@ -1463,6 +1574,321 @@ because that would produce duplicate or conflicting entries.
 
 Buildbarn's completed-action calls carry no token. They are admitted only
 through `publisher.trustedCalCidrs`, described next.
+
+### Independent publisher signing keys and rotation
+
+`publisher.jwks.source` selects the publisher's public key source while leaving
+dashboard/API OIDC configuration intact:
+
+| Source | Required publisher value | Behavior |
+|---|---|---|
+| `auto` (default) | Existing configuration | Preserve publisher URL, then inherited OIDC URL, then existing Secret/inline JSON precedence. Helm notes identify local keys shadowed by the inherited URL. |
+| `url` | `publisher.jwks.url` | Fetch only this URL; do not inherit the global OIDC URL. |
+| `inline` | `publisher.jwks.json` | Render a Secret containing this public JWK set and mount it as a file. A keyset change rolls the publisher Pods. |
+| `secret` | `publisher.jwks.existingSecret` | Mount this Secret, which must contain `jwks.json`, as a projected directory without `subPath`. |
+
+Explicit modes require `publisher.jwks.enabled=true` and reject other nonempty
+publisher key-source values. Global `oidc` values may remain set. `auto` preserves
+previously accepted combinations; upgrading must not start trusting a formerly
+ignored keyset. `enabled=false` still means the custom-environment configuration
+mode above, not disabled token validation.
+
+For CI signing its own RS256 JWTs while dashboard users log in through Okta:
+
+```yaml
+publisher:
+  jwks:
+    source: inline
+    issuer: https://ci.example.com/hermetiq
+    audience: hermetiq-bep
+    # Use service only when this entire trusted profile represents machines.
+    principalKind: service
+    json: |
+      {"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":"ci-1","n":"REPLACE_WITH_PUBLIC_MODULUS","e":"AQAB"}]}
+```
+
+Keep the private signing key with the issuer. Match `iss`, `aud` and the JWT header's
+`kid`; use a stable `sub` such as `buildkite-ci`. This configures BEP authentication;
+configure Buildbarn's issuer/audience/keys separately for cache or execution traffic.
+
+Both `publisher.jwks` and `api.jwt` expose `refreshInterval` (default `1h`),
+`refreshRateLimit` (`5m`), `refreshTimeout` (`10s`) and `fileReloadInterval` (`10s`).
+They render the corresponding `GRPC_AUTH_JWKS_*` durations. The verifier validates
+positive durations and limits the file reload interval to ten seconds. URL-backed
+verification also refreshes on an unknown `kid`, subject to the refresh rate limit.
+Mounted file reload starts once Kubernetes projects the update; projection latency
+is additional. Inline updates roll Pods; existing-Secret updates do not require a
+chart upgrade. Run a matching application version with these reload controls.
+
+Existing `api.env` and `publisher.env` overrides for `GRPC_AUTH_PRINCIPAL_KIND`
+and the four `GRPC_AUTH_JWKS_*` refresh/reload settings remain supported with
+single-issuer authentication. Each explicit environment override takes precedence
+over the corresponding `api.jwt` or `publisher.jwks` field and is rendered once.
+Remove an override when moving that setting into the typed values. Independent
+JWT profiles require these settings inside each profile instead.
+
+Publish overlapping old/new keys before switching signing keys, then replace
+credentials and retire the old key deliberately. Multi-key overlap requires JWTs
+to carry `kid`. Removing a key invalidates new requests using it, including requests
+with still-unexpired long-lived JWTs. A credential helper forwards the JWT and does
+not perform key rotation itself.
+
+`principalKind` defaults to `human` for compatibility and can be `service` for a
+machine-only credential profile. It renders `GRPC_AUTH_PRINCIPAL_KIND`; the verifier
+does not assume a provider's optional `idtyp` claim is present. Explicit service
+registrations in the project policy identify registered machines even when they
+share a profile with humans.
+
+### Project access policy
+
+The chart always enforces project authorization for the API, publisher, and
+dashboard. The API and publisher share the `authorization` policy through
+`PROJECT_AUTHORIZATION_CONFIG`, and the publisher requires `write:bep` permission
+for the selected project. JWT verification and signed project restrictions also
+apply. Configure grants and access defaults through the typed `authorization`
+values; workload environment maps cannot disable or replace the chart's policy.
+
+Before installing or upgrading, prepare memberships and issuer-qualified group
+and service-account grants. For example:
+
+```yaml
+authorization:
+  defaultAccess: viewer
+  groupBindings:
+    - projectId: my-project
+      issuer: https://idp.example.com/
+      group: engineering
+      roles: [builder]
+  serviceAccounts:
+    - issuer: https://ci.example.com/hermetiq
+      subject: buildkite-ci
+      projectRoles:
+        my-project: [builder]
+  instanceBindings:
+    - namespace: my-buildbarn-namespace
+      instancePrefix: my-instance
+      projectId: my-project
+```
+
+`defaultAccess: viewer` is the default and grants automatic Viewer access to all
+projects for authenticated humans. Select `none` when access must come from
+explicit membership or group grants. Service accounts receive their explicit
+project roles instead of the human baseline. Roles are `viewer` (read builds and
+the cache, run remote execution), `builder` (also publish builds, write the cache, edit ConfigSets and
+issue build credentials) and `admin` (everything, including project
+administration); each includes the one before it. The API and publisher cache
+access decisions for 30 seconds, so membership changes and
+suspensions take effect within that window.
+
+In the dashboard, **Users** shows direct project memberships in a table. Project
+administrators can use **Manage** to change a member's role or remove their direct
+membership, and **Add member** to assign a role to an existing principal.
+**Project Settings → Access** contains group bindings, effective access details,
+and the role-permission reference. Installation-managed grants remain in the
+Helm `authorization` values. A person admitted through a group or the default
+Viewer policy does not automatically appear as a direct member; removing a
+direct membership does not revoke access from those other sources.
+
+Issuing Hermetiq build credentials requires direct membership or SCIM-backed
+grants. A Builder role obtained only through JWT groups can publish builds with
+an issuer-provided credential helper, but cannot issue Hermetiq build credentials.
+
+Use the project's actual saved managed namespace and instance mapping; an empty
+`instancePrefix` is an explicit mapping choice, not an inferred default. Defining
+these mappings does not automatically configure Buildbarn's listeners or trust.
+`api.mcpAuthDisabled=true` remains supported: those MCP callers share its synthetic
+administrator identity and cannot receive individual user revocation semantics.
+
+### Upgrading project authorization
+
+Project authorization is required by this chart. Prepare access and compatible
+images before upgrading an existing installation:
+
+1. Use application images that support project authorization, browser authorization,
+   and, when configured, SCIM and JWT profiles. Update the API, publisher, schema
+   bootstrap job, dashboard, and `grpc-auth-proxy` together; keep subscribers on
+   the corresponding core release. The schema bootstrap image must apply the
+   authorization migrations before the new API and publisher start.
+2. Preserve existing stable user IDs, issuer strings, and identity prefixes.
+   Grant existing Bazel and CI principals Builder or Admin access to their
+   projects through direct memberships, group bindings, or `serviceAccounts`.
+   A valid JWT alone no longer permits BEP publication, and Viewer access cannot
+   publish builds. For external client-credentials helpers, follow
+   [External Auth0 credential helpers](#external-auth0-credential-helpers).
+3. Move administrators who rely on `app.adminEmails` to a trusted administrator
+   group; see [Admin access](#admin-access). Confirm an administrator can still
+   sign in and manage access.
+4. Classify machine-only JWT profiles with `principalKind: service`. When humans
+   and machines share a profile, register machine issuer/subject pairs explicitly
+   in `authorization.serviceAccounts`. The default `principalKind: human` does
+   not infer machine identity from optional provider claims.
+5. Choose `authorization.defaultAccess` deliberately: `viewer` retains read
+   access across projects for authenticated humans; `none` requires explicit
+   membership or group grants. Service accounts receive only explicit grants.
+   Keep the dashboard oauth2-proxy enabled and verify dashboard sign-in, API/MCP
+   access, and a build published by each CI identity after the rollout.
+
+The image settings are:
+
+| Workload | Tag setting | Digest setting |
+|---|---|---|
+| API | `images.bepNats.apiTag` | `images.bepNats.apiDigest` |
+| Publisher | `images.bepNats.pubTag` | `images.bepNats.pubDigest` |
+| Subscribers | `images.bepNats.subTag` | `images.bepNats.subDigest` |
+| Schema bootstrap and maintenance | `images.bepNats.bootstrapTag` | `images.bepNats.bootstrapDigest` |
+| Dashboard and its init container | `images.dashboard.tag` | `images.dashboard.digest` |
+| API auth proxy | `images.authProxy.tag` | `images.authProxy.digest` |
+
+A nonempty digest takes precedence over the tag. When selecting an updated tag,
+set its matching digest from that release or explicitly clear the previous digest
+with `""`; changing only the tag keeps running the old pinned image. In particular,
+JWT profile mode needs an auth-proxy image that supports
+`GRPC_AUTH_PROXY_FORWARD_ONLY`; updating only the API and dashboard is insufficient.
+
+The chart's default images are the `v1.0.0` release, which implements these
+features. Images from `v0.9.8` and earlier do not, and the chart refuses to
+render with them because they cannot enforce the authorization policy or the
+browser flow. Custom tags and digests are not recognised by that check; verify
+them against the same application release before a staged rollout.
+
+Once images and grants are ready, upgrade using a complete copy of your
+installation values, for example from this checkout:
+
+```bash
+helm upgrade hermetiq ./charts/hermetiq --namespace hermetiq \
+  --reset-values -f installation-values.yaml
+```
+
+`installation-values.yaml` must contain all installation-specific settings you
+intend to retain. `--reset-values` loads the new chart defaults before applying
+those files; avoid `--reuse-values` with pre-authorization releases, whose saved
+defaults omit the new configuration blocks. For packaged installs, use the
+intended chart reference and version in place of `./charts/hermetiq`.
+
+`api.mcpAuthDisabled: true` remains an explicit shared-administrator option;
+it does not provide individual user authorization or revocation.
+
+### External Auth0 credential helpers
+
+An Auth0 helper using `grant_type: client_credentials` authenticates the
+application named by the token's `sub`, commonly `<client-id>@clients`. It does
+not inherit the user identity or installation-admin groups of the person who
+created the application, owns its secret, or is signed in to the dashboard.
+Browser email-domain admission does not apply to the BEP endpoint.
+
+Before upgrading a helper that previously published with a valid token alone,
+grant its exact verified `iss` and `sub` Builder access to each required project.
+For a token with issuer `https://idp.example.com/` and subject
+`example-build-client@clients`:
+
+```yaml
+authorization:
+  serviceAccounts:
+    - issuer: https://idp.example.com/
+      subject: example-build-client@clients
+      projectRoles:
+        my-project: [builder]
+```
+
+Replace these example values with the token's issuer and subject and the project
+selected by Bazel's `--bes_instance_name`. Preserve the issuer's trailing slash
+and quote numeric project IDs as YAML keys, for example `"0": [builder]`.
+Merge the entry with existing grants, then upgrade the chart and wait for the
+API and publisher rollouts. This registers that application as a service
+principal even when humans share the same JWT trust profile; changing the whole
+profile to `principalKind: service` is unnecessary in that case.
+
+Verify the helper still sends its JWT in `Authorization: Bearer <token>` for the
+BEP hostname, with the audience accepted by `publisher.jwks.audience`, then run
+a build with the matching project selected. Auth0 token scopes alone do not
+create a Hermetiq project grant. Keep project authorization enforced.
+
+For diagnosis, gRPC `Unauthenticated` (code 16) means authentication failed;
+check the credential, signature, issuer, audience, and expiry. A verified token
+that lacks `write:bep` receives `PermissionDenied` (code 7); check the exact
+principal's project grants. Successful token exchange or browser admin access
+does not by itself establish permission for the helper's application token.
+
+### Browser authorization and independent JWT profiles
+
+The chart requires the dashboard's backend-for-frontend (BFF): an nginx reverse
+proxy that sends browser API requests through the dashboard's own origin and
+authenticated session. Browser calls to `/grpc/` and `/api/v1/` reach the API
+through this proxy; `/auth/me` reads the API's authoritative identity and access
+decision. The BFF forwards the ID token provided by oauth2-proxy, so the IdP must
+include the configured groups claim in that ID token when using group grants.
+Putting groups only in an access token does not supply them to this browser flow.
+
+The BFF carries credentials; it does not grant permissions. API and publisher
+authorization, the BFF, and dashboard oauth2-proxy are required by this chart.
+Shared cookies and `authorization.defaultAccess` remain configurable. In Gateway
+mode the browser uses the existing dashboard `HTTPRoute`; no dashboard
+`GRPCRoute` is added. Envoy must preserve gRPC-web through the HTTP/1.1 proxy
+chain; see [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding).
+HTTP 505 on `/grpc/` while `/auth/me` succeeds indicates the transport problem
+described there, not evidence that an administrator lost their group grant.
+
+Use compatible API, publisher, dashboard, and auth-proxy images as described in
+[Upgrading project authorization](#upgrading-project-authorization).
+
+Grafana uses its own oauth2-proxy with the shared login-admission settings, then
+applies its own organization roles. It does not use Hermetiq project
+authorization; see [Grafana SSO](#grafana-sso).
+
+`api.jwt.profiles` and `publisher.jwks.profiles` optionally replace the
+single-issuer settings. Each entry supplies `name`, `issuer`, `audiences`,
+`principalKind: human|service`, `credentialUse: browser|build`, and exactly one
+of `jwksUrl`, `jwksInline` (JSON string), or `existingSecret` with optional
+`existingSecretKey` (default `jwks.json`). Optional `userIdClaim`, `userIdPrefix`,
+`groupsClaim`, `allowedAlgs` and refresh durations apply independently. Preserve
+existing IDs; reserve separate nonempty prefixes for distinct issuers. Project
+and groups claims are optional for CI credentials; current project grants still
+control authorization. The API sidecar delegates verification to the core in
+profile mode and strips asserted identity/XFCC. Secret directory mounts permit
+key rotation; inline keys require a rollout. See `ci-values/ci.yaml` for a
+render-only fixture; its image tags and credentials are not for deployment.
+
+### Optional SCIM provisioning
+
+SCIM is disabled by default. Configure provisioning only on the API workload.
+Setting a SCIM user `active: false`, or deleting it, suspends that person in
+every project:
+
+```yaml
+api:
+  scim:
+    enabled: true
+    issuer: https://idp.example.com/
+    userIdPrefix: "" # Must match this issuer's verified JWT identity mapping.
+    existingSecret: hermetiq-scim
+    existingSecretKey: token
+    rolloutVersion: "1"
+    groups:
+      - {id: engineering, displayName: Engineering}
+authorization:
+  groupBindings:
+    - projectId: my-project
+      issuer: https://idp.example.com/
+      group: engineering
+      source: scim
+      roles: [builder]
+```
+
+Create `hermetiq-scim` separately in the release namespace with a `token` key
+containing a random provisioning credential (32–4096 non-whitespace bytes).
+The chart mounts the Secret read-only into the API container; the token is never
+placed in values, policy JSON, environment variables, or publisher/subscriber pods.
+Point the IdP at `https://<API host>/api/v1/scim/v2`, using that bearer token.
+The SCIM `userName` must equal the issuer's stable JWT subject (or configured stable
+ID claim), never an email alias; `userIdPrefix` must match the JWT trust profile.
+Only the configured immutable group IDs are accepted. Each principal is limited to 128 SCIM group IDs and 6 KiB of serialized group IDs; an oversized mutation fails atomically with HTTP 413. `source: scim` bindings use
+current directory membership, while JWT bindings continue to use signed claims.
+Removing a group grant cannot remove access still provided by `defaultAccess: viewer`.
+
+The API reads its provisioning token at startup. To rotate it, update the Secret,
+change the nonsecret `api.scim.rolloutVersion` marker, complete the API rollout,
+and update the IdP's provisioning credential. Plan for provisioning retries during
+that transition. Normal user JWT/JWKS rotation is independent of this token.
 
 ### Completed Action Logger trust
 
@@ -1514,21 +1940,46 @@ is a worked IdP example.
 
 ### Admin access
 
-A user has the Hermetiq admin role, which opens Project Settings and user
-management, in either of two ways:
+Installation administrators manage access across Hermetiq. With the default
+single-issuer configuration and no `authorization.administratorGroups` override,
+the verified `hermetiq-admin` group grants this access. For example, the browser's
+verified ID token would include:
 
-- Their email is listed in `app.adminEmails`. The chart joins the list into
-  the comma-delimited `ADMIN_EMAIL_ALLOWLIST` variable.
-- Their token's groups claim (`api.jwt.groupsClaim`, default
-  `hermetiq/roles`) contains `publisher.hermetiqAdminGroup` (default
-  `hermetiq-admin`).
+```json
+{
+  "iss": "https://idp.example.com/",
+  "hermetiq/roles": ["hermetiq-admin"]
+}
+```
+
+Here `api.jwt.groupsClaim: hermetiq/roles` selects the claim, while
+`publisher.hermetiqAdminGroup: hermetiq-admin` selects the administrator group
+for both the API and publisher. These are the chart defaults. The token must
+also satisfy the configured issuer, audience, signature, and lifetime checks.
+
+To explicitly restrict administrator trust to an issuer and group, configure:
 
 ```yaml
-app:
-  adminEmails:
-    - admin@example.com
-    - ops@example.com
+authorization:
+  administratorGroups:
+    - issuer: https://idp.example.com/
+      group: hermetiq-admin
+      source: jwt
 ```
+
+The issuer and group must match verified token claims. `api.jwt.groupsClaim` and
+`publisher.jwks.groupsClaim` default to `hermetiq/roles`; independent JWT profiles
+set their own `groupsClaim`. Use `source: scim` for an authoritative provisioned
+group when SCIM is enabled. Explicit `administratorGroups` replace the default
+verified admin-group trust. When omitted, the verified admin group remains
+available (`publisher.hermetiqAdminGroup`, default `hermetiq-admin` for the
+single-issuer configuration).
+
+`app.adminEmails` has no effect on installation administration under the chart's
+enforced authorization policy.
+Move email-allowlisted administrators into a trusted group before upgrading.
+Existing direct project Admin memberships continue to grant administration
+of those projects; they do not grant installation-wide administration.
 
 ### Dashboard sign-in
 
@@ -1558,12 +2009,41 @@ can reuse the ConfigMap and the Secret and share one sign-in session.
 | Value under `dashboard.oauth2Proxy` | Default | Purpose |
 |---|---|---|
 | `scope` | `openid email profile offline_access` | Scopes requested from the IdP |
-| `oidcGroupsClaim` | `groups` | Claim oauth2-proxy reads groups from |
+| `emailDomains` | `[]` (required) | Email domains permitted to sign in to all proxies sharing the ConfigMap. `['*']` requires nonempty `allowedGroups`. |
+| `allowedGroups` | `[]` | Additional admission restriction: membership in at least one listed IdP group is required. Does not grant application roles. |
+| `oidcGroupsClaim` | empty | Claim oauth2-proxy reads groups from; falls back to `api.jwt.groupsClaim`, then `groups`. Set it explicitly with multiple JWT profiles. |
 | `whitelistDomains` | `[]` | Extra domains allowed as redirect targets (`OAUTH2_PROXY_WHITELIST_DOMAINS`). `.<hosts.domainBase>` is added automatically, so redirects to the dashboard, Browser, and Grafana work without configuration. |
 | `backendLogoutUrl` | empty | IdP logout URL to chain after oauth2-proxy clears its cookie |
 | `cookieExpire`, `cookieRefresh` | oauth2-proxy defaults | Session lifetime and refresh interval. Keep the refresh below the IdP's access-token lifetime for silent refresh. |
 | `cookieDomains` | `[]` | Share a session across subdomains, for example `[".example.com"]` |
 | `env` | `{}` | Any other oauth2-proxy variable |
+
+Configure admission explicitly before upgrading. For one organization, set
+`dashboard.oauth2Proxy.emailDomains: [example.com]` to your permitted email
+domains. For an identity provider serving multiple organizations, use an
+explicit group gate:
+
+```yaml
+dashboard:
+  oauth2Proxy:
+    emailDomains: ["*"]
+    allowedGroups: [hermetiq-users]
+    oidcGroupsClaim: hermetiq/roles
+```
+
+With both domain and group restrictions, users must satisfy both. The settings
+are shared by the dashboard, Grafana and Buildbarn Browser; overriding
+`OAUTH2_PROXY_EMAIL_DOMAINS`, `OAUTH2_PROXY_ALLOWED_GROUPS` or
+`OAUTH2_PROXY_OIDC_GROUPS_CLAIM` in a workload's `env` is rejected. Move existing
+overrides into these shared values. Keep email verification enabled. Hermetiq
+project roles and installation administrator groups remain separate from this
+sign-in gate, as do Grafana roles.
+
+Manage account registration at the identity provider. For Auth0 database
+connections, configure whether signup is allowed on the connection; this chart
+does not change tenant or connection settings. Directory-managed identities or
+an intentionally shared tenant may need registration enabled, with admission
+restricted by verified email domains or groups as above.
 
 Without `dashboard.oauth2Proxy.backendLogoutUrl`, signing out clears only the
 local cookie and the still-active IdP session silently signs the user back in.
@@ -1608,7 +2088,9 @@ rename the Grafana release.
 If no Grafana runs beside this release, set
 `gateway.routes.grafanaEnabled: false` to drop both the route and the proxy.
 To expose Grafana without the proxy, set `grafana.oauth2Proxy.enabled: false`;
-the route then targets the Grafana Service directly.
+the route then targets the Grafana Service directly. First configure Grafana
+to authenticate callers itself and adjust its backend policy; a direct route
+must not trust caller-supplied authentication headers.
 
 Register `https://grafana.<domainBase>/oauth2/callback` with the IdP, and
 configure Grafana to trust the proxy headers in the VictoriaMetrics values:
@@ -1616,6 +2098,10 @@ configure Grafana to trust the proxy headers in the VictoriaMetrics values:
 ```yaml
 grafana:
   grafana.ini:
+    users:
+      allow_sign_up: false
+      auto_assign_org: true
+      auto_assign_org_role: Viewer
     auth.proxy:
       enabled: true
       header_name: X-Forwarded-User
@@ -1624,6 +2110,37 @@ grafana:
       auto_sign_up: true
       enable_login_token: true
 ```
+
+These settings belong to the **VictoriaMetrics/Grafana release**, not the
+Hermetiq release. Apply them by upgrading that release with its complete values
+and waiting for Grafana's rollout; upgrading Hermetiq alone does not change
+Grafana's configuration. Before rolling Grafana, verify that its database uses
+persistent storage or an external database. Restarting a pod whose database is
+on `emptyDir` discards its users, role assignments, and locally saved dashboards;
+preserve that data before applying configuration changes.
+
+The [starter VictoriaMetrics values](../../custom-values/victoriametrics-values.yaml)
+also create a Grafana backend NetworkPolicy through the Grafana chart's
+`extraObjects`. It permits only the same-namespace Hermetiq Grafana proxy and
+the VictoriaMetrics agent belonging to that metrics release. The metrics agent
+is also trusted: Grafana serves `/metrics` on the same port as header-based
+authentication, and a NetworkPolicy cannot restrict URL paths. Keep permission
+to create or relabel pods in that namespace limited to trusted operators.
+
+Use a CNI that enforces NetworkPolicy and check that other policies do not
+grant broader access to the Grafana pod. A ClusterIP Service alone does not
+isolate Grafana, and Hermetiq's `networkPolicy.enabled` protects its proxy, not
+this external backend. If the proxy or metrics agent runs in another namespace,
+adjust the policy selectors deliberately. `auth.proxy.whitelist` can provide
+additional protection when proxy source addresses are stable; a whole-cluster
+pod CIDR does not distinguish the proxy from other pods.
+
+`users.auto_assign_org_role: Viewer` applies to newly created users; it does not
+demote existing administrators. Review existing Grafana memberships separately.
+Passing `X-Forwarded-Groups` does not map groups to Grafana Admin, and Hermetiq's
+API administrator group does not grant Grafana privileges. Manage Grafana roles
+explicitly or configure a supported role mapping in Grafana's identity provider
+integration. See [Grafana's auth proxy configuration](https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/auth-proxy/).
 
 ## Workload sizing, scheduling, and availability
 
@@ -2232,7 +2749,8 @@ the API Pods automatically; for an external policy, change `rolloutChecksum`.
 turn deadline plus headroom. It applies to the API gRPC route for Envoy
 Gateway, Contour, and ingress-nginx, and to the API Service's GKE backend
 policy. GKE shares that Service policy across the API ports, including REST
-and MCP. Publisher timeouts are unchanged.
+and MCP. Envoy Gateway also applies it to the dashboard route carrying
+same-origin browser gRPC-web streams. Publisher timeouts are unchanged.
 
 Raise the streaming timeout whenever you raise the assistant's turn deadline,
 and check the total response timeout of any external load balancer.
@@ -2718,7 +3236,8 @@ shares with the Buildbarn chart, such as `global.imageRegistry`,
 ### Upgrade and uninstall
 
 An upgrade is the [install command](#run-the-install) with the new chart
-version. The repository guide's
+version. Review [Upgrading project authorization](#upgrading-project-authorization)
+before upgrading an existing installation. The repository guide's
 [Upgrading](https://github.com/Hermetiq/hermetiq-k8s#upgrading) section gives
 the order across charts and shows how to compare defaults between versions,
 and [Uninstalling](https://github.com/Hermetiq/hermetiq-k8s#uninstalling)
@@ -2752,6 +3271,7 @@ README describes, by symptom.
 | `413 request_payload_too_large` through Envoy Gateway | Buffer limit or HTTP/2 windows too small for the upload | [Client connection tuning](#client-connection-tuning-for-high-rtt-clients) |
 | MCP clients are refused, for example with Auth0's `Service not found` | The IdP's resource identifier does not match `https://mcp.<domainBase>/mcp` exactly | [MCP authentication](#mcp-authentication) |
 | Signing out of the dashboard signs the user straight back in | `backendLogoutUrl` is not set | [Dashboard sign-in](#dashboard-sign-in) |
+| Dashboard API calls return HTTP 505 while `/auth/me` succeeds | Envoy translated gRPC-web before the dashboard's HTTP/1.1 BFF | [Dashboard gRPC-web forwarding](#dashboard-grpc-web-forwarding); verify the patch-policy extension, listener names, and `Programmed` status |
 | Rows accumulate in `*_default` tables | A partition is missing or maintenance is failing | [Inspect database partitions](#inspect-database-partitions) |
 | Cache views are empty | Shard counts differ, Action Cache Hit Tracker is off, or `app.cacheEventsEnabled` is `false` | [Cache-event analytics](#cache-event-analytics) |
 | A completed build's logs are empty | The build is older than its project's log retention | [Progress log storage](#progress-log-storage) |

@@ -178,7 +178,6 @@ metadata:
   namespace: {{ include "hermetiq-core.namespace" . }}
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
-  {{- if or (eq (include "hermetiq-core.renderPerRouteCertificates" .) "true") .Values.ingress.dashboard.annotations .Values.commonAnnotations }}
   annotations:
     {{- with .Values.commonAnnotations }}
     {{- include "hermetiq-core.commonAnnotations" $ | nindent 4 }}
@@ -186,10 +185,18 @@ metadata:
     {{- if eq (include "hermetiq-core.renderPerRouteCertificates" .) "true" }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer }}
     {{- end }}
+    {{- /* The dashboard's own API calls and assistant streams arrive on this
+         route, so it gets the API route's bound instead of nginx's 60s default. */}}
+    {{- if .Values.assistant.enabled }}
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ include "hermetiq-core.assistantTimeoutSeconds" (dict "root" . "value" .Values.ingress.grpc.proxyReadTimeoutSeconds) | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ include "hermetiq-core.assistantTimeoutSeconds" (dict "root" . "value" .Values.ingress.grpc.proxySendTimeoutSeconds) | quote }}
+    {{- else }}
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.grpc.proxyReadTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.grpc.proxySendTimeoutSeconds | quote }}
+    {{- end }}
     {{- with .Values.ingress.dashboard.annotations }}
     {{- include "hermetiq-core.tplvalues.render" (dict "value" . "context" $) | nindent 4 }}
     {{- end }}
-  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:

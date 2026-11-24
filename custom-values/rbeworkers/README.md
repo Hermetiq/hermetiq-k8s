@@ -7,10 +7,11 @@ them in the Buildbarn release namespace after the Buildbarn release and
 `buildbarn-worker-config` are ready. The example release namespace is
 `hermetiq`.
 
-These manifests require bb-worker-operator v0.3.13 or later and its matching
-CRD (operator chart 0.3.11 or later), which support the FUSE kernel tunables
-and Envoy's `spec.autoscaling.idleReplicas`. Upgrade the CRD and controller
-together following the [CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
+These manifests require bb-worker-operator v1.0.0 or later and its matching
+CRD (operator chart 1.0.0 or later), which support Buildbarn image inheritance,
+the FUSE kernel tunables, and Envoy's `spec.autoscaling.idleReplicas`.
+Upgrade the CRD and controller together following the
+[CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
 FUSE-backed pools also need Linux 6.2 or newer and writable `/sys`; see
 [FUSE kernel tuning](#fuse-kernel-tuning) for prerequisites and the fallback.
 When upgrading from operator versions before 0.3.4, drop
@@ -20,6 +21,37 @@ queue-depth queries now filter by the worker's namespace.
 ```bash
 kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
+
+The manifests do not set `spec.images.worker` or `spec.images.runnerInstaller`.
+The operator then uses the `workerImage` and
+`runnerInstallerImage` that the Buildbarn chart publishes in
+`buildbarn-worker-config`, so each pool's `bb-worker` always matches the
+Buildbarn release and its worker configuration. Set them only to run a
+different build, and update them in the same change as every Buildbarn
+upgrade.
+
+For an existing pre-CDC installation, apply these manifests inside the
+Buildbarn cut-over window, with the worker pools paused: upgrade the CRD and
+the operator, apply the unpinned manifests, then upgrade Buildbarn. Until
+Buildbarn 1.0.0 has published the two image keys, a pool without pins reports
+`SpecInvalid`. See the
+[operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-100).
+
+Custom pools using `spec.config.files` reference a ConfigMap through
+`configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.
+The Buildbarn upgrade checks the referenced ConfigMap's selected source keys,
+regardless of its name or labels. A ConfigMap that no `RbeWorker` references
+is scanned too, with all of its keys, when its name ends in `-worker-config`
+or it carries the `hermetiq.com/worker-pool` label and the operator does not
+own it. Rename a backup copy of an old worker configuration, or keep it in
+another namespace. Generated pools using a custom
+`commonConfigMapName`/`commonItems` must also migrate those selected libraries.
+Only the Buildbarn chart's own ConfigMaps are exempt because the upgrade
+replaces their contents. ConfigMap image defaults must also be CDC-capable;
+removing a CR image pin does not update a separate custom ConfigMap. The image
+check reads the upstream date stamp in the tag. It cannot classify a
+digest-only or re-tagged image, so such a pin passes whatever it runs: check
+those yourself.
 
 ## Pools
 

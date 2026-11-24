@@ -11,6 +11,7 @@ supported full-stack deployment order.
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
   - [Replacing the CRD from scratch](#replacing-the-crd-from-scratch)
+- [Upgrading to 1.0.0](#upgrading-to-100)
 - [Upgrading to 0.3.12](#upgrading-to-0312)
 - [Upgrading to 0.3.11](#upgrading-to-0311)
 - [RbeWorker Pools](#rbeworker-pools)
@@ -58,8 +59,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -68,7 +69,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -77,7 +78,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -126,12 +127,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.12;
+file and wait for Kubernetes to establish it. This example uses release 1.0.0;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -143,6 +144,10 @@ apply the CRD, then installs the controller with `--skip-crds`.
 On an **upgrade**, run the CRD command above before upgrading the chart or
 applying `RbeWorker` manifests that use new fields. Helm does not upgrade CRDs in
 `crds/` during `helm upgrade`, even when the chart contains a newer schema.
+If Helm created the CRD on the first install, `kubectl` can stop with a
+conflict against the `helm` field manager on `.spec.versions`. The new schema
+is meant to replace the old one, so run the same command again with
+`--force-conflicts` added.
 Keep the chart and CRD at the same version, and leave `image.tag` empty so the
 controller follows the chart's `appVersion`. A newer CRD may accept fields
 that an older controller cannot act on.
@@ -179,18 +184,86 @@ kubectl delete crd rbeworkers.bb.hermetiq.com --wait=true --ignore-not-found
 
 # 3. Apply the CRD from the release you are installing, and wait for it.
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 
 # 4. Upgrade or restart the controller on the same release.
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
 
 Then re-apply your `RbeWorker` manifests.
+
+## Upgrading to 1.0.0
+
+Chart 1.0.0 follows 0.3.12; the chart version now moves together with the
+Hermetiq and Buildbarn charts, and no chart was published in between. It
+deploys operator v1.0.0, which generates worker configuration for Buildbarn's
+content-defined chunking (CDC) storage and nothing else. Run it only with the
+Buildbarn 1.0.0 chart. Against an older Buildbarn release a worker stops at
+startup with `common.libsonnet is not a CDC Buildbarn configuration`.
+
+Upgrade the operator inside the Buildbarn
+[cut-over window](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
+after the worker pools are paused and before the Buildbarn upgrade. Nothing
+enforces the order. The Buildbarn chart does not check which operator is
+running: an operator older than v1.0.0 generates pre-CDC worker
+configuration, the CDC `bb-worker` rejects it, and the pools crash-loop until
+the operator is upgraded.
+
+- Apply the 1.0.0 CRD first. `spec.images.worker` and
+  `spec.images.runnerInstaller` become optional: when unset, the operator uses
+  the `workerImage` and `runnerInstallerImage` keys of the referenced config
+  ConfigMap, which the Buildbarn chart publishes, so worker images follow the
+  Buildbarn release.
+- Before the Buildbarn upgrade, remove pre-CDC image pins from each
+  `RbeWorker` or update them to the CDC images. The Buildbarn chart refuses
+  to upgrade while a live `RbeWorker` pins a pre-CDC image. A pool without
+  pins reports `SpecInvalid` until Buildbarn 1.0.0 has published the two
+  keys; with the pools paused that has no effect.
+- The embedded `worker-common.libsonnet` changed, so every generated-config
+  worker pool is rolled as soon as the new operator reconciles it, on every
+  pool at once. A pool that is not paused restarts its workers into the new
+  configuration; actions that outlast the pod's termination grace period are
+  killed (see
+  [Draining actions on termination](#draining-actions-on-termination)). A pool
+  with `spec.config.rolloutOnChange: false` is not rolled and picks the new
+  file up when its Pods next restart.
+- To stop a pool for the cut-over, pause it on the `RbeWorker`. While
+  `spec.autoscaling.enabled` is true, `spec.replicas` is ignored: the operator
+  leaves the Deployment's replica count to KEDA. A pause annotation set
+  directly on the `ScaledObject` does not last either, because the operator
+  replaces that object's annotations with
+  `spec.autoscaling.scaledObjectAnnotations` on every reconcile. Set KEDA's
+  pause annotation there, and remove it again to resume:
+
+  ```yaml
+  spec:
+    autoscaling:
+      scaledObjectAnnotations:
+        autoscaling.keda.sh/paused-replicas: "0"
+  ```
+
+  A pool without autoscaling stops with `spec.replicas: 0`. With
+  `spec.manageReplicas: false` the operator sets neither, and you scale the
+  Deployment or its external scaler yourself.
+- Rolling Buildbarn back to a pre-CDC chart means rolling this chart back to
+  0.3.12 as well, because operator v1.0.0 cannot generate pre-CDC worker
+  configuration. The pre-CDC Buildbarn chart does not publish `workerImage`
+  and `runnerInstallerImage`, so set `spec.images.worker` and
+  `spec.images.runnerInstaller` back to the pre-CDC images on each
+  `RbeWorker` as part of the rollback.
+- A pool that projects its own copy of `worker-common.libsonnet` through
+  `commonItems` is read by the Buildbarn chart's configuration text check like
+  any other worker configuration, and is refused if it contains pre-CDC
+  fields. Replace a copy taken from an older operator with one based on this
+  operator's built-in file.
+
+When upgrading from 0.3.11 or earlier, also follow
+[Upgrading to 0.3.12](#upgrading-to-0312).
 
 ## Upgrading to 0.3.12
 
@@ -236,7 +309,7 @@ see the result without changing anything, render against the cluster first:
 
 ```bash
 helm template bb-worker-operator oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 --namespace hermetiq --dry-run=server \
+  --version 1.0.0 --namespace hermetiq --dry-run=server \
   --values bb-worker-operator-values.yaml > /dev/null
 ```
 
