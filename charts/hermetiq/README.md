@@ -967,6 +967,15 @@ hosts keep their existing translation, and other virtual-host filters are
 preserved. The policy is not rendered for Contour, ingress-nginx, or GKE's
 `gateway-httproute-only` provider.
 
+> **Contour is not verified for the dashboard in this release.** Contour's
+> Envoy enables the same gRPC-web translation on every route and has no
+> per-route setting to turn it off, so dashboard queries under
+> `routing.provider: contour` are expected to return HTTP 505 while sign-in
+> works. The API, MCP and BEP hosts are not affected. The install notes repeat
+> this warning. Verify a dashboard query after installing, or use
+> `routing.provider: gateway` with Envoy Gateway, or `ingress`. ingress-nginx
+> and GKE's load balancer do not translate gRPC-web and need no exception.
+
 Enable patch policies in the Envoy Gateway controller before installing Hermetiq.
 For the controller's Helm chart, merge this into its existing values:
 

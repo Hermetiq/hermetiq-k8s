@@ -27,7 +27,36 @@ tests:
       - notMatchRegexRaw:
           pattern: 'DASHBOARD gRPC-WEB'
 
-  - it: stays quiet for other routing providers
+  # The ci-values fixture renders with Contour. Nothing exempts the dashboard
+  # host from Contour's gRPC-web translation, so the notes say so up front.
+  - it: warns that the dashboard is expected to fail behind Contour
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: DASHBOARD gRPC-WEB'
+      - matchRegexRaw:
+          pattern: 'HTTP 505'
+      - notMatchRegexRaw:
+          pattern: 'enableEnvoyPatchPolicy'
+
+  - it: does not print the Contour warning for Envoy Gateway
+    set:
+      routing.provider: gateway
+      gateway.name: public-edge
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'WARNING: DASHBOARD gRPC-WEB'
+
+  - it: prints no dashboard gRPC-web note for nginx Ingress
+    set:
+      routing.provider: ingress
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'DASHBOARD gRPC-WEB'
+
+  - it: prints no dashboard gRPC-web note for GKE Gateway
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: public-edge
     asserts:
       - notMatchRegexRaw:
           pattern: 'DASHBOARD gRPC-WEB'
