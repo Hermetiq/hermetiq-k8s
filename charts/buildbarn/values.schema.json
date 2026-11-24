@@ -206,6 +206,17 @@
     "frontend": {
       "type": "object",
       "properties": {
+        "jwks": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "allowedClientIds": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "clientIdClaim": { "type": "string", "minLength": 1 }
+          }
+        },
         "podAntiAffinity": {
           "type": "object",
           "properties": {
@@ -280,14 +291,17 @@
         },
         "adminHttpServers": {
           "type": "object",
-          "properties": { "authenticationPolicy": {
-          "type": "object",
           "properties": {
-            "mode": { "type": "string", "enum": ["", "allow", "deny", "custom"] },
-            "denyMessage": { "type": "string" },
-            "custom": { "type": "string" }
+            "allowUnauthenticatedRoute": { "type": "boolean" },
+            "authenticationPolicy": {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "enum": ["", "allow", "deny", "custom"] },
+                "denyMessage": { "type": "string" },
+                "custom": { "type": "string" }
+              }
+            }
           }
-        } }
         },
         "handover": {
           "type": "object",
