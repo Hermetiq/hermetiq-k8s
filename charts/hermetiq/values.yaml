@@ -29,27 +29,27 @@ images:
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v1.0.0"
+    apiTag: "v1.0.1"
     apiDigest: ""
-    pubTag: "v1.0.0"
+    pubTag: "v1.0.1"
     pubDigest: ""
-    subTag: "v1.0.0"
+    subTag: "v1.0.1"
     subDigest: ""
-    bootstrapTag: "v1.0.0"
+    bootstrapTag: "v1.0.1"
     bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v1.0.0"
+    tag: "v1.0.1"
     digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v1.0.0"
+    tag: "v1.0.1"
     digest: ""
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v1.0.0"
+    tag: "v1.0.1"
     digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
