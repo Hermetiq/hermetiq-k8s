@@ -475,3 +475,23 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "requires a non-empty GRPC_AUTH_AUDIENCE in publisher.env"
+
+  - it: trims whitespace-only issuer, jwksUrl, and audience values
+    template: templates/validate.yaml
+    set:
+      oidc.issuerUrl: "   "
+      api.jwt.issuer: "   "
+      api.jwt.jwksUrl: "   "
+    asserts:
+      - failedTemplate:
+          errorPattern: "api.jwt.issuer or oidc.issuerUrl is required"
+
+  - it: trims whitespace-only publisher audience and falls back to BEP host when absent
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.audience: "   "
+      hosts.domainBase: ""
+      hosts.bepGrpc: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "publisher.jwks.audience, hosts.bepGrpc, or hosts.domainBase is required"

@@ -913,16 +913,18 @@ With `routing.provider: gateway`, the chart renders Envoy Gateway
 | Kind | Purpose | Toggle |
 |---|---|---|
 | `BackendTrafficPolicy` | Active health checks and route timeouts for the BEP, gRPC API, `bbcal`, web API, and MCP routes; timeouts for the dashboard BFF | `gateway.healthChecks.enabled`, `gateway.timeouts.enabled` |
-| `SecurityPolicy` | CORS for the Gateway and for the MCP route | `gateway.cors.enabled` |
+| `SecurityPolicy` | CORS for the BEP gRPC, API gRPC, API web, and MCP routes | `gateway.cors.enabled` |
 | `ClientTrafficPolicy` | [Client connection tuning](#client-connection-tuning-for-high-rtt-clients) | `gateway.clientTrafficPolicy.enabled`, off by default |
 | `EnvoyPatchPolicy` | Preserve gRPC-web on the dashboard's same-origin API path | `gateway.dashboardGrpcWeb.enabled`, on by default |
 
 Health checks probe gRPC routes over TCP and HTTP routes on unauthenticated
 readiness or metadata endpoints. The dashboard gets a timeout-only policy,
 `<dashboard-route>-timeouts`, without active health checks. Grafana gets no
-`BackendTrafficPolicy`. The Gateway-wide CORS policy (`gateway-cors-policy`)
-and the `ClientTrafficPolicy` and `EnvoyPatchPolicy` are created in the Gateway's namespace, because
-a policy must live beside the Gateway it targets.
+`BackendTrafficPolicy`. The CORS policies (`gateway-cors-policy` for BEP gRPC,
+API gRPC, and API web; `mcp-cors-policy` for MCP) live in the release namespace
+beside the routes they target; `ClientTrafficPolicy` and `EnvoyPatchPolicy` are
+created in the Gateway's namespace, because a Gateway-scoped policy must live
+beside the Gateway it targets.
 
 Health checks and timeouts for a route share one `BackendTrafficPolicy`, named
 `<route>-health-check`. Envoy Gateway does not merge policies of the same kind
@@ -1550,9 +1552,12 @@ The API and the publisher run the same application process, `bep-nats`, and
 that process verifies bearer tokens itself: for the gRPC API and the MCP
 endpoint in the API Pods, and for BEP ingest in the publisher Pods. It is
 configured through `GRPC_AUTH_*` environment variables; `JWKS_*` variables
-are not recognized. The API Pods keep a `grpc-auth-proxy` sidecar only for
-gRPC-web framing and CORS. The process strips caller-supplied identity
-headers, including `X-Forwarded-User`, before it authenticates.
+are not recognized. The API Pods keep a `grpc-auth-proxy` sidecar for gRPC-web
+framing and CORS; in single-issuer mode it still verifies JWTs against `JWT_*`
+and rejects invalid tokens before forwarding, while in `api.jwt.profiles` mode
+it runs in forward-only mode and delegates all verification to the core. The
+core strips caller-supplied identity headers, including `X-Forwarded-User`,
+before it authenticates.
 
 `app.grpcAuthUserProvider` (default `jwks`) selects the verifier and is
 required; the process refuses to start without it. There is no "off" setting:
@@ -1973,8 +1978,8 @@ The Secret's keys must be `OAUTH2_PROXY_CLIENT_ID`,
 The chart renders the provider and session settings into a reusable ConfigMap,
 `oauth2-proxy-config-web-ui`. Values specific to one deployment, such as
 `OAUTH2_PROXY_REDIRECT_URL` and `OAUTH2_PROXY_UPSTREAMS`, are set on the
-dashboard sidecar itself, so the Grafana proxy and the Buildbarn Browser proxy
-can reuse the ConfigMap and the Secret and share one sign-in session.
+dashboard sidecar itself, so the Grafana proxy can reuse the ConfigMap and the
+Secret and share one sign-in session.
 
 | Value under `dashboard.oauth2Proxy` | Default | Purpose |
 |---|---|---|
@@ -2002,7 +2007,7 @@ dashboard:
 ```
 
 With both domain and group restrictions, users must satisfy both. The settings
-are shared by the dashboard, Grafana and Buildbarn Browser; overriding
+are shared by the dashboard and Grafana; overriding
 `OAUTH2_PROXY_EMAIL_DOMAINS`, `OAUTH2_PROXY_ALLOWED_GROUPS` or
 `OAUTH2_PROXY_OIDC_GROUPS_CLAIM` in a workload's `env` is rejected; set them
 through these shared values. Keep email verification enabled. Hermetiq
@@ -2034,7 +2039,7 @@ dashboard:
 ```
 
 Add the `returnTo` host to Auth0's "Allowed Logout URLs" application setting
-first. Because the Buildbarn Browser proxy reuses the ConfigMap, logout chains
+first. Because the Grafana proxy reuses the ConfigMap, logout chains
 through the same IdP for both UIs. A `__Host-` cookie name cannot be combined
 with `cookieDomains`.
 

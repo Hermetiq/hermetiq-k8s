@@ -1,5 +1,5 @@
-{{/* Keep browser admission consistent across the dashboard, Grafana and the
-     Buildbarn Browser, which consume the same oauth2-proxy ConfigMap. */}}
+{{/* Keep browser admission consistent across the dashboard and Grafana,
+     which consume the same oauth2-proxy ConfigMap. */}}
 {{- define "hermetiq-core.oauth2ProxyGroupsClaim" -}}
 {{- default (default "groups" .Values.api.jwt.groupsClaim) .Values.dashboard.oauth2Proxy.oidcGroupsClaim -}}
 {{- end -}}
@@ -13,6 +13,18 @@
   {{- range $oauth.emailDomains -}}
     {{- if not (regexMatch "^[^[:space:],]+$" .) -}}
       {{- fail "dashboard.oauth2Proxy.emailDomains entries must be nonempty domains without whitespace or commas" -}}
+    {{- end -}}
+    {{- if ne . "*" -}}
+      {{- $base := . -}}
+      {{- if hasPrefix "*." $base -}}
+        {{- $base = trimPrefix "*." $base -}}
+      {{- else if hasPrefix "." $base -}}
+        {{- $base = trimPrefix "." $base -}}
+      {{- end -}}
+      {{- $base = trimSuffix "." $base -}}
+      {{- if or (not (contains "." $base)) (hasPrefix "." $base) (contains ".." $base) -}}
+        {{- fail (printf "dashboard.oauth2Proxy.emailDomains entry %q must include a domain below the top-level domain (for example example.com or *.example.com); top-level-domain-only patterns like .com or *.com are not allowed" .) -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
   {{- range $oauth.allowedGroups -}}

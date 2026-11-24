@@ -63,3 +63,27 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: each JWT profile requires exactly one
+  - it: rejects blank strings inside profile audiences
+    template: templates/validate.yaml
+    set:
+      api.jwt.profiles:
+        - name: human
+          issuer: https://oidc.ci.test/
+          audiences: ["   "]
+          jwksUrl: https://oidc.ci.test/keys
+          principalKind: human
+          credentialUse: browser
+    asserts:
+      - failedTemplate:
+          errorPattern: JWT profile audiences entries must be nonempty
+  - it: omits oauth2-proxy secret checksum on grpc-api when api.jwt.profiles is set
+    template: templates/deployment-api.yaml
+    set:
+      api.jwt.audience: ""
+      dashboard.oauth2Proxy.client.existingSecret: ""
+      dashboard.oauth2Proxy.client.clientId: ci-id
+      dashboard.oauth2Proxy.client.clientSecret: ci-secret
+      dashboard.oauth2Proxy.client.cookieSecret: ci-cookie
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["hermetiq.com/oauth2-proxy-secret-checksum"]

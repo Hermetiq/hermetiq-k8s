@@ -253,6 +253,7 @@ spec:
         - {{ include "hermetiq-core.grafanaHost" . }}
       secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.grafanaName) "secretName" "") }}
 {{- end }}
+{{- if not .Values.api.mcpAuthDisabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -291,4 +292,5 @@ spec:
     - hosts:
         - {{ include "hermetiq-core.mcpHost" . }}
       secretName: {{ include "hermetiq-core.routeTlsSecretName" (dict "root" . "defaultName" (printf "%s-tls" .Values.gateway.routes.mcpName) "secretName" "") }}
+{{- end }}
 {{- end }}
