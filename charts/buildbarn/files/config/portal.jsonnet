@@ -3,11 +3,27 @@ local common = import 'common.libsonnet';
 {
   global: common.global,
   maximumMessageSizeBytes: common.maximumMessageSizeBytes,
-  instanceNameAuthorizer: { allow: {} },
   httpServers: [{
     listenAddresses: [':8081'],
     authenticationPolicy: { allow: {} },
   }],
+
+  database: {
+    postgres: {
+      connectionString: std.extVar('DB_CONNECTION_STRING'),
+    },
+    connectionPoolConfiguration: {
+      maxOpenConnections: {{ int .Values.portal.db.connectionPool.maxOpenConnections }},
+      maxIdleConnections: {{ int .Values.portal.db.connectionPool.maxIdleConnections }},
+      connectionMaxLifetime: '{{ .Values.portal.db.connectionPool.connectionMaxLifetime }}',
+      connectionMaxIdleTime: '{{ .Values.portal.db.connectionPool.connectionMaxIdleTime }}',
+    },
+    cleanupConfiguration: {
+      cleanupInterval: '{{ .Values.portal.bes.cleanup.cleanupInterval }}',
+      invocationMessageTimeout: '{{ .Values.portal.bes.cleanup.invocationMessageTimeout }}',
+      invocationRetention: '{{ .Values.portal.bes.cleanup.invocationRetention }}',
+    },
+  },
 
   besServiceConfiguration: {
     grpcServers: [{
@@ -17,25 +33,8 @@ local common = import 'common.libsonnet';
       // common.maximumMessageSizeBytes used for blob traffic.
       maximumReceivedMessageSizeBytes: 10 * 1024 * 1024,
     }],
-    database: {
-      postgres: {
-        connectionString: std.extVar('DB_CONNECTION_STRING'),
-      },
-      connectionPoolConfiguration: {
-        maxOpenConnections: {{ int .Values.portal.db.connectionPool.maxOpenConnections }},
-        maxIdleConnections: {{ int .Values.portal.db.connectionPool.maxIdleConnections }},
-        connectionMaxLifetime: '{{ .Values.portal.db.connectionPool.connectionMaxLifetime }}',
-        connectionMaxIdleTime: '{{ .Values.portal.db.connectionPool.connectionMaxIdleTime }}',
-      },
-    },
     enableBepFileUpload: {{ .Values.portal.bes.enableBepFileUpload }},
-    enableGraphqlPlayground: {{ .Values.portal.bes.enableGraphqlPlayground }},
     saveDataLevel: { basicAndTarget: {} },
-    databaseCleanupConfiguration: {
-      cleanupInterval: '{{ .Values.portal.bes.cleanup.cleanupInterval }}',
-      invocationMessageTimeout: '{{ .Values.portal.bes.cleanup.invocationMessageTimeout }}',
-      invocationRetention: '{{ .Values.portal.bes.cleanup.invocationRetention }}',
-    },
     minEventBatchDuration: '{{ .Values.portal.bes.minEventBatchDuration }}',
 {{- with .Values.portal.bes.buildKey }}
     buildKey: {{ . | quote }},
@@ -45,17 +44,33 @@ local common = import 'common.libsonnet';
     // Bazel's environment. buildKey above reads from the buildTags it returns.
     invocationMetadataExtractor: {{ toJson . }},
 {{- end }}
+    publishAuthorizer: { allow: {} },
   },
 
-  // Blob browsing reads the storage shards directly: the chart has no plain
-  // in-cluster frontend Service, and routing portal reads through
-  // frontend-grpc would push them through the optional grpc-cache-proxy
-  // sidecar, polluting cache-event analytics. ISCC/FSAC views light up only
-  // when those stores are enabled in common.libsonnet.
-  contentAddressableStorage: common.blobstore.contentAddressableStorage,
-  actionCache: common.blobstore.actionCache,
-  [if std.objectHas(common, 'initialSizeClassCache') then 'initialSizeClassCache']: common.initialSizeClassCache,
-  [if std.objectHas(common, 'fileSystemAccessCache') then 'fileSystemAccessCache']: common.fileSystemAccessCache,
+  graphqlApiServiceConfiguration: {
+    readAuthorizer: { allow: {} },
+  },
+
+  // Blob browsing reads the storage shards directly via the shared CDC CAS
+  // configuration. ISCC/FSAC views light up only when those stores are enabled
+  // in common.libsonnet.
+  contentAddressableStorageServer: {
+    contentAddressableStorage: common.blobstore.contentAddressableStorage,
+    readAuthorizer: { allow: {} },
+  },
+  actionCache: {
+    backend: common.blobstore.actionCache,
+    readAuthorizer: { allow: {} },
+  },
+  [if std.objectHas(common, 'initialSizeClassCache') then 'initialSizeClassCache']: {
+    backend: common.initialSizeClassCache,
+    readAuthorizer: { allow: {} },
+  },
+  [if std.objectHas(common, 'fileSystemAccessCache') then 'fileSystemAccessCache']: {
+    backend: common.fileSystemAccessCache,
+    readAuthorizer: { allow: {} },
+  },
+  blobstoreServiceConfiguration: {},
 
   schedulerServiceConfiguration: {
     buildQueueStateClient: {
@@ -65,6 +80,9 @@ local common = import 'common.libsonnet';
       {{- end }}
     },
     killOperationsAuthorizer: {
+      allow: {},
+    },
+    readAuthorizer: {
       allow: {},
     },
     listOperationsPageSize: 500,

@@ -28,7 +28,7 @@
 {{- if and .Values.specPolicy.checkExistingRbeWorkers (.Capabilities.APIVersions.Has "bb.hermetiq.com/v1/RbeWorker") -}}
 {{- $violations := include "bb-worker-operator.specPolicyViolations" . -}}
 {{- if $violations -}}
-{{- fail (printf "bb-worker-operator v0.3.13 and newer would stop reconciling these existing RbeWorkers:%s\nWiden specPolicy or fix the RbeWorkers as noted; see \"Upgrading to 0.3.11\" in the chart README. Set specPolicy.checkExistingRbeWorkers=false to skip this check." $violations) -}}
+{{- fail (printf "bb-worker-operator would stop reconciling these existing RbeWorkers:%s\nWiden specPolicy or fix the RbeWorkers as noted; see \"Install-time check\" in the chart README. Set specPolicy.checkExistingRbeWorkers=false to skip this check." $violations) -}}
 {{- end -}}
 {{- end -}}
 {{- if not (has .Values.rbac.managerBindingMode (list "cluster" "namespace")) -}}

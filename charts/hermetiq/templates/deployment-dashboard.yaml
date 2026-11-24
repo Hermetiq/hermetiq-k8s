@@ -48,6 +48,9 @@ spec:
       {{- end }}
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.dashboard) | nindent 6 }}
       volumes:
+        # Writable directory for the BFF routes the entrypoint renders.
+        - name: dashboard-bff
+          emptyDir: {sizeLimit: 1Mi}
         # Holds the init container's copy of the image's built web UI, about
         # 60 MB with source maps, so leave room for the bundle to grow.
         - name: dashboard-html
@@ -113,6 +116,15 @@ spec:
 {{- with .Values.dashboard.oauth2Proxy.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+            {{- if not (hasKey (default (dict) .Values.dashboard.oauth2Proxy.env) "OAUTH2_PROXY_UPSTREAM_TIMEOUT") }}
+            # Every dashboard API call (/grpc, /api/v1) passes through this
+            # proxy. Its upstream response-header timeout defaults to 30s,
+            # which would answer a slower unary query with HTTP 502 long before
+            # the route timeout. Leave the bound to the route and to the
+            # dashboard's own upstream timeout.
+            - name: OAUTH2_PROXY_UPSTREAM_TIMEOUT
+              value: "3600s"
+            {{- end }}
             - name: OAUTH2_PROXY_REDIRECT_URL
               value: {{ printf "%s/oauth2/callback" (include "hermetiq-core.dashboardUrl" .) | quote }}
             - name: OAUTH2_PROXY_UPSTREAMS
@@ -175,12 +187,20 @@ spec:
               value: "true"
             - name: REACT_APP_HMQ_METRICS_DASHBOARD_URL
               value: {{ include "hermetiq-core.victoriaMetricsDashboardUrl" . | quote }}
+            - name: REACT_APP_PROJECT_AUTHORIZATION_MODE
+              value: "enforced"
+            - name: BROWSER_AUTHORIZATION
+              value: "true"
+            - name: GRPC_API_HOST
+              value: {{ include "hermetiq-core.apiName" . | quote }}
+            - name: BFF_USE_ID_TOKEN
+              value: "true"
             - name: REACT_APP_API_URL
-              value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
+              value: {{ include "hermetiq-core.dashboardUrl" . | quote }}
             - name: REACT_APP_GRPC_WEB_URL
-              value: {{ printf "https://%s" (include "hermetiq-core.apiGrpcHost" .) | quote }}
+              value: {{ printf "%s/grpc" (include "hermetiq-core.dashboardUrl" .) | quote }}
             - name: REACT_APP_HMQ_API_URL
-              value: {{ printf "https://%s" (include "hermetiq-core.apiHost" .) | quote }}
+              value: {{ include "hermetiq-core.dashboardUrl" . | quote }}
             - name: REACT_APP_HMQ_BES_RESULTS_URL
               value: {{ printf "%s/build/" (include "hermetiq-core.dashboardUrl" .) | quote }}
             - name: REACT_APP_HMQ_BES_SVC
@@ -206,6 +226,8 @@ spec:
             {{- include "hermetiq-core.tcpProbe" (dict "port" "http" "settings" .Values.dashboard.probes.readiness) | nindent 12 }}
           {{- end }}
           volumeMounts:
+            - name: dashboard-bff
+              mountPath: /etc/nginx/conf.d/bff
             - name: dashboard-html
               mountPath: /usr/share/nginx/html
             {{- if or .Values.dashboard.quickstartConfig.existingConfigMap .Values.dashboard.quickstartConfig.data }}

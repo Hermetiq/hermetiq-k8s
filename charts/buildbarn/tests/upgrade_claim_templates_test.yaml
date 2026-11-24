@@ -1,0 +1,692 @@
+suite: buildbarn storage claim-template preflight
+templates:
+  - templates/validate.yaml
+release:
+  name: buildbarn
+  namespace: buildbarn
+tests:
+  # Kubernetes forbids changing a StatefulSet's volumeClaimTemplates, and Helm
+  # patches every other object before that one patch is refused. validate.yaml
+  # compares the live StatefulSet "storage" with the render and fails first.
+  # _testLookup.statefulSets stands in for the cluster (the shape of a list
+  # result); the last tests go through the real lookup path.
+  #
+  # The two no-difference mocks are written the way the API server returns a
+  # StatefulSet: volumeMode defaulted to Filesystem, an unset storageClassName
+  # absent, creationTimestamp and status filled in. The other mocks carry only
+  # the fields the comparison reads.
+
+  - it: checks nothing when there is no live storage StatefulSet
+    set:
+      _testLookup:
+        statefulSets:
+          items: []
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: ignores StatefulSets other than storage
+    set:
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: dragonfly
+              spec:
+                volumeClaimTemplates:
+                  - metadata:
+                      name: data
+                    spec:
+                      storageClassName: standard
+                      resources:
+                        requests:
+                          storage: 1Gi
+    asserts:
+      - notFailedTemplate: {}
+
+  # No-difference case, filesystem layout: the mock is the chart's own default
+  # render as the API server stores it. If a default claim changes, this test
+  # must be updated with it.
+  - it: accepts a live StatefulSet that matches the default filesystem render
+    set:
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - apiVersion: v1
+                    kind: PersistentVolumeClaim
+                    metadata:
+                      creationTimestamp: null
+                      name: cas
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources:
+                        requests:
+                          storage: 1000Gi
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status:
+                      phase: Pending
+                  - apiVersion: v1
+                    kind: PersistentVolumeClaim
+                    metadata:
+                      creationTimestamp: null
+                      name: ac
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources:
+                        requests:
+                          storage: 12Gi
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status:
+                      phase: Pending
+                  - apiVersion: v1
+                    kind: PersistentVolumeClaim
+                    metadata:
+                      creationTimestamp: null
+                      name: iscc
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources:
+                        requests:
+                          storage: 2Gi
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status:
+                      phase: Pending
+                  - apiVersion: v1
+                    kind: PersistentVolumeClaim
+                    metadata:
+                      creationTimestamp: null
+                      name: fsac
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources:
+                        requests:
+                          storage: 6Gi
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status:
+                      phase: Pending
+    asserts:
+      - notFailedTemplate: {}
+
+  # No-difference case, raw block layout with the default (empty) blocks
+  # StorageClass: the live blocks claims carry no storageClassName at all.
+  - it: accepts a live StatefulSet that matches the default raw block render
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.ac.backend: blockDevice
+      storage.persistence.iscc.backend: blockDevice
+      storage.persistence.fsac.backend: blockDevice
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {creationTimestamp: null, name: cas-blocks}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 200Gi}}
+                      volumeMode: Block
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: cas-meta}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 10Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: ac-blocks}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 8Gi}}
+                      volumeMode: Block
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: ac-meta}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 3Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: iscc-blocks}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 2Gi}}
+                      volumeMode: Block
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: iscc-meta}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 1Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: fsac-blocks}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 6Gi}}
+                      volumeMode: Block
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: fsac-meta}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 1Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+    asserts:
+      - notFailedTemplate: {}
+
+  # hostPath and emptyDir modes render no claim templates, and a StatefulSet
+  # created in those modes has none.
+  - it: accepts a live StatefulSet without claim templates outside pvc mode
+    set:
+      storage.persistence.mode: hostPath
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                serviceName: storage
+    asserts:
+      - notFailedTemplate: {}
+
+  # The API server rewrites a quantity into its canonical form (1024Gi is
+  # stored as 1Ti, 1024Mi as 1Gi). A different spelling of the same size is
+  # not a difference.
+  - it: treats two spellings of one size as equal
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.size: 1024Gi
+      storage.persistence.cas.blockDevice.metadata.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.metadata.size: 10240Mi
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas-blocks}
+                    spec:
+                      resources: {requests: {storage: 1Ti}}
+                      storageClassName: bb-block
+                      volumeMode: Block
+                  - metadata: {name: cas-meta}
+                    spec:
+                      resources: {requests: {storage: 10Gi}}
+                      storageClassName: bb-block
+                      volumeMode: Filesystem
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - notFailedTemplate: {}
+
+  # An absent storageClassName and an empty one are the same request here: the
+  # chart renders an empty class as an unset field.
+  - it: treats an empty live storageClassName like an absent one
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.metadata.storageClassName: ""
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas-blocks}
+                    spec:
+                      resources: {requests: {storage: 200Gi}}
+                      storageClassName: ""
+                      volumeMode: Block
+                  - metadata: {name: cas-meta}
+                    spec:
+                      resources: {requests: {storage: 10Gi}}
+                      volumeMode: Filesystem
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - notFailedTemplate: {}
+
+  # The default upgrade from chart 0.9.9: its StatefulSet has claims for CAS
+  # and AC only, and 1.0.0 enables ISCC and FSAC.
+  - it: refuses an upgrade that adds the ISCC and FSAC claim templates
+    set:
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {creationTimestamp: null, name: cas}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+                  - metadata: {creationTimestamp: null, name: ac}
+                    spec:
+                      accessModes: [ReadWriteOnce]
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                    status: {phase: Pending}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live StatefulSet buildbarn/storage has different volumeClaimTemplates than this release renders: claim template "fsac" is added; claim template "iscc" is added\.'
+      - failedTemplate:
+          errorPattern: 'Stop storage first \(scale statefulset/storage to 0 and wait for its pods to terminate\), run `kubectl delete statefulset storage --namespace buildbarn --cascade=orphan`, then run this upgrade again'
+      - failedTemplate:
+          errorPattern: 'The same recreation is needed when rolling back to a revision whose claim templates differ; helm rollback does not run this check\.'
+      - failedTemplate:
+          errorPattern: 'Set upgradeChecks\.skipStorageClaimTemplateCheck=true to skip it\. See https://github\.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations\.md#recreate-the-storage-statefulset'
+
+  - it: accepts the 0.9.9 claim set when ISCC and FSAC stay disabled
+    set:
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips the comparison when upgradeChecks.skipStorageClaimTemplateCheck is set
+    set:
+      upgradeChecks.skipStorageClaimTemplateCheck: true
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses a removed claim template
+    set:
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: iscc}
+                    spec:
+                      resources: {requests: {storage: 2Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: fsac}
+                    spec:
+                      resources: {requests: {storage: 6Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "fsac" is removed\.'
+
+  # Leaving pvc mode drops every claim template.
+  - it: refuses a switch away from pvc mode while the StatefulSet has claim templates
+    set:
+      storage.persistence.mode: emptyDir
+      storage.persistence.cas.emptyDir.sizeLimit: 1000Gi
+      storage.persistence.ac.emptyDir.sizeLimit: 20Gi
+      storage.persistence.iscc.emptyDir.sizeLimit: 2Gi
+      storage.persistence.fsac.emptyDir.sizeLimit: 6Gi
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'claim template "ac" is removed; claim template "cas" is removed\.'
+
+  - it: refuses a changed storageClassName on an existing claim template
+    set:
+      storage.persistence.cas.storageClassName: hyperdisk-balanced
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "cas" storageClassName changes from "premium-rwo" to "hyperdisk-balanced"\.'
+
+  # An empty rendered class (cluster default) is not the class the live
+  # template names.
+  - it: refuses a storageClassName that changes from a named class to the cluster default
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.metadata.storageClassName: bb-fs
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas-blocks}
+                    spec:
+                      resources: {requests: {storage: 200Gi}}
+                      storageClassName: bb-block
+                      volumeMode: Block
+                  - metadata: {name: cas-meta}
+                    spec:
+                      resources: {requests: {storage: 10Gi}}
+                      storageClassName: bb-fs
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "cas-blocks" storageClassName changes from "bb-block" to ""\.'
+
+  - it: refuses a changed requested size on an existing claim template
+    set:
+      storage.persistence.ac.size: 25Gi
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "ac" requested size changes from "12Gi" to "25Gi"\.'
+
+  - it: refuses a changed volumeMode on an existing claim template
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: bb-block
+      storage.persistence.cas.blockDevice.metadata.storageClassName: bb-block
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas-blocks}
+                    spec:
+                      resources: {requests: {storage: 200Gi}}
+                      storageClassName: bb-block
+                      volumeMode: Filesystem
+                  - metadata: {name: cas-meta}
+                    spec:
+                      resources: {requests: {storage: 10Gi}}
+                      storageClassName: bb-block
+                      volumeMode: Filesystem
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "cas-blocks" volumeMode changes from "Filesystem" to "Block"\.'
+
+  # Switching a raw store's index from RAM to the file default adds its
+  # <store>-meta claim: the raw PVC case of the 1.0.0 upgrade.
+  - it: refuses an upgrade that adds a raw store's metadata claim template
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.storageClassName: topolvm-ssd
+      storage.persistence.cas.blockDevice.metadata.storageClassName: topolvm-ssd
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: cas-blocks}
+                    spec:
+                      resources: {requests: {storage: 200Gi}}
+                      storageClassName: topolvm-ssd
+                      volumeMode: Block
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+                      volumeMode: Filesystem
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim template "cas-meta" is added\.'
+
+  - it: refuses reordered claim templates
+    set:
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+      _testLookup:
+        statefulSets:
+          items:
+            - metadata:
+                name: storage
+              spec:
+                volumeClaimTemplates:
+                  - metadata: {name: ac}
+                    spec:
+                      resources: {requests: {storage: 12Gi}}
+                      storageClassName: premium-rwo
+                  - metadata: {name: cas}
+                    spec:
+                      resources: {requests: {storage: 1000Gi}}
+                      storageClassName: premium-rwo
+    asserts:
+      - failedTemplate:
+          errorPattern: 'than this release renders: claim templates are reordered from "ac,cas" to "cas,ac"\.'
+
+  # --- Real lookup path -----------------------------------------------------
+  # No _testLookup: the StatefulSet is read with lookup, as on a real upgrade.
+  # The fake client only serves a list for kinds it holds an object of, so
+  # each test carries one unrelated ConfigMap and Deployment for the lists
+  # validate.yaml runs after this check.
+  - it: finds the live StatefulSet through lookup on a real upgrade
+    release:
+      upgrade: true
+    kubernetesProvider:
+      scheme:
+        "apps/v1/StatefulSet":
+          gvr: {group: apps, version: v1, resource: statefulsets}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: StatefulSet
+          metadata: {name: storage, namespace: buildbarn}
+          spec:
+            volumeClaimTemplates:
+              - metadata: {name: cas}
+                spec:
+                  resources: {requests: {storage: 1000Gi}}
+                  storageClassName: premium-rwo
+                  volumeMode: Filesystem
+              - metadata: {name: ac}
+                spec:
+                  resources: {requests: {storage: 12Gi}}
+                  storageClassName: premium-rwo
+                  volumeMode: Filesystem
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live StatefulSet buildbarn/storage has different volumeClaimTemplates than this release renders: claim template "fsac" is added; claim template "iscc" is added\.'
+
+  - it: accepts a real upgrade whose live StatefulSet already matches
+    release:
+      upgrade: true
+    set:
+      storage.persistence.iscc.enabled: false
+      storage.persistence.fsac.enabled: false
+    kubernetesProvider:
+      scheme:
+        "apps/v1/StatefulSet":
+          gvr: {group: apps, version: v1, resource: statefulsets}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: StatefulSet
+          metadata: {name: storage, namespace: buildbarn}
+          spec:
+            volumeClaimTemplates:
+              - metadata: {name: cas}
+                spec:
+                  resources: {requests: {storage: 1000Gi}}
+                  storageClassName: premium-rwo
+                  volumeMode: Filesystem
+              - metadata: {name: ac}
+                spec:
+                  resources: {requests: {storage: 12Gi}}
+                  storageClassName: premium-rwo
+                  volumeMode: Filesystem
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: looks only in the release namespace and only at the StatefulSet named storage
+    release:
+      upgrade: true
+    kubernetesProvider:
+      scheme:
+        "apps/v1/StatefulSet":
+          gvr: {group: apps, version: v1, resource: statefulsets}
+          namespaced: true
+        "apps/v1/Deployment":
+          gvr: {group: apps, version: v1, resource: deployments}
+          namespaced: true
+        "v1/ConfigMap":
+          gvr: {group: "", version: v1, resource: configmaps}
+          namespaced: true
+      objects:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: unrelated, namespace: buildbarn}
+        - apiVersion: apps/v1
+          kind: StatefulSet
+          metadata: {name: storage, namespace: other-buildbarn}
+          spec:
+            volumeClaimTemplates:
+              - metadata: {name: cas}
+                spec:
+                  resources: {requests: {storage: 1Gi}}
+        - apiVersion: apps/v1
+          kind: StatefulSet
+          metadata: {name: storage-old, namespace: buildbarn}
+          spec:
+            volumeClaimTemplates:
+              - metadata: {name: cas}
+                spec:
+                  resources: {requests: {storage: 1Gi}}
+    asserts:
+      - notFailedTemplate: {}

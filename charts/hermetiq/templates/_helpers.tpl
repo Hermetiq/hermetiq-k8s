@@ -323,9 +323,49 @@ true
 {{- default (include "hermetiq-core.oidcIssuerUrl" .) .Values.publisher.jwks.issuer -}}
 {{- end -}}
 
-{{/* publisher.jwks.url with fallback to derived OIDC JWKS URL. */}}
+{{/* Explicit key sources never inherit the dashboard's OIDC JWKS URL.
+     auto retains the existing publisher URL -> global OIDC -> local precedence. */}}
 {{- define "hermetiq-core.publisherJwksUrl" -}}
+{{- $source := default "auto" .Values.publisher.jwks.source -}}
+{{- if eq $source "auto" -}}
 {{- default (include "hermetiq-core.oidcJwksUrl" .) .Values.publisher.jwks.url -}}
+{{- else if eq $source "url" -}}
+{{- .Values.publisher.jwks.url -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The chart always enforces project authorization. Copy the configurable
+     policy before injecting the fixed mode so rendering never mutates Values. */}}
+{{- define "hermetiq-core.projectAuthorizationJSON" -}}
+{{- $policy := deepCopy (default (dict) .Values.authorization) -}}
+{{- $_ := set $policy "mode" "enforced" -}}
+{{- mustToJson $policy -}}
+{{- end -}}
+
+{{/* Shared verifier settings for chart-managed JWKS. Historical workload env
+     overrides take precedence and are rendered once by extraEnv. */}}
+{{- define "hermetiq-core.jwksRefreshEnv" -}}
+{{- $env := default (dict) .env -}}
+{{- if not (hasKey $env "GRPC_AUTH_PRINCIPAL_KIND") }}
+- name: GRPC_AUTH_PRINCIPAL_KIND
+  value: {{ .settings.principalKind | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_INTERVAL") }}
+- name: GRPC_AUTH_JWKS_REFRESH_INTERVAL
+  value: {{ .settings.refreshInterval | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT") }}
+- name: GRPC_AUTH_JWKS_REFRESH_RATE_LIMIT
+  value: {{ .settings.refreshRateLimit | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_REFRESH_TIMEOUT") }}
+- name: GRPC_AUTH_JWKS_REFRESH_TIMEOUT
+  value: {{ .settings.refreshTimeout | quote }}
+{{- end }}
+{{- if not (hasKey $env "GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL") }}
+- name: GRPC_AUTH_JWKS_FILE_RELOAD_INTERVAL
+  value: {{ .settings.fileReloadInterval | quote }}
+{{- end }}
 {{- end -}}
 
 {{/* publisher.jwks.audience defaults to the public BEP gRPC origin. */}}
@@ -389,11 +429,14 @@ OAUTH2_PROXY_COOKIE_EXPIRE: {{ .Values.dashboard.oauth2Proxy.cookieExpire | quot
 {{- if .Values.dashboard.oauth2Proxy.cookieRefresh }}
 OAUTH2_PROXY_COOKIE_REFRESH: {{ .Values.dashboard.oauth2Proxy.cookieRefresh | quote }}
 {{- end }}
-OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+OAUTH2_PROXY_EMAIL_DOMAINS: {{ join "," .Values.dashboard.oauth2Proxy.emailDomains | quote }}
+{{- if .Values.dashboard.oauth2Proxy.allowedGroups }}
+OAUTH2_PROXY_ALLOWED_GROUPS: {{ join "," .Values.dashboard.oauth2Proxy.allowedGroups | quote }}
+{{- end }}
 OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:8888
 OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: {{ .Values.dashboard.oauth2Proxy.insecureOidcAllowUnverifiedEmail | quote }}
 OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: {{ .Values.dashboard.oauth2Proxy.insecureOidcSkipIssuerVerification | quote }}
-OAUTH2_PROXY_OIDC_GROUPS_CLAIM: {{ .Values.dashboard.oauth2Proxy.oidcGroupsClaim | quote }}
+OAUTH2_PROXY_OIDC_GROUPS_CLAIM: {{ include "hermetiq-core.oauth2ProxyGroupsClaim" . | quote }}
 OAUTH2_PROXY_OIDC_ISSUER_URL: {{ required "dashboard.oauth2Proxy.oidcIssuerUrl or oidc.issuerUrl is required when oauth2Proxy is enabled" (include "hermetiq-core.dashboardOidcIssuerUrl" .) | quote }}
 OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
 OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
@@ -644,6 +687,39 @@ azure.workload.identity/use: "true"
 {{ end -}}
 {{- end -}}
 
+{{/*
+S3 credentials and default region for the s3 artifact storage provider, from
+artifactStorage.s3, for the bep-nats containers. A name already set in the
+component's own env (passed as .env) wins. Renders nothing when unset, and
+tolerates artifactStorage being absent from values reused by an upgrade.
+*/}}
+{{- define "hermetiq-core.s3StorageEnv" -}}
+{{- $s3 := (.root.Values.artifactStorage | default dict).s3 | default dict -}}
+{{- $env := .env | default dict -}}
+{{- with $s3.existingSecret }}
+{{- if not (hasKey $env "AWS_ACCESS_KEY_ID") }}
+- name: AWS_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $s3.accessKeyIdKey | default "AWS_ACCESS_KEY_ID" | quote }}
+{{- end }}
+{{- if not (hasKey $env "AWS_SECRET_ACCESS_KEY") }}
+- name: AWS_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $s3.secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY" | quote }}
+{{- end }}
+{{- end }}
+{{- with $s3.region }}
+{{- if not (hasKey $env "AWS_REGION") }}
+- name: AWS_REGION
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
 {{- define "hermetiq-core.sharedEnvName" -}}bep-nats-shared-env{{- end -}}
 
 {{/*
@@ -785,10 +861,10 @@ nginx.ingress.kubernetes.io/cors-max-age: {{ .Values.ingress.cors.maxAgeSeconds 
 nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors.allowMethods | quote }}
 {{- end -}}
 
-{{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one gRPC route.
+{{/* Envoy Gateway BackendTrafficPolicy `timeout:` block for one route.
      Args: dict "root" $ "route" <key under gateway.timeouts>.
 
-     With the assistant enabled, the API route always gets a block, even when
+     With the assistant enabled, API gRPC and dashboard routes get a block, even when
      ordinary route timeouts are disabled, and its request and stream limits are
      raised to at least assistant.streamTimeoutSeconds. Otherwise renders nothing
      when gateway.timeouts.enabled is false or the route sets none of the three
@@ -798,17 +874,17 @@ nginx.ingress.kubernetes.io/cors-allow-methods: {{ join "," .Values.ingress.cors
      *immediate*). */}}
 {{- define "hermetiq-core.routeTimeout" -}}
 {{- $timeouts := .root.Values.gateway.timeouts | default dict -}}
-{{- if and .root.Values.assistant.enabled (eq .route "apiGrpc") -}}
+{{- if and .root.Values.assistant.enabled (has .route (list "apiGrpc" "dashboard")) -}}
 {{- $route := dict -}}
 {{- if $timeouts.enabled -}}
 {{- $route = index $timeouts .route | default dict -}}
 {{- end -}}
-{{- $apiGrpc := index $timeouts "apiGrpc" | default dict -}}
+{{- $configuredRoute := index $timeouts .route | default dict -}}
 timeout:
   http:
     requestTimeout: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.requestTimeout) | quote }}
     maxStreamDuration: {{ include "hermetiq-core.assistantTimeout" (dict "root" .root "value" $route.maxStreamDuration "unset" "0s") | quote }}
-    connectionIdleTimeout: {{ default "1h" $apiGrpc.connectionIdleTimeout | quote }}
+    connectionIdleTimeout: {{ default "1h" $configuredRoute.connectionIdleTimeout | quote }}
 {{- else if $timeouts.enabled -}}
 {{- $route := index $timeouts .route | default dict -}}
 {{- if or $route.requestTimeout $route.maxStreamDuration $route.connectionIdleTimeout -}}
@@ -963,6 +1039,13 @@ spec:
 {{- end -}}
 
 {{- define "hermetiq-core.apiAuthProxyRoleEnv" -}}
+{{- if .Values.api.jwt.profiles }}
+# The core owns the complete multi-profile verifier; the sidecar only frames gRPC-web.
+- name: GRPC_AUTH_PROXY_FORWARD_ONLY
+  value: "true"
+- name: JWT_AUTH_ENABLED
+  value: "false"
+{{- else }}
 {{- if .Values.api.jwt.enabled }}
 - name: JWT_AUTH_ENABLED
   value: "true"
@@ -1000,6 +1083,7 @@ spec:
 {{- with (include "hermetiq-core.adminEmails" .) }}
 - name: ADMIN_EMAIL_ALLOWLIST
   value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- with (include "hermetiq-core.authProxyCorsAllowedOrigins" .) }}
 {{- /* When set, the auth-proxy answers gRPC-web CORS preflight itself (in

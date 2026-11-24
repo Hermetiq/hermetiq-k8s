@@ -1,0 +1,369 @@
+syntax = "proto3";
+
+package buildbarn.configuration.bb_scheduler;
+
+import "build/bazel/remote/execution/v2/remote_execution.proto";
+import "github.com/buildbarn/bb-remote-execution/pkg/proto/configuration/scheduler/scheduler.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/auth/auth.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/blobstore/blobstore.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/global/global.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/grpc/grpc.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/http/server/server.proto";
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/buildbarn/bb-remote-execution/pkg/proto/configuration/bb_scheduler";
+
+message ApplicationConfiguration {
+  // Was 'admin_http_listen_address'. bb-portal is capable of displaying
+  // the same information by letting it connect to the
+  // build_queue_state_grpc_servers endpoint.
+  reserved 2;
+
+  // URL of bb-portal, linked to by the web UI.
+  //
+  // NOTE: This option will be removed on 2027-07-01, as bb-portal is
+  // capable of displaying the same information by letting it connect to
+  // the build_queue_state_grpc_servers endpoint.
+  string deprecated_portal_url = 5;
+
+  // Configuration for the HTTP servers that expose the web UI.
+  //
+  // NOTE: This option will be removed on 2027-07-01, as bb-portal is
+  // now capable of displaying the same information by letting it
+  // connect to the build_queue_state_grpc_servers endpoint.
+  repeated buildbarn.configuration.http.server.Configuration
+      deprecated_admin_http_servers = 19;
+
+  // The path under which the administrative web UI needs to be exposed.
+  // When left empty, the web UI will be exposed at "/".
+  //
+  // NOTE: This option will be removed on 2027-07-01, as bb-portal is
+  // now capable of displaying the same information by letting it
+  // connect to the build_queue_state_grpc_servers endpoint.
+  string deprecated_admin_route_prefix = 22;
+
+  // gRPC servers to spawn to listen for requests from clients
+  // (bb_storage or Bazel).
+  repeated buildbarn.configuration.grpc.ServerConfiguration
+      client_grpc_servers = 3;
+
+  // gRPC servers to spawn to listen for requests from bb_worker.
+  repeated buildbarn.configuration.grpc.ServerConfiguration
+      worker_grpc_servers = 4;
+
+  // Configuration for blob storage.
+  buildbarn.configuration.blobstore.ContentAddressableStorageConfiguration
+      content_addressable_storage = 6;
+
+  // Maximum Protobuf message size to unmarshal.
+  int64 maximum_message_size_bytes = 7;
+
+  // Common configuration options that apply to all Buildbarn binaries.
+  buildbarn.configuration.global.Configuration global = 8;
+
+  // Was 'aws_asg_lifecycle_hooks' and 'aws_session'. This functionality
+  // has now moved into bb_asg_lifecycle_hook, which is part of the
+  // bb-autoscaler project.
+  reserved 9, 10;
+
+  // gRPC servers to spawn to expose the state of the build queue. This
+  // endpoint can be used by bb-portal to display the state of workers
+  // and currently running operations.
+  repeated buildbarn.configuration.grpc.ServerConfiguration
+      build_queue_state_grpc_servers = 11;
+
+  // Create platform queues that are always present, regardless of
+  // whether there are workers synchronizing against the scheduler.
+  //
+  // It is required to use this option to create platform queues that
+  // support multiple worker size classes.
+  repeated PredeclaredPlatformQueueConfiguration predeclared_platform_queues =
+      12;
+
+  // Was 'default_execution_timeout'. This setting is now configured
+  // through 'action_router'.
+  reserved 13;
+
+  // Was 'maximum_execution_timeout'. This setting is now configured
+  // through 'action_router'.
+  reserved 14;
+
+  // Authorization requirements to be enforced for Execute and WaitExecution
+  // requests.
+  buildbarn.configuration.auth.AuthorizerConfiguration execute_authorizer = 15;
+
+  // The policy for routing actions.
+  //
+  // Before the scheduler is capable of enqueueing an action, it must
+  // extract some properties from the incoming execution request:
+  //
+  // - The platform on which the action has to run.
+  // - The invocation to which the execution request belongs, so that
+  //   may be scheduled fairly with respect to actions queued by other
+  //   users.
+  // - The execution timeout that needs to be applied.
+  // - If the platform has workers partitioned across multiple size
+  //   classes, it must choose a size class on which execution is
+  //   attempted initially.
+  //
+  // The action router is the subsystem that is responsible for
+  // extracting these properties.
+  //
+  // It is possible to write fairly complex action router configurations
+  // (e.g., ones that apply different policies between platforms, or
+  // reroute requests from one platform to another). However, for
+  // typical setups the configuration can remain fairly simple. It is
+  // recommended that a configuration like the one below is used as a
+  // starting point:
+  //
+  // {
+  //   simple: {
+  //     platformKeyExtractor: { action: {} },
+  //     invocationKeyExtractors: [{ toolInvocationId: {} }],
+  //     initialSizeClassAnalyzer: {
+  //       defaultExecutionTimeout: '1800s',
+  //       maximumExecutionTimeout: '7200s',
+  //     },
+  //   },
+  // }
+  buildbarn.configuration.scheduler.ActionRouterConfiguration action_router =
+      16;
+
+  // Optional: The Initial Size Class Cache (ISCC) where execution times
+  // of actions are read and written.
+  //
+  // This option only needs to be set if one or feedback driven
+  // analyzers are configured through 'action_router'.
+  buildbarn.configuration.blobstore.BlobAccessConfiguration
+      initial_size_class_cache = 17;
+
+  // Platform queues are removed when no workers have been present
+  // during this time period.
+  //
+  // Recommended value: 900s
+  google.protobuf.Duration platform_queue_with_no_workers_timeout = 18;
+
+  // Authorization requirements to be enforced for AddDrain and
+  // RemoveDrain requests issued through the BuildQueueState gRPC
+  // servers.
+  //
+  // The instance name to be matched is the instance name prefix of the
+  // size class queue to which drains are added, or from which drains
+  // are removed.
+  buildbarn.configuration.auth.AuthorizerConfiguration
+      modify_drains_authorizer = 20;
+
+  // Authorization requirements to be enforced for KillOperations
+  // RemoveDrain requests issued through the BuildQueueState gRPC
+  // servers.
+  //
+  // The instance name to be matched is the instance name prefix of the
+  // size class queue containing the operation. Not the instance name
+  // used by the operation itself.
+  buildbarn.configuration.auth.AuthorizerConfiguration
+      kill_operations_authorizer = 21;
+
+  // Authorization requirements to be enforced for Synchronize requests
+  // by workers.
+  buildbarn.configuration.auth.AuthorizerConfiguration synchronize_authorizer =
+      23;
+
+  // Was 'zstd_pool' no longer required as bb-remote-execution doesn't
+  // need to stream long lived zstd encoding/decoding.
+  reserved 24;
+
+  // Optional: Interval at which the scheduler configuration file is
+  // re-evaluated, so that changes to predeclared_platform_queues and
+  // action_router are applied without restarting the scheduler. All
+  // other options are only read at startup.
+  //
+  // A reload is applied as a whole or not at all: if the configuration
+  // file cannot be evaluated, or if either the predeclared platform
+  // queues or the action router is invalid, the previous configuration
+  // remains in effect.
+  //
+  // Changes to an existing predeclared platform queue's size classes
+  // or worker invocation stickiness limits cannot be applied in place.
+  // These are reported through logs and the
+  // buildbarn_scheduler_predeclared_platform_queues_pending_restart
+  // metric, and take effect on the next restart.
+  //
+  // If unset or zero, the configuration file is not reloaded.
+  google.protobuf.Duration configuration_reload_interval = 25;
+
+  // Optional: gRPC servers to spawn to expose the Handover service for
+  // zero-downtime blue/green state transfer between scheduler pods.
+  repeated buildbarn.configuration.grpc.ServerConfiguration
+      handover_grpc_servers = 26;
+
+  // Optional: Configuration for coordinated leader election and
+  // zero-downtime state handover.
+  CoordinatorConfiguration coordinator = 27;
+}
+
+message CoordinatorConfiguration {
+  // gRPC client configuration for connecting to the local coordinator
+  // sidecar (e.g., address: "unix:///run/bb-coordinator/coordinator.sock").
+  buildbarn.configuration.grpc.ClientConfiguration client = 1;
+
+  // Unique identifier of this scheduler instance (typically POD_NAME).
+  string self_id = 2;
+
+  // Endpoints advertised to peer scheduler instances for forwarding and
+  // handover RPCs (e.g., "$(POD_IP):8982").
+  string self_client_endpoint = 3;
+  string self_worker_endpoint = 4;
+  string self_state_endpoint = 5;
+  string self_handover_endpoint = 6;
+
+  // Optional template for gRPC client connections to peer schedulers
+  // (e.g., to supply TLS / keepalive settings). Its address field is
+  // populated dynamically with the peer's advertised endpoint.
+  buildbarn.configuration.grpc.ClientConfiguration peer_client_template = 7;
+
+  // Duration after state restore during which unadopted executing tasks
+  // wait for their worker's next Synchronize call before being
+  // re-enqueued. Defaults to 15s.
+  google.protobuf.Duration adoption_window = 8;
+
+  // Duration after state restore during which restored operations may
+  // exist with zero waiters while relayed streams re-attach via
+  // WaitExecution. Defaults to 30s.
+  google.protobuf.Duration recovered_operation_grace_period = 9;
+
+  // Maximum time a retired leader waits on SIGTERM for open relayed
+  // Execute / WaitExecution streams to finish before shutting down.
+  // Defaults to 1740s.
+  google.protobuf.Duration relay_drain_period = 10;
+}
+
+message PredeclaredPlatformQueueConfiguration {
+  // The instance name prefix of the platform queue to create.
+  string instance_name_prefix = 1;
+
+  // The platform properties of the platform queue to create.
+  build.bazel.remote.execution.v2.Platform platform = 2;
+
+  // Size classes for which predeclared size class queues are created.
+  // These size class queues will continue to exist, even if they have
+  // no workers that synchronize against the scheduler.
+  //
+  // A worker's size class denotes its size relative to that of other
+  // workers of the same platform. For example, if some workers have 4
+  // CPU cores and others have 8 CPU cores (thus being twice as fast,
+  // twice as expensive, etc.), one may set this field as follows:
+  //
+  //     sizeClasses: [1, 2]
+  //
+  // However, this prevents adding workers having a number of CPU cores
+  // that is not a multiple of four later on. It is therefore
+  // recommended to let the size classes be equal to the number of CPU
+  // cores:
+  //
+  //     sizeClasses: [4, 8]
+  //
+  // If multiple size classes are used, all of them must be positive. If
+  // only a single size class is used, an exception is made, allowing
+  // the use of size class zero:
+  //
+  //     sizeClasses: [0]
+  //
+  // If workers advertise a size class that is not specified here, a
+  // size class queue will be created on demand. However, this queue
+  // will also disappear if such workers stop synchronizing. Size class
+  // queues will only be created on demand if the advertized size class
+  // is lower than the largest size class specified here. The reason
+  // being that the largest size class is responsible for retrying all
+  // actions that fail on smaller size classes. Altering the largest
+  // size class at runtime would be unsound.
+  //
+  // Size classes must be specified in increasing order.
+  repeated uint32 size_classes = 3;
+
+  // Was 'initial_size_class_feedback_driven_analyzer'. This option has
+  // moved into ApplicationConfiguration.action_router.
+  reserved 4;
+
+  // Allow workers to continue to execute actions from the same
+  // invocation up to given amount of time, if doing so keeps the number
+  // of workers assigned to an invocation balanced. It is worth setting
+  // this option if there is an inherent overhead when switching between
+  // actions belonging to different invocations.
+  //
+  // For example, consider the case where workers are configured to run
+  // tests inside virtual machines, and that the virtual machine's boot
+  // image is provided as part of the input root. When actions that use
+  // the same boot image run right after each other, the existing
+  // virtual machine may be repurposed. If the boot image is different,
+  // a costly restart needs to be performed, so that a new image may be
+  // loaded. By placing actions that use different boot images in
+  // separate invocations and adding stickiness, the probability of
+  // needing to do virtual machine restarts decreases.
+  //
+  // Because invocations can be nested by using multiple invocation key
+  // extractors, this field contains a list of durations of stickiness
+  // to apply at each level. If the number of invocation keys of an
+  // operation exceeds the configured number of stickiness limits, the
+  // stickiness limit for the remaining invocation keys is assumed to be
+  // zero.
+  //
+  // This option may require custom implementations of
+  // invocation.KeyExtractor to be effective.
+  //
+  // Recommended value: unset
+  repeated google.protobuf.Duration worker_invocation_stickiness_limits = 5;
+
+  // NOTE: The option below only has effect when feedback driven initial
+  // size class analysis is enabled.
+  //
+  // There is a small probability that this implementation runs actions
+  // on size classes even if it is fairly certain that they are
+  // suboptimal (either too small or too large). This is necessary, as
+  // without it there is a chance that previous execution statistics
+  // stored in the ISCC remain permanently outdated. The downside of
+  // this strategy is that it may cause unnecessary delays, especially
+  // when attempted against long-running actions that are part of the
+  // critical path of a build.
+  //
+  // To mitigate this, this implementation uses an alternative execution
+  // strategy in case there is a >50% probability of failure on a
+  // smaller size class. Instead of first executing the action on the
+  // smaller size class, followed by falling back to the largest size
+  // class, it schedules it the other way around. The client is
+  // unblocked as soon as the execution on the largest size class
+  // succeeds, while the execution on the smallest size class is
+  // performed in the background.
+  //
+  // To make sure that operations that are merely created to perform
+  // learning in the background don't starve other builds that are
+  // taking place, all of them are placed in a single fictive
+  // invocation, so that fairness is respected.
+  //
+  // This option determines the maximum number of background learning
+  // operations that may be in the QUEUED execution stage, per size
+  // class. Excessive operations are discarded. Not only is it necessary
+  // to set this value to ensure that the scheduler doesn't run out of
+  // memory due to background actions piling up, it can also put a limit
+  // on how much the cluster is scaled up (in case autoscaling based on
+  // queue sizes is performed).
+  //
+  // Recommended value: 1000
+  int32 maximum_queued_background_learning_operations = 6;
+
+  // NOTE: The option below only has effect when feedback driven initial
+  // size class analysis is enabled.
+  //
+  // The REv2 execution priority that needs to be used for background
+  // learning operations.
+  //
+  // bb_scheduler respects REv2 execution priorities by increasing the
+  // number of actions to run concurrently between invocations by a
+  // factor 2 for every 100 decrease in priority value (i.e., lower
+  // priority value means faster builds).
+  //
+  // This option determines how aggressively background learning
+  // operations should be preferred over operations enqueued by clients.
+  //
+  // Recommended value: 0
+  int32 background_learning_operation_priority = 7;
+}

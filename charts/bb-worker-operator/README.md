@@ -11,22 +11,23 @@ supported full-stack deployment order.
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
   - [Replacing the CRD from scratch](#replacing-the-crd-from-scratch)
-- [Upgrading to 0.3.12](#upgrading-to-0312)
-- [Upgrading to 0.3.11](#upgrading-to-0311)
 - [RbeWorker Pools](#rbeworker-pools)
   - [Configuration modes](#configuration-modes)
+  - [Worker images](#worker-images)
   - [Completed-action logger address](#completed-action-logger-address)
   - [FUSE build directories](#fuse-build-directories)
   - [Draining actions on termination](#draining-actions-on-termination)
   - [Docker-capable workers](#docker-capable-workers)
 - [KEDA Autoscaling](#keda-autoscaling)
   - [Private pools](#private-pools)
+  - [Pausing a pool](#pausing-a-pool)
   - [Scaling to zero](#scaling-to-zero)
   - [Tuning generated autoscaling](#tuning-generated-autoscaling)
   - [Diagnose a pool that does not scale](#diagnose-a-pool-that-does-not-scale)
 - [Security Context](#security-context)
 - [RbeWorker Spec Policy](#rbeworker-spec-policy)
-  - [Keeping the previous behavior](#keeping-the-previous-behavior)
+  - [When the operator stops reconciling a pool](#when-the-operator-stops-reconciling-a-pool)
+  - [Install-time check](#install-time-check)
 - [RBAC Scope](#rbac-scope)
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
@@ -58,8 +59,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.12
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -68,7 +69,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -77,7 +78,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -92,6 +93,12 @@ Keep the CRD and controller image on the same release. Leave `image.tag` empty
 so the image follows the chart's `appVersion`: the CRD is what accepts a field
 and the controller is what acts on it, so a controller older than the CRD
 silently ignores fields it does not know.
+
+The default image is pinned to its SHA-256 manifest digest, and `image.digest`
+takes precedence over `image.tag`. If you override `image.tag`, also set
+`image.digest` to that image's digest, or clear it with
+`--set-string image.digest=`. See
+[image integrity](../../docs/image-integrity.md).
 
 ## Verify
 
@@ -126,12 +133,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.12;
+file and wait for Kubernetes to establish it. This example uses release 1.0.0;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -143,6 +150,10 @@ apply the CRD, then installs the controller with `--skip-crds`.
 On an **upgrade**, run the CRD command above before upgrading the chart or
 applying `RbeWorker` manifests that use new fields. Helm does not upgrade CRDs in
 `crds/` during `helm upgrade`, even when the chart contains a newer schema.
+If Helm created the CRD on the first install, `kubectl` can stop with a
+conflict against the `helm` field manager on `.spec.versions`. The new schema
+is meant to replace the old one, so run the same command again with
+`--force-conflicts` added.
 Keep the chart and CRD at the same version, and leave `image.tag` empty so the
 controller follows the chart's `appVersion`. A newer CRD may accept fields
 that an older controller cannot act on.
@@ -151,12 +162,17 @@ On **uninstall**, Helm leaves the CRD in place. Deleting that CRD also deletes
 all `RbeWorker` objects in the cluster, so remove it only when you intend to
 retire the API and those worker pools.
 
-If upgrading from a release before 0.3.3, the target release's CRD includes
-updated Pod and volume schemas. If upgrading from a release before 0.3.4,
-remove `spec.autoscaling.prometheus.projectID` from `RbeWorker` manifests and
-Kustomize patches before reapplying them; the CRD no longer accepts that field.
-Generated queries now use the `RbeWorker` namespace, so each worker must share
-a namespace with the Buildbarn scheduler it scales on.
+A new operator release can change the worker configuration it generates. Each
+generated-config pool is then rolled as soon as the new operator reconciles
+it, on every pool at once; actions that outlast the pod's termination grace
+period are killed (see
+[Draining actions on termination](#draining-actions-on-termination)). A pool
+with `spec.config.rolloutOnChange: false` is not rolled and picks the new
+configuration up when its Pods next restart.
+
+An installation on a chart older than 1.0.0 follows the
+[operator migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-bb-worker-operator.md)
+instead.
 
 For a rendered install bundle, pass `--include-crds` to `helm template` as shown
 in [Local chart development](#local-chart-development); Helm omits CRDs from
@@ -179,80 +195,18 @@ kubectl delete crd rbeworkers.bb.hermetiq.com --wait=true --ignore-not-found
 
 # 3. Apply the CRD from the release you are installing, and wait for it.
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.12/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 
 # 4. Upgrade or restart the controller on the same release.
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
 
 Then re-apply your `RbeWorker` manifests.
-
-## Upgrading to 0.3.12
-
-Chart 0.3.12 deploys the same operator v0.3.13 as 0.3.11 and has the same
-CRD. The default image is now pinned to its SHA-256 manifest digest, so the
-operator Deployment rolls once on upgrade. Worker pools are not restarted.
-
-`image.digest` takes precedence over `image.tag`. If you override `image.tag`,
-also set `image.digest` to that image's digest, or clear it with
-`--set-string image.digest=`. Otherwise the operator keeps running the pinned
-v0.3.13 image. See [image integrity](../../docs/image-integrity.md).
-
-When upgrading from 0.3.10 or earlier, also follow
-[Upgrading to 0.3.11](#upgrading-to-0311).
-
-## Upgrading to 0.3.11
-
-Chart 0.3.11 deploys operator v0.3.13, which stops reconciling an `RbeWorker`
-in two new cases. It sets `Ready=False` and leaves that pool's existing
-Deployment and `ScaledObject` as they are, so running workers keep running and
-autoscaling, but changes to the `RbeWorker` no longer reach them:
-
-- **`SpecInvalid`**: the spec asks for something the
-  [RbeWorker Spec Policy](#rbeworker-spec-policy) does not allow, such as a
-  `hostPath` CAS volume outside the allowed prefixes.
-- **`NameConflict`**: a Deployment, generated ConfigMap or `ScaledObject` with
-  the pool's name exists but is not controlled by this `RbeWorker`, or
-  `spec.config.generated.commonConfigMapName` is `<name>-config`. Objects the
-  operator created already carry the right owner reference. A conflict usually
-  means the `RbeWorker` was deleted with `--cascade=orphan` and recreated.
-
-To catch both before they happen, `helm install` and `helm upgrade` list the
-`RbeWorker` objects the operator watches and fail with each problem and the
-fix, for example:
-
-```text
-Error: execution error at (bb-worker-operator/templates/validate.yaml:31:4): bb-worker-operator v0.3.13 and newer would stop reconciling these existing RbeWorkers:
-  - buildbarn/worker-cas: spec.storage.casVolume.hostPath.path "/mnt/disks/ssd0/cas" needs a covering entry in specPolicy.allowedHostPathPrefixes
-```
-
-Widen `specPolicy` or fix the `RbeWorker` objects, then rerun the upgrade. To
-see the result without changing anything, render against the cluster first:
-
-```bash
-helm template bb-worker-operator oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.12 --namespace hermetiq --dry-run=server \
-  --values bb-worker-operator-values.yaml > /dev/null
-```
-
-The check reads the cluster through Helm's `lookup`, so it needs permission to
-list `RbeWorker` objects in the watched scope and to get Deployments,
-ConfigMaps and `ScaledObject`s in their namespaces. It does nothing under
-`helm template` without `--dry-run=server`, or under GitOps tools that render
-charts client-side, such as Argo CD. In those setups run the command above from
-a workstation before syncing. Set `specPolicy.checkExistingRbeWorkers=false` to
-skip it.
-
-Pools that use Docker-in-Docker restart once during the upgrade, because dockerd
-now runs as a Kubernetes-native sidecar (Kubernetes 1.29 or newer). Other pools
-keep their pod template. Apply the target release's CRD first as described in
-[CRD Lifecycle](#crd-lifecycle), which adds the
-[FUSE kernel tunables](#kernel-tunables).
 
 ## RbeWorker Pools
 
@@ -279,6 +233,20 @@ by `spec.config.generated.commonConfigMapName`. That file stays the place for
 cluster-wide Buildbarn settings such as storage, the browser URL, message size,
 tracing, and diagnostics. The Buildbarn chart renders it as
 `buildbarn-worker-config`.
+
+The generated configuration is written for the Buildbarn release in the same
+[supported chart bundle](https://github.com/Hermetiq/hermetiq-k8s#supported-chart-bundle),
+so run the operator with that Buildbarn chart.
+
+### Worker images
+
+`spec.images.worker` and `spec.images.runnerInstaller` are optional. When they
+are unset, the operator uses the `workerImage` and `runnerInstallerImage` keys
+of the referenced config ConfigMap. The Buildbarn chart publishes both in
+`buildbarn-worker-config`, so worker images follow the Buildbarn release. A
+pool that sets neither field reports `SpecInvalid` while that ConfigMap does
+not carry the keys. Set the two fields only to run a different build, and
+update them in the same change as every Buildbarn upgrade.
 
 ### Completed-action logger address
 
@@ -310,14 +278,6 @@ the address in the `RbeWorker` updates the Deployment's pod environment and
 triggers a rollout even when `spec.config.rolloutOnChange` is false. If the
 address comes from a referenced ConfigMap or Secret, restart the worker Pods
 after changing that external value so they receive the new environment.
-
-When upgrading from an operator release that embedded the address in the
-generated Jsonnet, first add `BBCAL_ADDRESS` to `spec.worker.env` with the
-current address (or an empty value to keep logging disabled) and let that
-rollout finish before upgrading the operator. Generated ConfigMaps are updated
-in place, so this staging lets an old Pod still restart successfully after its
-Jsonnet starts reading the environment. Afterward you can remove the explicit
-entry and use `completedActionLoggerAddress` again.
 
 For `spec.config.files`, the logger configuration and environment stay under
 your control. A custom `worker-common.libsonnet` used with generated config
@@ -358,8 +318,7 @@ attempt and any failure.
 A pool with a virtual build directory serves every concurrent action in a Pod
 from one FUSE mount, and the Linux defaults for that mount are sized for light
 use. Two optional fields under `virtualBuildDirectory.fuse` raise those limits.
-The operator leaves both unset by default, so pools that do not set them keep
-the worker config they had before. The [example FUSE pools](../../custom-values/rbeworkers/README.md#fuse-kernel-tuning)
+The operator leaves both unset by default. The [example FUSE pools](../../custom-values/rbeworkers/README.md#fuse-kernel-tuning)
 set both explicitly and document the node prerequisites and how to opt out.
 
 ```yaml
@@ -407,11 +366,10 @@ Before enabling them:
   file names (lowercase letters, digits, and underscores) and values that are not
   unsigned integers, with reason `SpecInvalid`. Roll the change out to one pool
   first and confirm its workers start and stay healthy.
-- The fields exist only in operator and CRD releases that include them. Check the
-  installed CRD with
+- The installed CRD must match the chart. Check it with
   `kubectl explain rbeworker.spec.config.generated.virtualBuildDirectory.fuse`:
-  if the two fields are not listed, upgrade the CRD and controller together as
-  described in [CRD Lifecycle](#crd-lifecycle) before applying them.
+  if the two fields are not listed, the CRD is behind the controller, so update
+  it as described in [CRD Lifecycle](#crd-lifecycle) before applying them.
 
 Setting or changing either field changes the generated worker config and the
 Deployment's `bb.hermetiq.com/config-hash` annotation, so that pool's Pods roll
@@ -543,6 +501,26 @@ prefix, platform, and size classes, as described under
 [Scaling to zero](#scaling-to-zero). A custom `worker-common.libsonnet` supplied
 through `commonItems` must copy `config.instanceNamePrefix` onto its runners
 itself.
+
+### Pausing a pool
+
+Pause a pool on its `RbeWorker`. While `spec.autoscaling.enabled` is true,
+`spec.replicas` is ignored: the operator leaves the Deployment's replica count
+to KEDA. A pause annotation set directly on the `ScaledObject` does not last
+either, because the operator replaces that object's annotations with
+`spec.autoscaling.scaledObjectAnnotations` on every reconcile. Set KEDA's
+pause annotation there, and remove it again to resume:
+
+```yaml
+spec:
+  autoscaling:
+    scaledObjectAnnotations:
+      autoscaling.keda.sh/paused-replicas: "0"
+```
+
+A pool without autoscaling stops with `spec.replicas: 0`. With
+`spec.manageReplicas: false` the operator sets neither, and you scale the
+Deployment or its external scaler yourself.
 
 ### Scaling to zero
 
@@ -681,9 +659,8 @@ Buildbarn namespace, as described in [Install](#install).
 
 The operator creates worker Deployments and `ScaledObject`s with its own
 credentials, so anyone who can edit an `RbeWorker` could otherwise use them to
-run pods with privileges they do not have. Starting with operator v0.3.13, an
-`RbeWorker` whose spec goes beyond `specPolicy` gets `Ready=False` with reason
-`SpecInvalid`.
+run pods with privileges they do not have. An `RbeWorker` whose spec goes
+beyond `specPolicy` gets `Ready=False` with reason `SpecInvalid`.
 
 These are always allowed: privileged worker and runner containers, FUSE at
 `/dev/fuse`, and the operator's own volume-init, fuse-cleanup and Docker
@@ -697,7 +674,7 @@ paths containing `..` are always refused.
 | `specPolicy.allowPrivilegedExtraContainers` | `false` | `privileged: true`, `capabilities.add`, or a non-default `procMount` in `spec.pod.extraContainers` and `extraInitContainers`. |
 | `specPolicy.allowedHostPathPrefixes` | `[/mnt/stateful_partition/kube-ephemeral-ssd]` | Node paths for `hostPath` volumes in `spec.pod.extraVolumes`, `spec.storage.workerVolume`, `spec.storage.casVolume` and `spec.docker.dind.storageVolume`, and a `spec.storage.fuse` device other than a `CharDevice` at `/dev/fuse`. A prefix matches itself and the paths below it, by whole path components. |
 | `specPolicy.allowedClusterTriggerAuthentications` | `[]` | KEDA `ClusterTriggerAuthentication` names that `spec.autoscaling.prometheus.authenticationRef` and `additionalTriggers[].authenticationRef` may reference. `"*"` allows any. Namespaced `TriggerAuthentication` references are always allowed. |
-| `specPolicy.checkExistingRbeWorkers` | `true` | Fails `helm install` and `helm upgrade` when existing `RbeWorker` objects would stop reconciling. See [Upgrading to 0.3.11](#upgrading-to-0311). |
+| `specPolicy.checkExistingRbeWorkers` | `true` | Fails `helm install` and `helm upgrade` when existing `RbeWorker` objects would stop reconciling. See [Install-time check](#install-time-check). |
 
 The default `hostPath` prefix is where GKE mounts ephemeral local SSDs, which
 pools use for a node-local CAS cache. Set it to `[]` to refuse every
@@ -713,34 +690,58 @@ The chart passes these settings to the manager as environment variables
 (`ALLOWED_POD_SERVICE_ACCOUNTS`, `ALLOW_PRIVILEGED_EXTRA_CONTAINERS`,
 `ALLOWED_HOST_PATH_PREFIXES`, `ALLOWED_CLUSTER_TRIGGER_AUTHENTICATIONS`) rather
 than flags, and sets `POD_SERVICE_ACCOUNT` so the operator knows its own
-ServiceAccount. Operator images older than v0.3.13 ignore the variables, so
-the values are safe to set before the image changes.
+ServiceAccount.
 
-### Keeping the previous behavior
-
-To upgrade without changing which `RbeWorker` specs the operator accepts, allow
-everything the policy can allow. This matches operator v0.3.12 and earlier,
-except that the operator's own ServiceAccount and `hostPath` paths containing
-`..` stay refused:
-
-```yaml
-specPolicy:
-  allowedPodServiceAccounts: ["*"]
-  allowPrivilegedExtraContainers: true
-  allowedHostPathPrefixes: ["/"]
-  allowedClusterTriggerAuthentications: ["*"]
-```
-
-Use it as a stepping stone rather than a long-term setting. After the upgrade,
-list what your pools actually use and narrow each value to that:
+To size the policy, list what your pools actually use and narrow each value to
+that:
 
 ```bash
 kubectl get rbeworkers -A -o json | jq -r '.items[] |
   "\(.metadata.namespace)/\(.metadata.name)\tsa=\(.spec.pod.serviceAccountName // "default")\thostPaths=\([.spec.storage.casVolume, .spec.storage.workerVolume, .spec.docker.dind.storageVolume, (.spec.pod.extraVolumes // [])[]] | map(select(. != null) | .hostPath.path // empty) | join(","))"'
 ```
 
-Then rerun `helm upgrade` with the narrower values. The upgrade check refuses
-any value that would make an existing `RbeWorker` `SpecInvalid`.
+### When the operator stops reconciling a pool
+
+The operator stops reconciling an `RbeWorker` in two cases. It sets
+`Ready=False` and leaves that pool's existing Deployment and `ScaledObject` as
+they are, so running workers keep running and autoscaling, but changes to the
+`RbeWorker` do not reach them:
+
+- **`SpecInvalid`**: the spec asks for something the policy above does not
+  allow, such as a `hostPath` CAS volume outside the allowed prefixes.
+- **`NameConflict`**: a Deployment, generated ConfigMap or `ScaledObject` with
+  the pool's name exists but is not controlled by this `RbeWorker`, or
+  `spec.config.generated.commonConfigMapName` is `<name>-config`. Objects the
+  operator created already carry the right owner reference. A conflict usually
+  means the `RbeWorker` was deleted with `--cascade=orphan` and recreated.
+
+### Install-time check
+
+To catch both before they happen, `helm install` and `helm upgrade` list the
+`RbeWorker` objects the operator watches and fail with each problem and the
+fix, for example:
+
+```text
+Error: execution error at (bb-worker-operator/templates/validate.yaml:31:4): bb-worker-operator would stop reconciling these existing RbeWorkers:
+  - buildbarn/worker-cas: spec.storage.casVolume.hostPath.path "/mnt/disks/ssd0/cas" needs a covering entry in specPolicy.allowedHostPathPrefixes
+```
+
+Widen `specPolicy` or fix the `RbeWorker` objects, then rerun the command. To
+see the result without changing anything, render against the cluster first:
+
+```bash
+helm template bb-worker-operator oci://ghcr.io/hermetiq/bb-worker-operator \
+  --version 1.0.0 --namespace hermetiq --dry-run=server \
+  --values bb-worker-operator-values.yaml > /dev/null
+```
+
+The check reads the cluster through Helm's `lookup`, so it needs permission to
+list `RbeWorker` objects in the watched scope and to get Deployments,
+ConfigMaps and `ScaledObject`s in their namespaces. It does nothing under
+`helm template` without `--dry-run=server`, or under GitOps tools that render
+charts client-side, such as Argo CD. In those setups run the command above from
+a workstation before syncing. Set `specPolicy.checkExistingRbeWorkers=false` to
+skip it.
 
 ## RBAC Scope
 
@@ -772,13 +773,11 @@ watches only the release namespace (honoring `namespaceOverride`); an explicit
 scrape resources. With HTTP metrics, control access through your cluster's
 network policy or monitoring setup.
 
-`watchNamespace` renders as `--watch-namespace`, so it needs an operator image
-that accepts that flag; older images exit with
-`flag provided but not defined`. Change it together with `image.tag` and update
-or clear `image.digest`; a digest takes precedence over the tag.
+`watchNamespace` renders as `--watch-namespace`, which the chart's default
+image accepts. An image selected through `image.tag` and `image.digest` must
+accept it too, or the manager exits with `flag provided but not defined`.
 
-`rbac.managerBindingMode` is retained for existing installs in cluster mode.
-Its `namespace` option binds a **ClusterRole** within one namespace and still
+`rbac.managerBindingMode` applies in cluster mode. Its `namespace` option binds a **ClusterRole** within one namespace and still
 creates other cluster-scoped RBAC resources. Use `rbac.mode=namespace` when
 the installer cannot create ClusterRoles. In cluster mode, setting
 `watchNamespace` narrows the watch without narrowing the grant.

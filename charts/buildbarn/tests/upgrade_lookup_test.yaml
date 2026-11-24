@@ -1,0 +1,280 @@
+suite: buildbarn upgrade checks through lookup
+templates:
+  - templates/validate.yaml
+release:
+  name: buildbarn
+  namespace: buildbarn
+# The other suites feed validate.yaml through _testLookup. This one sets no
+# _testLookup: every object comes from the fake cluster below and is read
+# with lookup, the path a real install or upgrade takes. It covers which
+# namespace each lookup reads and the Capabilities gate on RbeWorker.
+#
+# The fake client only serves a list for kinds it holds an object of, so the
+# suite carries one unrelated object for every kind validate.yaml always
+# reads. Objects must not contain numbers: helm-unittest 0.8.2 cannot copy
+# them.
+kubernetesProvider:
+  scheme:
+    "v1/ConfigMap":
+      gvr: {group: "", version: v1, resource: configmaps}
+      namespaced: true
+    "apps/v1/Deployment":
+      gvr: {group: apps, version: v1, resource: deployments}
+      namespaced: true
+    "apps/v1/StatefulSet":
+      gvr: {group: apps, version: v1, resource: statefulsets}
+      namespaced: true
+    "bb.hermetiq.com/v1/RbeWorker":
+      gvr: {group: bb.hermetiq.com, version: v1, resource: rbeworkers}
+      namespaced: true
+  objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: unrelated, namespace: buildbarn}
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: unrelated, namespace: buildbarn}
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata: {name: unrelated, namespace: buildbarn}
+tests:
+  - it: accepts a cluster with nothing to check
+    release:
+      upgrade: true
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- RbeWorker: read only when the API is in Capabilities -------------------
+  - it: reads RbeWorkers through lookup when the cluster serves the API
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker buildbarn/pool pins pre-CDC image "ghcr\.io/buildbarn/bb-worker:20260908T142432Z-77f7642" in spec\.images\.worker'
+
+  # Without the API in Capabilities the lookup is not made, so the same
+  # RbeWorker is not seen.
+  - it: does not read RbeWorkers when the API is not in Capabilities
+    release:
+      upgrade: true
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: reads only RbeWorkers in the release namespace
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: team-a}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Worker ConfigMaps: read from the release namespace ---------------------
+  - it: reads the ConfigMap a live RbeWorker references through lookup
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            config:
+              generated: {commonConfigMapName: custom-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: custom-libraries, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap buildbarn/custom-libraries data\["common\.libsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage'
+
+  - it: does not read a ConfigMap of the same name in another namespace
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            config:
+              generated: {commonConfigMapName: custom-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: custom-libraries, namespace: team-a}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker buildbarn/pool references missing ConfigMap "custom-libraries"'
+
+  # --- Operator and Hermetiq Deployments are not inspected ---------------------
+  # Both are upgraded together with this chart and carry no capability
+  # declaration, so no Deployment may block a Buildbarn release: not an old
+  # operator, not a missing one, and not Hermetiq.
+  - it: does not inspect operator or Hermetiq Deployments on install
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: bb-worker-operator-0.3.12
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: grpc-api
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: hermetiq-1.0.0
+              app.kubernetes.io/component: api
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bep-nats-pub
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: hermetiq-1.0.0
+              app.kubernetes.io/component: publisher
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts live RbeWorkers without looking for an operator
+    release:
+      upgrade: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              runner: example.com/runner:latest
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not inspect Hermetiq Deployments on upgrade
+    release:
+      upgrade: true
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: grpc-api
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: hermetiq-1.0.0
+              app.kubernetes.io/component: api
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips RbeWorker and worker ConfigMap checks with upgradeChecks.skipWorkerChecks
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipWorkerChecks: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+            config:
+              generated: {commonConfigMapName: missing-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: team-worker-config, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips the worker ConfigMap text scan with upgradeChecks.skipConfigTextCheck
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            config:
+              generated: {commonConfigMapName: custom-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: custom-libraries, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still refuses pre-CDC worker image pins when only the text scan is skipped
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker buildbarn/pool pins pre-CDC image'

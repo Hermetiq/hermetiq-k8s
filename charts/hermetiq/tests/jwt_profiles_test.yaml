@@ -1,0 +1,65 @@
+suite: independent browser and build JWT trust profiles
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/secrets.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+set:
+  api.jwt.profiles:
+    - name: human
+      issuer: https://oidc.ci.test/
+      audiences: [dashboard-client]
+      jwksUrl: https://oidc.ci.test/keys
+      principalKind: human
+      credentialUse: browser
+  publisher.jwks.profiles:
+    - name: ci
+      issuer: https://ci.example.test/
+      audiences: [hermetiq-bep]
+      existingSecret: ci-public-keys
+      existingSecretKey: public.json
+      principalKind: service
+      credentialUse: build
+      userIdPrefix: 'ci:'
+tests:
+  - it: replaces legacy publisher keys and projects a reloadable Secret directory
+    template: templates/deployment-publisher.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWT_PROFILES")].value
+          value: '[{"audiences":["hermetiq-bep"],"credentialUse":"build","issuer":"https://ci.example.test/","jwksFile":"/config/jwt-profiles/0/jwks.json","name":"ci","principalKind":"service","userIdPrefix":"ci:"}]'
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "GRPC_AUTH_JWKS_URL")]
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "publisher-jwks")]
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "jwt-profile-0")].secret.secretName
+          value: ci-public-keys
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "jwt-profile-0")].subPath
+  - it: delegates profile verification to the core while retaining gRPC-web framing
+    template: templates/deployment-api.yaml
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWT_PROFILES")]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "grpc-auth-proxy")].env[?(@.name == "GRPC_AUTH_PROXY_FORWARD_ONLY")].value
+          value: "true"
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "GRPC_AUTH_JWKS_URL")]
+  - it: rejects multiple key sources within one profile
+    template: templates/validate.yaml
+    set:
+      publisher.jwks.profiles:
+        - name: ci
+          issuer: https://ci.example.test/
+          audiences: [hermetiq-bep]
+          existingSecret: ci-public-keys
+          jwksInline: '{"keys":[]}'
+          principalKind: service
+          credentialUse: build
+    asserts:
+      - failedTemplate:
+          errorPattern: each JWT profile requires exactly one

@@ -19,31 +19,38 @@ standardLabels:
   appVersion: false
 
 images:
+  # The API, publisher, schema bootstrap, dashboard and auth-proxy images must
+  # come from the same release. Images older than v1.0.0 do not implement
+  # project authorization and are rejected at render time.
+  # Digests are empty here and are resolved when the chart is published, so
+  # the packaged chart pulls by digest. When overriding a tag, set its digest
+  # as well or leave the digest empty; a non-empty digest wins over the tag.
+  # See README: Application images.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.8"
-    apiDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    pubTag: "v0.9.8"
-    pubDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    subTag: "v0.9.8"
-    subDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    bootstrapTag: "v0.9.8"
-    bootstrapDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
+    apiTag: "v1.0.0"
+    apiDigest: ""
+    pubTag: "v1.0.0"
+    pubDigest: ""
+    subTag: "v1.0.0"
+    subDigest: ""
+    bootstrapTag: "v1.0.0"
+    bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.8"
-    digest: "sha256:8555a0160ab6adc41a02c029f0eca5a6c3277a7c00c167bff7f73c1459e769dc"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.8"
-    digest: "sha256:8154cc722cb7cec11b27913a49f6be660f1e9ff3aba68e93c31404fe20c4ca97"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v0.9.8"
-    digest: "sha256:edcfa745b7f551c72ad0b8d701119a168659f96e4660e2b5034e263779023a42"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
     # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public
@@ -113,8 +120,9 @@ app:
   # and CrashLoopBackOffs.
   grpcAuthUserProvider: jwks
   environment: prod
-  # Emails that should receive the Hermetiq admin role. Rendered as the
-  # comma-delimited ADMIN_EMAIL_ALLOWLIST env var for the API and publisher workloads.
+  # Retained application metadata; configure trusted administrator groups under
+  # authorization instead. Email allowlists do not grant admin authority.
+  # Rendered as ADMIN_EMAIL_ALLOWLIST for the API and publisher workloads.
   adminEmails: []
   # How invocation rows are driven. "build_tool" (the chart default) creates
   # invocations from BEP build-tool events and provisions NO BEP_LIFECYCLE
@@ -366,6 +374,12 @@ hosts:
 #         headers: "Email:X-Forwarded-Email Groups:X-Forwarded-Groups"
 #         auto_sign_up: true
 #         enable_login_token: true
+#       users:
+#         allow_sign_up: false
+#         auto_assign_org_role: Viewer
+# Protect the Grafana backend with NetworkPolicy or a proxy IP whitelist;
+# ClusterIP alone does not prevent callers from forging identity headers.
+# The starter VictoriaMetrics values include the backend NetworkPolicy.
 #
 # Also register https://grafana.<domainBase>/oauth2/callback as an allowed
 # callback URL with your IdP.
@@ -422,6 +436,19 @@ gateway:
   enabled: true
   name: ""
   namespace: ""
+  # Preserve gRPC-web through the dashboard's oauth2-proxy and nginx BFF.
+  # Envoy's listener-wide translator would otherwise send native gRPC over
+  # the BFF's HTTP/1.1 upstream and produce HTTP 505 before authentication.
+  # Renders a dashboard-only EnvoyPatchPolicy in routing.provider=gateway.
+  # Requires extensionApis.enableEnvoyPatchPolicy=true in Envoy Gateway's
+  # controller configuration. Disable for other Gateway implementations.
+  dashboardGrpcWeb:
+    enabled: true
+    # Per-Gateway HTTPS listeners serving the dashboard host. Both Envoy
+    # naming schemes use <gateway namespace>/<gateway name>/<listener> for
+    # their RouteConfiguration. See README for HTTP V2 or merged Gateways.
+    listenerNames:
+      - https
   routes:
     bepGrpcName: bep-cloud-grpc
     apiGrpcName: api-cloud-grpc
@@ -448,14 +475,15 @@ gateway:
     backendPolicy:
       enabled: true
       namePrefix: bp
-      # Backend service timeout in seconds for gRPC backends.
+      # Backend service timeout in seconds for the gRPC backends and the
+      # dashboard Service, which carries the dashboard's own API calls.
       timeoutSec: 300
   healthChecks:
     # Render Envoy Gateway BackendTrafficPolicy resources in gateway mode so
     # active health checks use unauthenticated readiness endpoints instead of
     # default /healthz or grpc.health.v1 checks on auth-sensitive backends.
     enabled: true
-  # Envoy Gateway stream timeouts for the chart's gRPC routes
+  # Envoy Gateway stream timeouts for the chart's gRPC and HTTP routes
   # (routing.provider=gateway only). Without these, Envoy applies its default
   # 15s route timeout — the only routing provider this chart supports that
   # leaves the gRPC routes uncapped-by-omission. Contour already sets
@@ -512,10 +540,17 @@ gateway:
       requestTimeout: "0s"
       maxStreamDuration: "0s"
       connectionIdleTimeout: "1h"
-    # The dashboard's REST/gRPC-web traffic. The same unary analytics queries
-    # that reach apiGrpc arrive over this route too, so it gets the same 300s
-    # bound rather than Envoy Gateway's 15s default.
+    # External REST/gRPC-web API traffic gets the same 300s bound as apiGrpc.
     apiWeb:
+      requestTimeout: "300s"
+      maxStreamDuration: ""
+      connectionIdleTimeout: "1h"
+    # Same-origin browser REST and gRPC-web calls pass through the dashboard
+    # BFF. Give these queries the same headroom as the external API. With the
+    # assistant enabled, request and stream limits are raised to at least
+    # assistant.streamTimeoutSeconds, even if timeouts.enabled is false.
+    # This policy adds no active health checks to the authenticated dashboard.
+    dashboard:
       requestTimeout: "300s"
       maxStreamDuration: ""
       connectionIdleTimeout: "1h"
@@ -630,6 +665,8 @@ contour:
   ingressClassName: contour
   httpProxy:
     loadBalancerPolicy: Cookie
+    # Response timeout of the gRPC routes and of the dashboard route, which
+    # carries the dashboard's own API calls.
     responseTimeout: "300s"
   ingress:
     proxyBodySize: "50m"
@@ -700,6 +737,8 @@ ingress:
   enabled: true
   className: nginx
   proxyBodySize: "50m"
+  # Read and send timeouts of the gRPC routes and of the dashboard route,
+  # which carries the dashboard's own API calls.
   grpc:
     proxyReadTimeoutSeconds: "300"
     proxySendTimeoutSeconds: "300"
@@ -835,6 +874,23 @@ azureWorkloadIdentity:
 gcpWorkloadIdentity:
   enabled: false
   serviceAccount: ""
+
+# S3-compatible storage for progress logs (the "S3-compatible" provider in
+# Project Settings). On EKS, IRSA (serviceAccount.annotations
+# eks.amazonaws.com/role-arn) and EKS Pod Identity need nothing here. For stores
+# that only accept access keys (OCI Object Storage Customer Secret Keys, MinIO,
+# Ceph), name a Secret holding the pair: the api, publisher and subscriber pods
+# then read AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from it. A name already
+# set in api.env, publisher.env or subscriber.env takes precedence.
+artifactStorage:
+  s3:
+    # Secret with the access key pair. Empty sets no keys.
+    existingSecret: ""
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+    # AWS_REGION for projects whose S3 settings leave the region empty, for
+    # example eu-central-1. EKS Pod Identity does not set a region.
+    region: ""
 
 rbac:
   enabled: true
@@ -1063,8 +1119,34 @@ api:
   # Keep it true for chart-managed JWKS settings. Set it false only when api.env
   # supplies exactly one GRPC_AUTH_JWKS_{URL,FILE,INLINE} plus
   # GRPC_AUTH_ISSUER and GRPC_AUTH_AUDIENCE.
+  # Optional directory provisioning for the enforced project authorization policy.
+  # userName must match the verified stable subject; never map it from email.
+  scim:
+    enabled: false
+    issuer: ""
+    userIdPrefix: ""
+    existingSecret: ""
+    existingSecretKey: token
+    # Nonsecret marker: change after rotating the token Secret to restart API pods.
+    rolloutVersion: ""
+    # Only these immutable directory group IDs can be provisioned.
+    groups: []
+    # - {id: engineering, displayName: Engineering}
+
   jwt:
+    # Optional independent issuer/audience profiles replace all legacy jwt settings.
+    # Each profile chooses jwksUrl, jwksInline, or existingSecret + existingSecretKey.
+    profiles: []
     enabled: true
+    # Classify this trusted credential profile explicitly; optional provider
+    # claims are not sufficient to distinguish humans from machines.
+    principalKind: human
+    # Positive Go durations. URL refresh preserves the verifier's existing timing.
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Once a mounted key file changes, reload within this interval (maximum 10s).
+    fileReloadInterval: 10s
     jwksUrl: ""
     issuer: ""
     # gRPC API token audience. Leave empty to reuse the dashboard oauth2-proxy
@@ -1099,8 +1181,35 @@ api:
     enabled: true
     maxUnavailable: 1
 
+# Shared project authorization policy for API and publisher. This chart always
+# enforces the policy; configure builder grants before sending builds.
+authorization:
+  # Authenticated humans may retain automatic Viewer access to every project.
+  # Service accounts receive only their explicit projectRoles.
+  # Roles: viewer, builder, admin (each includes the previous one).
+  defaultAccess: viewer
+  # Optional explicit installation-admin group trust; omit to retain the
+  # legacy verified admin group. Once set, only these issuer/source pairs apply.
+  # administratorGroups:
+  #   - {issuer: "https://idp.example.com/", group: admins, source: jwt}
+  groupBindings: []
+  # - projectId: my-project
+  #   issuer: https://idp.example.com/
+  #   group: engineering
+  #   roles: [builder]
+  serviceAccounts: []
+  # - issuer: https://ci.example.com/hermetiq
+  #   subject: buildkite-ci
+  #   projectRoles:
+  #     my-project: [builder]
+  instanceBindings: []
+  # - namespace: my-buildbarn-namespace
+  #   instancePrefix: my-instance
+  #   projectId: my-project
+
 publisher:
   replicas: 4
+  # BEP ingestion always requires write:bep membership for the selected project.
   # Additional environment variables for the publisher deployment.
   env: {}
   # Set to true/false to override serviceAccount.automountServiceAccountToken
@@ -1137,7 +1246,17 @@ publisher:
   trustedCalCidrs: ""
 
   jwks:
+    profiles: []
     enabled: true
+    principalKind: human
+    # auto keeps existing URL/global OIDC/local precedence. Explicit url,
+    # inline or secret selects only the corresponding publisher key source.
+    source: auto
+    refreshInterval: 1h
+    refreshRateLimit: 5m
+    refreshTimeout: 10s
+    # Maximum 10s; Kubernetes Secret projection latency is additional.
+    fileReloadInterval: 10s
     url: ""
     issuer: ""
     # BES/CAL token audience. Defaults to https://<hosts.bepGrpc> or
@@ -1235,7 +1354,7 @@ dashboard:
   remoteCacheUrl: ""
   # Additional environment variables for the dashboard deployment.
   env:
-    REACT_APP_HERMETIQ_AI_PLUGIN_VERSION: "v0.9.12-beta"
+    REACT_APP_HERMETIQ_AI_PLUGIN_VERSION: "v1.0.0"
   prepareDashboardHtml:
     # Additional environment variables for the dashboard HTML preparation init container.
     env: {}
@@ -1291,7 +1410,16 @@ dashboard:
     provider: oidc
     oidcIssuerUrl: ""
     scope: openid email profile offline_access
-    oidcGroupsClaim: groups
+    # Required browser admission policy, shared by dashboard, Grafana and
+    # Buildbarn Browser. Set your organization domains, e.g. ["example.com"].
+    # ["*"] is accepted only together with a nonempty allowedGroups list.
+    emailDomains: []
+    # Optional additional restriction: a user must belong to at least one
+    # listed IdP group AND pass emailDomains. These groups do not grant roles.
+    allowedGroups: []
+    # Empty uses api.jwt.groupsClaim, then "groups". With JWT profiles, set
+    # this explicitly to the browser identity provider's groups claim.
+    oidcGroupsClaim: ""
     validateUrl: ""
     # IdP logout URL. When `/oauth2/sign_out` is called, oauth2-proxy clears
     # its cookie and then redirects the browser here so the IdP also ends

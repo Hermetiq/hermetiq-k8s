@@ -22,7 +22,7 @@ class ChartImageDigestsTest(unittest.TestCase):
     def test_real_chart_defaults_cover_image_shapes(self):
         expected = {
             "hermetiq": {"images.bepNats.apiTag", "images.bepNats.pubTag", "images.bepNats.subTag", "images.bepNats.bootstrapTag", "images.authProxy.tag", "images.dashboard.tag", "images.promptRuntime.tag", "images.oauth2Proxy.tag"},
-            "buildbarn": {"images.storage.tag", "images.scheduler.tag", "images.browser.tag", "images.remoteAsset.tag", "images.busybox.image", "images.oauth2Proxy.tag", "images.grpcCacheProxy.tag", "images.portal.tag", "frontend.jwks.sync.image.tag"},
+            "buildbarn": {"images.storage.tag", "images.scheduler.tag", "images.worker.tag", "images.runnerInstaller.tag", "images.browser.tag", "images.remoteAsset.tag", "images.busybox.image", "images.oauth2Proxy.tag", "images.grpcCacheProxy.tag", "images.portal.tag", "frontend.jwks.sync.image.tag"},
             "bb-worker-operator": {"image.tag"},
         }
         for name, paths in expected.items():
@@ -177,12 +177,30 @@ images:
             values = chart / "values.yaml"
             unpinned, count = re.subn(r'(?m)^(\s+apiDigest:).*$', r'\1 ""', values.read_text())
             self.assertEqual(count, 1)
+            # Give the other required workloads digests of their own while
+            # leaving the API unpinned for the release command under test, so
+            # the render below also shows existing digests are kept.
+            unpinned = inventory.pin_values(unpinned, [
+                {"value": image_path, "digest": "sha256:" + "c" * 64}
+                for image_path in (
+                    "images.bepNats.pubTag",
+                    "images.bepNats.bootstrapTag",
+                    "images.dashboard.tag",
+                )
+            ])
             values.write_text(unpinned)
             with mock.patch.object(inventory.sys, "argv", [str(SCRIPT), "--pin", str(chart)]), mock.patch.object(
                 inventory, "inspect_reference", side_effect=lambda ref: ref.partition("@")[2] or digest
             ):
                 inventory.main()
-            command = ["helm", "template", "test", str(chart), "-f", str(chart / "ci-values/ci.yaml")]
+            self.assertEqual(yaml.safe_load(values.read_text())["images"]["bepNats"]["apiDigest"], digest)
+            # Drop any image selection from the render fixture so the rendered
+            # API uses the source digest written above.
+            runtime_values = yaml.safe_load((chart / "ci-values/ci.yaml").read_text())
+            runtime_values.pop("images", None)
+            runtime_fixture = Path(tmp) / "runtime-values.yaml"
+            runtime_fixture.write_text(yaml.safe_dump(runtime_values))
+            command = ["helm", "template", "test", str(chart), "-f", str(runtime_fixture)]
             rendered = subprocess.check_output(command, text=True)
             containers = [container for document in yaml.safe_load_all(rendered)
                           if document and document["kind"] == "Deployment"

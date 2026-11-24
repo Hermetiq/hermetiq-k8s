@@ -1,4 +1,4 @@
-suite: gateway gRPC route timeouts
+suite: gateway route timeouts
 values:
   - ../ci-values/ci.yaml
 templates:
@@ -75,11 +75,10 @@ tests:
       gateway.name: test-gateway
       gateway.routes.bbcalGrpcEnabled: true
     asserts:
-      # 9 routes + 5 policies (bep, api, bbcal, api-web, mcp). Splitting the
-      # timeouts into their own policies would push this to 17 and is exactly
-      # the regression this count is here to catch.
+      # 9 routes + 6 policies (bep, api, bbcal, api-web, dashboard, mcp).
+      # Health checks and timeouts must not create duplicate route policies.
       - hasDocuments:
-          count: 14
+          count: 15
       - equal:
           path: spec.healthCheck.active.type
           value: TCP
@@ -172,8 +171,7 @@ tests:
       gateway.healthChecks.enabled: false
       gateway.timeouts.enabled: false
     asserts:
-      # Routes still render; only the five policies drop out (12 - 4 = 8, and
-      # bbcal is off by default).
+      # Routes still render; the five policies drop out, with bbcal off.
       - hasDocuments:
           count: 8
 
@@ -279,3 +277,62 @@ tests:
           path: spec.timeout
       - exists:
           path: spec.healthCheck.active
+
+  - it: gives same-origin browser API calls 300s without probing the authenticated dashboard
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+    documentSelector:
+      path: metadata.name
+      value: dashboard-timeouts
+    asserts:
+      - equal:
+          path: spec.targetRefs
+          value:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: dashboard
+      - equal:
+          path: spec.timeout.http
+          value:
+            requestTimeout: 300s
+            connectionIdleTimeout: 1h
+      - notExists:
+          path: spec.healthCheck
+
+  - it: honors custom dashboard route names and bounded timeouts
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.healthChecks.enabled: false
+      gateway.routes.dashboardName: custom-dashboard
+      gateway.timeouts.dashboard.requestTimeout: 10m
+      gateway.timeouts.dashboard.maxStreamDuration: 12m
+      gateway.timeouts.dashboard.connectionIdleTimeout: 2h
+    documentSelector:
+      path: metadata.name
+      value: custom-dashboard-timeouts
+    asserts:
+      - equal:
+          path: spec.targetRefs[0].name
+          value: custom-dashboard
+      - equal:
+          path: spec.timeout.http
+          value:
+            requestTimeout: 10m
+            maxStreamDuration: 12m
+            connectionIdleTimeout: 2h
+      - notExists:
+          path: spec.healthCheck
+
+  - it: omits the dashboard policy when ordinary timeouts are disabled
+    set:
+      routing.provider: gateway
+      gateway.name: test-gateway
+      gateway.timeouts.enabled: false
+    asserts:
+      - containsDocument:
+          kind: BackendTrafficPolicy
+          apiVersion: gateway.envoyproxy.io/v1alpha1
+          name: dashboard-timeouts
+        not: true

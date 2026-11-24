@@ -1,0 +1,116 @@
+suite: explicit shared OAuth admission
+templates:
+  - templates/configmaps.yaml
+  - templates/deployment-dashboard.yaml
+  - templates/deployment-grafana-oauth2-proxy.yaml
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: shares explicit permitted domains and the API groups claim
+    template: templates/configmaps.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: [example.com, contractors.example.org]
+      api.jwt.groupsClaim: hermetiq/roles
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - equal:
+          path: data.OAUTH2_PROXY_EMAIL_DOMAINS
+          value: example.com,contractors.example.org
+      - equal:
+          path: data.OAUTH2_PROXY_OIDC_GROUPS_CLAIM
+          value: hermetiq/roles
+      - notExists:
+          path: data.OAUTH2_PROXY_ALLOWED_GROUPS
+
+  - it: permits multiple email domains through an explicit IdP group gate
+    template: templates/configmaps.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: ["*"]
+      dashboard.oauth2Proxy.allowedGroups: [hermetiq-users, hermetiq-admin]
+      dashboard.oauth2Proxy.oidcGroupsClaim: browser/roles
+      api.jwt.groupsClaim: api/roles
+    documentSelector:
+      path: metadata.name
+      value: oauth2-proxy-config-web-ui
+    asserts:
+      - equal:
+          path: data.OAUTH2_PROXY_EMAIL_DOMAINS
+          value: "*"
+      - equal:
+          path: data.OAUTH2_PROXY_ALLOWED_GROUPS
+          value: hermetiq-users,hermetiq-admin
+      - equal:
+          path: data.OAUTH2_PROXY_OIDC_GROUPS_CLAIM
+          value: browser/roles
+
+  - it: requires explicit email domains
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: []
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboard.oauth2Proxy.emailDomains must explicitly list permitted email domains
+
+  - it: rejects a wildcard without an allowed group
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: [example.com, "*"]
+    asserts:
+      - failedTemplate:
+          errorPattern: unrestricted browser admission is not supported
+
+  - it: rejects a blank allowed group as a wildcard bypass
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: ["*"]
+      dashboard.oauth2Proxy.allowedGroups: [" "]
+    asserts:
+      - failedTemplate:
+          errorPattern: allowedGroups entries must be nonempty group names
+
+  - it: prevents dashboard env from overriding shared admission
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.env.OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboard.oauth2Proxy.env must not set OAUTH2_PROXY_EMAIL_DOMAINS
+
+  - it: prevents Grafana env from clearing the required groups
+    template: templates/validate.yaml
+    set:
+      dashboard.oauth2Proxy.emailDomains: ["*"]
+      dashboard.oauth2Proxy.allowedGroups: [hermetiq-users]
+      grafana.oauth2Proxy.env.OAUTH2_PROXY_ALLOWED_GROUPS: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: grafana.oauth2Proxy.env must not set OAUTH2_PROXY_ALLOWED_GROUPS
+
+  - it: prevents Grafana env from changing the verified group claim
+    template: templates/validate.yaml
+    set:
+      grafana.oauth2Proxy.env.OAUTH2_PROXY_OIDC_GROUPS_CLAIM: other/roles
+    asserts:
+      - failedTemplate:
+          errorPattern: grafana.oauth2Proxy.env must not set OAUTH2_PROXY_OIDC_GROUPS_CLAIM
+
+  - it: keeps the dashboard and Grafana on the shared ConfigMap
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "oauth2-proxy")].envFrom
+          content:
+            configMapRef:
+              name: oauth2-proxy-config-web-ui
+        template: templates/deployment-dashboard.yaml
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            configMapRef:
+              name: oauth2-proxy-config-web-ui
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment

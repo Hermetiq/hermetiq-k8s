@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Exercise the rendered init script against real files, including repeated
+# starts. No Docker/Kubernetes dependency; container RPC tests run separately.
+set -euo pipefail
+python3 - "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" <<'PY'
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+import yaml
+
+chart = pathlib.Path(sys.argv[1])
+
+def render(extra_sets=()):
+    cmd = ['helm', 'template', 'test', str(chart), '-f', str(chart / 'ci-values/ci.yaml')]
+    for item in extra_sets:
+        cmd += ['--set', item]
+    docs = list(yaml.safe_load_all(subprocess.check_output(cmd, text=True)))
+    storage = next(d for d in docs if d and d['kind'] == 'StatefulSet' and d['metadata']['name'] == 'storage')
+    return next(c['command'][2] for c in storage['spec']['template']['spec']['initContainers'] if c['name'] == 'volume-init')
+
+
+def snapshot(root):
+    dirs = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_dir())
+    files = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    return dirs, files
+
+
+def rewrite_paths(script, root, mounts):
+    # Replace longest paths first so /storage-cas-meta is never partially rewritten as /storage-cas.
+    for mount in sorted(mounts, key=len, reverse=True):
+        script = script.replace(mount, str(root / mount.lstrip('/')))
+    return script
+
+
+# 1. Exercise legacy CAS, AC, ISCC, and FSAC guards in every layout that gives
+# those stores a filesystem: filesystem stores, raw CAS/AC with file KLMs, all
+# four stores raw with file KLMs, and filesystem stores in hostPath mode.
+#
+# The hostPath script chowns each directory to the storage identity, as root
+# in a pod. Render it with the identity running this test, so the chown is one
+# this process may perform whether or not it runs as root.
+identity = f'{os.getuid()}:{os.getgid()}'
+raw_cas_ac = [
+    'storage.persistence.cas.backend=blockDevice',
+    'storage.persistence.cas.blockDevice.keyLocationMap=file',
+    'storage.persistence.ac.backend=blockDevice',
+    'storage.persistence.ac.blockDevice.keyLocationMap=file',
+]
+raw_iscc_fsac = [
+    'storage.persistence.iscc.backend=blockDevice',
+    'storage.persistence.iscc.blockDevice.keyLocationMap=file',
+    'storage.persistence.fsac.backend=blockDevice',
+    'storage.persistence.fsac.blockDevice.keyLocationMap=file',
+]
+host_path = [
+    'storage.persistence.mode=hostPath',
+    f'security.pod.runAsUser={os.getuid()}',
+    f'security.pod.runAsGroup={os.getgid()}',
+]
+layouts = [
+    ('filesystem', [],
+     ['/storage-cas', '/storage-ac', '/storage-iscc', '/storage-fsac']),
+    ('raw CAS/AC', raw_cas_ac,
+     ['/storage-cas-meta', '/storage-ac-meta', '/storage-iscc', '/storage-fsac']),
+    ('raw CAS/AC/ISCC/FSAC', raw_cas_ac + raw_iscc_fsac,
+     ['/storage-cas-meta', '/storage-ac-meta', '/storage-iscc-meta', '/storage-fsac-meta']),
+    ('hostPath', host_path,
+     ['/storage-cas', '/storage-ac', '/storage-iscc', '/storage-fsac']),
+]
+for layout, layout_sets, mounts in layouts:
+    extra = [
+        'storage.persistence.iscc.enabled=true',
+        'storage.persistence.fsac.enabled=true',
+    ]
+    extra += layout_sets
+    script = render(extra)
+    # Only the hostPath script changes ownership.
+    assert (f'chown {identity} {mounts[0]}\n' in script) == (layout == 'hostPath'), (layout, script)
+    assert ('chown' in script) == (layout == 'hostPath'), (layout, script)
+    store_cases = [
+        ('cas', mounts[0], ('cas-keys.db', 'cas-blocks.db', 'persistent_state')),
+        ('ac', mounts[1], ('ac-keys.db', 'ac-blocks.db', 'persistent_state')),
+        ('iscc', mounts[2], ('iscc-keys.db', 'iscc-blocks.db', 'persistent_state')),
+        ('fsac', mounts[3], ('fsac-keys.db', 'fsac-blocks.db', 'persistent_state')),
+    ]
+    for store, mount, legacy_names in store_cases:
+        for legacy in legacy_names:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = pathlib.Path(tmp)
+                for m in mounts:
+                    (root / m.lstrip('/')).mkdir()
+                store_dir = root / mount.lstrip('/')
+                target = store_dir / legacy
+                if legacy == 'persistent_state':
+                    target.mkdir()
+                    (target / 'checkpoint').write_bytes(b'legacy state must be untouched')
+                else:
+                    target.write_bytes(b'legacy bytes must be untouched')
+                before = snapshot(root)
+                local_script = rewrite_paths(script, root, mounts)
+                for attempt in range(2):
+                    result = subprocess.run(['sh', '-c', local_script], capture_output=True, text=True)
+                    assert result.returncode != 0, (layout, store, legacy, 'legacy store accepted')
+                    assert f'Pre-CDC {store.upper()} files detected' in result.stderr, result.stderr
+                    # Snapshot verifies neither files NOR stray directories were created on any mount.
+                    assert before == snapshot(root), (layout, store, legacy, 'filesystem mutated on rejected upgrade')
+                # Model an operator explicitly retiring the legacy files after a
+                # snapshot. The chart itself must never perform this removal.
+                if target.is_dir():
+                    (target / 'checkpoint').unlink()
+                    target.rmdir()
+                else:
+                    target.unlink()
+                cas_dir = root / mounts[0].lstrip('/')
+                ac_dir = root / mounts[1].lstrip('/')
+                iscc_dir = root / mounts[2].lstrip('/')
+                fsac_dir = root / mounts[3].lstrip('/')
+                for attempt in range(2):
+                    subprocess.run(['sh', '-c', local_script], check=True)
+                    assert (cas_dir / 'cdc-v1/persistent_state').is_dir()
+                    assert (cas_dir / 'cdc-v1/cms_persistent_state').is_dir()
+                    assert (ac_dir / 'cdc-v1/persistent_state').is_dir()
+                    assert (iscc_dir / 'cdc-v1/persistent_state').is_dir()
+                    assert (fsac_dir / 'cdc-v1/persistent_state').is_dir()
+                    sentinel = cas_dir / 'cdc-v1/persistent_state/sentinel'
+                    if attempt:
+                        assert sentinel.read_bytes() == b'CDC state survives init'
+                    sentinel.write_bytes(b'CDC state survives init')
+
+# 2. Dedicated CMS filesystem mode creates /storage-cms/persistent_state alongside cdc-v1 stores.
+dedicated_script = render(['storage.persistence.cms.backend=filesystem', 'storage.persistence.cms.size=4Gi'])
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    mounts = ['/storage-cas', '/storage-cms', '/storage-ac', '/storage-iscc', '/storage-fsac']
+    for m in mounts:
+        (root / m.lstrip('/')).mkdir()
+    subprocess.run(['sh', '-c', rewrite_paths(dedicated_script, root, mounts)], check=True)
+    assert (root / 'storage-cas/cdc-v1/persistent_state').is_dir()
+    assert not (root / 'storage-cas/cdc-v1/cms_persistent_state').exists()
+    assert (root / 'storage-cms/persistent_state').is_dir()
+    assert (root / 'storage-ac/cdc-v1/persistent_state').is_dir()
+    assert (root / 'storage-iscc/cdc-v1/persistent_state').is_dir()
+    assert (root / 'storage-fsac/cdc-v1/persistent_state').is_dir()
+
+print('Storage format guard rejects legacy CAS/AC/ISCC/FSAC files in filesystem, raw and hostPath layouts without mutating files or dirs; CDC init is repeatable.')
+PY

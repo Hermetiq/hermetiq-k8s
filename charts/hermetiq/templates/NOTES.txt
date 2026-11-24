@@ -20,6 +20,29 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
 EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
 {{- end }}
 
+{{ if and (eq $provider "gateway") .Values.gateway.dashboardGrpcWeb.enabled -}}
+DASHBOARD gRPC-WEB — dashboard queries depend on the EnvoyPatchPolicy in this
+release. Envoy Gateway ignores it unless extensionApis.enableEnvoyPatchPolicy is
+true in the controller configuration; sign-in then works while every dashboard
+query returns HTTP 505. Check that the policy reports Programmed=True:
+  kubectl -n {{ include "hermetiq-core.gatewayNamespace" . }} get envoypatchpolicy
+
+{{ end -}}
+{{ if eq $provider "contour" -}}
+WARNING: DASHBOARD gRPC-WEB — not verified with Contour, and expected to fail.
+Contour's Envoy translates the dashboard's gRPC-web calls to gRPC before they
+reach the dashboard, and has no per-route setting to turn that off. Sign-in
+then works while dashboard queries return HTTP 505. API, MCP and BEP hosts are
+not affected. Open the dashboard and run a query after this install; if it
+fails, use routing.provider=gateway (Envoy Gateway) or ingress instead.
+
+{{ end -}}
+{{ if and .Values.publisher.jwks.enabled (eq (default "auto" .Values.publisher.jwks.source) "auto") (not .Values.publisher.jwks.url) (include "hermetiq-core.oidcJwksUrl" .) (or .Values.publisher.jwks.json .Values.publisher.jwks.existingSecret) -}}
+PUBLISHER JWKS — source=auto uses the inherited OIDC URL and ignores configured
+publisher local keys. This preserves existing trust. To deliberately use the local
+keys, select publisher.jwks.source=inline or secret and clear other publisher sources.
+
+{{ end -}}
 {{ if .Values.license.airGapped -}}
 LICENSING — air-gapped (offline license file) mode.
 The pods verify {{ .Values.license.key.existingSecretKey }} and {{ .Values.license.licenseFileSecretKey }}

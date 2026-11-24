@@ -28,6 +28,9 @@ spec:
         azure.workload.identity/use: "true"
         {{- end }}
       annotations:
+        {{- if .Values.api.scim.enabled }}
+        hermetiq.com/scim-rollout-version: {{ .Values.api.scim.rolloutVersion | quote }}
+        {{- end }}
         {{- with .Values.commonAnnotations }}
         {{- include "hermetiq-core.commonAnnotations" $ | nindent 8 }}
         {{- end }}
@@ -74,6 +77,15 @@ spec:
       {{- end }}
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.api) | nindent 6 }}
       volumes:
+        {{- if .Values.api.scim.enabled }}
+        - name: scim-credential
+          secret:
+            secretName: {{ .Values.api.scim.existingSecret | quote }}
+            items:
+              - key: {{ .Values.api.scim.existingSecretKey | quote }}
+                path: token
+        {{- end }}
+        {{- include "hermetiq-core.jwtProfileVolumes" .Values.api.jwt.profiles | nindent 8 }}
         - name: download-dir
           {{- with .Values.api.downloadDirSizeLimit }}
           emptyDir:
@@ -149,8 +161,17 @@ spec:
             - configMapRef:
                 name: {{ include "hermetiq-core.sharedEnvName" . }}
           env:
+            {{- if .Values.api.scim.enabled }}
+            - name: SCIM_CONFIG
+              value: {{ dict "issuer" .Values.api.scim.issuer "userIdPrefix" .Values.api.scim.userIdPrefix "bearerTokenFile" "/config/scim/token" "groups" .Values.api.scim.groups | mustToJson | quote }}
+            {{- end }}
+            - name: PROJECT_AUTHORIZATION_CONFIG
+              value: {{ include "hermetiq-core.projectAuthorizationJSON" . | quote }}
 {{- with .Values.api.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
+{{- end }}
+{{- with include "hermetiq-core.s3StorageEnv" (dict "root" $ "env" .Values.api.env) | trim }}
+{{- . | nindent 12 }}
 {{- end }}
             {{- if not (hasKey .Values.api.env "MCP_EXPOSE_USER_IDENTITIES") }}
             - name: MCP_EXPOSE_USER_IDENTITIES
@@ -218,7 +239,11 @@ spec:
             # Required — the process refuses to start without it.
             - name: GRPC_AUTH_USER_PROVIDER
               value: {{ include "hermetiq-core.grpcAuthUserProvider" . | quote }}
-            {{- if .Values.api.jwt.enabled }}
+            {{- if .Values.api.jwt.profiles }}
+            - name: GRPC_AUTH_JWT_PROFILES
+              value: {{ include "hermetiq-core.jwtProfilesJSON" .Values.api.jwt.profiles | quote }}
+            {{- else if .Values.api.jwt.enabled }}
+            {{- include "hermetiq-core.jwksRefreshEnv" (dict "settings" .Values.api.jwt "env" .Values.api.env) | nindent 12 }}
             # Issuer/JWKS/groups come from api.jwt.* (shared with the sidecar).
             {{- with (include "hermetiq-core.apiJwtJwksUrl" .) }}
             - name: GRPC_AUTH_JWKS_URL
@@ -426,6 +451,12 @@ spec:
               value: {{ printf "%s/tls.crt" .Values.otel.mtls.mountPath | quote }}
             {{- end }}
           volumeMounts:
+            {{- if .Values.api.scim.enabled }}
+            - name: scim-credential
+              mountPath: /config/scim
+              readOnly: true
+            {{- end }}
+            {{- include "hermetiq-core.jwtProfileMounts" .Values.api.jwt.profiles | nindent 12 }}
             - name: download-dir
               mountPath: /tmp/artifact-downloads
             - name: cache-ttl-config

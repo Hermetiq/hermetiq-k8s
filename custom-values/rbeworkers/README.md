@@ -7,19 +7,49 @@ them in the Buildbarn release namespace after the Buildbarn release and
 `buildbarn-worker-config` are ready. The example release namespace is
 `hermetiq`.
 
-These manifests require bb-worker-operator v0.3.13 or later and its matching
-CRD (operator chart 0.3.11 or later), which support the FUSE kernel tunables
-and Envoy's `spec.autoscaling.idleReplicas`. Upgrade the CRD and controller
-together following the [CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
+These manifests require bb-worker-operator v1.0.0 or later and its matching
+CRD (operator chart 1.0.0 or later), which support Buildbarn image inheritance,
+the FUSE kernel tunables, and Envoy's `spec.autoscaling.idleReplicas`.
+Upgrade the CRD and controller together following the
+[CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
 FUSE-backed pools also need Linux 6.2 or newer and writable `/sys`; see
 [FUSE kernel tuning](#fuse-kernel-tuning) for prerequisites and the fallback.
-When upgrading from operator versions before 0.3.4, drop
-`spec.autoscaling.prometheus.projectID` from existing manifests and overlays;
-queue-depth queries now filter by the worker's namespace.
+Queue-depth queries filter by the worker's namespace, so apply the pools in
+the namespace of the Buildbarn scheduler they scale on.
 
 ```bash
 kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
+
+The manifests do not set `spec.images.worker` or `spec.images.runnerInstaller`.
+The operator then uses the `workerImage` and
+`runnerInstallerImage` that the Buildbarn chart publishes in
+`buildbarn-worker-config`, so each pool's `bb-worker` always matches the
+Buildbarn release and its worker configuration. Set them only to run a
+different build, and update them in the same change as every Buildbarn
+upgrade.
+
+A pool without pins reports `SpecInvalid` while `buildbarn-worker-config` does
+not carry the two image keys, so install or upgrade Buildbarn before applying
+the pools.
+
+Custom pools using `spec.config.files` reference a ConfigMap through
+`configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.
+On every install and upgrade the Buildbarn chart reads the referenced
+ConfigMap's selected source keys, regardless of its name or labels, and
+refuses configuration fields and image defaults that the Buildbarn release it
+deploys rejects. A ConfigMap that no `RbeWorker` references is read too, with
+all of its keys, when its name ends in `-worker-config` or it carries the
+`hermetiq.com/worker-pool` label and the operator does not own it. Rename a
+backup copy of a worker configuration, or keep it in another namespace.
+Generated pools using a custom `commonConfigMapName`/`commonItems` are checked
+the same way. Only the Buildbarn chart's own ConfigMaps are exempt, because
+the upgrade replaces their contents. Removing an image pin from an `RbeWorker`
+does not update the image defaults of a separate custom ConfigMap. The image
+check reads the upstream date stamp in the tag. It cannot classify a
+digest-only or re-tagged image, so such a pin passes whatever it runs: check
+those yourself. See
+[Image and configuration checks](../../charts/buildbarn/README.md#image-and-configuration-checks).
 
 ## Pools
 
@@ -269,8 +299,7 @@ The worker operator renders a Kubernetes-native sidecar that terminates after
 the worker and runner and lazily unmounts `/worker/build`, preventing dead FUSE
 mounts from blocking kubelet Pod cleanup. Pools without `spec.storage.fuse` get
 no cleanup sidecar; a FUSE pool can explicitly opt out with
-`cleanupOnTermination: false`. This requires bb-worker-operator v0.3.3 or newer
-and Kubernetes 1.29 or newer.
+`cleanupOnTermination: false`. The sidecar requires Kubernetes 1.29 or newer.
 
 ## Worker and runner memory
 

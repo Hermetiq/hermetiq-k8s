@@ -86,7 +86,8 @@ victoriaMetrics:
 
 gcpWorkloadIdentity:
   # GKE only. Remove this block outside GKE and configure the cloud identity
-  # method for your cluster in the full chart values instead.
+  # method for your cluster in the full chart values instead (on EKS, IRSA via
+  # serviceAccount.annotations or an EKS Pod Identity association).
   enabled: true
   # Google service account bound to the chart's bep-nats ServiceAccount.
   serviceAccount: "hermetiq-bep@<gcp-project>.iam.gserviceaccount.com"
@@ -96,22 +97,36 @@ app:
   # before a large rollout (e.g. 8-16 for high-volume 5-10 shard RBE clusters);
   # must equal frontend.grpcCacheProxy.cacheEvents.numShards in buildbarn-values.yaml.
   streamPartitionCount: 4
-  # Grant the Hermetiq admin role on sign-in so initial admins can open
-  # Project Settings and manage users:
-  adminEmails: []
-  #   - admin@your-company.com
   # Enable Action Cache Hit Tracker queries and MCP cache-event tools:
   cacheEventsEnabled: true
   normalizeRepoUrls: true
   # Recommended for production scale: store build stdout/stderr (progress logs)
-  # in Google Cloud Storage or Azure Blob. This is enabled per project in
-  # Project Settings, not by a chart value; see "Progress log storage" in the
-  # Hermetiq chart README for the identity and bucket lifecycle requirements.
+  # in Google Cloud Storage, Azure Blob, or an S3-compatible store (AWS S3, OCI
+  # Object Storage, MinIO). This is enabled per project in Project Settings, not
+  # by a chart value; see "Progress log storage" in the Hermetiq chart README
+  # for the identity, access-key Secret (artifactStorage.s3) and bucket
+  # lifecycle requirements.
 
 oidc:
   # Shared OIDC issuer for API, publisher, and dashboard. Use the exact issuer
   # URL in your tokens (including its trailing slash, if present).
   issuerUrl: https://issuer.example.com/
+
+# The chart requires project and publisher authorization and the dashboard BFF.
+# Use application images from one release (including auth-proxy for JWT
+# profiles); see "Application images" in the chart README.
+authorization:
+  # Replace this immutable, issuer-qualified group with your administrator group.
+  administratorGroups:
+    - issuer: https://issuer.example.com/
+      group: hermetiq-admins
+      source: jwt
+  # Give build uploaders builder access to the actual project before installation.
+  groupBindings:
+    - projectId: "0"
+      issuer: https://issuer.example.com/
+      group: build-engineers
+      roles: [builder]
 
 api:
   # Example capacity for grpc-api; size requests and replica counts to load.
@@ -140,6 +155,8 @@ dashboard:
   # Quickstart's Bazel remote-cache URL derives as grpcs://bb.<hosts.domainBase>.
   # Override dashboard.remoteCacheUrl only if Buildbarn uses another host.
   oauth2Proxy:
+    # Replace with the email domains permitted to sign in to all shared UIs.
+    emailDomains: [example.com]
     # .<hosts.domainBase> is auto-included when hosts.domainBase is set. Add
     # external redirect domains here only when needed (e.g. [".auth0.com"]).
     whitelistDomains: []

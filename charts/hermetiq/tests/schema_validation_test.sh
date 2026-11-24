@@ -7,6 +7,15 @@ set -euo pipefail
 chart_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output=$(mktemp)
 trap 'rm -f "$output"' EXIT
+expect_schema_success() {
+  local setting=$1
+  if ! helm template schema-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
+    --set-json "$setting" >"$output" 2>&1; then
+    echo "Expected schema acceptance for $setting:" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
 expect_schema_failure() {
   local setting=$1 expected=$2
   if helm template schema-check "$chart_dir" -f "$chart_dir/ci-values/ci.yaml" \
@@ -20,6 +29,7 @@ expect_schema_failure() {
     exit 1
   fi
 }
+expect_schema_success 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"directory-builders","source":"scim","roles":["builder"]},{"projectId":"p","issuer":"https://issuer.example","group":"jwt-builders","source":"jwt","roles":["builder"]},{"projectId":"p","issuer":"https://issuer.example","group":"legacy-builders","roles":["builder"]}]'
 expect_schema_failure 'rbe.accessPolicy.projects={"":{"enabled":true,"minimum_role":"viewer"}}' \
   "Property name of \"\" does not match|invalid propertyName ''"
 expect_schema_failure 'rbe.accessPolicy.projects={"0":{"enabled":true,"minimum_role":"owner"}}' \
@@ -34,4 +44,49 @@ expect_schema_failure 'gateway.timeouts.apiWeb.requestTimeout="five-minutes"' \
   "apiWeb\.requestTimeout: Does not match pattern|apiWeb/requestTimeout': .* does not match pattern"
 expect_schema_failure 'gateway.timeouts.mcp.maxStreamDuration="forever"' \
   "mcp\.maxStreamDuration: Does not match pattern|mcp/maxStreamDuration': .* does not match pattern"
-echo 'Assistant and RBE values schema checks passed'
+expect_schema_failure 'authorization.mode="legacy"' \
+  "mode.*(not allowed|additionalProperties)|additional properties.*mode"
+expect_schema_failure 'authorization.mode="enforced"' \
+  "mode.*(not allowed|additionalProperties)|additional properties.*mode"
+expect_schema_failure 'publisher.jwks.source="automatic"' \
+  "source.*(one of|enum)"
+expect_schema_failure 'publisher.jwks.refreshInterval="eventually"' \
+  "refreshInterval.*(pattern|match)"
+expect_schema_failure 'publisher.jwks.principalKind="machine"' \
+  "principalKind.*(one of|enum)"
+expect_schema_failure 'authorization.defaultAccess="admin"' \
+  "defaultAccess.*(one of|enum)"
+expect_schema_failure 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"engineers","roles":["owner"]}]' \
+  "roles.*(one of|enum)"
+expect_schema_failure 'authorization.groupBindings=[{"projectId":"p","issuer":"https://issuer.example","group":"engineers","source":"directory","roles":["builder"]}]' \
+  "source.*(one of|enum)"
+expect_schema_failure 'authorization.serviceAccounts=[{"issuer":"https://issuer.example","subject":"ci"}]' \
+  "projectRoles.*required|missing property 'projectRoles'"
+expect_schema_failure 'api.scim.token="never-store-provisioning-tokens-in-values"' \
+  "token.*(not allowed|additionalProperties)|additional properties.*token"
+expect_schema_failure 'api.scim.existingSecretKey="../token"' \
+  "existingSecretKey.*(pattern|match)"
+expect_schema_failure 'api.scim.groups=[{"id":"build"}]' \
+  "displayName.*required|missing property 'displayName'"
+expect_schema_failure 'dashboard.oauth2Proxy.emailDomains="example.com"' \
+  "emailDomains.*(array|type)"
+expect_schema_failure 'dashboard.oauth2Proxy.emailDomains=["example.com,*"]' \
+  "emailDomains.*(pattern|match)"
+expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=[""]' \
+  "allowedGroups.*(length|minLength)"
+expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=["users,admins"]' \
+  "allowedGroups.*(pattern|match)"
+expect_schema_success 'artifactStorage={"s3":{"existingSecret":"hermetiq-s3-keys","accessKeyIdKey":"access-key","secretAccessKeyKey":"secret.key","region":"eu-central-1"}}'
+expect_schema_failure 'artifactStorage={"S3":{"existingSecret":"hermetiq-s3-keys"}}' \
+  "S3.*(not allowed|additionalProperties)|additional properties.*S3"
+expect_schema_failure 'artifactStorage={"s3":{"existingSecrets":"hermetiq-s3-keys"}}' \
+  "existingSecrets.*(not allowed|additionalProperties)|additional properties.*existingSecrets"
+expect_schema_failure 'artifactStorage.s3.existingSecret="Hermetiq S3 Keys"' \
+  "existingSecret.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.accessKeyIdKey=""' \
+  "accessKeyIdKey.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.secretAccessKeyKey="../key"' \
+  "secretAccessKeyKey.*(pattern|match)"
+expect_schema_failure 'artifactStorage.s3.region="us east 1"' \
+  "region.*(pattern|match)"
+echo 'Assistant, RBE, publisher, authorization, OAuth admission, and artifact storage values schema checks passed'

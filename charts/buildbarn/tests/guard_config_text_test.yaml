@@ -1,0 +1,627 @@
+suite: buildbarn pre-CDC configuration text guard
+templates:
+  - templates/validate.yaml
+release:
+  name: buildbarn
+  namespace: buildbarn
+tests:
+  # validate.yaml reads configOverrides, scheduler.actionRouter.custom and
+  # worker ConfigMaps as text. validation_test.yaml covers the basic rules;
+  # this suite covers the spellings and exemptions around them.
+
+  # --- One rejection per removed field --------------------------------------
+  - it: rejects keyLocationMapInMemory
+    set:
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapInMemory: { entries: 1 } } } } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "keyLocationMapInMemory" .* replace keyLocationMapInMemory with keyLocationMap: \{ inMemory: \.\.\. \}'
+
+  - it: rejects keyLocationMapOnBlockDevice
+    set:
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapOnBlockDevice: { file: {} } } } } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "keyLocationMapOnBlockDevice"'
+
+  - it: rejects keyLocationMapMaximumGetAttempts
+    set:
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapMaximumGetAttempts: 16 } } } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "keyLocationMapMaximumGetAttempts"'
+
+  - it: rejects keyLocationMapMaximumPutAttempts
+    set:
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapMaximumPutAttempts: 64 } } } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "keyLocationMapMaximumPutAttempts"'
+
+  - it: rejects adminHttpServers
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ adminHttpServers: [{ listenAddresses: [':7982'] }] }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "adminHttpServers" .* replace adminHttpServers with deprecatedAdminHttpServers'
+
+  - it: accepts deprecatedAdminHttpServers and deprecatedAdminRoutePrefix
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ deprecatedAdminHttpServers: [{ listenAddresses: [':7982'] }], deprecatedAdminRoutePrefix: '/' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects adminRoutePrefix
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ adminRoutePrefix: '/' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "adminRoutePrefix"'
+
+  - it: rejects enableGraphqlPlayground in portal.jsonnet
+    set:
+      configOverrides:
+        portal.jsonnet: "{ enableGraphqlPlayground: true }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["portal\.jsonnet"\] contains pre-CDC field "enableGraphqlPlayground"'
+
+  - it: rejects databaseCleanupConfiguration in portal.jsonnet
+    set:
+      configOverrides:
+        portal.jsonnet: "{ databaseCleanupConfiguration: { cleanupInterval: '3600s' } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["portal\.jsonnet"\] contains pre-CDC field "databaseCleanupConfiguration"'
+
+  # The three portal rules are scoped to portal.jsonnet.
+  - it: does not apply the portal-only rules to other files
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ local unused = { instanceNameAuthorizer: {}, enableGraphqlPlayground: true, databaseCleanupConfiguration: {} } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Spellings of a field ---------------------------------------------------
+  - it: recognises single-quoted keys
+    set:
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { 'keyLocationMapInMemory': { entries: 1 } } } } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["storage\.jsonnet"\] contains pre-CDC field "keyLocationMapInMemory"'
+
+  # A configuration produced as JSON quotes every key.
+  - it: recognises double-quoted keys
+    set:
+      configOverrides:
+        scheduler.jsonnet: '{ "adminHttpServers": [], "contentAddressableStorage": { "chunkStorage": {} } }'
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "adminHttpServers"'
+
+  - it: recognises a quoted single-store contentAddressableStorage
+    set:
+      configOverrides:
+        common.libsonnet: '{ "blobstore": { "contentAddressableStorage": { "grpc": { "address": "storage:8981" } } } }'
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["common\.libsonnet"\] defines a pre-CDC single-store "contentAddressableStorage" without "chunkStorage"'
+
+  - it: accepts a quoted CDC contentAddressableStorage
+    set:
+      configOverrides:
+        common.libsonnet: '{ "blobstore": { "contentAddressableStorage": { "chunkStorage": {}, "chunkMappingStorage": {} } } }'
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: recognises the jsonnet merge form (name+:)
+    set:
+      configOverrides:
+        scheduler.jsonnet: "(import 'base.jsonnet') + { zstdPool+: { maximumEncoders: 4 } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  - it: recognises the jsonnet hidden form (name::)
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ adminRoutePrefix:: '/', deprecatedAdminRoutePrefix: self.adminRoutePrefix }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "adminRoutePrefix"'
+
+  # The pre-CDC Envoy worker overlay: a merge into contentAddressableStorage
+  # that sets no CDC field.
+  - it: rejects a pre-CDC decorator merged into contentAddressableStorage with the merge form
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-libraries
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-libraries
+              data:
+                common.libsonnet: |
+                  local common = import 'common-base.libsonnet';
+                  common { blobstore+: { contentAddressableStorage+: { deadlineEnforcing+: { timeout: '120s' } } } }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap buildbarn/envoy-libraries data\["common\.libsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage'
+
+  # The chart's own worker common.libsonnet ends in this overlay. A custom
+  # ConfigMap holding a copy of it, or only the overlay, is CDC configuration.
+  - it: accepts a copy of the chart worker common.libsonnet with its chunkCache overlay
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-custom
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: |
+                  {
+                    blobstore: {
+                      contentAddressableStorage: {
+                        chunkStorage: { sharding: {} },
+                        chunkMappingStorage: { chunkMappingValidating: { backend: { sharding: {} } } },
+                        cdcParameterCache: { cacheSize: 1000, cacheDuration: '3600s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' },
+                      },
+                      actionCache: { completenessChecking: { backend: { sharding: {} } } },
+                    },
+                    portalUrl: 'https://portal.example.com',
+                  }
+                  + {
+                    // Workers only: keep decoded chunks in memory, so repeat FUSE reads
+                    // skip ZSTD decoding and SHA-256 verification.
+                    blobstore+: {
+                      contentAddressableStorage+: {
+                        chunkCache: {
+                          cacheSize: 2048,
+                          cacheDuration: "3600s",
+                          cacheReplacementPolicy: "LEAST_RECENTLY_USED",
+                        },
+                      },
+                    },
+                  }
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts an overlay that only merges a CDC field into contentAddressableStorage
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-custom
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: |
+                  (import 'chart-common.libsonnet') + {
+                    blobstore+: { contentAddressableStorage+: { chunkCache: { cacheSize: 4096, cacheDuration: '3600s', cacheReplacementPolicy: 'LEAST_RECENTLY_USED' } } },
+                  }
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Comments -----------------------------------------------------------------
+  - it: ignores removed field names in whole-line hash comments
+    set:
+      configOverrides:
+        scheduler.jsonnet: |
+          # browserUrl: was renamed to deprecatedPortalUrl
+          {
+              # zstdPool: { maximumEncoders: 4 } was removed
+            deprecatedPortalUrl: common.portalUrl,
+          }
+    asserts:
+      - notFailedTemplate: {}
+
+  # Only whole-line # comments are removed: a # later in a line can be part of
+  # a string, so the rest of that line is still read.
+  - it: still reads a line that has a hash sign after other text
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ label: 'pool #1', zstdPool: {} }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  # --- The operator's worker-common.libsonnet -----------------------------------
+  # Excerpt of the worker-common.libsonnet that bb-worker-operator 1.0.0 embeds
+  # (internal/controller/rbeworker_controller.go, generatedWorkerCommonLibsonnet).
+  # It generates the CDC blobstore only and names no removed field, so a pool
+  # that projects its own copy through commonItems must pass.
+  - it: accepts the operator's built-in worker-common.libsonnet projected by a pool
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-custom
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                    commonItems:
+                      - {key: common.libsonnet, path: common.libsonnet}
+                      - {key: worker-common.libsonnet, path: worker-common.libsonnet}
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'https://portal.example.com' }"
+                worker-common.libsonnet: |
+                  local common = import 'common.libsonnet';
+
+                  {
+                    workerConfig(config):: (
+                      local casMountPath = if std.objectHas(config, 'casMountPath') && config.casMountPath != '' then config.casMountPath else '/storage-worker-cas';
+                      local commonCAS = common.blobstore.contentAddressableStorage;
+                      local casConfig = {
+                        chunkStorage: {
+                          readCaching: {
+                            slow: commonCAS.chunkStorage,
+                            fast: {
+                              'local': {
+                                keyLocationMap: {
+                                  onBlockDevice: {
+                                    file: {
+                                      path: casMountPath + '/key_location_map',
+                                      sizeBytes: 200 * 1024 * 1024,
+                                    },
+                                  },
+                                  maximumGetAttempts: 8,
+                                  maximumPutAttempts: 32,
+                                },
+                                oldBlocks: 2,
+                                currentBlocks: 12,
+                                newBlocks: 1,
+                                blocksOnBlockDevice: {
+                                  source: {
+                                    file: {
+                                      path: casMountPath + '/blocks',
+                                      sizeBytes: 16 * 1024 * 1024 * 1024,
+                                    },
+                                  },
+                                  spareBlocks: 1,
+                                },
+                                persistent: {
+                                  stateDirectoryPath: casMountPath + '/persistent_state',
+                                  minimumEpochInterval: '300s',
+                                },
+                              },
+                            },
+                            replicator: { deduplicating: { 'local': {} } },
+                          },
+                        },
+                        chunkMappingStorage: commonCAS.chunkMappingStorage,
+                        cdcParameterCache: if std.objectHas(commonCAS, 'cdcParameterCache') then
+                          commonCAS.cdcParameterCache
+                        else {
+                          cacheSize: 1000,
+                          cacheDuration: '60s',
+                          cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
+                        },
+                        [if std.objectHas(commonCAS, 'chunkCache') then 'chunkCache']: commonCAS.chunkCache,
+                      };
+                      // Buildbarn's content-defined chunking (CDC) schema is the only one this
+                      // operator generates.
+                      assert std.objectHas(commonCAS, 'chunkStorage') && std.objectHas(commonCAS, 'chunkMappingStorage') :
+                             'common.libsonnet is not a CDC Buildbarn configuration: blobstore.contentAddressableStorage needs chunkStorage and chunkMappingStorage. This operator generates CDC worker configuration only; upgrade the Buildbarn chart to 1.0.0 or later.';
+                      assert std.objectHas(common, 'portalUrl') :
+                             'common.libsonnet has no portalUrl, which CDC Buildbarn workers require. Upgrade the Buildbarn chart to 1.0.0 or later, or add portalUrl to a custom common.libsonnet.';
+                      {
+                        blobstore: {
+                          actionCache: common.blobstore.actionCache,
+                          contentAddressableStorage: casConfig,
+                        },
+                        portalUrl: common.portalUrl,
+                        maximumMessageSizeBytes: common.maximumMessageSizeBytes,
+                      }
+                    ),
+                  }
+    asserts:
+      - notFailedTemplate: {}
+
+  # A pre-CDC worker library is refused, whatever else it contains.
+  - it: rejects a pre-CDC worker-common.libsonnet projected by a pool
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-custom
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: custom-libraries
+                    commonItems:
+                      - {key: common.libsonnet, path: common.libsonnet}
+                      - {key: worker-common.libsonnet, path: worker-common.libsonnet}
+        configMaps:
+          items:
+            - metadata:
+                name: custom-libraries
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'https://portal.example.com' }"
+                worker-common.libsonnet: |
+                  local common = import 'common.libsonnet';
+                  {
+                    workerConfig(config):: {
+                      blobstore: {
+                        actionCache: common.blobstore.actionCache,
+                        contentAddressableStorage: {
+                          readCaching: {
+                            slow: common.blobstore.contentAddressableStorage,
+                            fast: { 'local': { keyLocationMapOnBlockDevice: { file: {} } } },
+                          },
+                        },
+                      },
+                    },
+                  }
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap buildbarn/custom-libraries data\["worker-common\.libsonnet"\] contains pre-CDC field "keyLocationMapOnBlockDevice"'
+
+  # A file that branches on the CDC shape and still carries a pre-CDC branch,
+  # as the operator's library did before 1.0.0, is refused like any other.
+  - it: rejects pre-CDC fields in a file that also tests for chunkStorage
+    set:
+      configOverrides:
+        scheduler.jsonnet: "{ a: if std.objectHas(common.blobstore.contentAddressableStorage, 'chunkStorage') then {} else { zstdPool: {} } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'configOverrides\["scheduler\.jsonnet"\] contains pre-CDC field "zstdPool"'
+
+  # --- Which ConfigMaps are read, and what the message says ---------------------
+  # A ConfigMap nothing references is still read when its name ends in
+  # -worker-config; the message has to say that is why.
+  - it: reads an unreferenced ConfigMap selected by the -worker-config suffix and says so
+    set:
+      _testLookup:
+        configMaps:
+          items:
+            - metadata:
+                name: backup-20261119-buildbarn-worker-config
+              data:
+                common.libsonnet: "{ browserUrl: 'https://browser.example.com' }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap buildbarn/backup-20261119-buildbarn-worker-config data\["common\.libsonnet"\] contains pre-CDC field "browserUrl"'
+      - failedTemplate:
+          errorPattern: 'No RbeWorker references this ConfigMap; it was selected by its name ending in -worker-config\. If it is not a worker configuration \(for example a backup copy\), rename it or keep it outside this namespace'
+
+  - it: reads an unreferenced ConfigMap selected by the worker-pool label and says so
+    set:
+      _testLookup:
+        configMaps:
+          items:
+            - metadata:
+                name: pool-a-settings
+                labels:
+                  hermetiq.com/worker-pool: pool-a
+              data:
+                worker.jsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live worker ConfigMap buildbarn/pool-a-settings data\["worker\.jsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage'
+      - failedTemplate:
+          errorPattern: 'No RbeWorker references this ConfigMap; it was selected by its hermetiq\.com/worker-pool label\.'
+
+  - it: does not read an unreferenced ConfigMap with another name and no label
+    set:
+      _testLookup:
+        configMaps:
+          items:
+            - metadata:
+                name: pre-cdc-backup
+              data:
+                common.libsonnet: "{ browserUrl: 'https://browser.example.com' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not explain the selection of a ConfigMap an RbeWorker references
+    set:
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-custom
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: team-worker-config
+        configMaps:
+          items:
+            - metadata:
+                name: team-worker-config
+              data:
+                common.libsonnet: "{ browserUrl: 'https://browser.example.com' }"
+    asserts:
+      - failedTemplate:
+          errorMessage: 'live worker ConfigMap buildbarn/team-worker-config data["common.libsonnet"] contains pre-CDC field "browserUrl" (replace browserUrl with portalUrl (or deprecatedPortalUrl in scheduler.jsonnet)); migrate the ConfigMap before upgrading the buildbarn chart'
+
+  # --- extraObjects entries with several documents ---------------------------------
+  # Helm applies every document of an entry, so the guard reads every one. The
+  # rendered ConfigMap replaces the live pre-CDC copy and must be judged
+  # instead of it, wherever it sits in the entry.
+  - it: reads a ConfigMap that is not the first document of an extraObjects entry
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: extra-sa
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } }, browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a pre-CDC ConfigMap in a later document and calls it release-rendered
+    set:
+      extraObjects:
+        - |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: extra-sa
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: envoy-worker-config
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'release-rendered worker ConfigMap buildbarn/envoy-worker-config data\["common\.libsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage; migrate it in the release values \(extraObjects\) before upgrading the buildbarn chart'
+
+  - it: reads ConfigMaps inside a kind List entry
+    set:
+      extraObjects:
+        - apiVersion: v1
+          kind: List
+          items:
+            - apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: extra-sa
+            - apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { chunkStorage: {}, chunkMappingStorage: {} } }, portalUrl: 'new' }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+        configMaps:
+          items:
+            - metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } }, browserUrl: 'old' }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a pre-CDC ConfigMap inside a kind List entry
+    set:
+      extraObjects:
+        - apiVersion: v1
+          kind: List
+          items:
+            - apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: envoy-worker-config
+              data:
+                common.libsonnet: "{ browserUrl: 'old' }"
+      _testLookup:
+        rbeWorkers:
+          items:
+            - metadata:
+                name: worker-envoy
+              spec:
+                config:
+                  generated:
+                    commonConfigMapName: envoy-worker-config
+    asserts:
+      - failedTemplate:
+          errorPattern: 'release-rendered worker ConfigMap buildbarn/envoy-worker-config data\["common\.libsonnet"\] contains pre-CDC field "browserUrl"'
+
+  # --- Opt-out -----------------------------------------------------------------
+  - it: skips the configOverrides text scan with upgradeChecks.skipConfigTextCheck
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapInMemory: { entries: 1 } } } } } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips the custom router text scan with upgradeChecks.skipConfigTextCheck
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ simple: { browserUrl: 'x' } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses the same custom router text without the opt-out
+    set:
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ simple: { browserUrl: 'x' } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'scheduler\.actionRouter\.custom contains pre-CDC field "browserUrl"'

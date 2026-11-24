@@ -6,15 +6,17 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.12
-appVersion: "v0.3.13"
+version: 1.0.0
+appVersion: "v1.0.0"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: security
-      description: "Pin the operator v0.3.13 image to its immutable SHA-256 manifest digest; the operator Deployment rolls once on upgrade"
     - kind: changed
-      description: "image.digest now has a default and takes precedence over image.tag; set or clear image.digest when overriding image.tag"
+      description: "Breaking: operator v1.0.0 generates worker configuration for Buildbarn's CDC storage only. Run it with the Buildbarn 1.0.0 chart and upgrade the two in one maintenance window; against a pre-CDC Buildbarn, workers stop at startup with an error naming the cause"
+    - kind: changed
+      description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap. Apply the updated CRD before upgrading"
+    - kind: changed
+      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts and follows 0.3.12. The default image is pinned to the signed v1.0.0 digest"
 keywords:
   - buildbarn
   - bazel

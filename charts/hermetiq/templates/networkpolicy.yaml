@@ -24,6 +24,9 @@ spec:
       {{- with .Values.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              app: {{ include "hermetiq-core.dashboardName" $ }}
       {{- end }}
     {{- /* 8008 serves both the REST API (Service port 80) and /metrics, so it
          admits ingress callers and scrapers alike. */}}
@@ -33,6 +36,9 @@ spec:
       {{- with .Values.networkPolicy.ingressFrom }}
       from:
         {{- concat . ($.Values.networkPolicy.metricsFrom | default list) | toYaml | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              app: {{ include "hermetiq-core.dashboardName" $ }}
       {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
