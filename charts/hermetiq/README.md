@@ -1465,8 +1465,8 @@ kubectl -n hermetiq rollout restart deployment \
 
 Grant the resulting identity only the object-storage permissions that the
 enabled features need: progress-log storage needs read and write access for
-the subscribers, and trace and output-file features may need additional read
-access.
+the subscribers and API Pods, and trace and output-file features may need
+additional read access.
 
 ## Application settings
 

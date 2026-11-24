@@ -78,9 +78,9 @@ expect_schema_failure 'dashboard.oauth2Proxy.allowedGroups=["users,admins"]' \
   "allowedGroups.*(pattern|match)"
 expect_schema_success 'artifactStorage={"s3":{"existingSecret":"hermetiq-s3-keys","accessKeyIdKey":"access-key","secretAccessKeyKey":"secret.key","region":"eu-central-1"}}'
 expect_schema_failure 'artifactStorage={"S3":{"existingSecret":"hermetiq-s3-keys"}}' \
-  "additional propert(y|ies) 'S3'"
+  "S3.*(not allowed|additionalProperties)|additional properties.*S3"
 expect_schema_failure 'artifactStorage={"s3":{"existingSecrets":"hermetiq-s3-keys"}}' \
-  "additional propert(y|ies) 'existingSecrets'"
+  "existingSecrets.*(not allowed|additionalProperties)|additional properties.*existingSecrets"
 expect_schema_failure 'artifactStorage.s3.existingSecret="Hermetiq S3 Keys"' \
   "existingSecret.*(pattern|match)"
 expect_schema_failure 'artifactStorage.s3.accessKeyIdKey=""' \
