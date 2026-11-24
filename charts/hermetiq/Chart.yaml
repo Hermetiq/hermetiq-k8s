@@ -32,6 +32,8 @@ annotations:
       description: "Dashboard API calls and assistant streams get the API route timeout on every routing provider and are no longer cut at the oauth2-proxy 30-second upstream default"
     - kind: fixed
       description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
+    - kind: added
+      description: "Read S3 access keys for S3-compatible progress log storage from a Secret (artifactStorage.s3)"
 keywords:
   - hermetiq
   - MCP

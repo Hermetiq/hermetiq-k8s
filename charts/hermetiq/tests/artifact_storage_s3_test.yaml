@@ -1,0 +1,112 @@
+suite: S3 progress log storage credentials
+templates:
+  - templates/deployment-api.yaml
+  - templates/deployment-publisher.yaml
+  - templates/deployment-subscribers.yaml
+values:
+  - ../ci-values/ci.yaml
+tests:
+  - it: sets no AWS variables by default
+    asserts:
+      - template: templates/deployment-api.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_ACCESS_KEY_ID")]
+      - template: templates/deployment-publisher.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "AWS_SECRET_ACCESS_KEY")]
+      - template: templates/deployment-subscribers.yaml
+        documentIndex: 0
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "AWS_REGION")]
+
+  - it: renders nothing when values reused from an older release lack artifactStorage
+    set:
+      artifactStorage: null
+    asserts:
+      - template: templates/deployment-api.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_ACCESS_KEY_ID")]
+
+  - it: reads the key pair from the Secret on api, publisher and every subscriber
+    set:
+      artifactStorage.s3.existingSecret: s3-keys
+    asserts:
+      - template: templates/deployment-api.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_ACCESS_KEY_ID")].valueFrom.secretKeyRef
+          value: {name: s3-keys, key: AWS_ACCESS_KEY_ID}
+      - template: templates/deployment-api.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_SECRET_ACCESS_KEY")].valueFrom.secretKeyRef
+          value: {name: s3-keys, key: AWS_SECRET_ACCESS_KEY}
+      - template: templates/deployment-api.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "prompt-runtime")].env[?(@.name == "AWS_ACCESS_KEY_ID")]
+      - template: templates/deployment-publisher.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "AWS_SECRET_ACCESS_KEY")].valueFrom.secretKeyRef
+          value: {name: s3-keys, key: AWS_SECRET_ACCESS_KEY}
+      - template: templates/deployment-subscribers.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "AWS_ACCESS_KEY_ID")].valueFrom.secretKeyRef
+          value: {name: s3-keys, key: AWS_ACCESS_KEY_ID}
+      - template: templates/deployment-subscribers.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "AWS_REGION")]
+
+  - it: uses custom key names and sets the region
+    set:
+      artifactStorage.s3.existingSecret: oci-keys
+      artifactStorage.s3.accessKeyIdKey: access-key
+      artifactStorage.s3.secretAccessKeyKey: secret-key
+      artifactStorage.s3.region: eu-frankfurt-1
+    asserts:
+      - template: templates/deployment-publisher.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "AWS_ACCESS_KEY_ID")].valueFrom.secretKeyRef
+          value: {name: oci-keys, key: access-key}
+      - template: templates/deployment-publisher.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "AWS_SECRET_ACCESS_KEY")].valueFrom.secretKeyRef
+          value: {name: oci-keys, key: secret-key}
+      - template: templates/deployment-subscribers.yaml
+        documentIndex: 0
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats-sub")].env[?(@.name == "AWS_REGION")].value
+          value: eu-frankfurt-1
+
+  - it: sets only the region when no Secret is named
+    set:
+      artifactStorage.s3.region: eu-central-1
+    asserts:
+      - template: templates/deployment-api.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_REGION")].value
+          value: eu-central-1
+      - template: templates/deployment-api.yaml
+        notExists:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_ACCESS_KEY_ID")]
+
+  - it: lets a component's own env win over artifactStorage
+    set:
+      artifactStorage.s3.existingSecret: s3-keys
+      artifactStorage.s3.region: eu-central-1
+      publisher.env.AWS_REGION: us-ashburn-1
+    asserts:
+      - template: templates/deployment-publisher.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env[?(@.name == "AWS_REGION")].value
+          value: us-ashburn-1
+      - template: templates/deployment-publisher.yaml
+        contains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: AWS_REGION, value: us-ashburn-1}
+          count: 1
+      - template: templates/deployment-publisher.yaml
+        notContains:
+          path: spec.template.spec.containers[?(@.name == "bep-nats")].env
+          content: {name: AWS_REGION, value: eu-central-1}
+      - template: templates/deployment-api.yaml
+        equal:
+          path: spec.template.spec.containers[?(@.name == "api")].env[?(@.name == "AWS_REGION")].value
+          value: eu-central-1

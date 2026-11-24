@@ -468,7 +468,8 @@ depend on cluster configuration:
   [sidecar section](charts/buildbarn/README.md#hermetiq-grpc-cache-proxy-sidecar)
   of the Buildbarn reference.
 - **Store compressed invocation logs in cloud object storage** needs workload
-  identity for the subscriber pods and a bucket lifecycle rule you own; see
+  identity for the subscriber and API pods (or, for S3-compatible stores,
+  access keys from a Secret), egress from those pods to the storage endpoint, and a bucket lifecycle rule you own; see
   [progress log storage](charts/hermetiq/README.md#progress-log-storage).
 - **Bytestream URI Host Aliases** in the CAS and bytestream client settings
   must include the external Buildbarn frontend host, for example
