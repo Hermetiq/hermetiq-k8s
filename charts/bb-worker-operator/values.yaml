@@ -71,10 +71,10 @@ image:
   # silently ignores — no error, the feature just never appears in the generated
   # worker Jsonnet.
   tag: ""
-  # Empty here and resolved when the chart is published, so the packaged chart
-  # pulls by digest. A non-empty digest takes precedence over the tag: when you
-  # override image.tag, set the matching digest or leave this empty.
-  digest: ""
+  # The signed v1.0.0 image index, taken from that release's
+  # release-images.json. The digest takes precedence over the tag: when you
+  # override image.tag, set the matching digest or clear this one.
+  digest: "sha256:edba1e563dc6dc428f00d1e904ace652a59c2589109125e48c96c324260aaddf"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

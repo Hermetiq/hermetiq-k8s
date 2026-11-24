@@ -16,7 +16,7 @@ annotations:
     - kind: changed
       description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap. Apply the updated CRD before upgrading"
     - kind: changed
-      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts and follows 0.3.12. The default image is referenced by tag; its digest is resolved when the chart is published"
+      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts and follows 0.3.12. The default image is pinned to the signed v1.0.0 digest"
 keywords:
   - buildbarn
   - bazel
