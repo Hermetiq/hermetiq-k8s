@@ -111,3 +111,61 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: SCIM_CONFIG must be configured through api.scim
+  - it: refuses source=scim groupBindings when SCIM is disabled
+    template: templates/validate.yaml
+    set:
+      api.scim.enabled: false
+      authorization.groupBindings:
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: engineering
+          source: scim
+          roles: [builder]
+    asserts:
+      - failedTemplate:
+          errorPattern: uses source=scim, which requires api\.scim\.enabled=true
+  - it: refuses source=scim groupBindings for undeclared SCIM group IDs
+    template: templates/validate.yaml
+    set:
+      authorization.groupBindings:
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: unknown-group
+          source: scim
+          roles: [builder]
+    asserts:
+      - failedTemplate:
+          errorPattern: with source=scim must be listed in api\.scim\.groups
+  - it: refuses source=scim administratorGroups when SCIM is disabled
+    template: templates/validate.yaml
+    set:
+      api.scim.enabled: false
+      authorization.administratorGroups:
+        - issuer: https://directory.example.test/
+          group: engineering
+          source: scim
+    asserts:
+      - failedTemplate:
+          errorPattern: administratorGroups group "engineering" uses source=scim, which requires api\.scim\.enabled=true
+  - it: refuses source=scim administratorGroups for undeclared SCIM group IDs
+    template: templates/validate.yaml
+    set:
+      authorization.administratorGroups:
+        - issuer: https://directory.example.test/
+          group: undeclared-admins
+          source: scim
+    asserts:
+      - failedTemplate:
+          errorPattern: administratorGroups group "undeclared-admins" with source=scim must be listed in api\.scim\.groups
+  - it: refuses empty roles in groupBindings
+    template: templates/validate.yaml
+    set:
+      authorization.groupBindings:
+        - projectId: my-project
+          issuer: https://directory.example.test/
+          group: engineering
+          source: scim
+          roles: []
+    asserts:
+      - failedTemplate:
+          errorPattern: "roles|at least one role"

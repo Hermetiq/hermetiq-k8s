@@ -67,3 +67,69 @@ tests:
         documentSelector:
           path: kind
           value: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name == "OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER")].value
+          value: "false"
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name == "OAUTH2_PROXY_PASS_ACCESS_TOKEN")].value
+          value: "false"
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name == "OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS")].value
+          value: "false"
+        template: templates/deployment-grafana-oauth2-proxy.yaml
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: preserves dashboard token forwarding in the shared ConfigMap while suppressing it on Grafana
+    set:
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: true
+    asserts:
+      - equal:
+          path: data.OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER
+          value: "true"
+        template: templates/configmaps.yaml
+        documentSelector:
+          path: metadata.name
+          value: oauth2-proxy-config-web-ui
+      - equal:
+          path: data.OAUTH2_PROXY_PASS_ACCESS_TOKEN
+          value: "true"
+        template: templates/configmaps.yaml
+        documentSelector:
+          path: metadata.name
+          value: oauth2-proxy-config-web-ui
+
+  - it: lets explicit grafana.oauth2Proxy.env overrides replace token defaults without duplicates
+    template: templates/deployment-grafana-oauth2-proxy.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      grafana.oauth2Proxy.enabled: true
+      gateway.routes.grafanaEnabled: true
+      grafana.oauth2Proxy.env.OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+      grafana.oauth2Proxy.env.OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+      grafana.oauth2Proxy.env.OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS: "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER, value: "true"}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OAUTH2_PROXY_PASS_ACCESS_TOKEN, value: "true"}
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS, value: "true"}
+          count: 1

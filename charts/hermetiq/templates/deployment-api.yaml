@@ -58,7 +58,7 @@ spec:
         {{- if and .Values.license.key.value (not .Values.license.key.existingSecret) }}
         checksum/license-secret: {{ dict "key" .Values.license.key.existingSecretKey "value" .Values.license.key.value | toJson | sha256sum }}
         {{- end }}
-        {{- if and .Values.api.jwt.enabled .Values.dashboard.oauth2Proxy.enabled (not .Values.api.jwt.audience) (not .Values.dashboard.oauth2Proxy.client.existingSecret) }}
+        {{- if and .Values.api.jwt.enabled (not .Values.api.jwt.profiles) .Values.dashboard.oauth2Proxy.enabled (not (trim (default "" .Values.api.jwt.audience))) (not .Values.dashboard.oauth2Proxy.client.existingSecret) }}
         hermetiq.com/oauth2-proxy-secret-checksum: {{ include "hermetiq-core.oauth2ProxySecretChecksum" . }}
         {{- end }}
     spec:
@@ -231,11 +231,12 @@ spec:
               value: {{ .Values.app.mcpProtoIntelToolsEnabled | quote }}
             - name: MCP_AUTH_DISABLED
               value: {{ .Values.api.mcpAuthDisabled | quote }}
-            # gRPC authentication. The core is the authentication boundary now:
-            # it verifies bearer tokens itself for the gRPC API (50091) and the
-            # MCP HTTP server (5150), instead of trusting identity headers from
-            # the grpc-auth-proxy sidecar (which stays only for gRPC-web
-            # framing and CORS, and still reads its own JWT_* set above).
+            # gRPC authentication. The core verifies bearer tokens itself for
+            # the gRPC API (50091) and the MCP HTTP server (5150), instead of
+            # trusting identity headers from the grpc-auth-proxy sidecar. In
+            # single-issuer mode the sidecar still verifies JWTs against JWT_*
+            # before forwarding; in api.jwt.profiles mode it runs in
+            # forward-only mode and only handles gRPC-web framing and CORS.
             # Required — the process refuses to start without it.
             - name: GRPC_AUTH_USER_PROVIDER
               value: {{ include "hermetiq-core.grpcAuthUserProvider" . | quote }}
@@ -254,8 +255,9 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- $audiences := list (include "hermetiq-core.mcpResourceUrl" .) (include "hermetiq-core.mcpEndpointUrl" .) }}
-            {{- if .Values.api.jwt.audience }}
-            {{- $audiences = append $audiences .Values.api.jwt.audience }}
+            {{- $apiAudience := trim (default "" .Values.api.jwt.audience) }}
+            {{- if $apiAudience }}
+            {{- $audiences = append $audiences $apiAudience }}
             {{- end }}
             {{- if eq (include "hermetiq-core.apiJwtAudienceFromOauth2Secret" .) "true" }}
             # The gRPC API audience is the dashboard oauth2-proxy client ID,

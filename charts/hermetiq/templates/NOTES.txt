@@ -10,7 +10,9 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
   Grafana:    https://{{ include "hermetiq-core.grafanaHost" . }}
 {{- end }}
   API web:    https://{{ include "hermetiq-core.apiHost" . }}{{ .Values.gateway.routes.apiWebPathPrefix }}
+{{- if not .Values.api.mcpAuthDisabled }}
   MCP:        {{ include "hermetiq-core.mcpEndpointUrl" . }}
+{{- end }}
   API gRPC:   grpcs://{{ include "hermetiq-core.apiGrpcHost" . }}
   BEP gRPC:   grpcs://{{ include "hermetiq-core.bepGrpcHost" . }}
 {{- if .Values.gateway.routes.bbcalGrpcEnabled }}
@@ -19,6 +21,15 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
 {{- else -}}
 EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
 {{- end }}
+
+{{ if .Values.api.mcpAuthDisabled -}}
+WARNING: MCP AUTHENTICATION DISABLED — api.mcpAuthDisabled=true grants
+every caller on {{ include "hermetiq-core.apiName" . }}:5150 a shared synthetic administrator identity
+with no per-user revocation. The external MCP route is not rendered; keep port
+5150 restricted to trusted in-cluster callers (for example with
+networkPolicy.enabled=true).
+
+{{ end -}}
 
 {{ if and (eq $provider "gateway") .Values.gateway.dashboardGrpcWeb.enabled -}}
 DASHBOARD gRPC-WEB — dashboard queries depend on the EnvoyPatchPolicy in this

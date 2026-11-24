@@ -89,6 +89,11 @@ tests:
           path: spec.template.spec.volumes[?(@.name == "publisher-jwks")].secret.secretName
           value: customer-build-keys
       - equal:
+          path: spec.template.spec.volumes[?(@.name == "publisher-jwks")].secret.items
+          value:
+            - key: jwks.json
+              path: jwks.json
+      - equal:
           path: spec.template.spec.containers[?(@.name == "bep-nats")].volumeMounts[?(@.name == "publisher-jwks")].mountPath
           value: /config/jwks
       - notExists:

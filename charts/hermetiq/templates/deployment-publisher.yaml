@@ -81,6 +81,9 @@ spec:
         - name: publisher-jwks
           secret:
             secretName: {{ include "hermetiq-core.pubJwksSecretName" . }}
+            items:
+              - key: jwks.json
+                path: jwks.json
         {{- end }}
         # File-mount (not env) so the kubelet's ~1m Secret refresh enables
         # license hot reload. Always mounted with optional: true so a trial

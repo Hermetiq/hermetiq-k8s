@@ -53,10 +53,16 @@ spec:
   rules:
     {{- if $httpRouteOnly }}
     - matches:
-        - headers:
+        - method: OPTIONS
+          headers:
             - name: Access-Control-Request-Method
               type: Exact
               value: POST
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - x-forwarded-client-cert
       backendRefs:
         - name: {{ include "hermetiq-core.apiName" . }}
           port: 50092
@@ -189,6 +195,7 @@ spec:
         - name: {{ include "hermetiq-core.grafanaUpstreamService" . }}
           port: {{ include "hermetiq-core.grafanaUpstreamServicePort" . }}
 {{- end }}
+{{- if not .Values.api.mcpAuthDisabled }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -210,6 +217,7 @@ spec:
       backendRefs:
         - name: {{ include "hermetiq-core.apiName" . }}
           port: 5150
+{{- end }}
 {{- $hcEnabled := .Values.gateway.healthChecks.enabled -}}
 {{- $bepTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "bepGrpc") | trim -}}
 {{- $apiTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "apiGrpc") | trim -}}
@@ -337,7 +345,7 @@ spec:
       name: {{ .Values.gateway.routes.dashboardName }}
   {{- $dashboardTimeout | nindent 2 }}
 {{- end }}
-{{- if and (not $httpRouteOnly) (or $hcEnabled $mcpTimeout) }}
+{{- if and (not $httpRouteOnly) (not .Values.api.mcpAuthDisabled) (or $hcEnabled $mcpTimeout) }}
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
@@ -369,14 +377,20 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
   name: gateway-cors-policy
-  namespace: {{ include "hermetiq-core.gatewayNamespace" . }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
   labels:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: {{ required "gateway.name is required" .Values.gateway.name }}
+      kind: GRPCRoute
+      name: {{ .Values.gateway.routes.bepGrpcName }}
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+      name: {{ .Values.gateway.routes.apiGrpcName }}
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.routes.apiWebName }}
   cors:
     allowOrigins:
       {{- if .Values.gateway.cors.allowOrigins }}
@@ -392,6 +406,7 @@ spec:
       {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 6 }}
     allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
     maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+{{- if not .Values.api.mcpAuthDisabled }}
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
@@ -416,7 +431,8 @@ spec:
     exposeHeaders:
       {{- toYaml .Values.gateway.cors.exposeHeaders | nindent 6 }}
       - mcp-protocol-version
-    allowCredentials: {{ .Values.gateway.cors.allowCredentials }}
+    allowCredentials: false
     maxAge: {{ .Values.gateway.cors.maxAge | quote }}
+{{- end }}
 {{- end }}
 {{- end }}

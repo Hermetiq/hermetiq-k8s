@@ -41,6 +41,12 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: images.bepNats.apiTag=v0.9.8-rc.1.*predates
+  - it: rejects any release tag older than v1.0.0 including v0.9.9
+    set:
+      images.bepNats.apiTag: v0.9.9
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.apiTag=v0.9.9.*predates
   - it: rejects the shipped publisher digest independently
     set:
       images.bepNats.pubDigest: sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118

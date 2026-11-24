@@ -39,14 +39,20 @@
 {{- define "hermetiq-core.validateJWTProfiles" -}}
 {{- $names := dict -}}
 {{- range . -}}
-{{- if or (not .name) (hasKey $names .name) -}}
+{{- $name := trim (default "" .name) -}}
+{{- if or (not $name) (hasKey $names $name) -}}
 {{- fail "JWT profiles require unique nonempty names" -}}
 {{- end -}}
-{{- $_ := set $names .name true -}}
-{{- if or (not .issuer) (not .audiences) -}}
+{{- $_ := set $names $name true -}}
+{{- if or (not (trim (default "" .issuer))) (not .audiences) -}}
 {{- fail "JWT profiles require issuer and audiences" -}}
 {{- end -}}
-{{- if ne (len (compact (list .jwksUrl .jwksInline .existingSecret))) 1 -}}
+{{- range .audiences -}}
+{{- if not (trim (toString .)) -}}
+{{- fail "JWT profile audiences entries must be nonempty" -}}
+{{- end -}}
+{{- end -}}
+{{- if ne (len (compact (list (trim (default "" .jwksUrl)) (trim (default "" .jwksInline)) (trim (default "" .existingSecret))))) 1 -}}
 {{- fail "each JWT profile requires exactly one jwksUrl, jwksInline, or existingSecret" -}}
 {{- end -}}
 {{- if not (has .credentialUse (list "browser" "build")) -}}

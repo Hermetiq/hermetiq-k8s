@@ -14,7 +14,7 @@
   {{- /* Compare the numeric release, including its prereleases, but never
        pass arbitrary custom tags to semverCompare. */ -}}
   {{- $release := regexFind "^v?[0-9]+\\.[0-9]+\\.[0-9]+" .tag -}}
-  {{- $legacy = semverCompare "<=0.9.8" $release -}}
+  {{- $legacy = semverCompare "<1.0.0" $release -}}
 {{- end -}}
 {{- if $legacy -}}
 {{- fail (printf "%s=%s selects an image that predates %s; configure matching authorization-capable %s and %s (digest takes precedence over tag). Helm deployments require enforced project authorization and compatible application images" $field $value .feature .tagField .digestField) -}}
