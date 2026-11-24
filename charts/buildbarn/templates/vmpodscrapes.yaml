@@ -4,7 +4,7 @@
 {{- if not (include "buildbarn.fullDeployment" .) -}}
 {{- $scrapes = list -}}
 {{- end -}}
-{{- if .Values.storage.enabled -}}
+{{- if include "buildbarn.manageStorage" . -}}
 {{- $scrapes = append $scrapes (dict "name" (printf "%s-vmpodscrape" (include "buildbarn.storageName" .)) "app" (include "buildbarn.storageName" .) "component" "storage") -}}
 {{- end -}}
 {{- if include "buildbarn.fullDeployment" . -}}

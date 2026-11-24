@@ -19,7 +19,8 @@
       "properties": {
         "skipWorkerChecks": {"type": "boolean"},
         "skipConfigTextCheck": {"type": "boolean"},
-        "skipStorageClaimTemplateCheck": {"type": "boolean"}
+        "skipStorageClaimTemplateCheck": {"type": "boolean"},
+        "skipExternalStorageCheck": {"type": "boolean"}
       }
     },
     "config": {

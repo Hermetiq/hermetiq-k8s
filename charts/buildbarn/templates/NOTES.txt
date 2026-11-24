@@ -1,6 +1,6 @@
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
 Storage target: {{ include "buildbarn.storageName" . }} ({{ .Values.storage.replicas }} shards).
-{{- if .Values.storage.enabled }}
+{{- if include "buildbarn.manageStorage" . }}
 
 {{- if (index (default (dict) .Values.configOverrides) "storage.jsonnet" | default "") }}
 STORAGE CONFIG OVERRIDE: configOverrides["storage.jsonnet"] replaces the generated

@@ -585,6 +585,9 @@ resources. It does not render application Deployments or worker ConfigMaps and
 does not require the namespace's existing workers to have been upgraded first.
 Choose a name not already owned by another release. Default claim names include
 the StatefulSet name, so the green claims are distinct from the old claims.
+Stage green storage on PVCs: storage-only mode refuses
+`storage.persistence.mode=hostPath`, because hostPath stores use fixed node paths
+and devices and a green pod could share a node, and its disks, with old storage.
 
 Validate all green shards, PVC binding, disk performance, persistence after a
 pod restart and storage logs before changing any production client. Clients
@@ -657,7 +660,10 @@ it need not expand this optional AC/CAS migration into an additional project.
    the client configuration. Frontend, scheduler, browser and generated worker
    configuration target `storage-cdc-0.storage-cdc.<namespace>:8981` and the other
    green shards. The independent release continues owning its StatefulSet and
-   claims. Do not run a deployment wrapper that reapplies unpaused worker CRs.
+   claims. Before applying anything, the upgrade refuses to continue if
+   StatefulSet `storage-cdc` is missing, is owned by the main release, or runs a
+   different number of replicas than `storage.replicas`.
+   Do not run a deployment wrapper that reapplies unpaused worker CRs.
    Avoid automatic rollback during this coordinated cross-version cutover.
 5. Check application readiness and the rendered client/worker addresses. Restore
    the worker pause settings, verify both custom and standard worker families,

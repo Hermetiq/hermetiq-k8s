@@ -1,11 +1,18 @@
 {{- $full := eq (default "full" .Values.deploymentMode) "full" -}}
-{{- $manageStorage := .Values.storage.enabled -}}
+{{- $manageStorage := include "buildbarn.manageStorage" . -}}
 {{- $storageName := include "buildbarn.storageName" . -}}
 {{- if not (has (default "full" .Values.deploymentMode) (list "full" "storage-only")) -}}
 {{- fail "deploymentMode must be full or storage-only" -}}
 {{- end -}}
 {{- if and (not $full) (not $manageStorage) -}}
 {{- fail "deploymentMode=storage-only requires storage.enabled=true" -}}
+{{- end -}}
+{{/* hostPath stores live at fixed node paths and devices that do not depend
+     on storage.name, and pod anti-affinity only separates pods of one ring. A
+     second ring could land on a node running the current storage and open the
+     same block devices and index files. */}}
+{{- if and (not $full) (eq (toString .Values.storage.persistence.mode) "hostPath") -}}
+{{- fail "deploymentMode=storage-only does not support storage.persistence.mode=hostPath: hostPath stores use fixed node paths and devices, and pod anti-affinity only separates pods of the same ring, so the new ring could share a node and its disks with the storage already running there. Stage the new ring with storage.persistence.mode=pvc" -}}
 {{- end -}}
 {{- if or (gt (len $storageName) 63) (not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $storageName)) -}}
 {{- fail "storage.name must be a DNS service label: 1-63 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit" -}}
@@ -688,3 +695,44 @@
        with this chart: an operator older than v1.0.0 generates pre-CDC worker
        configuration, which shows up as crash-looping worker pools, and
        Hermetiq 1.0.0 reads the CDC schema only. */ -}}
+{{- /* External-storage preflight. With storage.enabled=false this upgrade
+       deletes any storage StatefulSet the release still owns and rewrites
+       every client to dial storage.name with storage.replicas shards, so check
+       the target before anything is applied: it must exist, belong to another
+       release (or to none), and run the same number of shards. A missing ring
+       or a wrong name is a full outage; a replica mismatch sends part of the
+       keyspace to shards that do not exist. An offline render (helm template,
+       client-side dry run) has no list result and checks nothing. */ -}}
+{{- if and $full (not $manageStorage) (not (index $upgradeChecks "skipExternalStorageCheck")) -}}
+{{- $statefulSets := dict -}}
+{{- if hasKey $mockLookup "statefulSets" -}}
+{{- $statefulSets = default (dict) (index $mockLookup "statefulSets") -}}
+{{- else -}}
+{{- $statefulSets = default (dict) (lookup "apps/v1" "StatefulSet" $ns "") -}}
+{{- end -}}
+{{- if hasKey $statefulSets "items" -}}
+{{- $target := dict -}}
+{{- range $sts := default (list) (index $statefulSets "items") -}}
+{{- if eq (toString (index (default (dict) (index $sts "metadata")) "name")) $storageName -}}
+{{- $target = $sts -}}
+{{- end -}}
+{{- end -}}
+{{- $skipHint := "Set upgradeChecks.skipExternalStorageCheck=true to skip this check" -}}
+{{- if not $target -}}
+{{- fail (printf "storage.enabled=false points every client at StatefulSet %s/%s, which does not exist. Install the storage-only release first (deploymentMode=storage-only, storage.name=%s) and wait for its pods, or correct storage.name. %s" $ns $storageName $storageName $skipHint) -}}
+{{- end -}}
+{{- $targetMeta := default (dict) (index $target "metadata") -}}
+{{- $annotations := default (dict) (index $targetMeta "annotations") -}}
+{{- if and (eq (toString (index $annotations "meta.helm.sh/release-name")) $.Release.Name) (eq (toString (index $annotations "meta.helm.sh/release-namespace")) $.Release.Namespace) -}}
+{{- fail (printf "storage.enabled=false targets StatefulSet %s/%s, which this release (%s) owns: the upgrade would delete it and leave every client without storage. Set storage.name to the StatefulSet of the storage-only release. %s" $ns $storageName $.Release.Name $skipHint) -}}
+{{- end -}}
+{{- $targetSpec := default (dict) (index $target "spec") -}}
+{{- $liveReplicas := 1 -}}
+{{- if hasKey $targetSpec "replicas" -}}
+{{- $liveReplicas = int (index $targetSpec "replicas") -}}
+{{- end -}}
+{{- if ne $liveReplicas (int $.Values.storage.replicas) -}}
+{{- fail (printf "storage.replicas is %d but StatefulSet %s/%s is set to %d replicas. Clients shard by storage.replicas, so a mismatch sends part of the keyspace to shards that do not exist or leaves shards unused. Set storage.replicas to the storage-only release's value. %s" (int $.Values.storage.replicas) $ns $storageName $liveReplicas $skipHint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

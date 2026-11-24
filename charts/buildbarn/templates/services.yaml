@@ -151,7 +151,7 @@ spec:
       protocol: TCP
 ---
 {{- end }}
-{{- if .Values.storage.enabled }}
+{{- if include "buildbarn.manageStorage" . }}
 apiVersion: v1
 kind: Service
 metadata:

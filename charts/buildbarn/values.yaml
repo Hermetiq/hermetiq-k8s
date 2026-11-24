@@ -67,6 +67,11 @@ upgradeChecks:
   # check skipped, a claim-template change makes Helm apply every other object
   # of the release and then fail on the StatefulSet.
   skipStorageClaimTemplateCheck: false
+  # Skip the target check for storage.enabled=false. Leave this false: the
+  # check refuses an upgrade whose storage.name StatefulSet is missing, is
+  # still owned by this release, or runs a different number of replicas than
+  # storage.replicas, each of which leaves clients without working storage.
+  skipExternalStorageCheck: false
   # The two switches below exist for installs the checks cannot serve. Leave
   # them false unless you hit one of the cases named, and verify by hand what
   # the check would have verified.
@@ -406,7 +411,11 @@ k8sNodeScheduling:
 storage:
   # False leaves storage ownership with another release, but clients still use
   # name and replicas below. The old StatefulSet is removed on Helm upgrade;
-  # its PVCs are retained by Kubernetes and must be cleaned up manually.
+  # its PVCs are retained by Kubernetes and must be cleaned up manually. Before
+  # anything is applied, the upgrade checks that StatefulSet <name> exists, is
+  # owned by another release and runs <replicas> pods
+  # (upgradeChecks.skipExternalStorageCheck). Only an explicit false disables
+  # storage; a missing key keeps it.
   enabled: true
   # StatefulSet + headless Service name, and the target for every cache client.
   name: storage

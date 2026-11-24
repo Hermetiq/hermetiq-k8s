@@ -1,4 +1,4 @@
-{{- if and .Values.storage.enabled .Values.storage.podDisruptionBudget.enabled }}
+{{- if and (include "buildbarn.manageStorage" .) .Values.storage.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

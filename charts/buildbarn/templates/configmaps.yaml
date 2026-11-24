@@ -24,7 +24,7 @@ data:
 {{- end }}
 {{- range $path, $_ := .Files.Glob "files/config/*" }}
 {{- $name := base $path -}}
-{{- if and (or (include "buildbarn.fullDeployment" $root) (has $name (list "common.libsonnet" "storage.jsonnet"))) (or (ne $name "storage.jsonnet") $root.Values.storage.enabled) (or (ne $name "scheduler-routing.libsonnet") $root.Values.scheduler.configurationReloadInterval) }}
+{{- if and (or (include "buildbarn.fullDeployment" $root) (has $name (list "common.libsonnet" "storage.jsonnet"))) (or (ne $name "storage.jsonnet") (include "buildbarn.manageStorage" $root)) (or (ne $name "scheduler-routing.libsonnet") $root.Values.scheduler.configurationReloadInterval) }}
 {{- $override := index $configOverrides $name | default "" }}
   {{ $name }}: |-
 {{- if $override }}

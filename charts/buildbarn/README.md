@@ -819,6 +819,9 @@ The default `app: storage-cdc` selectors keep both storage rings separate;
 `kubernetes_service: storage` preserves the metrics conventions. Optional
 `storage.topologySpreadConstraints` are passed to the Pod spec; use
 `labelSelector.matchLabels.app: storage-cdc` when spreading this ring across zones.
+Storage-only mode refuses `storage.persistence.mode=hostPath`: hostPath stores use
+fixed node paths and devices, and anti-affinity only separates pods of one ring,
+so the new ring could share a node's disks with the storage already running there.
 
 Once the new shards are ready, upgrade the original full release using its
 application values and these overrides:
@@ -836,6 +839,12 @@ consistent between both releases. Generated clients dial
 `storage-cdc-<ordinal>.storage-cdc.<namespace>:8981`. Certificates must cover those
 names. An external-storage release rejects a `common.libsonnet` override because
 it would bypass the generated target; update custom worker configuration separately.
+
+Before anything is applied, the upgrade looks up StatefulSet `storage.name` in the
+namespace and refuses to continue if it does not exist, if this release still owns
+it (the upgrade would delete it), or if its replica count differs from
+`storage.replicas`. An offline render skips the check, and
+`upgradeChecks.skipExternalStorageCheck=true` turns it off.
 
 This upgrade removes the original storage StatefulSet and supporting resources.
 Kubernetes retains its PVCs by default; remove them manually after validating the
@@ -1370,6 +1379,7 @@ serve. `values.yaml` says what to verify by hand before setting one:
 | Value | Skips | Use it when |
 |---|---|---|
 | `upgradeChecks.skipStorageClaimTemplateCheck` | The claim-template comparison | Leave it `false`: without the check Helm applies every other object of the release and then fails on the StatefulSet. |
+| `upgradeChecks.skipExternalStorageCheck` | The `storage.enabled=false` target check: StatefulSet `storage.name` exists, is not owned by this release and runs `storage.replicas` pods | Leave it `false`: a missing, self-owned or differently sized target leaves clients without working storage. |
 | `upgradeChecks.skipWorkerChecks` | Every check that reads `RbeWorker` objects and worker ConfigMaps | The account running Helm may not list `RbeWorker` objects or ConfigMaps, and Helm stops with a `forbidden` error. |
 | `upgradeChecks.skipConfigTextCheck` | The text scan of `configOverrides`, `scheduler.actionRouter.custom` and worker ConfigMaps | The scan refuses configuration that is valid for the deployed binaries, such as a field name inside a string. |
 

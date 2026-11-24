@@ -106,7 +106,11 @@ cutover_values = {"storage": {"enabled": False, "name": "storage-cdc", "replicas
                               "persistence": {"mode": "unused"}},
                   "configOverrides": {"storage.jsonnet": "{ contentAddressableStorage: {} }"},
                   "_testLookup": {"statefulSets": {"items": [{
-                      "metadata": {"name": "storage-cdc"}, "spec": {
+                      "metadata": {"name": "storage-cdc", "annotations": {
+                          "meta.helm.sh/release-name": "buildbarn-storage-cdc",
+                          "meta.helm.sh/release-namespace": "buildbarn"}},
+                      "spec": {
+                          "replicas": 3,
                           "volumeClaimTemplates": [{"metadata": {"name": "different"}}],
                       },
                   }]}}}
@@ -142,5 +146,39 @@ render({"deploymentMode": "storage-only", "images": {"storage": {"tag": "2026090
 # The main upgrade still checks old workers even after storage moves to another release.
 render({"storage": {"enabled": False}, "_testLookup": green_values["_testLookup"]},
        error="pre-CDC image")
+# --reuse-values replaces chart defaults with the old release's values, which
+# have no storage.enabled. A missing key must keep storage, not delete it.
+reused = render({"storage": {"enabled": None}})
+for kind in ("StatefulSet", "Service", "PodDisruptionBudget"):
+    assert (kind, "storage") in reused, f"missing storage.enabled dropped {kind}"
+assert ("VMPodScrape", "storage-vmpodscrape") in render(
+    {"storage": {"enabled": None}, "vmPodScrapes": {"enabled": True}})
+assert "storage.jsonnet" in reused[("ConfigMap", "buildbarn-config")]["data"]
+
+# hostPath stores use fixed node paths, so a second ring could share disks.
+render({"deploymentMode": "storage-only", "storage": {"name": "storage-cdc",
+        "persistence": {"mode": "hostPath"}}}, error="does not support storage.persistence.mode=hostPath")
+
+# External-storage preflight: target must exist, belong to another release and
+# match storage.replicas. An offline render has no list result and passes.
+render({"storage": {"enabled": False, "name": "storage-cdc"}})
+def external(items, **storage):
+    return {"storage": {"enabled": False, "name": "storage-cdc", "replicas": 3, **storage},
+            "_testLookup": {"statefulSets": {"items": items}}}
+def sts(name="storage-cdc", release="buildbarn-storage-cdc", **spec):
+    return {"metadata": {"name": name, "annotations": {
+        "meta.helm.sh/release-name": release, "meta.helm.sh/release-namespace": "buildbarn"}},
+        "spec": spec}
+render(external([]), error="StatefulSet buildbarn/storage-cdc, which does not exist")
+render(external([sts(name="storage", release="test", replicas=3)]),
+       error="StatefulSet buildbarn/storage-cdc, which does not exist")
+render(external([sts(release="test", replicas=3)]), error="which this release (test) owns")
+render(external([sts(replicas=4)]), error="storage.replicas is 3 but StatefulSet buildbarn/storage-cdc is set to 4")
+render(external([sts()]), error="is set to 1 replicas")
+render(external([sts(name="storage", release="test", replicas=3)]) | {
+    "storage": {"enabled": False, "replicas": 3}}, error="which this release (test) owns")
+render(external([{"metadata": {"name": "storage-cdc"}, "spec": {"replicas": 3}}]))
+render(external([sts(replicas=3)]))
+render(external([]) | {"upgradeChecks": {"skipExternalStorageCheck": True}})
 print("PASS storage-only staging, external-storage cutover, selectors, rollouts and preflights")
 PY
