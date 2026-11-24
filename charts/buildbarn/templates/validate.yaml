@@ -429,12 +429,20 @@
 {{- $_ := set $rule "pattern" (include "buildbarn.cdc.keyPattern" $rule.field) -}}
 {{- end -}}
 {{- end -}}
+{{- /* Escape hatches. The text scan matches patterns and cannot evaluate
+       jsonnet, and the live checks need list access the installer may not
+       have; each one can be turned off on its own. */ -}}
+{{- $upgradeChecks := default (dict) $.Values.upgradeChecks -}}
+{{- $skipConfigTextCheck := index $upgradeChecks "skipConfigTextCheck" -}}
+{{- $skipWorkerChecks := index $upgradeChecks "skipWorkerChecks" -}}
+{{- $skipOperatorCheck := index $upgradeChecks "skipOperatorCheck" -}}
 {{- $casKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorage" -}}
 {{- $casServerKey := include "buildbarn.cdc.keyPattern" "contentAddressableStorageServer" -}}
 {{- /* Evidence that a contentAddressableStorage definition is the CDC message:
        it sets one of the fields only that message has, or it delegates to the
        chart's common.blobstore.contentAddressableStorage. */ -}}
 {{- $cdcShape := printf "(%s|common\\.blobstore\\.contentAddressableStorage)" (include "buildbarn.cdc.keyPattern" "(chunkStorage|chunkMappingStorage|chunkMappingCache|cdcParameterCache|chunkCache)") -}}
+{{- if not $skipConfigTextCheck -}}
 {{- range $name, $content := default (dict) $.Values.configOverrides -}}
 {{- $text := include "buildbarn.cdc.stripComments" $content -}}
 {{- if not (include "buildbarn.cdc.dualSchema" $text) -}}
@@ -465,6 +473,7 @@
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has "scheduler.jsonnet" $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has "scheduler.jsonnet" $rule.excludedFiles))) -}}
 {{- if and $inScope (regexMatch $rule.pattern $routerText) -}}
 {{- fail (printf "scheduler.actionRouter.custom contains pre-CDC field %q which is rejected by the CDC Buildbarn binaries: %s" $rule.field $rule.hint) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -505,6 +514,8 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- $rbeWorkerItems := list -}}
+{{- if not $skipWorkerChecks -}}
 {{- $configMaps := default (lookup "v1" "ConfigMap" $ns "") (index $mockLookup "configMaps") -}}
 {{- $configMapsByName := dict -}}
 {{- range $cm := default (list) (index (default (dict) $configMaps) "items") -}}
@@ -544,7 +555,7 @@
 {{- else if .Capabilities.APIVersions.Has "bb.hermetiq.com/v1/RbeWorker" -}}
 {{- $rbeWorkers = lookup "bb.hermetiq.com/v1" "RbeWorker" $ns "" -}}
 {{- end -}}
-{{- $rbeWorkerItems := default (list) (index (default (dict) $rbeWorkers) "items") -}}
+{{- $rbeWorkerItems = default (list) (index (default (dict) $rbeWorkers) "items") -}}
 {{- range $worker := $rbeWorkerItems -}}
 {{- $wName := (default (dict) $worker.metadata).name | default "<unknown>" -}}
 {{- $wSpec := default (dict) $worker.spec -}}
@@ -620,7 +631,7 @@
 {{- range $fName, $fContent := default (dict) $cm.data -}}
 {{- if or $selected.all (hasKey $selected.keys $fName) -}}
 {{- $fText := include "buildbarn.cdc.stripComments" $fContent -}}
-{{- if not (include "buildbarn.cdc.dualSchema" $fText) -}}
+{{- if and (not $skipConfigTextCheck) (not (include "buildbarn.cdc.dualSchema" $fText)) -}}
 {{- range $rule := $removedCdcFields -}}
 {{- $inScope := and (or (not (hasKey $rule "configFiles")) (has $fName $rule.configFiles)) (or (not (hasKey $rule "excludedFiles")) (not (has $fName $rule.excludedFiles))) -}}
 {{- if and $inScope (regexMatch $rule.pattern $fText) -}}
@@ -635,13 +646,17 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- /* Components that must understand CDC before this chart switches to it.
-       Chart/app-version labels describe packaging, not the selected image.
-       Require a capability declaration verified against the effective image.
-       Absent components are not required when no RbeWorkers exist in this
-       namespace: Buildbarn-only installs have no bep-nats, and SaaS runs it elsewhere.
-       These checks run on install as well as upgrade, on purpose: a first
-       install next to an undeclared operator or bep-nats is refused too. */ -}}
+{{- end -}}
+{{- /* The worker operator must understand CDC before this chart switches to
+       it: an older operator generates pre-CDC worker configuration from the CDC
+       common.libsonnet. Chart/app-version labels describe packaging, not the
+       selected image, so require a capability declaration verified against
+       the effective image. An absent operator is accepted when no RbeWorkers
+       exist in this namespace. The check runs on install as well as upgrade,
+       on purpose: a first install next to an undeclared operator is refused
+       too. Hermetiq is not checked: Hermetiq 1.0.0 reads the CDC schema only
+       and is upgraded together with this chart. */ -}}
+{{- if not $skipOperatorCheck -}}
 {{- $operatorNs := default $ns $.Values.upgradeChecks.operatorNamespace -}}
 {{- $operatorDeployments := default (lookup "apps/v1" "Deployment" $operatorNs "") (index $mockLookup "operatorDeployments") -}}
 {{- $foundOperator := false -}}
@@ -658,20 +673,6 @@
 {{- end -}}
 {{- end -}}
 {{- if and (gt (len $rbeWorkerItems) 0) (not $foundOperator) -}}
-{{- fail (printf "live RbeWorker resources exist in namespace %s, but no bb-worker-operator Deployment was found in namespace %s; set upgradeChecks.operatorNamespace to the operator's namespace so CDC compatibility can be verified before upgrading" $ns $operatorNs) -}}
-{{- end -}}
-{{- $hermetiqNs := default $ns $.Values.upgradeChecks.hermetiqNamespace -}}
-{{- $deployments := default (lookup "apps/v1" "Deployment" $hermetiqNs "") (index $mockLookup "deployments") -}}
-{{- range $dep := default (list) (index (default (dict) $deployments) "items") -}}
-{{- $dMeta := default (dict) $dep.metadata -}}
-{{- $dName := $dMeta.name | default "" -}}
-{{- $dLabels := default (dict) $dMeta.labels -}}
-{{- $chartLabel := default "" (index $dLabels "helm.sh/chart") -}}
-{{- /* bep-nats validates ConfigSets in grpc-api and bep-nats-pub; the
-       subscribers only ingest builds. */ -}}
-{{- if or (has $dName (list "grpc-api" "bep-nats-pub" "bep-nats")) (and (hasPrefix "hermetiq-" $chartLabel) (has (default "" (index $dLabels "app.kubernetes.io/component")) (list "api" "publisher"))) -}}
-{{- if ne (default "" (index (default (dict) $dMeta.annotations) "hermetiq.com/cdc-compatible")) "true" -}}
-{{- fail (printf "live Deployment %s/%s has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image; deploy an image that validates both pre-CDC and CDC configurations and set buildbarnCdcCompatible=true in the hermetiq chart (chart version alone does not establish compatibility). This needs a Hermetiq chart release newer than the published 0.9.8: that chart accepts the value but renders no annotation" $hermetiqNs $dName) -}}
-{{- end -}}
+{{- fail (printf "live RbeWorker resources exist in namespace %s, but no bb-worker-operator Deployment was found in namespace %s; set upgradeChecks.operatorNamespace to the operator's namespace so CDC compatibility can be verified before upgrading. If the account running Helm cannot read that namespace, confirm the operator runs v0.3.14 or newer and set upgradeChecks.skipOperatorCheck=true" $ns $operatorNs) -}}
 {{- end -}}
 {{- end -}}

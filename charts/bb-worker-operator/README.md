@@ -11,7 +11,7 @@ supported full-stack deployment order.
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
   - [Replacing the CRD from scratch](#replacing-the-crd-from-scratch)
-- [Upgrading to 0.3.13](#upgrading-to-0313)
+- [Upgrading to 1.0.0](#upgrading-to-100)
 - [Upgrading to 0.3.12](#upgrading-to-0312)
 - [Upgrading to 0.3.11](#upgrading-to-0311)
 - [RbeWorker Pools](#rbeworker-pools)
@@ -59,8 +59,8 @@ Inspect this release's packaged documentation and defaults before editing the
 operator values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.13
-helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 0.3.13
+helm show readme oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/bb-worker-operator --version 1.0.0
 ```
 
 For a namespace-scoped install, set `rbac.mode=namespace` and
@@ -69,7 +69,7 @@ the CRD from the matching release tag:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.13/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -78,7 +78,7 @@ Then install the controller in the namespace:
 ```bash
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.13 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
@@ -127,12 +127,12 @@ charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 ```
 
 The recommended way to install or upgrade the CRD is to apply the versioned
-file and wait for Kubernetes to establish it. This example uses release 0.3.13;
+file and wait for Kubernetes to establish it. This example uses release 1.0.0;
 use the target chart's release tag when upgrading:
 
 ```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.13/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 ```
 
@@ -144,6 +144,10 @@ apply the CRD, then installs the controller with `--skip-crds`.
 On an **upgrade**, run the CRD command above before upgrading the chart or
 applying `RbeWorker` manifests that use new fields. Helm does not upgrade CRDs in
 `crds/` during `helm upgrade`, even when the chart contains a newer schema.
+If Helm created the CRD on the first install, `kubectl` can stop with a
+conflict against the `helm` field manager on `.spec.versions`. The new schema
+is meant to replace the old one, so run the same command again with
+`--force-conflicts` added.
 Keep the chart and CRD at the same version, and leave `image.tag` empty so the
 controller follows the chart's `appVersion`. A newer CRD may accept fields
 that an older controller cannot act on.
@@ -180,35 +184,37 @@ kubectl delete crd rbeworkers.bb.hermetiq.com --wait=true --ignore-not-found
 
 # 3. Apply the CRD from the release you are installing, and wait for it.
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v0.3.13/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
+  https://raw.githubusercontent.com/Hermetiq/hermetiq-k8s/bb-worker-operator-v1.0.0/charts/bb-worker-operator/crds/bb.hermetiq.com_rbeworkers.yaml
 kubectl wait --for=condition=Established crd/rbeworkers.bb.hermetiq.com --timeout=60s
 
 # 4. Upgrade or restart the controller on the same release.
 helm upgrade --install --namespace hermetiq bb-worker-operator \
   oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.13 \
+  --version 1.0.0 \
   --skip-crds \
   --values bb-worker-operator-values.yaml
 ```
 
 Then re-apply your `RbeWorker` manifests.
 
-## Upgrading to 0.3.13
+## Upgrading to 1.0.0
 
-Chart 0.3.13 deploys operator v0.3.14, which supports the Buildbarn chart's
+Chart 1.0.0 follows 0.3.12; the chart version now moves together with the
+Hermetiq and Buildbarn charts, and no chart was published in between. It
+deploys operator v0.3.14, which supports the Buildbarn chart's
 content-defined chunking (CDC) storage. The operator reads the shape of
 `blobstore.contentAddressableStorage` in the Buildbarn chart's
 `common.libsonnet`: with `chunkStorage` it generates the CDC worker blobstore
 (`chunkStorage`, `chunkMappingStorage`, the CDC caches and `portalUrl`), and
 otherwise the same pre-CDC config as before. Install this operator **before**
-installing or upgrading the Buildbarn chart to 0.10.0, whose checks require it
+installing or upgrading the Buildbarn chart to 1.0.0, whose checks require it
 on `helm install` as well as `helm upgrade`.
 
 This upgrade rolls worker pools, so schedule it: run it inside the Buildbarn
 [cut-over window](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback),
 or in a separate window that you announce.
 
-- Apply the 0.3.13 CRD first. `spec.images.worker` and
+- Apply the 1.0.0 CRD first. `spec.images.worker` and
   `spec.images.runnerInstaller` become optional: when unset, the operator uses
   the `workerImage` and `runnerInstallerImage` keys of the referenced config
   ConfigMap, which the Buildbarn chart publishes, so worker images follow the
@@ -318,7 +324,7 @@ see the result without changing anything, render against the cluster first:
 
 ```bash
 helm template bb-worker-operator oci://ghcr.io/hermetiq/bb-worker-operator \
-  --version 0.3.13 --namespace hermetiq --dry-run=server \
+  --version 1.0.0 --namespace hermetiq --dry-run=server \
   --values bb-worker-operator-values.yaml > /dev/null
 ```
 

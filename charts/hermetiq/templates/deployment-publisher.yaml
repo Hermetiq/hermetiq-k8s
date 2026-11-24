@@ -7,10 +7,6 @@ metadata:
     {{- include "hermetiq-core.labels" . | nindent 4 }}
     {{- include "hermetiq-core.componentLabel" (dict "component" "publisher") | nindent 4 }}
     app: {{ include "hermetiq-core.publisherName" . }}
-  {{- if .Values.buildbarnCdcCompatible }}
-  annotations:
-    hermetiq.com/cdc-compatible: "true"
-  {{- end }}
 spec:
   {{- if not .Values.autoscaling.publisher.enabled }}
   replicas: {{ .Values.publisher.replicas }}

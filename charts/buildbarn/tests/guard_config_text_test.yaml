@@ -664,3 +664,28 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'release-rendered worker ConfigMap buildbarn/envoy-worker-config data\["common\.libsonnet"\] contains pre-CDC field "browserUrl"'
+
+  # --- Opt-out -----------------------------------------------------------------
+  - it: skips the configOverrides text scan with upgradeChecks.skipConfigTextCheck
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+      configOverrides:
+        storage.jsonnet: "{ contentAddressableStorageServer: { contentAddressableStorage: { chunkStorage: { 'local': { keyLocationMapInMemory: { entries: 1 } } } } } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: skips the custom router text scan with upgradeChecks.skipConfigTextCheck
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ simple: { browserUrl: 'x' } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses the same custom router text without the opt-out
+    set:
+      scheduler.actionRouter.mode: custom
+      scheduler.actionRouter.custom: "{ simple: { browserUrl: 'x' } }"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'scheduler\.actionRouter\.custom contains pre-CDC field "browserUrl"'

@@ -1033,7 +1033,7 @@ tests:
             - metadata:
                 name: bb-worker-operator
                 labels:
-                  helm.sh/chart: bb-worker-operator-0.3.13
+                  helm.sh/chart: bb-worker-operator-1.0.0
                   app.kubernetes.io/version: v0.3.14
             - metadata:
                 name: bb-worker-operator-controller-manager
@@ -1081,79 +1081,6 @@ tests:
                   app.kubernetes.io/version: 2.19.0
     asserts:
       - notFailedTemplate: {}
-
-  # bep-nats: only grpc-api and bep-nats-pub validate ConfigSets.
-  - it: rejects bep-nats from hermetiq 0.9.8, the latest release without dual-descriptor validation
-    set:
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: grpc-api
-                labels:
-                  helm.sh/chart: hermetiq-0.9.8
-                  app.kubernetes.io/component: api
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment .*/grpc-api has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
-
-  - it: rejects newer hermetiq chart labels without evidence for the selected bep-nats image
-    set:
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: bep-nats-pub
-                labels:
-                  helm.sh/chart: hermetiq-0.9.9
-                  app.kubernetes.io/component: publisher
-            - metadata:
-                name: bep-nats-sub-0
-                labels:
-                  helm.sh/chart: hermetiq-0.9.8
-                  app.kubernetes.io/component: subscriber
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
-
-  - it: accepts hermetiq 0.9.8 bep-nats annotated as CDC-compatible (buildbarnCdcCompatible)
-    set:
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: grpc-api
-                annotations:
-                  hermetiq.com/cdc-compatible: "true"
-                labels:
-                  helm.sh/chart: hermetiq-0.9.8
-                  app.kubernetes.io/component: api
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: ignores subscribers because they do not validate configurations
-    set:
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: bep-nats-sub-0
-                labels:
-                  helm.sh/chart: hermetiq-0.9.8
-                  app.kubernetes.io/component: subscriber
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: fails closed when a bep-nats Deployment has no readable hermetiq chart version
-    set:
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: bep-nats-pub
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment .*/bep-nats-pub has no hermetiq.com/cdc-compatible=true declaration for its bep-nats image'
 
   - it: rejects legacyContentAddressableStorage in scheduler configOverrides even when referencing common.blobstore
     set:
@@ -1319,7 +1246,7 @@ tests:
             - metadata:
                 name: custom-operator-name
                 labels:
-                  helm.sh/chart: bb-worker-operator-0.3.13
+                  helm.sh/chart: bb-worker-operator-1.0.0
                 annotations:
                   hermetiq.com/cdc-compatible: "true"
         rbeWorkers:
@@ -1346,21 +1273,6 @@ tests:
                 worker.jsonnet: "{ browserUrl: 'operator-generated-will-be-reconciled' }"
     asserts:
       - notFailedTemplate: {}
-
-  - it: checks Hermetiq Deployments in upgradeChecks.hermetiqNamespace when set
-    set:
-      upgradeChecks.hermetiqNamespace: hermetiq-prod
-      _testLookup:
-        deployments:
-          items:
-            - metadata:
-                name: custom-api-name
-                labels:
-                  helm.sh/chart: hermetiq-0.9.8
-                  app.kubernetes.io/component: api
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment hermetiq-prod/custom-api-name has no hermetiq.com/cdc-compatible=true declaration'
 
   - it: rejects _testLookup during helm upgrade
     release:

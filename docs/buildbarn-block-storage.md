@@ -57,7 +57,7 @@ In `mode: hostPath` there are no claims. Supply each store's
 `blockDevice.metadata.hostPath.path`; Helm rejects a missing path rather than
 choosing a filesystem for you. The directory must already exist on the node, on
 the same storage as the blocks: `blockDevice.metadata.hostPath.type` defaults
-to `Directory` (it was `DirectoryOrCreate` before chart 0.10.0), so a missing
+to `Directory` (it was `DirectoryOrCreate` before chart 1.0.0), so a missing
 directory fails the volume mount and the pod does not start. Do not override it
 with `DirectoryOrCreate`, which lets the kubelet create the directory on the
 boot disk when the metadata filesystem is not mounted. Point the path at a
@@ -110,7 +110,7 @@ StatefulSet `volumeClaimTemplates` are effectively immutable, and Kubernetes ret
 
 Helm cannot patch the volume claim templates in place. Plan a reviewed StatefulSet recreate. On `helm install` or `helm upgrade` the chart compares the live `storage` StatefulSet's claim templates with the rendered ones and, when they differ, fails before anything is applied and lists the differences; follow [Recreate the Storage StatefulSet](buildbarn-storage-operations.md#recreate-the-storage-statefulset). `helm template`, GitOps renders and `helm rollback` do not run that check.
 
-A release whose raw PVC stores ran in-memory indexes on 0.9.9 (the raw default then) has no `<store>-meta` claims. Chart 0.10.0 defaults those stores to file indexes and adds a `<store>-meta` template for each, on `premium-rwo` unless you set `blockDevice.metadata.storageClassName`. Either set that class for every raw store and recreate the StatefulSet, or keep the indexes volatile by applying the [ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out) last: with it the raw stores render the same claim templates as on 0.9.9. ISCC and FSAC are now enabled by default and add their own claims unless the release already had them or sets `enabled: false`.
+A release whose raw PVC stores ran in-memory indexes on 0.9.9 (the raw default then) has no `<store>-meta` claims. Chart 1.0.0 defaults those stores to file indexes and adds a `<store>-meta` template for each, on `premium-rwo` unless you set `blockDevice.metadata.storageClassName`. Either set that class for every raw store and recreate the StatefulSet, or keep the indexes volatile by applying the [ephemeral profile](buildbarn-storage-operations.md#explicit-ephemeral-opt-out) last: with it the raw stores render the same claim templates as on 0.9.9. ISCC and FSAC are now enabled by default and add their own claims unless the release already had them or sets `enabled: false`.
 
 If this change also upgrades a pre-CDC release, follow the
 [storage-format cutover](buildbarn-storage-model.md#storage-format-cutover-and-rollback)
@@ -285,7 +285,7 @@ label the node ready. The same checks run periodically and in its readiness prob
 a detected mismatch removes the scheduling label and fails the provisioner.
 
 The storage overlay requires the ready label and uses `type: Directory` for
-metadata hostPaths. That is the chart default since 0.10.0; the overlay sets it
+metadata hostPaths. That is the chart default since 1.0.0; the overlay sets it
 explicitly, and values files of your own must not override it. A missing
 per-store directory therefore fails mounting
 instead of being silently created on the boot disk. Staging before publication
@@ -372,7 +372,7 @@ left on the chart default `hostPath.path` while CAS is a raw device.
 ### Cut-over procedure for an existing Local SSD pool
 
 This is the cut-over for a pool that the 0.9.9 DaemonSet provisioned (four data
-LVs filling the volume group, no `meta`) and that moves to chart 0.10.0 with
+LVs filling the volume group, no `meta`) and that moves to chart 1.0.0 with
 the Local SSD overlay. It discards the cache. Every shard starts empty, and
 nothing of the pre-CDC stores is kept.
 

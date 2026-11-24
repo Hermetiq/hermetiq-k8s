@@ -20,6 +20,14 @@ EXTERNAL ENDPOINTS — via {{ $provider }}
 EXTERNAL ENDPOINTS — none (chart-managed routing is disabled).
 {{- end }}
 
+{{ if and (eq $provider "gateway") .Values.gateway.dashboardGrpcWeb.enabled -}}
+DASHBOARD gRPC-WEB — dashboard queries depend on the EnvoyPatchPolicy in this
+release. Envoy Gateway ignores it unless extensionApis.enableEnvoyPatchPolicy is
+true in the controller configuration; sign-in then works while every dashboard
+query returns HTTP 505. Check that the policy reports Programmed=True:
+  kubectl -n {{ include "hermetiq-core.gatewayNamespace" . }} get envoypatchpolicy
+
+{{ end -}}
 {{ if and .Values.publisher.jwks.enabled (eq (default "auto" .Values.publisher.jwks.source) "auto") (not .Values.publisher.jwks.url) (include "hermetiq-core.oidcJwksUrl" .) (or .Values.publisher.jwks.json .Values.publisher.jwks.existingSecret) -}}
 PUBLISHER JWKS — source=auto uses the inherited OIDC URL and ignores configured
 publisher local keys. This preserves existing trust. To deliberately use the local

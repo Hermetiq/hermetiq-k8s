@@ -177,9 +177,9 @@ images:
             values = chart / "values.yaml"
             unpinned, count = re.subn(r'(?m)^(\s+apiDigest:).*$', r'\1 ""', values.read_text())
             self.assertEqual(count, 1)
-            # No authorization-capable public release is pinned yet. Give the
-            # other required workloads synthetic compatible digests while
-            # leaving the API unpinned for the release command under test.
+            # Give the other required workloads digests of their own while
+            # leaving the API unpinned for the release command under test, so
+            # the render below also shows existing digests are kept.
             unpinned = inventory.pin_values(unpinned, [
                 {"value": image_path, "digest": "sha256:" + "c" * 64}
                 for image_path in (
@@ -194,9 +194,8 @@ images:
             ):
                 inventory.main()
             self.assertEqual(yaml.safe_load(values.read_text())["images"]["bepNats"]["apiDigest"], digest)
-            # The general render fixture selects authorization-capable test
-            # images. Strip those selections so the rendered API uses the
-            # source digest written above, not an unrelated fixture override.
+            # Drop any image selection from the render fixture so the rendered
+            # API uses the source digest written above.
             runtime_values = yaml.safe_load((chart / "ci-values/ci.yaml").read_text())
             runtime_values.pop("images", None)
             runtime_fixture = Path(tmp) / "runtime-values.yaml"

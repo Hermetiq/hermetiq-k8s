@@ -1,23 +1,8 @@
 # Minimal values to render the hermetiq chart in CI. The chart `required`s these
 # runtime settings, so `helm template` / kubeconform need them supplied. This is
 # NOT a real deployment — just enough to render for validation.
-# Render-only image names exercise the authorization-capable runtime contract.
-# These tags are fixtures, not published releases or deployable images. No
-# authorization switches exist: CI tests the chart's enforced contract.
-images:
-  bepNats:
-    apiTag: authorization-test
-    apiDigest: ""
-    pubTag: authorization-test
-    pubDigest: ""
-    bootstrapTag: authorization-test
-    bootstrapDigest: ""
-  authProxy:
-    tag: authorization-test
-    digest: ""
-  dashboard:
-    tag: authorization-test
-    digest: ""
+# Images are left at the chart defaults on purpose, so every CI render also
+# proves that the shipped image pins pass the chart's own image guard.
 hosts:
   domainBase: ci.hermetiq.test
 routing:

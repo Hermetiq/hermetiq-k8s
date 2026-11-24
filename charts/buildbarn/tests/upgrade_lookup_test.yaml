@@ -261,150 +261,208 @@ tests:
       - failedTemplate:
           errorPattern: 'live RbeWorker buildbarn/pool references missing ConfigMap "custom-libraries"'
 
-  # --- Hermetiq api and publisher: upgradeChecks.hermetiqNamespace -------------
-  - it: finds the Hermetiq api Deployment in upgradeChecks.hermetiqNamespace
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.hermetiqNamespace: hermetiq
+  # --- Hermetiq api and publisher are not inspected ----------------------------
+  # Hermetiq 1.0.0 reads the CDC schema only and has no capability
+  # declaration, so its Deployments must never block a Buildbarn release.
+  - it: does not inspect Hermetiq Deployments on install
     kubernetesProvider:
       objects:
         - apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: grpc-api
-            namespace: hermetiq
+            namespace: buildbarn
             labels:
-              helm.sh/chart: hermetiq-0.9.8
+              helm.sh/chart: hermetiq-1.0.0
               app.kubernetes.io/component: api
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bep-nats-pub
-            namespace: hermetiq
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: publisher
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment hermetiq/grpc-api has no hermetiq\.com/cdc-compatible=true declaration for its bep-nats image'
-
-  - it: finds the Hermetiq publisher Deployment in upgradeChecks.hermetiqNamespace
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.hermetiqNamespace: hermetiq
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: grpc-api
-            namespace: hermetiq
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: api
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bep-nats-pub
-            namespace: hermetiq
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: publisher
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment hermetiq/bep-nats-pub has no hermetiq\.com/cdc-compatible=true declaration for its bep-nats image'
-
-  # Renamed Deployments are recognised by the Hermetiq chart label and their
-  # component.
-  - it: recognises api and publisher Deployments by chart label and component
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.hermetiqNamespace: hermetiq
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: custom-publisher
-            namespace: hermetiq
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: publisher
-    asserts:
-      - failedTemplate:
-          errorPattern: 'live Deployment hermetiq/custom-publisher has no hermetiq\.com/cdc-compatible=true declaration for its bep-nats image'
-
-  - it: accepts declared api and publisher Deployments and ignores subscribers
-    release:
-      upgrade: true
-    set:
-      upgradeChecks.hermetiqNamespace: hermetiq
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: grpc-api
-            namespace: hermetiq
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: api
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bep-nats-pub
-            namespace: hermetiq
-            annotations:
-              hermetiq.com/cdc-compatible: "true"
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: publisher
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: bep-nats-sub-0
-            namespace: hermetiq
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: subscriber
-    asserts:
-      - notFailedTemplate: {}
-
-  # Same cluster as the first Hermetiq test, value left empty: that namespace
-  # is not read.
-  - it: does not read another namespace's Hermetiq Deployments when upgradeChecks.hermetiqNamespace is empty
-    release:
-      upgrade: true
-    kubernetesProvider:
-      objects:
-        - apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: grpc-api
-            namespace: hermetiq
-            labels:
-              helm.sh/chart: hermetiq-0.9.8
-              app.kubernetes.io/component: api
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: runs the Hermetiq check on install as well as upgrade
-    kubernetesProvider:
-      objects:
         - apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: bep-nats-pub
             namespace: buildbarn
+            labels:
+              helm.sh/chart: hermetiq-1.0.0
+              app.kubernetes.io/component: publisher
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not inspect Hermetiq Deployments on upgrade
+    release:
+      upgrade: true
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: grpc-api
+            namespace: buildbarn
+            labels:
+              helm.sh/chart: hermetiq-1.0.0
+              app.kubernetes.io/component: api
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Opt-outs ----------------------------------------------------------------
+  # Each switch turns off one check and nothing else. The default-on behaviour
+  # is covered above; these prove the same cluster is accepted once skipped.
+  - it: skips the operator declaration with upgradeChecks.skipOperatorCheck
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.operatorNamespace: operators
+      upgradeChecks.skipOperatorCheck: true
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: operators
+            labels:
+              helm.sh/chart: bb-worker-operator-0.3.12
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not require an operator for live RbeWorkers with upgradeChecks.skipOperatorCheck
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipOperatorCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              runner: example.com/runner:latest
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still checks worker configuration when only the operator check is skipped
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipOperatorCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            config:
+              generated: {commonConfigMapName: custom-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: custom-libraries, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
     asserts:
       - failedTemplate:
-          errorPattern: 'live Deployment buildbarn/bep-nats-pub has no hermetiq\.com/cdc-compatible=true declaration for its bep-nats image'
+          errorPattern: 'live worker ConfigMap buildbarn/custom-libraries data\["common\.libsonnet"\] defines a pre-CDC single-store contentAddressableStorage without chunkStorage'
+
+  - it: skips RbeWorker and worker ConfigMap checks with upgradeChecks.skipWorkerChecks
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipWorkerChecks: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+            config:
+              generated: {commonConfigMapName: missing-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: team-worker-config, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still requires the operator declaration when only worker checks are skipped
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipWorkerChecks: true
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: buildbarn
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live Deployment buildbarn/bb-worker-operator has no hermetiq\.com/cdc-compatible=true declaration for its operator image'
+
+  - it: skips the worker ConfigMap text scan with upgradeChecks.skipConfigTextCheck
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            config:
+              generated: {commonConfigMapName: custom-libraries}
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata: {name: custom-libraries, namespace: buildbarn}
+          data:
+            common.libsonnet: "{ blobstore: { contentAddressableStorage: { grpc: {} } } }"
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: buildbarn
+            annotations:
+              hermetiq.com/cdc-compatible: "true"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still refuses pre-CDC worker image pins when only the text scan is skipped
+    release:
+      upgrade: true
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+    capabilities:
+      apiVersions:
+        - bb.hermetiq.com/v1/RbeWorker
+    kubernetesProvider:
+      objects:
+        - apiVersion: bb.hermetiq.com/v1
+          kind: RbeWorker
+          metadata: {name: pool, namespace: buildbarn}
+          spec:
+            images:
+              worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: bb-worker-operator
+            namespace: buildbarn
+            annotations:
+              hermetiq.com/cdc-compatible: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'live RbeWorker buildbarn/pool pins pre-CDC image'

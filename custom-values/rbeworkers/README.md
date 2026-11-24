@@ -8,7 +8,7 @@ them in the Buildbarn release namespace after the Buildbarn release and
 `hermetiq`.
 
 These manifests require bb-worker-operator v0.3.14 or later and its matching
-CRD (operator chart 0.3.13 or later), which support Buildbarn image inheritance,
+CRD (operator chart 1.0.0 or later), which support Buildbarn image inheritance,
 the FUSE kernel tunables, and Envoy's `spec.autoscaling.idleReplicas`.
 Upgrade the CRD and controller together following the
 [CRD lifecycle guide](../../charts/bb-worker-operator/README.md#crd-lifecycle).
@@ -23,7 +23,7 @@ kubectl apply --namespace hermetiq --kustomize rbeworkers
 ```
 
 The manifests do not set `spec.images.worker` or `spec.images.runnerInstaller`.
-Operator v0.3.14 and later (chart 0.3.13) then use the `workerImage` and
+Operator v0.3.14 and later (chart 1.0.0) then use the `workerImage` and
 `runnerInstallerImage` that the Buildbarn chart publishes in
 `buildbarn-worker-config`, so each pool's `bb-worker` always matches the
 Buildbarn release and its worker configuration. Set them only to run a
@@ -36,7 +36,7 @@ two image keys: populate them with the exact current worker and runner-installer
 images before applying these unpinned examples. Verify the pools reconcile,
 then upgrade Buildbarn so the shared Jsonnet and inherited images switch to
 CDC together. Otherwise the operator reports `SpecInvalid` during the gap.
-See the [operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-0313).
+See the [operator upgrade procedure](../../charts/bb-worker-operator/README.md#upgrading-to-100).
 
 Custom pools using `spec.config.files` reference a ConfigMap through
 `configMapName`, `workerConfigPath`, `runnerConfigPath`, and optional `items`.

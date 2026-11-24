@@ -99,3 +99,46 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: "STORAGE CLASS MISMATCH"
+
+  # Index sizing diagnostics. NOTES only warns: a raw device size the chart
+  # accepted before must never start failing an upgrade that leaves
+  # storage.keyLocationMapSizing.validate off.
+  - it: renders NOTES for a raw device sized in decimal units
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: 375G
+    asserts:
+      - notFailedTemplate: {}
+      - notMatchRegexRaw:
+          pattern: 'capacity cannot be checked'
+
+  - it: renders NOTES for a raw device sized in bytes
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: "402653184000"
+    asserts:
+      - notFailedTemplate: {}
+      - notMatchRegexRaw:
+          pattern: 'capacity cannot be checked'
+
+  - it: warns instead of failing when a raw device size cannot be read
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: 10m
+    asserts:
+      - notFailedTemplate: {}
+      - matchRegexRaw:
+          pattern: 'storage\.persistence\.cas: key-location map capacity cannot be checked because storage\.persistence\.cas\.blockDevice\.size \(10m\) is not a whole-byte Kubernetes quantity'
+
+  - it: sizes a fractional raw device from its real capacity
+    # 0.5Ti used to be read as 0 MiB, which made the comparison pass for any
+    # index. 512 GiB of 16 KiB objects needs far more than a 1 MiB file index.
+    set:
+      storage.persistence.cas.backend: blockDevice
+      storage.persistence.cas.blockDevice.size: 0.5Ti
+      storage.persistence.cas.blockDevice.keyLocationMap: file
+      storage.persistence.cas.blockDevice.metadata.keyLocationMapSizeMi: 1
+    asserts:
+      - notFailedTemplate: {}
+      - matchRegexRaw:
+          pattern: 'storage\.persistence\.cas: key-location map is too small for its blocks device\. blockDevice\.metadata\.keyLocationMapSizeMi=1 indexes 15888 objects, but 488541 MiB usable'

@@ -1154,10 +1154,16 @@ hostPath are documentary: Helm cannot discover the actual node device capacity.
 {{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity cannot be checked without storage.persistence.%s.blockDevice.size; set it to the actual device capacity." $store $store) -}}
 {{- else if or (le $avg 0.0) (le $ratio 0.0) (le $data 0) (le $total 0) -}}
 {{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity requires positive averageObjectSizeBytes.%s, minimumRatio, and data/total block counts." $store $store) -}}
+{{- else if and $isBlock (not (include "buildbarn.storage.quantityBytes" $s.blockDevice.size)) -}}
+{{- /* Report, never fail: this helper also feeds NOTES, and a device size the
+       chart accepted before (375G, a byte count) must not start failing an
+       upgrade that leaves keyLocationMapSizing.validate off. */ -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity cannot be checked because storage.persistence.%s.blockDevice.size (%v) is not a whole-byte Kubernetes quantity." $store $store $s.blockDevice.size) -}}
 {{- else -}}
 {{- $deviceMi := 0.0 -}}
 {{- if $isBlock -}}
-{{- $deviceMi = int (include "buildbarn.storageSizeMi" (dict "name" (printf "storage.persistence.%s.blockDevice.size" $store) "value" $s.blockDevice.size)) | float64 -}}
+{{- /* Any quantity spelling the API server accepts: 700Gi, 375G, 0.5Ti, bytes. */ -}}
+{{- $deviceMi = divf (include "buildbarn.storage.quantityBytes" $s.blockDevice.size | float64) 1048576.0 -}}
 {{- else if $isCmsInMem -}}
 {{- $deviceMi = divf (mulf ($data | float64) ($s.blocksInMemoryBlockSizeBytes | float64)) 1048576.0 -}}
 {{- else -}}

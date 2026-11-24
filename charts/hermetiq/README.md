@@ -393,27 +393,11 @@ When the Buildbarn chart runs in the same cluster:
 - If FUSE-based workers share the Hermetiq namespace, that namespace needs the
   `privileged` Pod Security level; see
   [Pod and container security context](#pod-and-container-security-context).
-- Buildbarn `0.10.0` (RepMaxCDC) refuses to install or upgrade unless the
-  Hermetiq API (`grpc-api`) and publisher (`bep-nats-pub`) Deployments it
-  finds carry `hermetiq.com/cdc-compatible: "true"`. The check runs on
-  `helm install` as well as `helm upgrade`. Two things are needed to pass it:
-  - A `bep-nats` image that validates both the pre-CDC and the CDC Buildbarn
-    configuration schema. The default `bep-nats v0.9.8` image validates only
-    the pre-CDC schema.
-  - `buildbarnCdcCompatible: true`, which renders the annotation on both
-    Deployments. Set it only for such an image; the chart cannot verify the
-    image for you. The value is implemented in a Hermetiq chart release newer
-    than the published `0.9.8`. The published `0.9.8` chart accepts the value
-    and renders no annotation, so setting it there changes nothing and
-    Buildbarn's check still fails.
-
-  Buildbarn looks for these Deployments in its own namespace, or in the one
-  named by its `upgradeChecks.hermetiqNamespace`. When Hermetiq runs in a
-  different namespace and that value is left empty, Buildbarn finds nothing
-  and skips the check, and configuration validation in the Hermetiq UI stays
-  on the pre-CDC schema. The repository's
-  [supported chart bundle](https://github.com/Hermetiq/hermetiq-k8s#supported-chart-bundle)
-  note says which combinations install today.
+- Run Hermetiq `1.0.0` with the Buildbarn `1.0.0` chart. Hermetiq `1.0.0`
+  reads and validates Buildbarn configuration in the CDC (RepMaxCDC) schema
+  only; it has no mode for the pre-CDC schema that Buildbarn `0.9.9` and
+  older use. Upgrade the two together, following the repository's
+  [upgrade order](https://github.com/Hermetiq/hermetiq-k8s#upgrading).
 
 ### Inspect the packaged defaults
 
@@ -421,8 +405,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 0.9.8
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
 ```
 
 ## Install
@@ -487,7 +471,7 @@ values where they differ from the starter.
 
    ```bash
    helm template hmq oci://ghcr.io/hermetiq/hermetiq \
-     --version 0.9.8 \
+     --version 1.0.0 \
      --namespace hermetiq \
      --values hermetiq-values.yaml > /dev/null
    ```
@@ -499,7 +483,7 @@ Install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.8 \
+  --version 1.0.0 \
   --values hermetiq-values.yaml
 ```
 
@@ -1747,12 +1731,11 @@ with `""`; changing only the tag keeps running the old pinned image. In particul
 JWT profile mode needs an auth-proxy image that supports
 `GRPC_AUTH_PROXY_FORWARD_ONLY`; updating only the API and dashboard is insufficient.
 
-The currently pinned v0.9.8 images do not implement these authorization features.
-The chart rejects known incompatible images that cannot enforce the required
-authorization policy and browser flow. A chart release must include compatible
-image pins. For development or a staged rollout, supply compatible images
-explicitly; custom tags and digests still need verification against the required
-application capabilities.
+The chart's default images are the `v1.0.0` release, which implements these
+features. Images from `v0.9.8` and earlier do not, and the chart refuses to
+render with them because they cannot enforce the authorization policy or the
+browser flow. Custom tags and digests are not recognised by that check; verify
+them against the same application release before a staged rollout.
 
 Once images and grants are ready, upgrade using a complete copy of your
 installation values, for example from this checkout:

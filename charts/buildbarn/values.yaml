@@ -49,11 +49,10 @@ configOverrides: {}
 # and other client-side renders, where lookup returns nothing.
 #
 # CDC capability: the chart requires hermetiq.com/cdc-compatible=true on the
-# operator and, when bep-nats runs in this namespace, on its api/publisher
-# Deployments. These declarations must match the selected binaries; chart
-# version labels alone do not prove support. The operator chart recognizes its
-# pinned CDC digest. Because the checks also run on install, installing
-# Buildbarn next to an operator or bep-nats without the declaration fails.
+# bb-worker-operator Deployment. The declaration must match the selected
+# binary; chart version labels alone do not prove support. The operator chart
+# recognizes its pinned CDC digest. Because the check also runs on install,
+# installing Buildbarn next to an operator without the declaration fails.
 #
 # Storage claim templates: when a StatefulSet named storage already exists in
 # the release namespace and its volumeClaimTemplates differ from the rendered
@@ -67,13 +66,32 @@ upgradeChecks:
   # elsewhere (for example "hermetiq"). Listing Deployments there needs read
   # access to that namespace.
   operatorNamespace: ""
-  # Namespace of the Hermetiq API/publisher (bep-nats) Deployments when running
-  # in a separate namespace from Buildbarn. Empty means this release's namespace.
-  hermetiqNamespace: ""
   # Skip the storage claim-template comparison. Leave this false: with the
   # check skipped, a claim-template change makes Helm apply every other object
   # of the release and then fail on the StatefulSet.
   skipStorageClaimTemplateCheck: false
+  # The three switches below exist for installs the checks cannot serve. Leave
+  # them false unless you hit one of the cases named, and verify by hand what
+  # the check would have verified.
+  #
+  # Skip the bb-worker-operator capability check. Use it when the account
+  # running Helm may not list Deployments in the operator's namespace (Helm
+  # then stops with "deployments is forbidden"), after confirming the operator
+  # runs v0.3.14 or newer. An older operator generates pre-CDC worker
+  # configuration and its workers do not start.
+  skipOperatorCheck: false
+  # Skip every check that reads RbeWorker objects and worker ConfigMaps in the
+  # release namespace: pre-CDC worker image pins, missing ConfigMaps and the
+  # text scan of worker configuration. Use it when the account running Helm
+  # may not list rbeworkers or ConfigMaps.
+  skipWorkerChecks: false
+  # Skip the text scan for pre-CDC fields in configOverrides,
+  # scheduler.actionRouter.custom and worker ConfigMaps. The scan matches
+  # patterns and does not evaluate jsonnet, so it can refuse configuration that
+  # is valid CDC (a field name inside a string, an import alias it does not
+  # recognise). Use it for such a file after checking the file against the CDC
+  # schema; a real pre-CDC field makes the component crash-loop.
+  skipConfigTextCheck: false
 
 # Shared Buildbarn configuration knobs templated into files/config/*.
 config:

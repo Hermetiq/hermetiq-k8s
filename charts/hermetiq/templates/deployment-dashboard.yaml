@@ -116,6 +116,15 @@ spec:
 {{- with .Values.dashboard.oauth2Proxy.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
+            {{- if not (hasKey (default (dict) .Values.dashboard.oauth2Proxy.env) "OAUTH2_PROXY_UPSTREAM_TIMEOUT") }}
+            # Every dashboard API call (/grpc, /api/v1) passes through this
+            # proxy. Its upstream response-header timeout defaults to 30s,
+            # which would answer a slower unary query with HTTP 502 long before
+            # the route timeout. Leave the bound to the route and to the
+            # dashboard's own upstream timeout.
+            - name: OAUTH2_PROXY_UPSTREAM_TIMEOUT
+              value: "3600s"
+            {{- end }}
             - name: OAUTH2_PROXY_REDIRECT_URL
               value: {{ printf "%s/oauth2/callback" (include "hermetiq-core.dashboardUrl" .) | quote }}
             - name: OAUTH2_PROXY_UPSTREAMS

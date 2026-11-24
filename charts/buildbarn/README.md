@@ -14,7 +14,7 @@ and `RbeWorker` pools need the operator's CRD. The repository's
 [installation guide](https://github.com/Hermetiq/hermetiq-k8s#readme) gives the
 supported full-stack deployment order and external dependencies.
 
-Upgrading an existing cache to chart 0.10.0 requires the
+Upgrading an existing cache to chart 1.0.0 requires the
 [CDC storage cutover](../../docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback).
 The new storage encoding cannot read the old CAS files. Plan a maintenance
 window, snapshot for rollback, and an explicit cold-cache reset. The chart
@@ -109,7 +109,7 @@ Storage format and claims:
   differ from the rendered ones: a claim name added, removed or reordered, or
   `storageClassName`, `volumeMode` or the requested size changed for an
   existing name. Access modes, labels and annotations are not compared. A
-  0.9.9 release on chart defaults always differs, because 0.10.0 adds the
+  0.9.9 release on chart defaults always differs, because 1.0.0 adds the
   `iscc` and `fsac` claims. The error lists the differences and the step to
   run first, with storage stopped:
   `kubectl delete statefulset storage --namespace <namespace> --cascade=orphan`.
@@ -150,9 +150,9 @@ Storage format and claims:
   is still the chart default fails the render when CAS is a raw block device
   or `cas.hostPath.path` is not the chart default: give the store a path next
   to the other stores, or set its `enabled: false`.
-- `helm upgrade --reuse-values` cannot be used for the 0.9.9 to 0.10.0
+- `helm upgrade --reuse-values` cannot be used for the 0.9.9 to 1.0.0
   upgrade. Helm then replaces the new chart's defaults with the values
-  computed for the old release, so every key 0.10.0 introduced is missing and
+  computed for the old release, so every key 1.0.0 introduced is missing and
   the render fails with errors that do not mention the flag. Pass your
   complete values files instead.
 
@@ -198,22 +198,24 @@ Images and configuration text:
 
 Other components:
 
-- Operator and co-located `bep-nats` Deployments must declare
-  `hermetiq.com/cdc-compatible: "true"` for the actual selected binaries.
-  These checks run on `helm install` as well as `helm upgrade`, on purpose: a
-  first install next to an operator or `bep-nats` without the declaration is
-  refused too. They read the cluster through Helm's `lookup`, so
-  `helm template` and other client-side renders skip them.
-  The operator chart recognizes its pinned CDC image digest; custom operator
-  images require its `buildbarnCdcCompatible` setting. Set
-  `upgradeChecks.operatorNamespace` and `upgradeChecks.hermetiqNamespace` when
-  those components run in another namespace. For `bep-nats` the declaration
-  needs a Hermetiq chart release newer than the published `0.9.8`, with a
-  `bep-nats` image that validates both configuration schemas. The published
-  `0.9.8` chart accepts `buildbarnCdcCompatible` but renders no annotation,
-  and its default `bep-nats v0.9.8` image is **not** compatible. The
-  [supported chart bundle](../../README.md#supported-chart-bundle) says what
-  that means for installing next to Hermetiq today.
+- The bb-worker-operator Deployment must declare
+  `hermetiq.com/cdc-compatible: "true"` for the binary it actually runs.
+  The check runs on `helm install` as well as `helm upgrade`, on purpose: a
+  first install next to an operator without the declaration is refused too.
+  It reads the cluster through Helm's `lookup`, so `helm template` and other
+  client-side renders skip it. The operator chart recognizes its pinned CDC
+  image digest; custom operator images require its `buildbarnCdcCompatible`
+  setting. Set `upgradeChecks.operatorNamespace` when the operator runs in
+  another namespace.
+- Hermetiq is not checked. Hermetiq `1.0.0` reads and validates Buildbarn
+  configuration in the CDC schema only, so run this chart with Hermetiq
+  `1.0.0` and upgrade the two together; see the
+  [supported chart bundle](../../README.md#supported-chart-bundle).
+- Each live check has a switch under `upgradeChecks` for installs it cannot
+  serve: `skipOperatorCheck` and `skipWorkerChecks` when the account running
+  Helm may not list the objects (Helm then stops with a `forbidden` error),
+  and `skipConfigTextCheck` when the text scan refuses configuration that is
+  valid CDC. `values.yaml` says what to verify by hand before setting one.
 - `bb-browser` is still a pre-CDC binary and now reads CAS through the
   frontend on port `8980`, which reassembles multi-chunk blobs for it. It
   dials `frontend-internal:8980` by default and `frontend-grpc:8980` when
@@ -458,13 +460,10 @@ in `buildbarn-values.yaml` and `hermetiq-values.yaml`:
    `publisher.trustedCalCidrs` empty, which rejects every CAL stream, so set it
    in `hermetiq-values.yaml` to your cluster's Pod CIDR (and Node CIDR if any
    workers use `hostNetwork`).
-6. **CDC capability declaration.** This chart refuses to install or upgrade
-   while the Hermetiq API and publisher Deployments in its namespace (or in
-   `upgradeChecks.hermetiqNamespace`) lack
-   `hermetiq.com/cdc-compatible: "true"`. The published Hermetiq `0.9.8` chart
-   cannot render that annotation, so installing this chart into the same
-   namespace fails until a newer Hermetiq chart release with a dual-schema
-   `bep-nats` image is deployed. See the
+6. **Hermetiq version.** Run this chart with Hermetiq `1.0.0`, which reads
+   Buildbarn configuration in the CDC schema only. Hermetiq `0.9.8` and older
+   validate the pre-CDC schema and do not match the configuration this chart
+   renders. See the
    [supported chart bundle](../../README.md#supported-chart-bundle).
 
 ### Deploying the chart
@@ -479,8 +478,8 @@ Inspect the packaged documentation and defaults before editing Buildbarn
 values:
 
 ```bash
-helm show readme oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
-helm show values oci://ghcr.io/hermetiq/buildbarn --version 0.10.0
+helm show readme oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/buildbarn --version 1.0.0
 ```
 
 Set the hosts, identity provider, storage sizing, and routing for your cluster.
@@ -518,7 +517,7 @@ After the Hermetiq chart and worker operator are installed, install Buildbarn:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.10.0 \
+  --version 1.0.0 \
   --values buildbarn-values.yaml
 ```
 
@@ -612,7 +611,7 @@ values model:
 ```bash
 helm upgrade --install --namespace hermetiq buildbarn \
   oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.10.0 \
+  --version 1.0.0 \
   --values buildbarn-values.yaml \
   --set-file 'configOverrides.frontend\.jsonnet'=./my-frontend.jsonnet
 ```
@@ -2922,7 +2921,7 @@ Render and inspect the chart:
 
 ```bash
 helm template buildbarn oci://ghcr.io/hermetiq/buildbarn \
-  --version 0.10.0 \
+  --version 1.0.0 \
   --namespace hermetiq \
   --values buildbarn-values.yaml > /tmp/buildbarn.yaml
 ```
@@ -3022,7 +3021,7 @@ helm upgrade <buildbarn-release> oci://ghcr.io/hermetiq/buildbarn \
 ```
 
 `--reuse-values` is only valid here because the chart version does not change.
-It cannot be used for the 0.9.9 to 0.10.0 upgrade, or to change chart version
+It cannot be used for the 0.9.9 to 1.0.0 upgrade, or to change chart version
 in general: Helm then replaces the new chart's defaults with the values
 computed for the old release, every key the new chart introduced is missing,
 and the render fails. Upgrade the chart with your complete values files, then

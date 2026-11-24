@@ -245,8 +245,8 @@ the [ephemeral opt-out](#explicit-ephemeral-opt-out) instead.
 1. **Capture the current configuration.** Save the current release values and
    rendered manifest, and retain your deployment values file. Inspect
    `helm get values buildbarn --namespace hermetiq --all` for inherited settings.
-   `--reuse-values` cannot render 0.10.0. It substitutes the old chart's
-   defaults for the new ones, so every key added in 0.10.0 is missing and the
+   `--reuse-values` cannot render 1.0.0. It substitutes the old chart's
+   defaults for the new ones, so every key added in 1.0.0 is missing and the
    render stops on an error that does not name the flag, such as
    `storage.persistence.cms.backend must be one of: sharedCas, filesystem,
    blockDevice`. Nothing is applied. Pass the complete values files, or use

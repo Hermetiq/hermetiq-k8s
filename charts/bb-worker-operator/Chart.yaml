@@ -6,19 +6,21 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.3.13
+version: 1.0.0
 appVersion: "v0.3.14"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: "Use bb-worker-operator v0.3.14: generated worker configs follow the Buildbarn chart's common.libsonnet shape, emitting the CDC chunkStorage/chunkMappingStorage blobstore when it is present and the pre-CDC blobstore otherwise"
-    - kind: added
-      description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap"
-    - kind: added
-      description: "Declare CDC compatibility for the known pinned operator digest; custom images require explicit buildbarnCdcCompatible confirmation before the Buildbarn upgrade guard accepts them"
     - kind: changed
-      description: "Upgrading restarts every generated-config worker pool once, because the embedded worker-common.libsonnet changed; pre-CDC worker configs evaluate unchanged"
+      description: "The chart version moves to 1.0.0 with the Hermetiq and Buildbarn charts. It follows 0.3.12 and deploys operator v0.3.14"
+    - kind: added
+      description: "Generated worker configuration follows the Buildbarn chart: the CDC chunkStorage and chunkMappingStorage blobstore when common.libsonnet uses it, and the pre-CDC blobstore otherwise"
+    - kind: changed
+      description: "spec.images.worker and spec.images.runnerInstaller are optional; when unset, the operator uses the workerImage and runnerInstallerImage keys of the referenced config ConfigMap. Apply the updated CRD before upgrading"
+    - kind: added
+      description: "The Deployment declares hermetiq.com/cdc-compatible for the pinned image digest, which the Buildbarn 1.0.0 chart requires; custom images need buildbarnCdcCompatible=true"
+    - kind: changed
+      description: "Upgrading restarts every generated-config worker pool once"
 keywords:
   - buildbarn
   - bazel

@@ -6,33 +6,30 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.8
-appVersion: "0.9.8"
+version: 1.0.0
+appVersion: "1.0.0"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
-  # Keep track 0.9.9 changes here (we'll bump the chart version in the release PR when we're ready to release 0.9.9)
   artifacthub.io/changes: |
-    - kind: security
-      description: "Require explicit shared browser login admission and default the Grafana starter to Viewer with backend network isolation"
-    - kind: fixed
-      description: "Preserve dashboard gRPC-web through Envoy Gateway and the authenticated BFF to prevent HTTP 505 responses"
-    - kind: fixed
-      description: "Give same-origin dashboard API calls and assistant streams the configured Envoy Gateway timeout headroom"
+    - kind: changed
+      description: "Breaking: project authorization is always enforced. Access comes from viewer, builder and admin roles granted through authorization.groupBindings, authorization.serviceAccounts and project memberships; publishing builds needs the builder role, and app.adminEmails no longer grants admin"
+    - kind: changed
+      description: "Breaking: the dashboard calls the API through its own host behind oauth2-proxy, which must stay enabled, and dashboard.oauth2Proxy.emailDomains is required"
+    - kind: changed
+      description: "Breaking: Buildbarn configuration is read and validated in the CDC (RepMaxCDC) schema only; run with the Buildbarn 1.0.0 chart"
+    - kind: changed
+      description: "Default application images are v1.0.0; images from v0.9.8 and earlier are rejected at render time"
     - kind: added
-      description: "Add an explicit buildbarnCdcCompatible declaration for verified dual-schema bep-nats images; existing default images are not automatically declared compatible"
-    - kind: fixed
-      description: "Keep Buildbarn dashboards usable with legacy CAS and CDC chunk storage, add separate chunk-mapping views, and test shipped queries against old/new/mixed metrics"
-    - kind: fixed
-      description: "Bound worker-pool CPU and memory queries during pod churn"
-    - kind: fixed
-      description: "Correct the Buildbarn object-size panel descriptions: on CDC storage the panels show the size named in the request digest (the whole blob for CMS, the action message for AC, ISCC, and FSAC, the uncompressed chunk for CS), not the stored entry"
+      description: "Optional SCIM provisioning (api.scim), independent JWT trust profiles (api.jwt.profiles, publisher.jwks.profiles) and independent publisher signing keys with configurable JWKS refresh"
     - kind: added
-      description: "Require project authorization with viewer, builder and admin roles, optional SCIM provisioning, independent JWT trust profiles, and a same-origin dashboard BFF"
+      description: "With routing.provider=gateway an EnvoyPatchPolicy keeps dashboard gRPC-web intact. Envoy Gateway needs extensionApis.enableEnvoyPatchPolicy; set gateway.dashboardGrpcWeb.enabled=false for other Gateway controllers"
     - kind: fixed
-      description: "Allow independent publisher signing keys and configurable JWKS rotation; document required image and access migration"
+      description: "Dashboard API calls and assistant streams get the configured Envoy Gateway route timeout and are no longer cut at the oauth2-proxy 30-second upstream default"
+    - kind: fixed
+      description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
 keywords:
   - hermetiq
   - MCP

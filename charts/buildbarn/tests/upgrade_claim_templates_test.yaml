@@ -267,7 +267,7 @@ tests:
       - notFailedTemplate: {}
 
   # The default upgrade from chart 0.9.9: its StatefulSet has claims for CAS
-  # and AC only, and 0.10.0 enables ISCC and FSAC.
+  # and AC only, and 1.0.0 enables ISCC and FSAC.
   - it: refuses an upgrade that adds the ISCC and FSAC claim templates
     set:
       _testLookup:
@@ -512,7 +512,7 @@ tests:
           errorPattern: 'than this release renders: claim template "cas-blocks" volumeMode changes from "Filesystem" to "Block"\.'
 
   # Switching a raw store's index from RAM to the file default adds its
-  # <store>-meta claim: the raw PVC case of the 0.10.0 upgrade.
+  # <store>-meta claim: the raw PVC case of the 1.0.0 upgrade.
   - it: refuses an upgrade that adds a raw store's metadata claim template
     set:
       storage.persistence.cas.backend: blockDevice

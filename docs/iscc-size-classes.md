@@ -106,7 +106,7 @@ The metadata mount must live on the same Local SSD storage as the blocks,
 with a readiness gate verifying the actual mount and a paired reset when the
 LVs/VG are replaced. `blockDevice.metadata.hostPath.path` has no default: the
 render fails without it. `type: Directory` is the chart default for every raw
-store's metadata directory (it was `DirectoryOrCreate` before chart 0.10.0).
+store's metadata directory (it was `DirectoryOrCreate` before chart 1.0.0).
 The kubelet does not create the directory, so a missing metadata mount fails
 the volume mount and the storage pod does not start, instead of an empty index
 being created on the boot disk. Pre-create the directory inside the mounted

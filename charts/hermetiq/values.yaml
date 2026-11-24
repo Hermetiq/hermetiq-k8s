@@ -18,46 +18,39 @@ extraObjects: []
 standardLabels:
   appVersion: false
 
-# Set true only when images.bepNats runs a bep-nats that validates both the
-# pre-CDC and the CDC Buildbarn configuration schemas (dual descriptor sets).
-# It annotates the api and publisher Deployments with
-# hermetiq.com/cdc-compatible=true, which the buildbarn chart's CDC upgrade
-# guard accepts in place of a hermetiq release version. Leave false for the
-# images this chart ships until a release includes that bep-nats.
-buildbarnCdcCompatible: false
-
 images:
-  # This chart requires matching authorization-capable API,
-  # publisher, bootstrap and dashboard images; JWT profiles also require the
-  # matching auth-proxy image. The v0.9.8 pins below predate this requirement
-  # and must be replaced before installing this chart.
-  # Upgrade tags AND digests together (or clear a digest to use its tag).
+  # The API, publisher, schema bootstrap, dashboard and auth-proxy images must
+  # come from the same release. Images older than v1.0.0 do not implement
+  # project authorization and are rejected at render time.
+  # Digests are empty here and are resolved when the chart is published, so
+  # the packaged chart pulls by digest. When overriding a tag, set its digest
+  # as well or leave the digest empty; a non-empty digest wins over the tag.
   # See README: Upgrading project authorization.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
-    apiTag: "v0.9.8"
-    apiDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    pubTag: "v0.9.8"
-    pubDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    subTag: "v0.9.8"
-    subDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
-    bootstrapTag: "v0.9.8"
-    bootstrapDigest: "sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118"
+    apiTag: "v1.0.0"
+    apiDigest: ""
+    pubTag: "v1.0.0"
+    pubDigest: ""
+    subTag: "v1.0.0"
+    subDigest: ""
+    bootstrapTag: "v1.0.0"
+    bootstrapDigest: ""
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
-    tag: "v0.9.8"
-    digest: "sha256:8555a0160ab6adc41a02c029f0eca5a6c3277a7c00c167bff7f73c1459e769dc"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
-    tag: "v0.9.8"
-    digest: "sha256:8154cc722cb7cec11b27913a49f6be660f1e9ff3aba68e93c31404fe20c4ca97"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
-    tag: "v0.9.8"
-    digest: "sha256:edcfa745b7f551c72ad0b8d701119a168659f96e4660e2b5034e263779023a42"
+    tag: "v1.0.0"
+    digest: ""
     pullPolicy: IfNotPresent
   oauth2Proxy:
     # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public
