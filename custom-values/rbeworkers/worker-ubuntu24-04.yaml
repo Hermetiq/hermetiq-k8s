@@ -128,15 +128,16 @@ spec:
     # bb_worker memory-maps the operator's 16 GiB local CAS and the file pool,
     # and the kernel charges the page cache for those reads to this container. A
     # limit sized for bb_worker's heap alone sends those reads back to disk
-    # (high major page-fault rates, disk reads far above writes). The memory
-    # comes from the runner, so the Pod's total request does not grow.
+    # (high major page-fault rates, disk reads far above writes). 9Gi also
+    # holds the CDC chunk cache, which every worker pool shares; the Pod now
+    # requests the same 49Gi as worker-ubuntu22-04.
     resources:
       requests:
         cpu: 1000m
-        memory: 4Gi
+        memory: 9Gi
       limits:
         cpu: 1000m
-        memory: 4Gi
+        memory: 9Gi
     securityContext:
       allowPrivilegeEscalation: true
       privileged: true

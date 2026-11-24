@@ -154,10 +154,10 @@ spec:
     resources:
       requests:
         cpu: 500m
-        memory: 4Gi
+        memory: 9Gi
       limits:
         cpu: 1000m
-        memory: 4Gi
+        memory: 9Gi
     securityContext:
       allowPrivilegeEscalation: true
       privileged: true
