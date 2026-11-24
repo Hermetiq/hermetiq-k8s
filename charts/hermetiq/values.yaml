@@ -1045,6 +1045,14 @@ assistant:
 # endpoint. Keys must be project IDs, not Kubernetes namespace names.
 rbe:
   enabled: false
+  # Limits for an explicitly requested, read-only size-class training preview.
+  # These do not enable RBE access or write to the scheduler's history cache.
+  sizeClassTraining:
+    maxLookbackHours: 168
+    maxSamples: 2000
+    maxRecords: 100
+    timeoutSeconds: 30
+    maxActionBytes: 1048576
   accessPolicy:
     # Explicit per-project access is required when the RBE page is enabled.
     # Example: {"0": {enabled: true, minimum_role: viewer}}

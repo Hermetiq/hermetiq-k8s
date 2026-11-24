@@ -1457,6 +1457,18 @@
         "enabled": {
           "type": "boolean"
         },
+        "sizeClassTraining": {
+          "type": "object",
+          "description": "Budgets for an explicit read-only size-class training preview; does not enable live RBE access or ISCC writes.",
+          "additionalProperties": false,
+          "properties": {
+            "maxLookbackHours": { "type": "integer", "minimum": 1 },
+            "maxSamples": { "type": "integer", "minimum": 1 },
+            "maxRecords": { "type": "integer", "minimum": 1 },
+            "timeoutSeconds": { "type": "integer", "minimum": 1 },
+            "maxActionBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
         "accessPolicy": {
           "type": "object",
           "properties": {

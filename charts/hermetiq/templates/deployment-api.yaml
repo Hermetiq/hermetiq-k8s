@@ -177,6 +177,17 @@ spec:
             - name: MCP_EXPOSE_USER_IDENTITIES
               value: {{ .Values.api.mcpExposeUserIdentities | quote }}
             {{- end }}
+            {{- range $name, $value := dict
+                "SIZE_CLASS_TRAINING_MAX_LOOKBACK_HOURS" .Values.rbe.sizeClassTraining.maxLookbackHours
+                "SIZE_CLASS_TRAINING_MAX_SAMPLES" .Values.rbe.sizeClassTraining.maxSamples
+                "SIZE_CLASS_TRAINING_MAX_RECORDS" .Values.rbe.sizeClassTraining.maxRecords
+                "SIZE_CLASS_TRAINING_TIMEOUT_SECONDS" .Values.rbe.sizeClassTraining.timeoutSeconds
+                "SIZE_CLASS_TRAINING_MAX_ACTION_BYTES" .Values.rbe.sizeClassTraining.maxActionBytes }}
+            {{- if not (hasKey $.Values.api.env $name) }}
+            - name: {{ $name }}
+              value: {{ $value | int64 | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.assistant.enabled }}
             - name: AICHAT_DEFAULT_PROVIDER
               value: claude
