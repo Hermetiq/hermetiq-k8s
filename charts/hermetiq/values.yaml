@@ -875,6 +875,23 @@ gcpWorkloadIdentity:
   enabled: false
   serviceAccount: ""
 
+# S3-compatible storage for progress logs (the "S3-compatible" provider in
+# Project Settings). On EKS, IRSA (serviceAccount.annotations
+# eks.amazonaws.com/role-arn) and EKS Pod Identity need nothing here. For stores
+# that only accept access keys (OCI Object Storage Customer Secret Keys, MinIO,
+# Ceph), name a Secret holding the pair: the api, publisher and subscriber pods
+# then read AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from it. A name already
+# set in api.env, publisher.env or subscriber.env takes precedence.
+artifactStorage:
+  s3:
+    # Secret with the access key pair. Empty sets no keys.
+    existingSecret: ""
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+    # AWS_REGION for projects whose S3 settings leave the region empty, for
+    # example eu-central-1. EKS Pod Identity does not set a region.
+    region: ""
+
 rbac:
   enabled: true
   # namespace uses only Roles/RoleBindings, including a read of the release

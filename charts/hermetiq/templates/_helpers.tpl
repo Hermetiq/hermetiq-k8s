@@ -687,6 +687,39 @@ azure.workload.identity/use: "true"
 {{ end -}}
 {{- end -}}
 
+{{/*
+S3 credentials and default region for the s3 artifact storage provider, from
+artifactStorage.s3, for the bep-nats containers. A name already set in the
+component's own env (passed as .env) wins. Renders nothing when unset, and
+tolerates artifactStorage being absent from values reused by an upgrade.
+*/}}
+{{- define "hermetiq-core.s3StorageEnv" -}}
+{{- $s3 := (.root.Values.artifactStorage | default dict).s3 | default dict -}}
+{{- $env := .env | default dict -}}
+{{- with $s3.existingSecret }}
+{{- if not (hasKey $env "AWS_ACCESS_KEY_ID") }}
+- name: AWS_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $s3.accessKeyIdKey | default "AWS_ACCESS_KEY_ID" | quote }}
+{{- end }}
+{{- if not (hasKey $env "AWS_SECRET_ACCESS_KEY") }}
+- name: AWS_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $s3.secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY" | quote }}
+{{- end }}
+{{- end }}
+{{- with $s3.region }}
+{{- if not (hasKey $env "AWS_REGION") }}
+- name: AWS_REGION
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
 {{- define "hermetiq-core.sharedEnvName" -}}bep-nats-shared-env{{- end -}}
 
 {{/*
