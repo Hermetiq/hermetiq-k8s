@@ -98,7 +98,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 1
       },
@@ -197,8 +197,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 1
       },
       "id": 4,
@@ -222,15 +222,116 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} {{kubernetes_replica}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CS / legacy CAS",
+      "type": "timeseries",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "id": 52,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "kubernetes_replica_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_replica}}",
           "refId": "A"
         }
       ],
-      "title": "cas",
-      "type": "timeseries"
+      "title": "CMS",
+      "type": "timeseries",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "collapsed": false,
@@ -309,7 +410,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 10
       },
@@ -408,8 +509,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 10
       },
       "id": 9,
@@ -433,15 +534,116 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} {{kubernetes_shard}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CS / legacy CAS",
+      "type": "timeseries",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "id": 53,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:max{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
           "refId": "A"
         }
       ],
-      "title": "cas",
-      "type": "timeseries"
+      "title": "CMS",
+      "type": "timeseries",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "collapsed": false,
@@ -520,7 +722,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 19
       },
@@ -619,8 +821,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 19
       },
       "id": 14,
@@ -644,15 +846,116 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} {{kubernetes_shard}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CS / legacy CAS",
+      "type": "timeseries",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "id": 54,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "kubernetes_shard_storage_type:buildbarn_blobstore_old_current_new_location_blob_map_last_removed_old_block_insertion_time_seconds:min{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{kubernetes_shard}}",
           "refId": "A"
         }
       ],
-      "title": "cas",
-      "type": "timeseries"
+      "title": "CMS",
+      "type": "timeseries",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "collapsed": false,
@@ -731,7 +1034,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 28
       },
@@ -841,8 +1144,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 28
       },
       "id": 19,
@@ -866,7 +1169,118 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} TooManyAttempts",
+          "refId": "B"
+        }
+      ],
+      "title": "CS / legacy CAS operation rate",
+      "type": "timeseries",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 70,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "id": 55,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_count:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -877,15 +1291,16 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_get_too_many_attempts:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyAttempts",
           "refId": "B"
         }
       ],
-      "title": "cas operation rate",
-      "type": "timeseries"
+      "title": "CMS operation rate",
+      "type": "timeseries",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "datasource": {
@@ -909,7 +1324,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 36
       },
@@ -932,7 +1347,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -992,8 +1407,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 36
       },
       "id": 23,
@@ -1015,7 +1430,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -1043,15 +1458,100 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cas\"} > 0",
+          "expr": "sum by (le) (le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "cas operation attempts",
-      "type": "heatmap"
+      "title": "CS / legacy CAS operation attempts",
+      "type": "heatmap",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 36
+      },
+      "id": 56,
+      "options": {
+        "calculate": false,
+        "calculation": {},
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Spectral",
+          "steps": 128
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "never",
+        "tooltip": {
+          "mode": "none",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "decimals": 0,
+          "reverse": false,
+          "unit": "short"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_get_attempts_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cms\"} > 0",
+          "format": "heatmap",
+          "intervalFactor": 10,
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CMS operation attempts",
+      "type": "heatmap",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "collapsed": false,
@@ -1130,7 +1630,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 45
       },
@@ -1150,17 +1650,6 @@
       },
       "pluginVersion": "12.0.2",
       "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
-          },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"ac\"}",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "IgnoredInvalid",
-          "refId": "A"
-        },
         {
           "datasource": {
             "type": "prometheus",
@@ -1251,8 +1740,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 45
       },
       "id": 28,
@@ -1276,18 +1765,118 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_ignored_invalid:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
           "format": "time_series",
           "intervalFactor": 2,
-          "legendFormat": "IgnoredInvalid",
-          "refId": "A"
+          "legendFormat": "{{storage_type}} {{outcome}}",
+          "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{storage_type}} TooManyIterations",
+          "refId": "C"
+        }
+      ],
+      "title": "CS / legacy CAS operation rate",
+      "type": "timeseries",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 70,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 45
+      },
+      "id": 57,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "outcome_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_count:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{outcome}}",
@@ -1298,15 +1887,16 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}",
+          "expr": "storage_type:buildbarn_blobstore_hashing_key_location_map_put_too_many_iterations:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "TooManyIterations",
           "refId": "C"
         }
       ],
-      "title": "cas operation rate",
-      "type": "timeseries"
+      "title": "CMS operation rate",
+      "type": "timeseries",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "datasource": {
@@ -1330,7 +1920,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 53
       },
@@ -1353,7 +1943,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -1413,8 +2003,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 53
       },
       "id": 32,
@@ -1436,7 +2026,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -1464,15 +2054,100 @@
             "type": "prometheus",
             "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
           },
-          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cas\"} > 0",
+          "expr": "sum by (le) (le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}) > 0",
           "format": "heatmap",
           "intervalFactor": 10,
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "cas operation iterations",
-      "type": "heatmap"
+      "title": "CS / legacy CAS operation iterations",
+      "type": "heatmap",
+      "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 53
+      },
+      "id": 58,
+      "options": {
+        "calculate": false,
+        "calculation": {},
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Spectral",
+          "steps": 128
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "never",
+        "tooltip": {
+          "mode": "none",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "decimals": 0,
+          "reverse": false,
+          "unit": "short"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "expr": "le_storage_type:buildbarn_blobstore_hashing_key_location_map_put_iterations_bucket:irate1m{namespace=\"$namespace\",storage_type=\"cms\"} > 0",
+          "format": "heatmap",
+          "intervalFactor": 10,
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CMS operation iterations",
+      "type": "heatmap",
+      "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
     },
     {
       "collapsed": false,
@@ -2391,7 +3066,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -2474,7 +3149,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -2790,7 +3465,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -2873,7 +3548,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true

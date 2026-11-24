@@ -1,0 +1,35 @@
+{{- if and (eq (include "hermetiq-core.routingProvider" .) "gateway") .Values.gateway.dashboardGrpcWeb.enabled -}}
+{{- $gatewayName := required "gateway.name is required for the dashboard gRPC-web policy" .Values.gateway.name -}}
+{{- $gatewayNamespace := include "hermetiq-core.gatewayNamespace" . -}}
+{{- $dashboardHost := include "hermetiq-core.dashboardHost" . -}}
+{{- $listeners := required "gateway.dashboardGrpcWeb.listenerNames must include every Gateway listener serving the dashboard" .Values.gateway.dashboardGrpcWeb.listenerNames -}}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyPatchPolicy
+metadata:
+  name: {{ printf "%s-%s-dashboard-grpc-web" (include "hermetiq-core.namespace" .) .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $gatewayNamespace }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ $gatewayName | quote }}
+  type: JSONPatch
+  jsonPatches:
+    {{- range $listeners }}
+    - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+      name: {{ printf "%s/%s/%s" $gatewayNamespace $gatewayName . | quote }}
+      operation:
+        op: add
+        # Match the configured hostname, independently of Envoy's generated
+        # virtual-host names and array order. This HTTPRoute has one hostname.
+        jsonPath: {{ printf "$.virtual_hosts[?(@.domains[0] == %s)]" (mustToJson $dashboardHost) | quote }}
+        # Envoy Gateway creates missing parent objects for add operations.
+        # Add only this filter key, preserving other virtual-host policies.
+        path: /typed_per_filter_config/envoy.filters.http.grpc_web
+        value:
+          "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+          disabled: true
+    {{- end }}
+{{- end }}

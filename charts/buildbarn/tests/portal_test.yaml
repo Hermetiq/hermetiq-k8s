@@ -114,10 +114,19 @@ tests:
       - notMatchRegex:
           path: data["portal.jsonnet"]
           pattern: "frontendProxyUrl|allowedOrigins|browserServiceConfiguration"
-      # Blob browsing config moved to the top level alongside the CAS.
+      # Blob browsing config moved to contentAddressableStorageServer at the top level.
       - matchRegex:
           path: data["portal.jsonnet"]
-          pattern: "\\n  contentAddressableStorage: common.blobstore.contentAddressableStorage,"
+          pattern: "contentAddressableStorageServer: \\{\\n    contentAddressableStorage: common\\.blobstore\\.contentAddressableStorage,"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "graphqlApiServiceConfiguration: \\{\\n    readAuthorizer: \\{ allow: \\{\\} \\},"
+      - matchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "blobstoreServiceConfiguration: \\{\\},"
+      - notMatchRegex:
+          path: data["portal.jsonnet"]
+          pattern: "instanceNameAuthorizer|enableGraphqlPlayground|databaseCleanupConfiguration"
 
   # buildKey reads from the buildTags this extractor returns; with no extractor
   # buildTags is always empty and the Builds page stays empty.

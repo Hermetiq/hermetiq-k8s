@@ -44,9 +44,7 @@ spec:
     rolloutOnChange: true
   images:
     runner: <registry>/drake-runner@sha256:<digest>
-    runnerInstaller: ghcr.io/buildbarn/bb-runner-installer:20260908T142432Z-77f7642
     volumeInit: busybox:1.31.1-uclibc
-    worker: ghcr.io/buildbarn/bb-worker:20260908T142432Z-77f7642
   pod:
     nodeSelector:
       kubernetes.io/arch: amd64

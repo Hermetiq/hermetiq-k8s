@@ -250,7 +250,7 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 8,
             "x": 0,
             "y": 120
           },
@@ -349,8 +349,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 8,
             "y": 120
           },
           "id": 31,
@@ -374,15 +374,116 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=\"cas\"}) by (operation)",
+              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",storage_type=~\"cas|cs\"}) by (storage_type, operation)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{storage_type}} {{operation}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Chunk Storage / legacy CAS",
+          "type": "timeseries",
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 70,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 120
+          },
+          "id": 48,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "12.0.2",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+              },
+              "expr": "sum(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",backend_type=~\"$cms_backend_type\",storage_type=\"cms\"}) by (operation)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{operation}}",
               "refId": "A"
             }
           ],
-          "title": "Content Addressable Storage",
-          "type": "timeseries"
+          "title": "Chunk Mapping Storage (CMS)",
+          "type": "timeseries",
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
         },
         {
           "datasource": {
@@ -406,7 +507,7 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 12,
+            "w": 8,
             "x": 0,
             "y": 219
           },
@@ -429,7 +530,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -489,8 +590,8 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 8,
             "y": 219
           },
           "id": 25,
@@ -512,7 +613,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -540,15 +641,16 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=~\"cas|cs\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
               "refId": "A"
             }
           ],
-          "title": "CAS Request Duration (Get)",
-          "type": "heatmap"
+          "title": "CS / legacy CAS Request Duration (Get)",
+          "type": "heatmap",
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
         },
         {
           "datasource": {
@@ -572,7 +674,91 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 12,
+            "w": 8,
+            "x": 16,
+            "y": 219
+          },
+          "id": 49,
+          "options": {
+            "calculate": false,
+            "calculation": {},
+            "cellGap": 2,
+            "cellValues": {},
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-09
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.0.2",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+              },
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cms_backend_type\",operation=\"Get\",storage_type=\"cms\"}) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CMS Request Duration (Get)",
+          "type": "heatmap",
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 8,
             "x": 0,
             "y": 229
           },
@@ -595,7 +781,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -657,8 +843,8 @@
           },
           "gridPos": {
             "h": 10,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 8,
             "y": 229
           },
           "id": 27,
@@ -680,7 +866,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -708,15 +894,100 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=~\"cas|cs\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
               "refId": "A"
             }
           ],
-          "title": "CAS Request Duration (Put)",
-          "type": "heatmap"
+          "title": "CS / legacy CAS Request Duration (Put)",
+          "type": "heatmap",
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 8,
+            "x": 16,
+            "y": 229
+          },
+          "id": 50,
+          "options": {
+            "calculate": false,
+            "calculation": {},
+            "cellGap": 2,
+            "cellValues": {},
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-09
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.0.2",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+              },
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_duration_seconds_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cms_backend_type\",operation=\"Put\",storage_type=\"cms\"}) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CMS Request Duration (Put)",
+          "type": "heatmap",
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments."
         },
         {
           "datasource": {
@@ -740,7 +1011,7 @@
           },
           "gridPos": {
             "h": 11,
-            "w": 12,
+            "w": 6,
             "x": 0,
             "y": 239
           },
@@ -763,7 +1034,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -791,15 +1062,16 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Get\",storage_type=~\"cas|cs\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
               "refId": "A"
             }
           ],
-          "title": "Content Addressable Storage (Get Size)",
-          "type": "heatmap"
+          "title": "Chunk Storage / legacy CAS (Get Size)",
+          "type": "heatmap",
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
         },
         {
           "datasource": {
@@ -823,11 +1095,11 @@
           },
           "gridPos": {
             "h": 11,
-            "w": 12,
-            "x": 12,
+            "w": 6,
+            "x": 6,
             "y": 239
           },
-          "id": 29,
+          "id": 51,
           "options": {
             "calculate": false,
             "calculation": {},
@@ -846,7 +1118,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1E-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -874,15 +1146,184 @@
                 "type": "prometheus",
                 "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
               },
-              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=\"cas\"}) by (le) > 0",
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cms_backend_type\",operation=\"Get\",storage_type=\"cms\"}) by (le) > 0",
               "format": "heatmap",
               "intervalFactor": 10,
               "legendFormat": "{{le}}",
               "refId": "A"
             }
           ],
-          "title": "Content Addressable Storage",
-          "type": "heatmap"
+          "title": "Chunk Mapping Storage (CMS) (Get Size)",
+          "type": "heatmap",
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 6,
+            "x": 12,
+            "y": 239
+          },
+          "id": 29,
+          "options": {
+            "calculate": false,
+            "calculation": {},
+            "cellGap": 2,
+            "cellValues": {},
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-09
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "bytes"
+            }
+          },
+          "pluginVersion": "12.0.2",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+              },
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cas_backend_type\",operation=\"Put\",storage_type=~\"cas|cs\"}) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Chunk Storage / legacy CAS (Put Size)",
+          "type": "heatmap",
+          "description": "Chunk Storage (cs) on CDC deployments; Content Addressable Storage (cas) on legacy deployments. During migration, both are shown. Chunk mappings have separate CMS panels. On CDC deployments the size is the uncompressed chunk size; chunks are stored zstd-compressed."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 6,
+            "x": 18,
+            "y": 239
+          },
+          "id": 52,
+          "options": {
+            "calculate": false,
+            "calculation": {},
+            "cellGap": 2,
+            "cellValues": {},
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "Spectral",
+              "steps": 128
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1e-09
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto"
+            },
+            "showValue": "never",
+            "tooltip": {
+              "mode": "none",
+              "showColorScale": false,
+              "yHistogram": false
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "decimals": 0,
+              "reverse": false,
+              "unit": "bytes"
+            }
+          },
+          "pluginVersion": "12.0.2",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+              },
+              "expr": "sum(backend_type_kubernetes_service_le_operation_storage_type:buildbarn_blobstore_blob_access_operations_blob_size_bytes_bucket:irate1m{namespace=\"$namespace\",backend_type=~\"$cms_backend_type\",operation=\"Put\",storage_type=\"cms\"}) by (le) > 0",
+              "format": "heatmap",
+              "intervalFactor": 10,
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Chunk Mapping Storage (CMS) (Put Size)",
+          "type": "heatmap",
+          "description": "Chunk Mapping Storage (cms), introduced by CDC. This panel is empty on legacy deployments. The size is the one named in the request digest: the whole blob, not the stored mapping."
         },
         {
           "datasource": {
@@ -1870,7 +2311,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -1955,7 +2396,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -2040,7 +2481,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -2708,14 +3149,38 @@
           "type": "prometheus",
           "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
         },
-        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}, backend_type)",
         "includeAll": false,
-        "label": "CAS backend",
+        "label": "CS / legacy CAS backend",
         "name": "cas_backend_type",
         "options": [],
         "query": {
           "qryType": 5,
-          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cas\"}, backend_type)",
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=~\"cas|cs\"}, backend_type)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "local_block_device",
+          "value": "local_block_device"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__HERMETIQ_METRICS_DATASOURCE_UID__"
+        },
+        "definition": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}, backend_type)",
+        "includeAll": false,
+        "label": "CMS backend",
+        "name": "cms_backend_type",
+        "options": [],
+        "query": {
+          "qryType": 5,
+          "query": "label_values(backend_type_kubernetes_service_operation_storage_type:buildbarn_blobstore_blob_access_operations_started:irate1m{namespace=\"$namespace\",storage_type=\"cms\"}, backend_type)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,

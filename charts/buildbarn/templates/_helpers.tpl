@@ -127,6 +127,35 @@ affinity:
 
 {{- define "buildbarn.configName" -}}buildbarn-config{{- end -}}
 {{- define "buildbarn.workerConfigName" -}}buildbarn-worker-config{{- end -}}
+
+{{/* Shared source for the standard worker ConfigMap and custom worker wrappers.
+     Keep worker-only CAS settings here so custom pools inherit the same defaults.
+     A complete common.libsonnet override remains authoritative. */}}
+{{- define "buildbarn.workerCommon" -}}
+{{- $configOverrides := default dict .Values.configOverrides -}}
+{{- $commonOverride := index $configOverrides "common.libsonnet" | default "" -}}
+{{- $chunkCache := .Values.config.contentAddressableStorage.chunkCache -}}
+{{- if $commonOverride -}}
+{{ $commonOverride }}
+{{- else -}}
+{{ tpl (.Files.Get "files/config/common.libsonnet") . }}
+{{- if gt (int64 $chunkCache.cacheSize) 0 }}
++ {
+  // Workers only: keep decoded chunks in memory, so repeat FUSE reads
+  // skip ZSTD decoding and SHA-256 verification.
+  blobstore+: {
+    contentAddressableStorage+: {
+      chunkCache: {
+        cacheSize: {{ int64 $chunkCache.cacheSize }},
+        cacheDuration: {{ $chunkCache.cacheDuration | quote }},
+        cacheReplacementPolicy: {{ $chunkCache.cacheReplacementPolicy | quote }},
+      },
+    },
+  },
+}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- define "buildbarn.configChecksum" -}}
 {{- $root := .root -}}
 {{- $overrides := default dict $root.Values.configOverrides -}}
@@ -538,7 +567,9 @@ mounted at /storage-<store>-meta) holds the KLM file + persistent_state.
 */}}
 
 {{- define "buildbarn.storage.storeList" -}}
-{{- $stores := list "cas" "ac" -}}
+{{- $stores := list "cas" -}}
+{{- if ne .Values.storage.persistence.cms.backend "sharedCas" -}}{{- $stores = append $stores "cms" -}}{{- end -}}
+{{- $stores = append $stores "ac" -}}
 {{- if .Values.storage.persistence.iscc.enabled -}}{{- $stores = append $stores "iscc" -}}{{- end -}}
 {{- if .Values.storage.persistence.fsac.enabled -}}{{- $stores = append $stores "fsac" -}}{{- end -}}
 {{- join " " $stores -}}
@@ -629,14 +660,58 @@ pvc and emptyDir volumes do get fsGroup, so there the mkdir runs unprivileged.
 {{- define "buildbarn.storage.volumeInitScript" -}}
 set -eu
 {{- $hostPath := eq .Values.storage.persistence.mode "hostPath" -}}
-{{- range $dir := splitList " " (include "buildbarn.storage.fsDirs" .) }}
-{{- if $hostPath }}
-chown 65534:65534 {{ $dir }}
+{{- $pod := .Values.security.pod -}}
+{{- $uid := ternary 65534 $pod.runAsUser (kindIs "invalid" $pod.runAsUser) -}}
+{{- $gid := ternary 65534 $pod.runAsGroup (kindIs "invalid" $pod.runAsGroup) -}}
+{{- $casNoFs := and (eq .Values.storage.persistence.cas.backend "blockDevice") (ne .Values.storage.persistence.cas.blockDevice.keyLocationMap "file") }}
+# Pre-CDC CAS stored raw bytes and pre-CDC AC/ISCC/FSAC stored unsuffixed
+# protobufs; CDC stores compressed chunks and SHA256-suffixed records. Refuse
+# legacy files across all stores before creating any CDC directory.
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) }}
+{{- if ne $store "cms" }}
+{{- $s := index $.Values.storage.persistence $store }}
+{{- if or (ne $s.backend "blockDevice") (eq $s.blockDevice.keyLocationMap "file") }}
+{{- $dir := ternary (printf "/storage-%s-meta" $store) (printf "/storage-%s" $store) (eq $s.backend "blockDevice") }}
+if [ -e {{ $dir }}/{{ $store }}-keys.db ] || [ -L {{ $dir }}/{{ $store }}-keys.db ] || [ -e {{ $dir }}/{{ $store }}-blocks.db ] || [ -L {{ $dir }}/{{ $store }}-blocks.db ] || [ -e {{ $dir }}/persistent_state ] || [ -L {{ $dir }}/persistent_state ]; then
+  echo 'Pre-CDC {{ upper $store }} files detected in {{ $dir }}. Stop all cache clients and storage, snapshot the old cache if rollback is required, then explicitly retire the legacy {{ upper $store }} files before upgrading. No data has been removed. See docs/buildbarn-storage-model.md#storage-format-cutover-and-rollback' >&2
+  exit 1
+fi
 {{- end }}
+{{- end }}
+{{- end }}
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) }}
+{{- $s := index $.Values.storage.persistence $store }}
+{{- if or (ne $s.backend "blockDevice") (eq $s.blockDevice.keyLocationMap "file") }}
+{{- $dir := ternary (printf "/storage-%s-meta" $store) (printf "/storage-%s" $store) (eq $s.backend "blockDevice") }}
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}
+{{- end }}
+{{- if ne $store "cms" }}
+mkdir -p {{ $dir }}/cdc-v1
+chmod 0700 {{ $dir }}/cdc-v1
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/cdc-v1
+{{- end }}
+mkdir -p {{ $dir }}/cdc-v1/persistent_state
+chmod 0700 {{ $dir }}/cdc-v1/persistent_state
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/cdc-v1/persistent_state
+{{- end }}
+{{- else }}
 mkdir -p {{ $dir }}/persistent_state
 chmod 0700 {{ $dir }}/persistent_state
 {{- if $hostPath }}
-chown 65534:65534 {{ $dir }}/persistent_state
+chown {{ $uid }}:{{ $gid }} {{ $dir }}/persistent_state
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (eq .Values.storage.persistence.cms.backend "sharedCas") (not $casNoFs) (eq .Values.storage.persistence.cms.keyLocationMap.type "blockDevice") }}
+{{- $sharedCasDir := ternary "/storage-cas-meta" "/storage-cas" (eq .Values.storage.persistence.cas.backend "blockDevice") }}
+mkdir -p {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
+chmod 0700 {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
+{{- if $hostPath }}
+chown {{ $uid }}:{{ $gid }} {{ $sharedCasDir }}/cdc-v1/cms_persistent_state
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -741,6 +816,9 @@ securityContext:
 {{/* Privileged-lite init container that chowns raw device nodes (deviceAccess=chownInit). Column 0. */}}
 {{- define "buildbarn.storage.deviceChownInit" -}}
 {{- $bd := .Values.storage.persistence.blockDevice }}
+{{- $pod := .Values.security.pod -}}
+{{- $uid := ternary 65534 $pod.runAsUser (kindIs "invalid" $pod.runAsUser) -}}
+{{- $gid := ternary 65534 $pod.runAsGroup (kindIs "invalid" $pod.runAsGroup) -}}
 - name: device-chown
   image: {{ include "buildbarn.imageString" (dict "root" . "name" "images.busybox" "image" .Values.images.busybox.image) | quote }}
   imagePullPolicy: {{ .Values.images.busybox.pullPolicy }}
@@ -751,7 +829,7 @@ securityContext:
       set -eu
       for dev in {{ range $store := splitList " " (include "buildbarn.storage.storeList" .) }}{{ $s := index $.Values.storage.persistence $store }}{{ if eq $s.backend "blockDevice" }}/dev/bb/{{ $store }} {{ end }}{{ end }}; do
         if [ -b "$dev" ]; then
-          chown 65534:65534 "$dev"
+          chown {{ $uid }}:{{ $gid }} "$dev"
           chmod 0600 "$dev"
         fi
       done
@@ -840,14 +918,16 @@ properties: [
 {{- define "buildbarn.frontendReadCachingBackend" -}}
 {
   readCaching: {
-    slow: common.blobstore.contentAddressableStorage,
+    slow: common.blobstore.contentAddressableStorage.chunkStorage,
     fast: {
       'local': {
-        keyLocationMapInMemory: {
-          entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
+        keyLocationMap: {
+          inMemory: {
+            entries: {{ int64 .Values.frontend.readCache.keyLocationMapInMemoryEntries }},
+          },
+          maximumGetAttempts: 16,
+          maximumPutAttempts: 64,
         },
-        keyLocationMapMaximumGetAttempts: 16,
-        keyLocationMapMaximumPutAttempts: 64,
         oldBlocks: {{ .Values.frontend.readCache.oldBlocks }},
         currentBlocks: {{ .Values.frontend.readCache.currentBlocks }},
         newBlocks: {{ .Values.frontend.readCache.newBlocks }},
@@ -859,15 +939,6 @@ properties: [
             },
           },
           spareBlocks: {{ .Values.frontend.readCache.spareBlocks }},
-          // Objects read out of a block device are checksummed end to end on
-          // every read by default. This caches the verdict, so a cache hit
-          // does not pay for a full re-digest — the cost the cache exists to
-          // avoid.
-          dataIntegrityValidationCache: {
-            cacheSize: {{ int64 .Values.frontend.readCache.dataIntegrityValidationCache.cacheSize }},
-            cacheDuration: {{ .Values.frontend.readCache.dataIntegrityValidationCache.cacheDuration | quote }},
-            cacheReplacementPolicy: 'LEAST_RECENTLY_USED',
-          },
         },
       },
     },
@@ -1058,4 +1129,298 @@ authenticationPolicy: {
   secret:
     secretName: {{ required "security.grpcMtls.secretName is required when security.grpcMtls.enabled is true" .Values.security.grpcMtls.secretName | quote }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Return a JSON list of capacity diagnostics for enabled stores. This is shared by
+validate.yaml (fatal when requested) and NOTES (warnings otherwise). Disk records
+occupy 66 bytes; RAM records use the configured entry count. Device sizes for
+hostPath are documentary: Helm cannot discover the actual node device capacity.
+*/}}
+{{- define "buildbarn.storage.indexSizingDiagnostics" -}}
+{{- $messages := list -}}
+{{- $klm := .Values.storage.keyLocationMapSizing -}}
+{{- $ratio := $klm.minimumRatio | float64 -}}
+{{- range $store := list "cas" "cms" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $store -}}
+{{- if or (eq $store "cas") (eq $store "cms") (eq $store "ac") $s.enabled -}}
+{{- $isBlock := eq $s.backend "blockDevice" -}}
+{{- $casNoFs := and (eq $.Values.storage.persistence.cas.backend "blockDevice") (ne $.Values.storage.persistence.cas.blockDevice.keyLocationMap "file") -}}
+{{- $isCmsInMem := and (eq $store "cms") (eq $s.backend "sharedCas") $casNoFs -}}
+{{- $data := add (int $s.oldBlocks) (int $s.currentBlocks) (int $s.newBlocks) -}}
+{{- $total := ternary $data (add $data (int $s.spareBlocks)) $isCmsInMem -}}
+{{- $avg := index $klm.averageObjectSizeBytes $store | float64 -}}
+{{- if and $isBlock (not $s.blockDevice.size) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity cannot be checked without storage.persistence.%s.blockDevice.size; set it to the actual device capacity." $store $store) -}}
+{{- else if or (le $avg 0.0) (le $ratio 0.0) (le $data 0) (le $total 0) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity requires positive averageObjectSizeBytes.%s, minimumRatio, and data/total block counts." $store $store) -}}
+{{- else if and $isBlock (not (include "buildbarn.storage.quantityBytes" $s.blockDevice.size)) -}}
+{{- /* Report, never fail: this helper also feeds NOTES, and a device size the
+       chart accepted before (375G, a byte count) must not start failing an
+       upgrade that leaves keyLocationMapSizing.validate off. */ -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map capacity cannot be checked because storage.persistence.%s.blockDevice.size (%v) is not a whole-byte Kubernetes quantity." $store $store $s.blockDevice.size) -}}
+{{- else -}}
+{{- $deviceMi := 0.0 -}}
+{{- if $isBlock -}}
+{{- /* Any quantity spelling the API server accepts: 700Gi, 375G, 0.5Ti, bytes. */ -}}
+{{- $deviceMi = divf (include "buildbarn.storage.quantityBytes" $s.blockDevice.size | float64) 1048576.0 -}}
+{{- else if $isCmsInMem -}}
+{{- $deviceMi = divf (mulf ($data | float64) ($s.blocksInMemoryBlockSizeBytes | float64)) 1048576.0 -}}
+{{- else -}}
+{{- $deviceMi = mul (int $s.blocksSizeGi) 1024 | float64 -}}
+{{- end -}}
+{{- $usableMi := divf (mulf $deviceMi ($data | float64)) ($total | float64) -}}
+{{- $maxObjects := divf (mulf $usableMi 1048576.0) $avg -}}
+{{- $entries := 0.0 -}}
+{{- $knob := "" -}}
+{{- $configured := 0.0 -}}
+{{- $disk := false -}}
+{{- if $isBlock -}}
+{{- if eq $s.blockDevice.keyLocationMap "file" -}}
+{{- $configured = $s.blockDevice.metadata.keyLocationMapSizeMi | float64 -}}
+{{- $knob = "blockDevice.metadata.keyLocationMapSizeMi" -}}
+{{- $disk = true -}}
+{{- else -}}
+{{- $configured = $s.blockDevice.keyLocationMapInMemoryEntries | float64 -}}
+{{- $knob = "blockDevice.keyLocationMapInMemoryEntries" -}}
+{{- end -}}
+{{- else if eq $store "cas" -}}
+{{- $configured = $s.keyLocationMapSizeMi | float64 -}}
+{{- $knob = "keyLocationMapSizeMi" -}}
+{{- $disk = true -}}
+{{- else if and (eq $s.keyLocationMap.type "blockDevice") (not $isCmsInMem) -}}
+{{- $configured = $s.keyLocationMap.sizeMi | float64 -}}
+{{- $knob = "keyLocationMap.sizeMi" -}}
+{{- $disk = true -}}
+{{- else -}}
+{{- $configured = $s.keyLocationMap.entries | float64 -}}
+{{- $knob = "keyLocationMap.entries" -}}
+{{- end -}}
+{{- $entries = $configured -}}
+{{- if $disk -}}
+{{- $entries = divf (mulf $configured 1048576.0) 66.0 -}}
+{{- end -}}
+{{- $required := mulf $ratio $maxObjects -}}
+{{- if lt $entries $required -}}
+{{- $remedy := printf "Set storage.persistence.%s.%s to at least %.0f entries, or reduce the blocks capacity." $store $knob (ceil $required) -}}
+{{- if $disk -}}
+{{- $requiredMi := ceil (divf (mulf $required 66.0) 1048576.0) -}}
+{{- $remedy = printf "Set storage.persistence.%s.%s to at least %.0f MiB (66 bytes per disk record), or reduce the blocks capacity. RAM entry settings do not size this file index." $store $knob $requiredMi -}}
+{{- end -}}
+{{- $messages = append $messages (printf "storage.persistence.%s: key-location map is too small for its blocks device. %s=%.0f indexes %.0f objects, but %.0f MiB usable (%d of %d blocks) at storage.keyLocationMapSizing.averageObjectSizeBytes.%s=%.0f can hold %.0f objects — that is %.2fx, below the required %vx. Once the table saturates, blobs may become unreachable. %s" $store $knob $configured $entries $usableMi $data $total $store $avg $maxObjects (divf $entries $maxObjects) $klm.minimumRatio $remedy) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $messages -}}
+{{- end -}}
+
+{{/* Names of enabled chart-generated stores without a persistent index/state.
+     A raw CAS without a filesystem forces its shared CMS into memory too. */}}
+{{- define "buildbarn.storage.volatileStores" -}}
+{{- $stores := list -}}
+{{- $cas := .Values.storage.persistence.cas -}}
+{{- $casNoFs := and (eq $cas.backend "blockDevice") (ne $cas.blockDevice.keyLocationMap "file") -}}
+{{- range $name := list "cas" "cms" "ac" "iscc" "fsac" -}}
+{{- $s := index $.Values.storage.persistence $name -}}
+{{- if or (has $name (list "cas" "cms" "ac")) $s.enabled -}}
+{{- $volatile := false -}}
+{{- if eq $s.backend "blockDevice" -}}
+{{- $volatile = ne $s.blockDevice.keyLocationMap "file" -}}
+{{- else if ne $name "cas" -}}
+{{- $volatile = or (ne $s.keyLocationMap.type "blockDevice") (and (eq $name "cms") (eq $s.backend "sharedCas") $casNoFs) -}}
+{{- end -}}
+{{- if $volatile -}}
+{{- $stores = append $stores (upper $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $stores -}}
+{{- end -}}
+
+{{/*
+Chart-default hostPath directory of a filesystem store. It must stay equal to
+storage.persistence.<store>.hostPath.path in values.yaml: the hostPath guard in
+validate.yaml uses it to tell an untouched default from a chosen path.
+*/}}
+{{- define "buildbarn.storage.defaultHostPath" -}}
+/mnt/stateful_partition/kube-ephemeral-ssd/buildbarn-storage/{{ . }}
+{{- end -}}
+
+{{/*
+JSON list of StorageClass mismatches between the claim templates rendered in
+mode=pvc. NOTES prints them as warnings. A raw block store's blocks and its
+companion metadata claim must share a lifecycle, and every filesystem store has
+its own storageClassName that does not follow the CAS setting.
+*/}}
+{{- define "buildbarn.storage.storageClassDiagnostics" -}}
+{{- $messages := list -}}
+{{- $p := .Values.storage.persistence -}}
+{{- if eq $p.mode "pvc" -}}
+{{- $casRaw := eq $p.cas.backend "blockDevice" -}}
+{{- $casClass := toString (default "" (ternary $p.cas.blockDevice.storageClassName $p.cas.storageClassName $casRaw)) -}}
+{{- $casKnob := ternary "storage.persistence.cas.blockDevice.storageClassName" "storage.persistence.cas.storageClassName" $casRaw -}}
+{{- range $store := splitList " " (include "buildbarn.storage.storeList" .) -}}
+{{- $s := index $p $store -}}
+{{- if eq $s.backend "blockDevice" -}}
+{{- $blocksClass := toString (default "" $s.blockDevice.storageClassName) -}}
+{{- $metaClass := toString (default "" $s.blockDevice.metadata.storageClassName) -}}
+{{- if and (eq $s.blockDevice.keyLocationMap "file") (ne $blocksClass $metaClass) -}}
+{{- $messages = append $messages (printf "storage.persistence.%s.blockDevice.storageClassName is %s but storage.persistence.%s.blockDevice.metadata.storageClassName is %s. The metadata claim holds this store's index and checkpoint state. If the two classes do not lose their volumes together, an index that outlives its blocks reports blobs that no longer exist. Set both to one class unless their volumes share one lifecycle." $store (ternary "empty (the cluster default)" (quote $blocksClass) (eq $blocksClass "")) $store (ternary "empty (the cluster default)" (quote $metaClass) (eq $metaClass ""))) -}}
+{{- end -}}
+{{- else if ne $store "cas" -}}
+{{- $class := toString (default "" $s.storageClassName) -}}
+{{- if ne $class $casClass -}}
+{{- $messages = append $messages (printf "storage.persistence.%s.storageClassName is %s but %s is %s. Each store has its own storageClassName; setting it for CAS does not change AC, ISCC, FSAC or a dedicated CMS. A claim keeps the class it was created with, and a class that does not exist in the cluster leaves the claim and its storage pod Pending." $store (ternary "empty (the cluster default)" (quote $class) (eq $class "")) $casKnob (ternary "empty (the cluster default)" (quote $casClass) (eq $casClass ""))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $messages -}}
+{{- end -}}
+
+{{/*
+Normalise a Kubernetes quantity to whole bytes so that two spellings of one
+size compare equal (the API server stores 1024Mi as 1Gi and 1.5Gi as 1536Mi).
+Accepts an integer or decimal mantissa followed by a binary suffix (Ki..Ei), a
+decimal suffix (k..E), a non-negative decimal exponent (e9), or nothing.
+Returns "" for anything else (milli-units, negative exponents, a fraction of a
+byte, a value beyond int64); callers then fall back to comparing the strings.
+*/}}
+{{- define "buildbarn.storage.quantityBytes" -}}
+{{- $q := toString . -}}
+{{- $suffixPattern := "(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E|[eE][0-9]{1,2})" -}}
+{{- if regexMatch (printf "^(0|[1-9][0-9]*)(\\.[0-9]+)?%s?$" $suffixPattern) $q -}}
+{{- $suffix := regexFind (printf "%s$" $suffixPattern) $q -}}
+{{- $parts := splitList "." (trimSuffix $suffix $q) -}}
+{{- $fraction := "" -}}
+{{- if gt (len $parts) 1 -}}
+{{- $fraction = index $parts 1 -}}
+{{- end -}}
+{{- /* value = digits x binary x 10^shift */ -}}
+{{- $digits := regexReplaceAll "^0+" (printf "%s%s" (first $parts) $fraction) "" -}}
+{{- $binary := index (dict "Ki" 1024 "Mi" 1048576 "Gi" 1073741824 "Ti" 1099511627776 "Pi" 1125899906842624 "Ei" 1152921504606846976) $suffix | default 1 | int64 -}}
+{{- $exponent := index (dict "k" 3 "M" 6 "G" 9 "T" 12 "P" 15 "E" 18) $suffix | default 0 | int64 -}}
+{{- if regexMatch "^[eE][0-9]+$" $suffix -}}
+{{- $exponent = int64 (default "0" (regexReplaceAll "^[eE]0*" $suffix "")) -}}
+{{- end -}}
+{{- $shift := sub $exponent (len $fraction) -}}
+{{- $max := 9223372036854775807 -}}
+{{- $pow10 := list 1 10 100 1000 10000 100000 1000000 10000000 100000000 1000000000 10000000000 100000000000 1000000000000 10000000000000 100000000000000 1000000000000000 10000000000000000 100000000000000000 1000000000000000000 -}}
+{{- if le (len $digits) 18 -}}
+{{- $n := int64 (default "0" $digits) -}}
+{{- if le $n (div $max $binary) -}}
+{{- $value := mul $n $binary -}}
+{{- if and (ge $shift 0) (le $shift 18) -}}
+{{- if le $value (div $max (index $pow10 $shift)) -}}
+{{- mul $value (index $pow10 $shift) -}}
+{{- end -}}
+{{- else if and (lt $shift 0) (ge $shift -18) -}}
+{{- if eq (mod $value (index $pow10 (sub 0 $shift))) 0 -}}
+{{- div $value (index $pow10 (sub 0 $shift)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+JSON list of the differences between a live StatefulSet's volumeClaimTemplates
+(.live) and the rendered ones (.rendered) that Kubernetes refuses to patch in
+place: a claim name added or removed, the order changed, or storageClassName,
+volumeMode or requested size changed for an existing name. Values are
+normalised the way the API server stores them: an absent storageClassName is
+empty, an absent volumeMode is Filesystem, and sizes compare as quantities.
+*/}}
+{{- define "buildbarn.storage.claimTemplateDifferences" -}}
+{{- $sides := dict -}}
+{{- $order := dict -}}
+{{- range $side := list "live" "rendered" -}}
+{{- $byName := dict -}}
+{{- $names := list -}}
+{{- range $claim := default (list) (index $ $side) -}}
+{{- $meta := default (dict) (index $claim "metadata") -}}
+{{- $spec := default (dict) (index $claim "spec") -}}
+{{- $requests := default (dict) (index (default (dict) (index $spec "resources")) "requests") -}}
+{{- $name := toString (default "" (index $meta "name")) -}}
+{{- $names = append $names $name -}}
+{{- /* The API server returns a quantity as a string. A rendered byte count
+       written as a bare number parses as a float; print it without exponent. */ -}}
+{{- $size := default "" (index $requests "storage") -}}
+{{- if kindIs "float64" $size -}}
+{{- if eq (floor $size) $size -}}
+{{- $size = printf "%.0f" $size -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $byName $name (dict
+      "storageClassName" (toString (default "" (index $spec "storageClassName")))
+      "volumeMode" (toString (default "Filesystem" (index $spec "volumeMode")))
+      "size" (toString $size)) -}}
+{{- end -}}
+{{- $_ := set $sides $side $byName -}}
+{{- $_ := set $order $side (join "," $names) -}}
+{{- end -}}
+{{- $live := index $sides "live" -}}
+{{- $rendered := index $sides "rendered" -}}
+{{- $differences := list -}}
+{{- range $name := sortAlpha (keys $rendered) -}}
+{{- if not (hasKey $live $name) -}}
+{{- $differences = append $differences (printf "claim template %q is added" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- range $name := sortAlpha (keys $live) -}}
+{{- if not (hasKey $rendered $name) -}}
+{{- $differences = append $differences (printf "claim template %q is removed" $name) -}}
+{{- else -}}
+{{- $l := index $live $name -}}
+{{- $r := index $rendered $name -}}
+{{- if ne $l.storageClassName $r.storageClassName -}}
+{{- $differences = append $differences (printf "claim template %q storageClassName changes from %q to %q" $name $l.storageClassName $r.storageClassName) -}}
+{{- end -}}
+{{- if ne $l.volumeMode $r.volumeMode -}}
+{{- $differences = append $differences (printf "claim template %q volumeMode changes from %q to %q" $name $l.volumeMode $r.volumeMode) -}}
+{{- end -}}
+{{- if ne $l.size $r.size -}}
+{{- $liveBytes := include "buildbarn.storage.quantityBytes" $l.size -}}
+{{- $renderedBytes := include "buildbarn.storage.quantityBytes" $r.size -}}
+{{- if or (not $liveBytes) (not $renderedBytes) (ne $liveBytes $renderedBytes) -}}
+{{- $differences = append $differences (printf "claim template %q requested size changes from %q to %q" $name $l.size $r.size) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not $differences) (ne (index $order "live") (index $order "rendered")) -}}
+{{- $differences = append $differences (printf "claim templates are reordered from %q to %q" (index $order "live") (index $order "rendered")) -}}
+{{- end -}}
+{{- toJson $differences -}}
+{{- end -}}
+
+{{/*
+"true" when an image reference carries an upstream Buildbarn date stamp from
+before the CDC storage format. Upstream tags are <YYYYMMDD>T<hhmmss>Z-<commit>
+and the first CDC builds are stamped 20261102. A tag without that stamp and a
+digest-only reference cannot be classified and return "". This is the only
+place the date rule lives; validate.yaml applies it to the release's own
+images and to RbeWorker pins.
+*/}}
+{{- define "buildbarn.cdc.preCdcImage" -}}
+{{- if regexMatch ":(20[01][0-9]{5}|202[0-5][0-9]{4}|2026(0[1-9]|10)[0-9]{2}|20261101)T" (toString .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Regular expression matching a jsonnet or JSON object field named `.`: bare or
+quoted, followed by `:`, `::`, `:::` or the merge forms `+:`, `+::`, `+:::`.
+*/}}
+{{- define "buildbarn.cdc.keyPattern" -}}
+(^|[^a-zA-Z0-9_])["']?{{ . }}["']?[[:space:]]*\+?:
+{{- end -}}
+
+{{/*
+Configuration text with comments removed, so a field name in a comment is not
+read as configuration: block comments, // to end of line, and lines whose first
+non-blank character is #.
+*/}}
+{{- define "buildbarn.cdc.stripComments" -}}
+{{- regexReplaceAll "(?m)^[ \\t]*#.*$" (regexReplaceAll "(?m)//.*$" (regexReplaceAll "(?s)/\\*.*?\\*/" (toString .) "") "") "" -}}
 {{- end -}}

@@ -1,0 +1,62 @@
+suite: install notes
+templates:
+  - templates/NOTES.txt
+values:
+  - ../ci-values/ci.yaml
+tests:
+  # Envoy Gateway accepts the EnvoyPatchPolicy and ignores it while the
+  # controller flag is off. Helm cannot see that, so the notes say what to check.
+  - it: tells Envoy Gateway installs to confirm the dashboard patch policy is programmed
+    set:
+      routing.provider: gateway
+      gateway.name: public-edge
+    asserts:
+      - matchRegexRaw:
+          pattern: 'DASHBOARD gRPC-WEB'
+      - matchRegexRaw:
+          pattern: 'extensionApis\.enableEnvoyPatchPolicy'
+      - matchRegexRaw:
+          pattern: 'get envoypatchpolicy'
+
+  - it: stays quiet when the patch policy is not rendered
+    set:
+      routing.provider: gateway
+      gateway.name: public-edge
+      gateway.dashboardGrpcWeb.enabled: false
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'DASHBOARD gRPC-WEB'
+
+  # The ci-values fixture renders with Contour. Nothing exempts the dashboard
+  # host from Contour's gRPC-web translation, so the notes say so up front.
+  - it: warns that the dashboard is expected to fail behind Contour
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: DASHBOARD gRPC-WEB'
+      - matchRegexRaw:
+          pattern: 'HTTP 505'
+      - notMatchRegexRaw:
+          pattern: 'enableEnvoyPatchPolicy'
+
+  - it: does not print the Contour warning for Envoy Gateway
+    set:
+      routing.provider: gateway
+      gateway.name: public-edge
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'WARNING: DASHBOARD gRPC-WEB'
+
+  - it: prints no dashboard gRPC-web note for nginx Ingress
+    set:
+      routing.provider: ingress
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'DASHBOARD gRPC-WEB'
+
+  - it: prints no dashboard gRPC-web note for GKE Gateway
+    set:
+      routing.provider: gateway-httproute-only
+      gateway.name: public-edge
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'DASHBOARD gRPC-WEB'

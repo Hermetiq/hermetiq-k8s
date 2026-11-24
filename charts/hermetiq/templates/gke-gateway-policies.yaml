@@ -35,10 +35,14 @@ spec:
 {{- end }}
 {{- end }}
 {{- if .Values.gateway.gke.backendPolicy.enabled }}
-{{- $grpcServices := list (include "hermetiq-core.publisherName" .) (include "hermetiq-core.apiName" .) -}}
+{{- /* The dashboard Service carries the dashboard's own API calls and
+     assistant streams, so it gets the API backend's bound instead of the
+     load balancer's 30s default. */ -}}
+{{- $apiPathServices := list (include "hermetiq-core.apiName" .) (include "hermetiq-core.dashboardName" .) -}}
+{{- $grpcServices := concat (list (include "hermetiq-core.publisherName" .)) $apiPathServices -}}
 {{- range $svc := uniq $grpcServices }}
 {{- $timeoutSec := $.Values.gateway.gke.backendPolicy.timeoutSec }}
-{{- if and $.Values.assistant.enabled (eq $svc (include "hermetiq-core.apiName" $)) }}
+{{- if and $.Values.assistant.enabled (has $svc $apiPathServices) }}
 {{- $timeoutSec = include "hermetiq-core.assistantTimeoutSeconds" (dict "root" $ "value" $timeoutSec) }}
 {{- end }}
 apiVersion: networking.gke.io/v1

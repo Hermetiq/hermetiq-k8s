@@ -196,13 +196,18 @@ change-control policies to every example.
 
 ## Supported chart bundle
 
-The following versions form the first tested bundle in this repository:
+The following versions are released and tested together:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `0.9.8` |             `0.9.8` |
-| Buildbarn |       `0.9.9` |  `20260908T142448Z` |
-| BB Worker Operator |      `0.3.12` |           `v0.3.13` |
+| Hermetiq |       `1.0.0` |             `1.0.0` |
+| Buildbarn |       `1.0.0` |  `20261118T120531Z` |
+| BB Worker Operator |       `1.0.0` |            `v1.0.0` |
+
+Run the three charts at these versions together. Hermetiq reads the
+configuration the Buildbarn chart renders, and the BB Worker Operator
+generates worker configuration for the same Buildbarn release, so mixing in
+another version of any one chart is not supported.
 
 The release PR updates the chart versions and README pins together. Tag the
 merged commit to publish the matching OCI packages. Maintenance PRs leave
@@ -395,7 +400,7 @@ steps.
 
 ### Install Buildbarn and worker pools
 
-Follow the [Buildbarn chart prerequisites checklist and install instructions](charts/buildbarn/README.md#install)
+Follow the [Buildbarn chart prerequisites checklist and install instructions](charts/buildbarn/README.md#install-prerequisites)
 (including [large-scale 10 TiB / 5–10 shard sizing](charts/buildbarn/README.md#large-scale-deployments-10-tib-cache--510-shards)
 and deciding on `iscc`/`fsac` before your first PVC-backed install), then follow
 the [RBE worker pool instructions](custom-values/rbeworkers/README.md)
@@ -487,6 +492,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | [`docs/mcp-authentication.md`](docs/mcp-authentication.md) | MCP chart authentication, resource audiences, and IdP requirements |
 | [`docs/mcp-auth0-runbook.md`](docs/mcp-auth0-runbook.md) | Auth0 setup and MCP authentication troubleshooting |
 | [`docs/image-integrity.md`](docs/image-integrity.md) | Public signing keys and Cosign verification for charts and container images |
+| [`docs/migrate-to-1.0.0.md`](docs/migrate-to-1.0.0.md) | Moving an installation from an earlier release to the `1.0.0` chart bundle |
 
 ## Shared chart conventions
 
@@ -525,24 +531,31 @@ assume `global.imageRegistry` covers the entire stack.
 
 ## Upgrading
 
+An installation on a release older than `1.0.0` follows
+[Migrating to 1.0.0](docs/migrate-to-1.0.0.md) instead of this section.
+
 When a new chart version is released:
 
 1. Read the `Chart.yaml` release metadata and GitHub release notes.
 2. Compare the new defaults with the version currently deployed.
 3. Back up PostgreSQL and assess whether Buildbarn storage changes imply a cold
-   cache. Enabling a new PVC-backed store (`iscc`, `fsac`) or changing a
-   store's `size` or `backend` also requires recreating the storage
-   StatefulSet; see the
+   cache; see
+   [Changes That Flush the Cache](docs/buildbarn-storage-operations.md#changes-that-flush-the-cache).
+   Enabling or disabling a PVC-backed store (`iscc`, `fsac`) or changing a
+   store's `size`, `storageClassName` or `backend` requires recreating the
+   storage StatefulSet; see the
    [storage operations runbook](docs/buildbarn-storage-operations.md#recreate-the-storage-statefulset).
 4. Apply the BB Worker Operator CRD first, then upgrade the operator, Hermetiq,
    and Buildbarn using a tested version combination.
-5. Reuse the same custom values files and verify every rollout before continuing.
+5. Reuse the same custom values files, passed with `--values`, and verify
+   every rollout before continuing. Do not use `--reuse-values` to change
+   chart version: Helm then drops the new chart's defaults.
 
 Example defaults comparison:
 
 ```bash
 helm show values oci://ghcr.io/hermetiq/hermetiq \
-  --version 0.9.7 > /tmp/hermetiq-old-values.yaml
+  --version '<deployed-version>' > /tmp/hermetiq-old-values.yaml
 helm show values oci://ghcr.io/hermetiq/hermetiq \
   --version '<new-version>' > /tmp/hermetiq-new-values.yaml
 diff -u /tmp/hermetiq-old-values.yaml /tmp/hermetiq-new-values.yaml

@@ -6,18 +6,34 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 0.9.9
-appVersion: "20260908T142448Z"
+version: 1.0.0
+appVersion: "20261118T120531Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "Update the Hermetiq grpc-cache-proxy default to v0.9.8, pinned to its signed digest; application release image values can update the sidecar independently of the Buildbarn chart version"
+      description: "Breaking: move to the Buildbarn November 2026 images and the RepMaxCDC chunked storage model. Existing cache data cannot be read: upgrading from 0.9.9 is a cold cut-over with a cache reset, and storage refuses to start on pre-CDC files until they are removed"
     - kind: changed
-      description: "Add disabled-by-default scheduler reload and handover hooks; preserve existing scheduler configuration and pod templates until explicitly enabled with compatible images"
+      description: "Breaking: CAS, CMS, AC, ISCC and FSAC keep persistent indexes by default, and ISCC and FSAC are enabled by default. PVC releases that ran without ISCC and FSAC, or with in-memory indexes on raw-block stores, gain claim templates and need the storage StatefulSet recreated; the upgrade refuses until then. custom-values/buildbarn-values-ephemeral.yaml restores volatile stores"
+    - kind: changed
+      description: "Breaking: jsonnet supplied through configOverrides, a custom common.libsonnet or RbeWorker spec.config.files must use the CDC schema; installs and upgrades fail with the field to change"
+    - kind: changed
+      description: "Breaking: raw-block metadata hostPath type defaults to Directory, so the node directory must exist before storage starts"
+    - kind: changed
+      description: "Breaking: bb-browser reads CAS through the frontend on port 8980 (frontend-internal) instead of the storage shards; a NetworkPolicy on the frontend pods must admit app=browser"
+    - kind: changed
+      description: "helm upgrade --reuse-values cannot upgrade 0.9.9 to 1.0.0; pass complete values files"
+    - kind: changed
+      description: "The grpc-cache-proxy sidecar default moves to the signed v1.0.0 image"
+    - kind: changed
+      description: "Scheduler handover and configurationReloadInterval require a CDC-capable fork image and scheduler.handover.cdcCompatibleFork=true"
+    - kind: added
+      description: "Install and upgrade are refused before anything is applied when the storage StatefulSet volumeClaimTemplates would change or when a pre-CDC Buildbarn image is pinned, on the release or on a live RbeWorker. upgradeChecks holds a skip switch for each check that reads the cluster"
+    - kind: added
+      description: "Requires bb-worker-operator 1.0.0, upgraded in the same window. buildbarn-worker-config publishes workerImage and runnerInstallerImage for RbeWorkers that set no images, and config.contentAddressableStorage.chunkCache gives worker pods a cache of decoded chunks"
     - kind: fixed
-      description: "Preserve custom router common imports and scheduler root references during reload, format IPv6 scheduler handover endpoints, and reject handover configurations with disabled API credentials or conflicting listener ports"
+      description: "Key-location-map recording rules and alerts cover the storage pods only and read both the CDC and the legacy metric names"
 keywords:
   - buildbarn
   - buildbarn-helm-chart

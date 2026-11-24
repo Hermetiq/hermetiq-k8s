@@ -59,7 +59,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: ea8c9d0913d4e2fa17ca8ae212517c3d5c2beea9a0ba292e8ac90afab0c1f1c0
+          value: 1ed13980dae6664f38b4314b721344f40b64990dbde6bcf2ddad2d7ec4388d7e
       - equal:
           path: spec.template.spec.volumes[0].configMap.items
           value:
@@ -79,21 +79,24 @@ tests:
     asserts:
       - notEqual:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: ea8c9d0913d4e2fa17ca8ae212517c3d5c2beea9a0ba292e8ac90afab0c1f1c0
+          value: 1ed13980dae6664f38b4314b721344f40b64990dbde6bcf2ddad2d7ec4388d7e
 
   # With configurationReloadInterval the scheduler applies changes to the
   # action router and predeclared queues itself, so they must not roll it.
   # The reload baseline includes the object-inheritance form that preserves
-  # custom routers' `$` references; only that opt-in source checksum changes.
+  # custom routers' `$` references and uses the CDC contentAddressableStorage
+  # field. Updating that source must change the baseline without changing the
+  # queue/router isolation assertions below.
   - it: baseline scheduler checksum/config with configuration reloading enabled
     template: templates/deployment-scheduler.yaml
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce
       - contains:
           path: spec.template.spec.volumes[0].configMap.items
           content:
@@ -105,6 +108,7 @@ tests:
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.predeclaredPlatformQueues:
         - platform:
             - name: cpu
@@ -113,16 +117,17 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce
 
   - it: does not roll the scheduler when the actionRouter changes and reloading is enabled
     template: templates/deployment-scheduler.yaml
     set:
       images.scheduler.repository: us-docker.pkg.dev/example/bb-scheduler
       scheduler.configurationReloadInterval: 30s
+      scheduler.handover.cdcCompatibleFork: true
       scheduler.actionRouter.mode: custom
       scheduler.actionRouter.custom: "simple: {},"
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: f8c7f77dde65eea44d3dd223e2265e124306f181c605422a4a0d2ecb509954fb
+          value: 6dc725b15999035f42e04cd34e55690be02fe7f182c5849d8fef7f93f213a5ce

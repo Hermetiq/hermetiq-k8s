@@ -3450,15 +3450,20 @@ spec:
                     minLength: 1
                     type: string
                   runnerInstaller:
+                    description: |-
+                      RunnerInstaller is the init container image that copies bb_runner into /bb.
+                      When unset and runner installer is enabled, the operator falls back to the
+                      runnerInstallerImage key in the referenced config ConfigMap.
                     type: string
                   volumeInit:
                     type: string
                   worker:
-                    minLength: 1
+                    description: |-
+                      Worker is the container image for bb_worker. When unset, the operator
+                      falls back to the workerImage key in the referenced config ConfigMap.
                     type: string
                 required:
                 - runner
-                - worker
                 type: object
               manageReplicas:
                 default: true

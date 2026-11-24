@@ -215,6 +215,7 @@ spec:
 {{- $apiTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "apiGrpc") | trim -}}
 {{- $bbcalTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "bbcalGrpc") | trim -}}
 {{- $apiWebTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "apiWeb") | trim -}}
+{{- $dashboardTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "dashboard") | trim -}}
 {{- $mcpTimeout := include "hermetiq-core.routeTimeout" (dict "root" . "route" "mcp") | trim -}}
 {{/* One BackendTrafficPolicy per gRPC route carrying both the health check and
      the stream timeouts. They cannot be split into two resources: Envoy Gateway
@@ -319,6 +320,22 @@ spec:
         path: /ready
         method: GET
   {{- end }}
+{{- end }}
+{{- if and (not $httpRouteOnly) $dashboardTimeout }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ printf "%s-timeouts" .Values.gateway.routes.dashboardName | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "hermetiq-core.namespace" . }}
+  labels:
+    {{- include "hermetiq-core.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ .Values.gateway.routes.dashboardName }}
+  {{- $dashboardTimeout | nindent 2 }}
 {{- end }}
 {{- if and (not $httpRouteOnly) (or $hcEnabled $mcpTimeout) }}
 ---

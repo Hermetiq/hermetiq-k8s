@@ -48,7 +48,7 @@ spec:
         {{- if and .Values.license.key.value (not .Values.license.key.existingSecret) }}
         checksum/license-secret: {{ dict "key" .Values.license.key.existingSecretKey "value" .Values.license.key.value | toJson | sha256sum }}
         {{- end }}
-        {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) }}
+        {{- if and .Values.publisher.jwks.enabled (not .Values.publisher.jwks.profiles) (not (include "hermetiq-core.publisherJwksUrl" .)) (not .Values.publisher.jwks.existingSecret) }}
         checksum/publisher-jwks-secret: {{ .Values.publisher.jwks.json | sha256sum }}
         {{- end }}
     spec:
@@ -67,6 +67,7 @@ spec:
       {{- end }}
       {{- include "hermetiq-core.podScheduling" (dict "root" . "workload" .Values.publisher) | nindent 6 }}
       volumes:
+        {{- include "hermetiq-core.jwtProfileVolumes" .Values.publisher.jwks.profiles | nindent 8 }}
         - name: download-dir
           emptyDir:
             sizeLimit: 1Gi
@@ -76,7 +77,7 @@ spec:
             items:
               - key: {{ .Values.nats.streamConfig.configMapKey | quote }}
                 path: nats_streams.json
-        {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) }}
+        {{- if and .Values.publisher.jwks.enabled (not .Values.publisher.jwks.profiles) (not (include "hermetiq-core.publisherJwksUrl" .)) }}
         - name: publisher-jwks
           secret:
             secretName: {{ include "hermetiq-core.pubJwksSecretName" . }}
@@ -115,6 +116,8 @@ spec:
             - configMapRef:
                 name: {{ include "hermetiq-core.sharedEnvName" . }}
           env:
+            - name: PROJECT_AUTHORIZATION_CONFIG
+              value: {{ include "hermetiq-core.projectAuthorizationJSON" . | quote }}
 {{- with .Values.publisher.env }}
 {{- include "hermetiq-core.extraEnv" (dict "root" $ "env" .) | trim | nindent 12 }}
 {{- end }}
@@ -125,7 +128,7 @@ spec:
             mcp-http). The publisher sets no MCP variables, so bep-nats keeps
             MCP disabled, its default. */}}
             - name: ENFORCE_PUB_AUTHZ
-              value: "false"
+              value: "true"
             - name: APP_MODE
               value: pub
             - name: HTTP_PORT
@@ -236,7 +239,11 @@ spec:
             - name: GRPC_AUTH_TRUSTED_CAL_CIDRS
               value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.publisher.jwks.enabled }}
+            {{- if .Values.publisher.jwks.profiles }}
+            - name: GRPC_AUTH_JWT_PROFILES
+              value: {{ include "hermetiq-core.jwtProfilesJSON" .Values.publisher.jwks.profiles | quote }}
+            {{- else if .Values.publisher.jwks.enabled }}
+            {{- include "hermetiq-core.jwksRefreshEnv" (dict "settings" .Values.publisher.jwks "env" .Values.publisher.env) | nindent 12 }}
             {{- $jwksUrl := include "hermetiq-core.publisherJwksUrl" . }}
             {{- if $jwksUrl }}
             - name: GRPC_AUTH_JWKS_URL
@@ -309,12 +316,13 @@ spec:
               value: {{ printf "%s/tls.crt" .Values.otel.mtls.mountPath | quote }}
             {{- end }}
           volumeMounts:
+            {{- include "hermetiq-core.jwtProfileMounts" .Values.publisher.jwks.profiles | nindent 12 }}
             - name: download-dir
               mountPath: /tmp/artifact-downloads
             - name: nats-stream-config
               mountPath: /config/nats-streams
               readOnly: true
-            {{- if and .Values.publisher.jwks.enabled (not (include "hermetiq-core.publisherJwksUrl" .)) }}
+            {{- if and .Values.publisher.jwks.enabled (not .Values.publisher.jwks.profiles) (not (include "hermetiq-core.publisherJwksUrl" .)) }}
             - name: publisher-jwks
               mountPath: /config/jwks
               readOnly: true

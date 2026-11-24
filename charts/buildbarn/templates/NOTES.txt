@@ -11,6 +11,42 @@
 {{- $anyEndpoint := or $browserExposed $rbeWebExposed $frontendGrpcExposed $remoteAssetExposed $portalExposed $besExposed -}}
 Buildbarn {{ .Chart.Version }} installed in namespace {{ include "buildbarn.namespace" . }}.
 
+{{- if (index (default (dict) .Values.configOverrides) "storage.jsonnet" | default "") }}
+STORAGE CONFIG OVERRIDE: configOverrides["storage.jsonnet"] replaces the generated
+storage configuration. Index persistence and sizing cannot be inferred from chart
+values; inspect the rendered override for every store's persistent configuration.
+{{- else }}
+{{- $volatile := include "buildbarn.storage.volatileStores" . | fromJsonArray }}
+{{- if $volatile }}
+WARNING: VOLATILE STORAGE STORES: {{ join ", " $volatile }}.
+These enabled stores render without persistent indexes/checkpoints and start
+empty after a storage-process restart. Remove explicit inMemory overrides or
+apply custom-values/buildbarn-values-persistent.yaml after deployment values
+unless this loss is intentional. --reset-then-reuse-values refreshes inherited
+defaults, but preserves explicit inMemory overrides.
+{{- else }}
+All enabled storage stores use persistent indexes and checkpoint state.
+{{- end }}
+{{- if not .Values.storage.keyLocationMapSizing.validate }}
+{{- range $diagnostic := (include "buildbarn.storage.indexSizingDiagnostics" . | fromJsonArray) }}
+
+WARNING: STORAGE INDEX CAPACITY: {{ $diagnostic }}
+Set storage.keyLocationMapSizing.validate=true to make this a render error.
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq .Values.storage.persistence.mode "emptyDir" }}
+WARNING: storage.persistence.mode=emptyDir loses all stores on pod replacement,
+even when their indexes and checkpoint state are file-backed.
+{{- end }}
+{{- range $diagnostic := (include "buildbarn.storage.storageClassDiagnostics" . | fromJsonArray) }}
+
+WARNING: STORAGE CLASS MISMATCH: {{ $diagnostic }}
+{{- end }}
+Storage recovery requires matching blocks, indexes, and state to survive together.
+For volume-lifetime limits:
+https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md#what-survives-a-restart
+
 {{ if $anyEndpoint -}}
 EXTERNAL ENDPOINTS — via {{ $provider }}
 {{- if $browserExposed }}
@@ -43,4 +79,20 @@ client config wholesale. The storage shard map and namespace are then no
 longer derived from storage.replicas — keep the override's shard list in
 lockstep with storage.replicas, or added/removed storage pods silently
 receive no traffic.
+{{- end }}
+{{- if or .Values.storage.dataIntegrityValidationCache.enabled .Values.frontend.readCache.dataIntegrityValidationCache }}
+
+DEPRECATION NOTE: dataIntegrityValidationCache was removed from
+local.BlobAccessConfiguration in CDC bb-storage (integrity validation now runs
+per RepMaxCDC chunk and via chunkMappingValidating) and is ignored by chart
+templates. Remove storage.dataIntegrityValidationCache (and
+frontend.readCache.dataIntegrityValidationCache) from your values file when
+convenient.
+{{- end }}
+{{- if and .Values.portal.enabled (eq (toString .Values.portal.bes.enableGraphqlPlayground) "false") }}
+
+WARNING: portal.bes.enableGraphqlPlayground=false is ignored. The pinned
+bb-portal serves the GraphQL playground (/graphiql) whenever the GraphQL API is
+configured, and this chart always configures it. Control who can reach the
+portal host at the route or network layer.
 {{- end }}

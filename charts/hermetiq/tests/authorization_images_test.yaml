@@ -1,0 +1,91 @@
+suite: authorization image compatibility
+templates:
+  - templates/validate.yaml
+values:
+  - ../ci-values/ci.yaml
+# These tags are render-only fixtures, not published release recommendations.
+set:
+  images.bepNats.apiTag: authorization-test
+  images.bepNats.apiDigest: ''
+  images.bepNats.pubTag: authorization-test
+  images.bepNats.pubDigest: ''
+  images.bepNats.bootstrapTag: authorization-test
+  images.bepNats.bootstrapDigest: ''
+  images.dashboard.tag: authorization-test
+  images.dashboard.digest: ''
+  images.authProxy.tag: authorization-test
+  images.authProxy.digest: ''
+tests:
+  - it: rejects the shipped API image when authorization is enforced
+    set:
+      images.bepNats.apiTag: v0.9.8
+      images.bepNats.apiDigest: sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.apiDigest=.*predates.*API authorization
+  - it: rejects a legacy digest even when its cosmetic tag is changed
+    set:
+      images.bepNats.apiDigest: sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.apiDigest=.*digest takes precedence over tag
+  - it: rejects old API release tags when no digest selects the image
+    set:
+      images.bepNats.apiTag: v0.9.7
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.apiTag=v0.9.7.*predates
+  - it: rejects prereleases of old API releases
+    set:
+      images.bepNats.apiTag: v0.9.8-rc.1
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.apiTag=v0.9.8-rc.1.*predates
+  - it: rejects the shipped publisher digest independently
+    set:
+      images.bepNats.pubDigest: sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.pubDigest=.*publisher authorization
+  - it: rejects the shipped dashboard digest independently
+    set:
+      images.dashboard.digest: sha256:8154cc722cb7cec11b27913a49f6be660f1e9ff3aba68e93c31404fe20c4ca97
+    asserts:
+      - failedTemplate:
+          errorPattern: images.dashboard.digest=.*browser authorization
+  - it: requires the bootstrap image to install the authorization schema
+    set:
+      images.bepNats.bootstrapDigest: sha256:b10a3d3208eb81804d6daf3260ff049324b6d7b37cc26ebd0cfc2c25d91c9118
+    asserts:
+      - failedTemplate:
+          errorPattern: images.bepNats.bootstrapDigest=.*project authorization database migrations
+  - it: permits explicit custom image selections for render validation
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: honors a custom digest instead of rejecting its old cosmetic tag
+    set:
+      images.bepNats.apiTag: v0.9.8
+      images.bepNats.apiDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: requires API profile forwarding support from the auth proxy
+    set:
+      api.jwt.profiles:
+        - name: browser
+          issuer: https://oidc.ci.test/
+          audiences: [dashboard-client]
+          jwksUrl: https://oidc.ci.test/keys
+          principalKind: human
+          credentialUse: browser
+      images.authProxy.digest: sha256:8555a0160ab6adc41a02c029f0eca5a6c3277a7c00c167bff7f73c1459e769dc
+    asserts:
+      - failedTemplate:
+          errorPattern: images.authProxy.digest=.*JWT profile forwarding
+  - it: does not require profile forwarding from a single-issuer auth proxy
+    set:
+      images.authProxy.digest: sha256:8555a0160ab6adc41a02c029f0eca5a6c3277a7c00c167bff7f73c1459e769dc
+    asserts:
+      - hasDocuments:
+          count: 0
