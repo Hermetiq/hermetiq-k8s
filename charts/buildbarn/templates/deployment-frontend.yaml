@@ -1,4 +1,5 @@
 {{- if include "buildbarn.fullDeployment" . }}
+{{- $shutdown := .Values.frontend.shutdown }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,8 +12,14 @@ spec:
   {{- if not (and .Values.keda.enabled .Values.keda.frontend.enabled) }}
   replicas: {{ .Values.frontend.replicas }}
   {{- end }}
-  progressDeadlineSeconds: 600
+  progressDeadlineSeconds: {{ max 600 (add .Values.frontend.terminationGracePeriodSeconds 60) (add .Values.frontend.minReadySeconds 60) }}
   revisionHistoryLimit: 10
+  minReadySeconds: {{ .Values.frontend.minReadySeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: frontend
@@ -28,6 +35,7 @@ spec:
         {{- end }}
         checksum/config: {{ include "buildbarn.configChecksum" (dict "root" . "files" (list "common.libsonnet" "frontend.jsonnet")) }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds }}
       {{- include "buildbarn.imagePullSecrets" . | nindent 6 }}
       {{- include "buildbarn.automountServiceAccountToken" (dict "root" . "workload" .Values.frontend) | nindent 6 }}
       {{- include "buildbarn.podSecurityContext" $ | nindent 6 }}
@@ -70,6 +78,12 @@ spec:
               value: {{ $proxy.port | quote }}
             - name: PROXY_PORT
               value: "8980"
+            - name: SHUTDOWN_DRAIN_DELAY
+              value: {{ printf "%ds" (int $shutdown.drainDelaySeconds) | quote }}
+            - name: SHUTDOWN_TIMEOUT
+              value: {{ printf "%ds" (int $shutdown.rpcGracePeriodSeconds) | quote }}
+            - name: CACHE_EVENT_DRAIN_TIMEOUT
+              value: {{ printf "%ds" (int $shutdown.eventDrainTimeoutSeconds) | quote }}
             - name: MAX_MESSAGE_SIZE_BYTES
               value: {{ include "buildbarn.grpcCacheProxyMaxMessageSize" . | quote }}
             - name: NATS_URL
@@ -110,6 +124,7 @@ spec:
             timeoutSeconds: {{ $proxy.probes.timeoutSeconds }}
             failureThreshold: {{ $proxy.probes.failureThreshold }}
           livenessProbe:
+            terminationGracePeriodSeconds: {{ $.Values.frontend.livenessTerminationGracePeriodSeconds }}
             grpc:
               port: {{ $proxy.port }}
             initialDelaySeconds: {{ $proxy.probes.initialDelaySeconds }}
@@ -127,6 +142,16 @@ spec:
           imagePullPolicy: {{ .Values.images.storage.pullPolicy }}
           args:
             - /config/frontend.jsonnet
+          lifecycle:
+            preStop:
+              sleep:
+                {{- if $proxy.enabled }}
+                # The proxy can open backend RPCs until its own drain ends.
+                # Keep its backend serving for the entire bounded RPC window.
+                seconds: {{ add $shutdown.drainDelaySeconds $shutdown.rpcGracePeriodSeconds 5 }}
+                {{- else }}
+                seconds: {{ $shutdown.drainDelaySeconds }}
+                {{- end }}
           {{- if or .Values.tracing.enabled .Values.frontend.env }}
           env:
             {{- include "buildbarn.tracingEnv" (dict "root" . "serviceName" "frontend") | nindent 12 }}
@@ -150,6 +175,7 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
+            terminationGracePeriodSeconds: {{ .Values.frontend.livenessTerminationGracePeriodSeconds }}
             httpGet:
               path: /-/healthy
               port: 9980

@@ -58,6 +58,7 @@ For Buildbarn upstream background, see https://github.com/buildbarn.
 - [Browser SSO](#browser-sso)
 - [Scheduler](#scheduler): predeclared queues, configuration reload, handover
 - [Frontend autoscaling](#frontend-autoscaling)
+- [Frontend rollouts](#frontend-rollouts)
 - [Worker and runner](#worker-and-runner)
 - [Worker autoscaling](#worker-autoscaling)
 - [Tracing, metrics, and diagnostics](#tracing-metrics-and-diagnostics)
@@ -604,6 +605,13 @@ Unknown keys fail `helm template` with the valid filenames.
 Overrides are verbatim. Helm templating is not applied to override contents, so
 if you override a templated file you own all values that the chart would normally
 inject into that file.
+
+For `frontend.jsonnet`, keep `stopGracefully: true` on every `grpcServers`
+entry. The chart checks for an explicit true value and rejects a literal false
+after stripping comments. This text check cannot evaluate Jsonnet or prove that
+every server is covered. If you compute the setting through an import or
+expression, verify the evaluated configuration before using
+`upgradeChecks.skipConfigTextCheck: true`.
 
 Override-able files:
 
@@ -1824,6 +1832,78 @@ Helm does not race the HPA. `frontend.replicas` takes effect again when either
 `keda.enabled` or `keda.frontend.enabled` is false. Scale-up is deliberately
 fast; scale-down retains recent capacity for five minutes and then removes at
 most 25% or one pod per minute, whichever is smaller.
+
+## Frontend rollouts
+
+The frontend Deployment uses `maxUnavailable: 0`, `maxSurge: 1`, and
+`frontend.minReadySeconds: 5`: a replacement must become ready before an old
+replica is retired. Reserve capacity for the replacement and for terminating
+pods that still retain their CPU, memory and read-cache volumes. The Pod
+Disruption Budget protects eligible evictions; it does not constrain Deployment
+rollouts.
+
+The generated frontend gRPC server sets `stopGracefully: true`. With the cache
+proxy enabled, these defaults coordinate both regular containers:
+
+```yaml
+frontend:
+  terminationGracePeriodSeconds: 1860
+  livenessTerminationGracePeriodSeconds: 30
+  shutdown:
+    drainDelaySeconds: 5
+    rpcGracePeriodSeconds: 1800
+    eventDrainTimeoutSeconds: 5
+```
+
+On termination, the proxy marks health not serving, waits 5 seconds for endpoint
+changes to propagate, then stops accepting new RPCs and gives active calls up to
+1800 seconds to finish. Cache events receive up to 5 more seconds to drain, and
+OTEL shutdown has its own 5-second timeout. The backend's native `preStop` sleep
+keeps it available for `drainDelaySeconds + rpcGracePeriodSeconds + 5` seconds
+(1810 by default), then SIGTERM starts its own graceful gRPC shutdown. Kubernetes
+enforces the final 1860-second pod deadline. Without the proxy, the backend
+sleeps only `drainDelaySeconds` before graceful shutdown; active calls use the
+remaining pod grace period. The RPC and event drain settings apply only to the
+proxy.
+
+This is a finite budget: queued Execute calls and actions lasting beyond the
+remaining RPC window can still be interrupted. Increase the RPC and pod budgets
+together for longer workloads. The chart rejects a proxy-enabled pod budget
+below `drainDelaySeconds + rpcGracePeriodSeconds + eventDrainTimeoutSeconds + 20`
+(1830 seconds with the defaults). Without the proxy, it requires the endpoint
+delay plus 15 seconds. Configure these values instead of the reserved proxy
+environment variables `SHUTDOWN_DRAIN_DELAY`, `SHUTDOWN_TIMEOUT` and
+`CACHE_EVENT_DRAIN_TIMEOUT`.
+
+The backend hook waits its full duration even if the proxy finishes early, so a
+terminating pod can retain resources for just over 30 minutes. Use a timeout
+longer than the pod grace period for tools that wait for old pods to disappear;
+for example `helm upgrade --wait --timeout 35m` with the default budget. The
+Deployment progress deadline is at least 600 seconds and otherwise the pod grace
+period or `minReadySeconds`, whichever is larger, plus 60 seconds (1920 by
+default), allowing time for draining pods to release capacity. This deadline
+reports stalled rollout progress; it does not extend the termination deadline.
+
+A failed liveness probe restarts only the unhealthy container, independently of
+the other container. Both frontend and proxy liveness probes use the separate
+`frontend.livenessTerminationGracePeriodSeconds: 30` budget, which includes the
+backend's hook and can force it to stop before that hook finishes. This preserves
+prompt recovery from an unhealthy process; active RPCs may fail during such a
+restart. Readiness probes only remove a pod from service and do not restart it.
+
+The hook runs in the kubelet and needs no shell in the distroless image. It
+requires Kubernetes 1.30 or newer with `PodLifecycleSleepAction` enabled; that
+feature is enabled by default from 1.30 and stable from 1.34. The chart's documented
+Kubernetes 1.32 minimum remains applicable. See the Kubernetes
+[lifecycle hook](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/)
+and [feature gate](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/)
+documentation. Shutdown ordering here applies to pod termination; it cannot
+protect a backend process that crashes or is killed independently of the proxy.
+
+**Install the first upgrade while clients are idle.** Existing pods retain their
+old PodSpec and process configuration, so the upgrade that installs this fix
+still terminates those old pods using the previous behavior. The new drain
+settings protect subsequent rollouts of the replacement pods.
 
 ## Worker and runner
 

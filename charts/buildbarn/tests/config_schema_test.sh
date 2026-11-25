@@ -226,6 +226,7 @@ ci_values = chart / "ci-values" / "ci.yaml"
 
 # 1. Default values (with ci-values image repository fixtures)
 defaults = render_and_validate("defaults", value_files=[ci_values])
+assert all(server.get("stopGracefully") is True for server in defaults["frontend.jsonnet"]["grpcServers"])
 for name in ("initialSizeClassCache", "fileSystemAccessCache"):
     assert "persistent" in defaults["storage.jsonnet"][name]["backend"]["local"], name
 

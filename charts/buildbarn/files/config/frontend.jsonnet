@@ -3,6 +3,7 @@ local common = import 'common.libsonnet';
 {
   grpcServers: [{
     listenAddresses: [':8980'],
+    stopGracefully: true,
     {{- if .Values.frontend.jwks.enabled }}
     authenticationPolicy: {
       any: {

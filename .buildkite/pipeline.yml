@@ -52,7 +52,7 @@ steps:
               image: "debian:bookworm-slim"
               propagate-environment: true
 
-      - label: ":test_tube: Buildbarn storage upgrade and restart"
+      - label: ":test_tube: Buildbarn storage and frontend shutdown"
         command: "bash .buildkite/scripts/buildbarn-storage-integration.sh"
         timeout_in_minutes: 15
         plugins:

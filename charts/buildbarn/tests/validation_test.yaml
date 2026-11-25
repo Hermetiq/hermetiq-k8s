@@ -607,7 +607,7 @@ tests:
     set:
       configOverrides:
         storage.jsonnet: "{ zstdPool: {} }"
-        frontend.jsonnet: "{ zstdPool: {} }"
+        frontend.jsonnet: "{ zstdPool: {}, grpcServers: [{ stopGracefully: true }] }"
         portal.jsonnet: "{ zstdPool: {} }"
     asserts:
       - notFailedTemplate: {}

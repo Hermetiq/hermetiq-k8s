@@ -12,6 +12,8 @@ annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Frontend rollouts retain active RPCs with graceful gRPC shutdown, ordered proxy/backend draining and configurable shutdown budgets; install this fix while clients are idle because old pods retain their previous shutdown behavior"
     - kind: added
       description: "Stage independently named storage with deploymentMode=storage-only, then point a full release at it with storage.enabled=false and storage.name"
     - kind: added

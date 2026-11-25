@@ -23,6 +23,26 @@
 {{- if and (not $manageStorage) (index (default (dict) .Values.configOverrides) "common.libsonnet") -}}
 {{- fail "storage.enabled=false requires the generated common.libsonnet so storage.name and storage.replicas select the external ring; remove configOverrides[\"common.libsonnet\"]" -}}
 {{- end -}}
+{{- if $full -}}
+{{- if not (semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version) -}}
+{{- fail "frontend graceful shutdown requires Kubernetes 1.30 or newer with PodLifecycleSleepAction enabled (stable in 1.34): the distroless frontend uses a native preStop sleep hook" -}}
+{{- end -}}
+{{- $shutdown := .Values.frontend.shutdown -}}
+{{- $minimumGrace := add $shutdown.drainDelaySeconds 15 -}}
+{{- if .Values.frontend.grpcCacheProxy.enabled -}}
+{{- /* Include proxy RPCs, cache events, 5s OTEL shutdown and 15s headroom.
+       This also leaves time after the backend's drain + RPC + 5s preStop. */ -}}
+{{- $minimumGrace = add $minimumGrace $shutdown.rpcGracePeriodSeconds $shutdown.eventDrainTimeoutSeconds 5 -}}
+{{- range $name := list "SHUTDOWN_DRAIN_DELAY" "SHUTDOWN_TIMEOUT" "CACHE_EVENT_DRAIN_TIMEOUT" -}}
+{{- if hasKey (default (dict) $.Values.frontend.grpcCacheProxy.env) $name -}}
+{{- fail (printf "frontend.grpcCacheProxy.env.%s is reserved: configure frontend.shutdown instead so the proxy and backend shutdown budgets stay consistent" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if lt (int .Values.frontend.terminationGracePeriodSeconds) (int $minimumGrace) -}}
+{{- fail (printf "frontend.terminationGracePeriodSeconds must be at least %d for frontend.shutdown (including cache-event and OTEL cleanup and shutdown headroom)" $minimumGrace) -}}
+{{- end -}}
+{{- end -}}
 {{/* Scheduler action router. The scheduler REJECTS an unsorted platform with
      InvalidArgument rather than sorting it (platform.NewKey), so a misordered
      list here is not a style problem — it stops the scheduler starting. Fail
@@ -504,6 +524,12 @@
 {{- end -}}
 {{- if and (has $name (list "storage.jsonnet" "frontend.jsonnet" "portal.jsonnet")) (regexMatch $casServerKey $text) (regexMatch $casKey $text) (not (regexMatch $cdcShape $text)) -}}
 {{- fail (printf "configOverrides[%q] defines contentAddressableStorageServer with a single-store \"contentAddressableStorage\" missing \"chunkStorage\"; update it to the CDC { chunkStorage, chunkMappingStorage } shape; see %s" $name $cdcGuide) -}}
+{{- end -}}
+{{- if eq $name "frontend.jsonnet" -}}
+{{- $graceKey := include "buildbarn.cdc.keyPattern" "stopGracefully" -}}
+{{- if or (not (regexMatch (printf "%s[[:space:]]*true([[:space:],}]|$)" $graceKey) $text)) (regexMatch (printf "%s[[:space:]]*false([[:space:],}]|$)" $graceKey) $text) -}}
+{{- fail "configOverrides[\"frontend.jsonnet\"] must set stopGracefully: true on every grpcServers entry to preserve active RPCs during rollout; for an evaluated Jsonnet expression, verify every server and set upgradeChecks.skipConfigTextCheck=true" -}}
+{{- end -}}
 {{- end -}}
 {{- if and (has $name (list "common.libsonnet" "scheduler.jsonnet" "asset.jsonnet")) (regexMatch $casKey $text) (not (regexMatch $cdcShape $text)) -}}
 {{- fail (printf "configOverrides[%q] defines a pre-CDC single-store \"contentAddressableStorage\" without \"chunkStorage\"; update it to the CDC { chunkStorage, chunkMappingStorage, cdcParameterCache } shape; see %s" $name $cdcGuide) -}}

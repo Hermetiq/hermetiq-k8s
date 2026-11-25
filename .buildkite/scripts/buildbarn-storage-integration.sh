@@ -16,3 +16,4 @@ curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar 
 install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
 export BUILDBARN_TEST_CLIENT_CONTAINER="$(hostname)"
 python3 charts/buildbarn/tests/storage_integration.py
+python3 charts/buildbarn/tests/frontend_shutdown_integration.py

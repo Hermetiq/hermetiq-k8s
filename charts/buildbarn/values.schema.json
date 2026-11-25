@@ -103,7 +103,21 @@
           },
           "frontend": {
             "type": "object",
+            "required": ["minReadySeconds", "terminationGracePeriodSeconds", "livenessTerminationGracePeriodSeconds", "shutdown"],
             "properties": {
+              "minReadySeconds": {"type": "integer", "minimum": 0},
+              "terminationGracePeriodSeconds": {"type": "integer", "minimum": 1},
+              "livenessTerminationGracePeriodSeconds": {"type": "integer", "minimum": 1},
+              "shutdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["drainDelaySeconds", "rpcGracePeriodSeconds", "eventDrainTimeoutSeconds"],
+                "properties": {
+                  "drainDelaySeconds": {"type": "integer", "minimum": 1},
+                  "rpcGracePeriodSeconds": {"type": "integer", "minimum": 1},
+                  "eventDrainTimeoutSeconds": {"type": "integer", "minimum": 1}
+                }
+              },
               "podAntiAffinity": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
               "grpcCacheProxy": {
                 "type": "object",
