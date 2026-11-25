@@ -2,6 +2,10 @@ suite: scheduler zero-downtime handover (Phase 1)
 # The CDC chart rejects handover unless the fork image supports CDC; each
 # handover-enabled test opts in explicitly so the default tests below exercise
 # unmodified chart defaults.
+# Keep validation independent of helm-unittest's default Kubernetes version.
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
 templates:
   - templates/deployment-scheduler.yaml
   - templates/rbac-scheduler.yaml

@@ -1,4 +1,8 @@
 suite: frontend graceful rollout
+# Keep validation independent of helm-unittest's default Kubernetes version.
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
 templates:
   - templates/deployment-frontend.yaml
   - templates/configmaps.yaml
@@ -166,6 +170,14 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "CACHE_EVENT_DRAIN_TIMEOUT is reserved"
+
+  - it: accepts the first Kubernetes version with native sleep enabled by default
+    template: templates/validate.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    asserts:
+      - notFailedTemplate: {}
 
   - it: refuses native sleep on unsupported Kubernetes
     template: templates/validate.yaml

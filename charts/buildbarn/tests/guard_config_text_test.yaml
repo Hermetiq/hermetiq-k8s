@@ -1,4 +1,8 @@
 suite: buildbarn pre-CDC configuration text guard
+# Keep validation independent of helm-unittest's default Kubernetes version.
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
 templates:
   - templates/validate.yaml
 release:
