@@ -7,6 +7,7 @@ supported full-stack deployment order.
 
 ## Contents
 
+- [Migration guides](#migration-guides)
 - [Install](#install)
 - [Verify](#verify)
 - [CRD Lifecycle](#crd-lifecycle)
@@ -32,6 +33,14 @@ supported full-stack deployment order.
 - [Observability](#observability)
 - [Local chart development](#local-chart-development)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> For upgrades from a chart version earlier than `1.0.0`, follow the
+> [BB Worker Operator migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-bb-worker-operator.md)
+> before upgrading. It covers CRD updates, worker image changes, and the
+> coordinated CDC cutover with worker pools paused.
 
 ## Install
 

@@ -6,8 +6,8 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 1.0.0
-appVersion: "1.0.0"
+version: 1.0.1
+appVersion: "1.0.1"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
@@ -17,23 +17,7 @@ annotations:
     - kind: fixed
       description: "Restore publisher.env.ENFORCE_PUB_AUTHZ overrides for authenticated BEP publishing without project-role grants, defaulting to true while keeping project authorization enforced; disabling requires a compatible publisher image"
     - kind: changed
-      description: "Breaking: API and dashboard project authorization is always enforced. Access comes from viewer, builder and admin roles granted through authorization.groupBindings, authorization.serviceAccounts and project memberships; publisher enforcement defaults to enabled, and app.adminEmails no longer grants admin"
-    - kind: changed
-      description: "Breaking: the dashboard calls the API through its own host behind oauth2-proxy, which must stay enabled, and dashboard.oauth2Proxy.emailDomains is required"
-    - kind: changed
-      description: "Breaking: Buildbarn configuration is read and validated in the CDC (RepMaxCDC) schema only; run with the Buildbarn 1.0.0 chart"
-    - kind: changed
-      description: "Default application images are v1.0.0; images earlier than v1.0.0 are rejected at render time"
-    - kind: added
-      description: "Optional SCIM provisioning (api.scim), independent JWT trust profiles (api.jwt.profiles, publisher.jwks.profiles) and independent publisher signing keys with configurable JWKS refresh"
-    - kind: added
-      description: "With routing.provider=gateway an EnvoyPatchPolicy keeps dashboard gRPC-web intact. Envoy Gateway needs extensionApis.enableEnvoyPatchPolicy; set gateway.dashboardGrpcWeb.enabled=false for other Gateway controllers"
-    - kind: changed
-      description: "The dashboard is not verified behind Contour in this release: dashboard queries are expected to return HTTP 505, and the install notes say so. Envoy Gateway, nginx Ingress and GKE Gateway are not affected"
-    - kind: fixed
-      description: "Dashboard API calls and assistant streams get the API route timeout on every routing provider and are no longer cut at the oauth2-proxy 30-second upstream default"
-    - kind: fixed
-      description: "Buildbarn dashboards read CDC chunk and chunk-mapping metrics alongside legacy CAS, and worker-pool CPU and memory queries are bounded during pod churn"
+      description: "Default application images are v1.0.1"
     - kind: added
       description: "Read S3 access keys for S3-compatible progress log storage from a Secret (artifactStorage.s3)"
     - kind: security

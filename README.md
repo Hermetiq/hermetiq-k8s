@@ -23,6 +23,7 @@ configuration.
 
 ## Contents
 
+- [Migration guides](#migration-guides)
 - [Key features](#key-features)
   - [Hermetiq chart](#hermetiq-chart)
   - [Buildbarn chart](#buildbarn-chart)
@@ -42,11 +43,33 @@ configuration.
 - [Verify the stack](#verify-the-stack)
 - [Post-installation configuration](#post-installation-configuration)
 - [Examples and runbooks](#examples-and-runbooks)
+  - [Chromium (Siso)](examples/README.md#chromium-siso): Build Chromium remotely with Siso and report builds to Hermetiq.
+  - [Testcontainers](examples/README.md#testcontainers): Run Bazel/Go container tests on Docker-capable workers.
+  - [Sysbox Runner Image](examples/README.md#sysbox-runner-image): Run Docker inside a Buildbarn runner using Sysbox.
+  - [Drake Runner Image](examples/README.md#drake-runner-image): Ubuntu 24.04 runner with CMake, GCC, and Clang for Drake.
+  - [abseil-cpp](examples/README.md#abseil-cpp): Configure C++ remote builds with a hermetic toolchain.
+  - [bazel-examples](examples/README.md#bazel-examples): Remote execution setup notes for the Go and Rust tutorials.
+  - [codex](examples/README.md#codex): Bazel test, remote cache, and remote execution configuration for OpenAI Codex.
+  - [drake](examples/README.md#drake): Configure remote execution; full-build validation remains incomplete.
+  - [envoy](examples/README.md#envoy): Build Envoy with its remote execution platform and matching worker pool.
 - [Shared chart conventions](#shared-chart-conventions)
 - [Upgrading](#upgrading)
 - [Uninstalling](#uninstalling)
 - [Getting help](#getting-help)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> **Upgrading an existing installation from a chart version earlier than 1.0.0?**
+> Start with the [migration overview](docs/migrate-to-1.0.0.md), then follow the
+> [Hermetiq](docs/migrate-to-1.0.0-hermetiq.md),
+> [Buildbarn](docs/migrate-to-1.0.0-buildbarn.md), and
+> [BB Worker Operator](docs/migrate-to-1.0.0-bb-worker-operator.md) migration guides
+> to coordinate the upgrade in one maintenance window.
+>
+> For staging replacement storage with Buildbarn chart 1.0.1, see the
+> [optional blue-green storage procedure](docs/migrate-to-1.0.0-buildbarn.md#optional-blue-green-storage-with-chart-101).
 
 ## Key features
 
@@ -200,7 +223,7 @@ The following versions are released and tested together:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `1.0.0` |             `1.0.0` |
+| Hermetiq |       `1.0.1` |             `1.0.1` |
 | Buildbarn |       `1.0.1` |  `20261118T120531Z` |
 | BB Worker Operator |       `1.0.0` |            `v1.0.0` |
 
@@ -222,10 +245,11 @@ Install in this order:
 1. Prepare the namespace, routing, DNS, TLS, and shared services below. Follow
    the [Hermetiq prerequisite guide](charts/hermetiq/README.md#install-prerequisites)
    to provision PostgreSQL, NATS JetStream, and DragonflyDB.
-2. Install Hermetiq. It creates the shared dashboard OAuth configuration used
-   by the optional Grafana and Buildbarn Browser proxies.
-3. Install the BB Worker Operator.
-4. Install Buildbarn.
+2. Install [Hermetiq](charts/hermetiq/README.md#contents). It creates the shared
+   dashboard OAuth configuration used by the optional Grafana and Buildbarn
+   Browser proxies.
+3. Install the [BB Worker Operator](charts/bb-worker-operator/README.md#contents).
+4. Install [Buildbarn](charts/buildbarn/README.md#contents).
 5. Apply the `RbeWorker` pools appropriate for the cluster, starting from the
    [sample worker pools](custom-values/rbeworkers/README.md).
 

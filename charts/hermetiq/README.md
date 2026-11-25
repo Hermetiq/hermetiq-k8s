@@ -24,6 +24,7 @@ How this README is organized:
 
 **Install**
 
+- [Migration guides](#migration-guides)
 - [What the chart installs](#what-the-chart-installs)
 - [Install prerequisites](#install-prerequisites): checklist, PostgreSQL, NATS
   JetStream, DragonflyDB, Secrets
@@ -72,6 +73,14 @@ How this README is organized:
 
 - [Local chart development](#local-chart-development)
 - [License](#license)
+
+## Migration guides
+
+> [!IMPORTANT]
+> For upgrades from a chart version earlier than `1.0.0`, follow the
+> [Hermetiq migration guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/migrate-to-1.0.0-hermetiq.md)
+> before upgrading. It covers project authorization, dashboard authentication,
+> and the coordinated CDC upgrade with Buildbarn and the worker operator.
 
 ## What the chart installs
 
@@ -404,8 +413,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.0
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.1
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.1
 ```
 
 ## Install
@@ -470,7 +479,7 @@ values where they differ from the starter.
 
    ```bash
    helm template hmq oci://ghcr.io/hermetiq/hermetiq \
-     --version 1.0.0 \
+     --version 1.0.1 \
      --namespace hermetiq \
      --values hermetiq-values.yaml > /dev/null
    ```
@@ -482,7 +491,7 @@ Install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --values hermetiq-values.yaml
 ```
 
@@ -1754,7 +1763,7 @@ identity and cannot receive individual user revocation semantics.
 
 The API, publisher, schema bootstrap job, dashboard, and `grpc-auth-proxy`
 enforce the policy together, so their images must come from the same
-application release. The chart's default images are the `v1.0.0` release.
+application release. The chart's default images are the `v1.0.1` release.
 
 | Workload | Tag setting | Digest setting |
 |---|---|---|
