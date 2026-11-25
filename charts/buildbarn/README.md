@@ -872,6 +872,8 @@ and configuration with that rollback too.
 
 Use the focused repository runbooks for planning and live operations:
 
+- [sizing guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/sizing-guide.md):
+  from workload numbers to cache size, shard count, disks and block ratios
 - [storage model and sizing](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-model.md)
 - [storage operations](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-storage-operations.md)
 - [raw block-device storage](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/buildbarn-block-storage.md)
@@ -2618,6 +2620,8 @@ When scaling `bb-storage` to a **10 TiB CAS** across **5 to 10 shards**
 (`5 × 2 TiB` or `10 × 1 TiB`), storage, memory, and ingress settings must scale
 together so the key-location map (KLM) does not saturate, lookups do not thrash
 the OS page cache, and rolling restarts keep the last few minutes of writes.
+To choose the cache size and shard count from your own workload first, see the
+[sizing guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/sizing-guide.md).
 
 Two profiles are shown below. **Option A** (raw-block PVC with a companion
 `-meta` PVC) fits when the StorageClass provisions `volumeMode: Block` volumes
