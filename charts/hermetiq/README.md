@@ -2972,6 +2972,8 @@ it; see [ServiceAccount tokens and RBAC](#serviceaccount-tokens-and-rbac).
 For high-concurrency Bazel and RBE environments (thousands of builds per day,
 5 to 10 or more Buildbarn storage shards, and large worker fleets), size the
 ingest path, NATS JetStream, and PostgreSQL across six areas before go-live.
+To work out the numbers from your own workload, start with the
+[sizing guide](https://github.com/Hermetiq/hermetiq-k8s/blob/main/docs/sizing-guide.md).
 
 1. **Progress logs.** By default, build stdout and stderr chunks are written
    as `BYTEA` rows into `public.progresses`. Under heavy CI concurrency,
@@ -3021,11 +3023,14 @@ ingest path, NATS JetStream, and PostgreSQL across six areas before go-live.
      opens a PostgreSQL connection pool. With 12–16 subscribers, 4–10
      publishers, and 4–8 API Pods, total active connections exceed
      PostgreSQL's stock `max_connections = 100`. Configure `max_connections`
-     of 300–500 or more, with 8–16 vCPU, 32–64 GiB of memory, and SSD storage
-     with 10,000 or more write IOPS.
-   - Read replica. Point `postgres.readReplica.host` at a replica so that
-     dashboard Trends aggregations and MCP and Barn Owl analytical queries do
-     not contend with subscriber batch inserts on the primary.
+     of 300–500 or more.
+   - Instance size. A 16 vCPU, 64 GiB instance with SSD storage and 10,000 or
+     more write IOPS handles more than 500,000 builds a day when progress logs
+     are in object storage.
+   - Read replica. Optional, and you can add one later. Point
+     `postgres.readReplica.host` at a replica so that dashboard Trends
+     aggregations and MCP and Barn Owl analytical queries do not contend with
+     subscriber batch inserts on the primary.
 
 5. **Publisher and API.** Enable `autoscaling.publisher.enabled: true`, for
    example with `minReplicas: 4` and `maxReplicas: 12`, so that bursty CI BEP

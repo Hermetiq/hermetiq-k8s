@@ -508,6 +508,7 @@ For Bazel client examples, start with [`examples/README.md`](examples/README.md)
 | Document | Purpose |
 |---|---|
 | [`examples/README.md`](examples/README.md) | Bazel integration and runnable project examples |
+| [`docs/sizing-guide.md`](docs/sizing-guide.md) | From workload numbers to starting values for storage, workers, ingest and PostgreSQL |
 | [`docs/buildbarn-storage-model.md`](docs/buildbarn-storage-model.md) | Storage sizing, sharding, and eviction model |
 | [`docs/buildbarn-storage-operations.md`](docs/buildbarn-storage-operations.md) | Buildbarn storage lifecycle and runbooks |
 | [`docs/buildbarn-block-storage.md`](docs/buildbarn-block-storage.md) | Raw block-device deployment guidance |
