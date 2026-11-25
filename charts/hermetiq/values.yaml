@@ -22,35 +22,35 @@ images:
   # The API, publisher, schema bootstrap, dashboard and auth-proxy images must
   # come from the same release. Images older than v1.0.0 do not implement
   # project authorization and are rejected at render time.
-  # Digests are empty here and are resolved when the chart is published, so
-  # the packaged chart pulls by digest. When overriding a tag, set its digest
-  # as well or leave the digest empty; a non-empty digest wins over the tag.
+  # Each digest pins the multi-arch index for its tag, so the chart pulls by
+  # digest. When overriding a tag, set its digest as well or clear the digest;
+  # a non-empty digest wins over the tag.
   # See README: Application images.
   bepNats:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/bep-nats
     pullPolicy: IfNotPresent
     apiTag: "v1.0.1"
-    apiDigest: ""
+    apiDigest: "sha256:ebf15e0f462c32a7273d17612d3088e39392741e68ca331c522682e49239ab2d"
     pubTag: "v1.0.1"
-    pubDigest: ""
+    pubDigest: "sha256:ebf15e0f462c32a7273d17612d3088e39392741e68ca331c522682e49239ab2d"
     subTag: "v1.0.1"
-    subDigest: ""
+    subDigest: "sha256:ebf15e0f462c32a7273d17612d3088e39392741e68ca331c522682e49239ab2d"
     bootstrapTag: "v1.0.1"
-    bootstrapDigest: ""
+    bootstrapDigest: "sha256:ebf15e0f462c32a7273d17612d3088e39392741e68ca331c522682e49239ab2d"
   authProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-auth-proxy
     tag: "v1.0.1"
-    digest: ""
+    digest: "sha256:f37af78540acfb7a78fc15cd86a22ee1e7ef744ffe3b81d2a631311b1dce3e43"
     pullPolicy: IfNotPresent
   dashboard:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/hermetiq-web-ui
     tag: "v1.0.1"
-    digest: ""
+    digest: "sha256:5bdd3572d6598e3aefd37bcf71fff5f2ca2232bd073db4c9e22700ae9a312b86"
     pullPolicy: IfNotPresent
   promptRuntime:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/prompt-runtime
     tag: "v1.0.1"
-    digest: ""
+    digest: "sha256:1542095cad27277568b98d229ce28b9d0445a2868ae5a762bd9a965ab9190e3e"
     pullPolicy: IfNotPresent
   oauth2Proxy:
     # Mirrored from quay.io/oauth2-proxy/oauth2-proxy into Hermetiq's public
