@@ -43,6 +43,15 @@ configuration.
 - [Verify the stack](#verify-the-stack)
 - [Post-installation configuration](#post-installation-configuration)
 - [Examples and runbooks](#examples-and-runbooks)
+  - [Chromium (Siso)](examples/README.md#chromium-siso): Build Chromium remotely with Siso and report builds to Hermetiq.
+  - [Testcontainers](examples/README.md#testcontainers): Run Bazel/Go container tests on Docker-capable workers.
+  - [Sysbox Runner Image](examples/README.md#sysbox-runner-image): Run Docker inside a Buildbarn runner using Sysbox.
+  - [Drake Runner Image](examples/README.md#drake-runner-image): Ubuntu 24.04 runner with CMake, GCC, and Clang for Drake.
+  - [abseil-cpp](examples/README.md#abseil-cpp): Configure C++ remote builds with a hermetic toolchain.
+  - [bazel-examples](examples/README.md#bazel-examples): Remote execution setup notes for the Go and Rust tutorials.
+  - [codex](examples/README.md#codex): Bazel test, remote cache, and remote execution configuration for OpenAI Codex.
+  - [drake](examples/README.md#drake): Configure remote execution; full-build validation remains incomplete.
+  - [envoy](examples/README.md#envoy): Build Envoy with its remote execution platform and matching worker pool.
 - [Shared chart conventions](#shared-chart-conventions)
 - [Upgrading](#upgrading)
 - [Uninstalling](#uninstalling)
