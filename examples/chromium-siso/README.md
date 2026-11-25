@@ -20,7 +20,7 @@ The pools need 40 nodes at most, each with 16 vCPUs and local SSD. On GKE, the
 local SSD must back the nodes' ephemeral storage
 (`--ephemeral-storage-local-ssd`). Check your cloud quota, including local SSD.
 
-Buildbarn needs four settings for the pools:
+Buildbarn needs five settings for the pools:
 
 - `iscc`: a store where the scheduler records which pool each action needs.
 - `fsac`: a store the workers use to prefetch each action's inputs.
@@ -28,6 +28,9 @@ Buildbarn needs four settings for the pools:
   longer than `minimumExecutionTimeout`, it moves to the large pool.
 - `predeclaredPlatformQueues`: lets builds start while the large pool is at
   zero.
+- `chunkCache`: how many decoded chunks each worker keeps in memory. The
+  setting applies to every pool, and 4,096 entries can hold 2 GiB, so check the
+  worker memory of your other pools first.
 
 Add them to your Buildbarn values and upgrade the release. They're also in
 [`buildbarn-values.yaml`](buildbarn-values.yaml). If you already have
@@ -35,6 +38,10 @@ Add them to your Buildbarn values and upgrade the release. They're also in
 lists rather than merging them.
 
 ```yaml
+config:
+  contentAddressableStorage:
+    chunkCache:
+      cacheSize: 4096
 storage:
   persistence:
     iscc:
@@ -138,12 +145,15 @@ siso-bep --bes_backend=grpcs://bep.<your-domain> --project=$INSTANCE_NAME \
 
 ### Build Times
 
-On 40 nodes, a cold build of `chrome` with this configuration takes about 21
-minutes when the large pool starts from zero, and about 16 minutes when both
-pools are scaled up before the build starts. New nodes take several minutes to
-arrive, so a build that starts from zero spends its first minutes waiting for
-them. See [The pools](reference.md#the-pools) for keeping capacity warm, and
-[Build flags](reference.md#build-flags) for measuring a cold build yourself.
+On about 40 spot nodes, a cold build of `chrome` with this configuration takes
+about 20 minutes when the large pool starts from zero, and about 13 minutes when
+both pools are scaled up before the build starts. New nodes take several minutes
+to arrive, so a build that starts from zero spends its first minutes waiting for
+them. Run the build client on a fast link to the cluster, such as a VM in the
+same cloud: `chrome` is more than 700 MB, and a client on a slow link spends
+minutes downloading the outputs. See [The pools](reference.md#the-pools) for
+keeping capacity warm, and [Build flags](reference.md#build-flags) for measuring
+a cold build yourself.
 
 ### Troubleshooting
 
