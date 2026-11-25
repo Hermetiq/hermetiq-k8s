@@ -18,6 +18,8 @@ annotations:
       description: "With storage.enabled=false, install and upgrade are refused when StatefulSet storage.name is missing, is owned by the same release or runs a different number of replicas; upgradeChecks.skipExternalStorageCheck skips the check"
     - kind: added
       description: "Storage topology spread constraints support placement across zones"
+    - kind: changed
+      description: "The grpc-cache-proxy sidecar image tag is v1.0.1; the pinned digest is unchanged"
 
 keywords:
   - buildbarn
