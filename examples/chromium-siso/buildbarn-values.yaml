@@ -14,6 +14,16 @@ storage:
     fsac:
       enabled: true
 
+config:
+  contentAddressableStorage:
+    # Each bb_worker keeps decoded chunks in memory, so a read decompresses and
+    # checks a chunk once instead of on every read. The setting is shared by
+    # every pool. At 4,096 entries it can hold 2 GiB (cacheSize x 2 x 256 KiB);
+    # the Chromium pools' 9Gi worker containers have room, so check the worker
+    # memory of any other pools before merging this.
+    chunkCache:
+      cacheSize: 4096
+
 scheduler:
   # Size classes need the scheduler's feedback-driven analysis, backed by the
   # ISCC store above.
