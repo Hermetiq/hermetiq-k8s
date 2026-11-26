@@ -985,6 +985,25 @@ frontend:
   # one replica per ~100 concurrent client jobs, and give each one CPU to match
   # (the 300m default request throttles hard under real load).
   replicas: 2
+  # Keep replacement pods ready for this long before retiring an old replica.
+  minReadySeconds: 5
+  # Includes the backend preStop hook, active RPCs, cache-event drain and OTEL
+  # cleanup. Raise this together with rpcGracePeriodSeconds for longer actions
+  # or Execute calls that can spend a long time queued at the scheduler.
+  terminationGracePeriodSeconds: 1860
+  # A failed liveness probe restarts only the unhealthy container. Bound that
+  # recovery separately from the long graceful rollout budget, for both the
+  # frontend and its optional proxy. Active calls may fail during this restart.
+  livenessTerminationGracePeriodSeconds: 30
+  shutdown:
+    # Native Kubernetes preStop sleep requires PodLifecycleSleepAction (enabled
+    # by default since Kubernetes 1.30; stable in 1.34). No shell is required.
+    drainDelaySeconds: 5
+    # Proxy RPCs get this much time after the endpoint propagation delay. The
+    # backend stays alive for this entire window plus a 5-second margin, then
+    # gracefully stops its own gRPC server. This is a finite drain budget.
+    rpcGracePeriodSeconds: 1800
+    eventDrainTimeoutSeconds: 5
   # Set to true/false to override serviceAccount.automountServiceAccountToken.
   automountServiceAccountToken: null
   # Mounts secrets.mtlsClientCert into the frontend pod. Use together with
@@ -1257,8 +1276,9 @@ frontend:
       timeoutSeconds: 3
       failureThreshold: 3
     # Extra environment variables, name -> value (tpl-rendered). Use for the
-    # proxy's tuning knobs, e.g. CACHE_EVENT_BATCH_SIZE,
-    # CACHE_EVENT_FLUSH_INTERVAL, SHUTDOWN_DRAIN_DELAY, SHUTDOWN_TIMEOUT.
+    # proxy's tuning knobs, e.g. CACHE_EVENT_BATCH_SIZE and CACHE_EVENT_FLUSH_INTERVAL.
+    # Set shutdown budgets through frontend.shutdown; SHUTDOWN_DRAIN_DELAY,
+    # SHUTDOWN_TIMEOUT and CACHE_EVENT_DRAIN_TIMEOUT are reserved by the chart.
     env: {}
     resources:
       requests:

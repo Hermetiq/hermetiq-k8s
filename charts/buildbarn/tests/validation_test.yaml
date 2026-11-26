@@ -1,4 +1,8 @@
 suite: buildbarn validation
+# Keep validation independent of helm-unittest's default Kubernetes version.
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
 templates:
   - templates/validate.yaml
 tests:
@@ -607,7 +611,7 @@ tests:
     set:
       configOverrides:
         storage.jsonnet: "{ zstdPool: {} }"
-        frontend.jsonnet: "{ zstdPool: {} }"
+        frontend.jsonnet: "{ zstdPool: {}, grpcServers: [{ stopGracefully: true }] }"
         portal.jsonnet: "{ zstdPool: {} }"
     asserts:
       - notFailedTemplate: {}

@@ -1,0 +1,234 @@
+suite: frontend graceful rollout
+# Keep validation independent of helm-unittest's default Kubernetes version.
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
+templates:
+  - templates/deployment-frontend.yaml
+  - templates/configmaps.yaml
+  - templates/validate.yaml
+tests:
+  - it: brings up a ready replacement before retiring an old frontend
+    template: templates/deployment-frontend.yaml
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxUnavailable: 0
+              maxSurge: 1
+      - equal:
+          path: spec.minReadySeconds
+          value: 5
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 1920
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 1860
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.terminationGracePeriodSeconds
+          value: 30
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe.terminationGracePeriodSeconds
+
+  - it: keeps the backend alive throughout the proxy RPC grace window
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].lifecycle.preStop.sleep.seconds
+          value: 1810
+      - notExists:
+          path: spec.template.spec.containers[0].lifecycle
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.terminationGracePeriodSeconds
+          value: 30
+      - equal:
+          path: spec.template.spec.containers[1].livenessProbe.terminationGracePeriodSeconds
+          value: 30
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe.terminationGracePeriodSeconds
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: SHUTDOWN_DRAIN_DELAY, value: 5s}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: SHUTDOWN_TIMEOUT, value: 1800s}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CACHE_EVENT_DRAIN_TIMEOUT, value: 5s}
+
+  - it: derives backend and proxy timing from the same custom budget
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.shutdown.drainDelaySeconds: 10
+      frontend.shutdown.rpcGracePeriodSeconds: 3600
+      frontend.shutdown.eventDrainTimeoutSeconds: 20
+      frontend.terminationGracePeriodSeconds: 3660
+      frontend.minReadySeconds: 12
+      frontend.livenessTerminationGracePeriodSeconds: 45
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].lifecycle.preStop.sleep.seconds
+          value: 3615
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: SHUTDOWN_DRAIN_DELAY, value: 10s}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: SHUTDOWN_TIMEOUT, value: 3600s}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CACHE_EVENT_DRAIN_TIMEOUT, value: 20s}
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 3720
+      - equal:
+          path: spec.minReadySeconds
+          value: 12
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.terminationGracePeriodSeconds
+          value: 45
+      - equal:
+          path: spec.template.spec.containers[1].livenessProbe.terminationGracePeriodSeconds
+          value: 45
+
+  - it: keeps the progress deadline longer than a custom readiness interval
+    template: templates/deployment-frontend.yaml
+    set:
+      frontend.minReadySeconds: 3600
+    asserts:
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 3660
+
+  - it: configures bb-storage to wait for active RPCs on SIGTERM
+    template: templates/configmaps.yaml
+    documentSelector:
+      path: metadata.name
+      value: buildbarn-config
+    asserts:
+      - matchRegex:
+          path: data["frontend.jsonnet"]
+          pattern: "stopGracefully: true"
+
+  - it: rejects a pod deadline that cuts off RPC or publisher cleanup
+    template: templates/validate.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.terminationGracePeriodSeconds: 1829
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.terminationGracePeriodSeconds must be at least 1830"
+
+  - it: accepts the minimum safe proxy pod deadline
+    template: templates/validate.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.terminationGracePeriodSeconds: 1830
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: leaves time after the endpoint propagation delay without a proxy
+    template: templates/validate.yaml
+    set:
+      frontend.terminationGracePeriodSeconds: 19
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.terminationGracePeriodSeconds must be at least 20"
+
+  - it: rejects independently overridden proxy drain timing
+    template: templates/validate.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.env.SHUTDOWN_DRAIN_DELAY: 30s
+    asserts:
+      - failedTemplate:
+          errorPattern: "SHUTDOWN_DRAIN_DELAY is reserved"
+
+  - it: rejects independently overridden proxy RPC timing
+    template: templates/validate.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.env.SHUTDOWN_TIMEOUT: 25s
+    asserts:
+      - failedTemplate:
+          errorPattern: "SHUTDOWN_TIMEOUT is reserved"
+
+  - it: rejects independently overridden event drain timing
+    template: templates/validate.yaml
+    set:
+      frontend.grpcCacheProxy.enabled: true
+      frontend.grpcCacheProxy.env.CACHE_EVENT_DRAIN_TIMEOUT: 60s
+    asserts:
+      - failedTemplate:
+          errorPattern: "CACHE_EVENT_DRAIN_TIMEOUT is reserved"
+
+  - it: accepts the first Kubernetes version with native sleep enabled by default
+    template: templates/validate.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 30
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses native sleep on unsupported Kubernetes
+    template: templates/validate.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 29
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend graceful shutdown requires Kubernetes 1.30 or newer"
+
+  - it: does not require frontend shutdown features in storage-only mode
+    template: templates/validate.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 29
+    set:
+      deploymentMode: storage-only
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects an overridden frontend that disables graceful shutdown
+    template: templates/validate.yaml
+    set:
+      configOverrides:
+        frontend.jsonnet: '{ grpcServers: [{ stopGracefully: false }] }'
+    asserts:
+      - failedTemplate:
+          errorPattern: "must set stopGracefully: true on every grpcServers entry"
+
+  - it: rejects a commented graceful setting in an overridden frontend
+    template: templates/validate.yaml
+    set:
+      configOverrides:
+        frontend.jsonnet: '{ grpcServers: [{ /* stopGracefully: true */ }] }'
+    asserts:
+      - failedTemplate:
+          errorPattern: "must set stopGracefully: true on every grpcServers entry"
+
+  - it: accepts an explicit quoted graceful setting in an overridden frontend
+    template: templates/validate.yaml
+    set:
+      configOverrides:
+        frontend.jsonnet: '{ "grpcServers": [{ "stopGracefully": true }] }'
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: retains the documented escape hatch for evaluated Jsonnet overrides
+    template: templates/validate.yaml
+    set:
+      upgradeChecks.skipConfigTextCheck: true
+      configOverrides:
+        frontend.jsonnet: "local common = import 'common.libsonnet'; { grpcServers: common.frontendServers }"
+    asserts:
+      - notFailedTemplate: {}
