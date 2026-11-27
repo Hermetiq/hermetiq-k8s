@@ -223,8 +223,8 @@ The following versions are released and tested together:
 
 | Chart | Chart version | Application version |
 |---|--------------:|--------------------:|
-| Hermetiq |       `1.0.1` |             `1.0.1` |
-| Buildbarn |       `1.0.1` |  `20261118T120531Z` |
+| Hermetiq |       `1.0.2` |             `1.0.2` |
+| Buildbarn |       `1.0.2` |  `20261118T120531Z` |
 | BB Worker Operator |       `1.0.0` |            `v1.0.0` |
 
 Run the three charts at these versions together. Hermetiq reads the

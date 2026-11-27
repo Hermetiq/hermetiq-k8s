@@ -6,7 +6,7 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 1.0.1
+version: 1.0.2
 appVersion: "20261118T120531Z"
 annotations:
   artifacthub.io/displayName: Buildbarn Helm Chart
@@ -14,14 +14,10 @@ annotations:
   artifacthub.io/changes: |
     - kind: fixed
       description: "Frontend rollouts retain active RPCs with graceful gRPC shutdown, ordered proxy/backend draining and configurable shutdown budgets; install this fix while clients are idle because old pods retain their previous shutdown behavior"
-    - kind: added
-      description: "Stage independently named storage with deploymentMode=storage-only, then point a full release at it with storage.enabled=false and storage.name"
-    - kind: added
-      description: "With storage.enabled=false, install and upgrade are refused when StatefulSet storage.name is missing, is owned by the same release or runs a different number of replicas; upgradeChecks.skipExternalStorageCheck skips the check"
-    - kind: added
-      description: "Storage topology spread constraints support placement across zones"
     - kind: changed
-      description: "The grpc-cache-proxy sidecar image tag is v1.0.1; the pinned digest is unchanged"
+      description: "The grpc-cache-proxy sidecar uses v1.0.2; its digest is resolved and pinned when the chart is published"
+    - kind: added
+      description: "Document workload sizing and size the Ubuntu worker example for the chunk cache"
 
 keywords:
   - buildbarn

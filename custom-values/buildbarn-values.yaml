@@ -73,16 +73,6 @@ storage:
     #     type: blockDevice # already the default
     #     sizeMi: 2688
 
-images:
-  # Hermetiq grpc-cache-proxy sidecar, used when frontend.grpcCacheProxy.enabled
-  # is true. Hermetiq releases bump this tag here, so a new proxy image does not
-  # need a Buildbarn chart release.
-  grpcCacheProxy:
-    repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
-    tag: v1.0.1
-    digest: "sha256:96331bfb15ed6c9e90ae713f21257f93c034134117be373c4da3fc80f3e74942"
-    pullPolicy: IfNotPresent
-
 frontend:
   # Optional Hermetiq grpc-cache-proxy sidecar for Action Cache Hit Tracker:
   # grpcCacheProxy:
