@@ -1763,7 +1763,7 @@ identity and cannot receive individual user revocation semantics.
 
 The API, publisher, schema bootstrap job, dashboard, and `grpc-auth-proxy`
 enforce the policy together, so their images must come from the same
-application release. The chart's default images are the `v1.0.1` release.
+application release. The chart's default images are the `v1.0.2` release.
 
 | Workload | Tag setting | Digest setting |
 |---|---|---|

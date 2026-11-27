@@ -6,24 +6,16 @@ home: https://www.hermetiq.com
 icon: https://www.hermetiq.com/logo.png
 sources:
   - https://github.com/Hermetiq/hermetiq-k8s
-version: 1.0.1
-appVersion: "1.0.1"
+version: 1.0.2
+appVersion: "1.0.2"
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Hermetiq Software License Agreement
       url: https://github.com/Hermetiq/hermetiq-k8s/blob/main/charts/hermetiq/SOFTWARE-LICENSE-AGREEMENT.md
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "Restore publisher.env.ENFORCE_PUB_AUTHZ overrides for authenticated BEP publishing without project-role grants, defaulting to true while keeping project authorization enforced; disabling requires a compatible publisher image"
     - kind: changed
-      description: "Default application images are v1.0.1"
-    - kind: added
-      description: "Read S3 access keys for S3-compatible progress log storage from a Secret (artifactStorage.s3)"
-    - kind: security
-      description: "Harden auth, CORS, and routing: stop forwarding OIDC tokens to Grafana in grafana-oauth2-proxy, omit external MCP routes when api.mcpAuthDisabled=true, scope Envoy Gateway CORS to chart routes and disable allowCredentials on MCP CORS policies, restrict gateway preflight matching to OPTIONS while stripping x-forwarded-client-cert, and project only jwks.json from publisher-jwks Secret"
-    - kind: fixed
-      description: "Tighten chart schema and render validation: declare boolean schema types for security flags, trim JWT profile values, reject empty profile audiences/roles and TLD-only oauth2Proxy emailDomains, validate source=scim bindings against api.scim, and skip oauth2-proxy secret checksum on grpc-api in profile mode"
+      description: "Default application images are v1.0.2 for the API, publisher, subscribers, schema bootstrap, auth proxy, dashboard and prompt runtime"
 keywords:
   - hermetiq
   - MCP
