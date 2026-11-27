@@ -236,7 +236,7 @@ images:
   grpcCacheProxy:
     repository: us-docker.pkg.dev/hermetiq-cloud/hermetiq-public/grpc-cache-proxy
     tag: v1.0.2
-    digest: "" # Resolved and pinned when the chart is published.
+    digest: ""
     pullPolicy: IfNotPresent
   # bb-portal build-event dashboard (portal.enabled). One image: the Go binary
   # serves the embedded web UI, the gRPC-Web APIs, and the BES gRPC endpoint.

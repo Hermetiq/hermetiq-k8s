@@ -413,8 +413,8 @@ Read the exact defaults and README of the version you are installing before
 writing advanced overrides:
 
 ```bash
-helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.1
-helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.1
+helm show values oci://ghcr.io/hermetiq/hermetiq --version 1.0.2
+helm show readme oci://ghcr.io/hermetiq/hermetiq --version 1.0.2
 ```
 
 ## Install
@@ -479,7 +479,7 @@ values where they differ from the starter.
 
    ```bash
    helm template hmq oci://ghcr.io/hermetiq/hermetiq \
-     --version 1.0.1 \
+     --version 1.0.2 \
      --namespace hermetiq \
      --values hermetiq-values.yaml > /dev/null
    ```
@@ -491,7 +491,7 @@ Install the pinned OCI release:
 ```bash
 helm upgrade --install --namespace hermetiq hmq \
   oci://ghcr.io/hermetiq/hermetiq \
-  --version 1.0.1 \
+  --version 1.0.2 \
   --values hermetiq-values.yaml
 ```
 
